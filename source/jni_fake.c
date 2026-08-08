@@ -78,6 +78,8 @@ typedef struct {
 volatile int jni_quit_requested = 0;
 volatile int jni_frontend_ready = 0;
 static void (*native_init_hmds_callback)(void *env, void *activity);
+static int software_keyboard_done;
+static char software_keyboard_text[256];
 
 void jni_set_native_init_hmds(void (*callback)(void *, void *)) {
   native_init_hmds_callback = callback;
@@ -397,6 +399,24 @@ static void hal_void(void *obj, const FakeID *id, va_list va) {
   const char *name = id->name;
   FakeObject *o = fake_object(obj);
 
+  if (!strcmp(id->cls, "jp/konami/SoftwareKeyboard") &&
+      name_is(id, "show")) {
+    (void)va_arg(va, void *); // Android Context
+    const char *initial_text = obj_str(va_arg(va, void *));
+    const int keyboard_type = va_arg(va, int);
+    const int max_length = va_arg(va, int);
+    const char *text = initial_text[0] ? initial_text : "revon";
+    strlcpy(software_keyboard_text, text, sizeof(software_keyboard_text));
+    if (max_length > 0 && max_length < (int)sizeof(software_keyboard_text))
+      software_keyboard_text[max_length] = '\0';
+    software_keyboard_done = 1;
+    debugPrintf("JNI: SoftwareKeyboard.show(type=%d max=%d initial=\"%s\")"
+                " -> \"%s\"\n",
+                keyboard_type, max_length, initial_text,
+                software_keyboard_text);
+    return;
+  }
+
   if (!strcmp(id->cls, "java/lang/Thread") && name_is(id, "setName")) {
     void *tls;
     __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tls));
@@ -618,6 +638,13 @@ static juint hal_bool(void *obj, const FakeID *id, va_list va) {
   const char *name = id->name;
   FakeObject *o = fake_object(obj);
 
+  if (!strcmp(id->cls, "jp/konami/SoftwareKeyboard") &&
+      name_is(id, "isDone")) {
+    debugPrintf("JNI: SoftwareKeyboard.isDone -> %s\n",
+                software_keyboard_done ? "true" : "false");
+    return software_keyboard_done;
+  }
+
   if (!strcmp(id->cls, "osobject") && name_is(id, "IsEnd")) {
     if (!o)
       return 0;
@@ -672,8 +699,20 @@ static void *hal_object(void *obj, const FakeID *id, va_list va) {
 
   if (!strcmp(id->cls, "java/lang/ClassLoader") && name_is(id, "loadClass")) {
     const char *class_name = next_str(va);
+    if (!strcmp(class_name, "jp/konami/SoftwareKeyboard")) {
+      debugPrintf("JNI: ClassLoader.loadClass(%s) -> software keyboard\n",
+                  class_name);
+      return jni_make_object(class_name);
+    }
     debugPrintf("JNI: ClassLoader.loadClass(%s) -> osobject\n", class_name);
     return jni_make_object("osobject");
+  }
+
+  if (!strcmp(id->cls, "jp/konami/SoftwareKeyboard") &&
+      name_is(id, "getText")) {
+    debugPrintf("JNI: SoftwareKeyboard.getText -> \"%s\"\n",
+                software_keyboard_text);
+    return jni_make_string(software_keyboard_text);
   }
 
   if (!strcmp(id->cls, "osobject") &&

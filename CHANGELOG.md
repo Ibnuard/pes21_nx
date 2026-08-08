@@ -4,6 +4,31 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.79] - 2026-08-09
+
+### Fixed
+
+- Implemented the `jp/konami/SoftwareKeyboard` JNI contract used by profile
+  text input, including class loading, show/completion state, and text return.
+- Updated runtime response validation for the tested preconfigured-account
+  payloads.
+- Documented the offline entry-data distinction that prevents the client from
+  reopening the User Profile, Team Select, and Signable Managers onboarding
+  loop when a club and squad already exist.
+
+### Working
+
+- A clean Ryujinx boot reaches the main myClub menu without the unauthorized
+  activity dialog or the initial-manager wizard.
+- Squad Management opens the supplied 4-2-3-1 squad, and confirming it returns
+  to the Match menu without a crash.
+
+### Known issues
+
+- Offline player cards and calculated squad values still depend on compatible
+  locally supplied master data; incomplete data can show placeholder cards and
+  zero Team Spirit or Team Strength.
+
 ## [0.1.78] - 2026-08-08
 
 ### Added

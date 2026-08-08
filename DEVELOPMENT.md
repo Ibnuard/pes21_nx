@@ -12,7 +12,7 @@ The public repository deliberately stops at that compatibility boundary. Game
 binaries, data archives, extracted assets, offline response payloads, keys,
 and local reverse-engineering output stay outside the repository.
 
-## Wrapper version 0.1.78
+## Wrapper version 0.1.79
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -28,6 +28,8 @@ Working in the currently tested revision:
 - EGL/GLES2 context creation and continuous swap/render loop
 - touchscreen input in emulator and on hardware
 - offline HTTP bootstrap, login, and registration flow
+- direct entry to the main myClub menu from a preconfigured offline account
+- title-specific software-keyboard JNI calls used by profile text input
 - main PAK and patch/locale CPK discovery and mounting
 - splash screens, menus, UI, HUD, and transition into gameplay
 - visible, correctly oriented 3D gameplay through the fallback compositor

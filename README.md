@@ -39,10 +39,15 @@ used as the compatibility target during development.
 
 ## Current status
 
-Wrapper version `0.1.78` boots through the splash screen and menus on the
+Wrapper version `0.1.79` boots through the splash screen and menus on the
 tested v5.3.0 game revision. Touch input, offline HTTP bootstrap,
 login/registration flow, PAK/CPK mounting, the render loop, UI/HUD, and the 3D
 gameplay scene are operational in the tested Ryujinx setup.
+
+The offline bootstrap can now treat the supplied club data as an existing
+account and bypass the otherwise-blocking mobile onboarding wizard. The JNI
+shim also implements the title's software-keyboard contract for profile text
+input still requested by the game.
 
 The former gameplay black screen is fixed by a GLES 3 fullscreen fallback
 compositor. The original mobile final pass produces no covered fragments on
@@ -126,6 +131,11 @@ The current offline bootstrap additionally expects locally prepared response
 payloads under `assets/responses/`. Those payloads and the private preparation
 tooling are deliberately not distributed here, so this source tree is not a
 plug-and-play game package.
+
+For an already-created offline account, `coach_list` and `squad_list` contain
+the owned club data while `default_coach_list` is empty. The game interprets a
+non-empty default list as the choices for a new-account manager wizard; mixing
+those two meanings reopens onboarding even when a complete squad is present.
 
 Launch through a full-memory title override, not Album applet mode. The loader
 needs code-memory syscalls and more heap than applet mode provides.
