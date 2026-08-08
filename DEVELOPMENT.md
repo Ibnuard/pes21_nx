@@ -12,7 +12,7 @@ The public repository deliberately stops at that compatibility boundary. Game
 binaries, data archives, extracted assets, offline response payloads, keys,
 and local reverse-engineering output stay outside the repository.
 
-## Wrapper version 0.1.77
+## Wrapper version 0.1.78
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -31,6 +31,8 @@ Working in the currently tested revision:
 - main PAK and patch/locale CPK discovery and mounting
 - splash screens, menus, UI, HUD, and transition into gameplay
 - visible, correctly oriented 3D gameplay through the fallback compositor
+- custom Switch-HID-to-mobile-touch controls in the tested Ryujinx Classic
+  layout, including simultaneous movement, Dash, and action input
 
 ## Runtime packaging findings
 
@@ -70,29 +72,39 @@ affected GLES state so later UI rendering remains game-owned.
 The experimental shader-cache Mesa patch used during earlier diagnostics is
 not required and is not included in this repository.
 
-## Controller investigation
+## Custom controller handler
 
-Ryujinx exposes a connected Bluetooth controller as Switch HID, and the wrapper
-observes both left-stick values and face-button transitions. Version 0.1.77
-adds a radial-deadzone normalizer and publishes a coherent input snapshot on
-the game thread. The requested positional PES mapping is:
+Ryujinx exposes a connected Bluetooth controller as Switch HID, but PES Mobile
+does not route generic Android or native-pad events into its match-action
+ThinkUnits. Version 0.1.78 therefore translates Switch HID into the same
+multi-touch protocol consumed by the Classic mobile controls:
 
-- Switch B: short pass
-- Switch X: through pass
-- Switch Y: shoot
-- Switch A: cross while attacking / sliding while defending
+- left analog controls the virtual movement stick with a radial deadzone;
+- Switch B holds/releases the Pass surface;
+- Switch X holds/releases the Through surface;
+- Switch Y holds/releases the Shoot or contextual Clear surface;
+- Switch A performs a Pass-surface Cross swipe in offense mode and a dedicated
+  Sliding swipe in defense mode;
+- Switch R1 holds the Dash surface.
 
-The snapshot is injected into `cobra::game::Pad`, including its normal
-clicked/released/repeat generation. Diagnostics also found that the mobile
-initializer marks the player cursor as having no real pad and disables real
-pad slot 0, so narrow experimental hooks reopen those two gates when Switch HID
-is connected.
+The fake Android motion event stores a complete immutable pointer snapshot.
+It emits Android `DOWN`, indexed `POINTER_DOWN`, `MOVE`, indexed `POINTER_UP`,
+and `UP` transitions, so the stick, Dash, an action button, and the physical
+touchscreen can coexist. Synthetic pointer IDs stay within the game's accepted
+0-9 range, and queue-full handling commits state only after the event has been
+accepted to avoid stuck contacts.
 
-Those changes prove the complete Ryujinx-to-native-pad path, but the mobile
-match logic still does not reliably act on it. The remaining work is below the
-generic Cobra/UE input layer: PES Mobile's touch-oriented movement/action
-consumer must be bridged directly. Until that path is complete, controller
-support remains experimental.
+A narrow UE4 hook records the current mobile offense/defense control mode. The
+input shim requires a fresh, known gameplay mode before generating controller
+touches, preventing stale contacts in menus, pauses, and mode transitions. The
+older native Cobra pad bridge remains inert because enabling it changes the
+mobile cursor route without feeding match gameplay.
+
+Ryujinx runtime traces confirm left-stick movement, B, X, Y, offense A Cross,
+R1 Dash, and simultaneous multi-pointer input. Defensive A Sliding is
+implemented with a larger threshold-safe swipe but still needs broader runtime
+and hardware coverage. Advanced controls and user-relocated mobile button
+layouts are not supported by this coordinate-based handler yet.
 
 ## Testing notes
 

@@ -29,10 +29,16 @@ static void *(*ue4_fmemory_malloc)(uint64_t size, uint32_t alignment);
 static _Alignas(8) uint64_t cobra_pad_input;
 static _Alignas(4) uint32_t cobra_pad_connected;
 static uintptr_t cobra_pad_update_resume;
+static uintptr_t mobile_screen_tap_entry_resume;
+static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
+static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
+static _Alignas(4) uint32_t mobile_control_mode;
+static _Alignas(4) uint32_t mobile_control_generation;
 static uint64_t cobra_pad_last_applied = UINT64_MAX;
 static unsigned int cobra_pad_apply_log_count;
 static unsigned int cursor_pad_log_count;
 static unsigned int real_pad_log_count;
+static unsigned int mobile_context_log_count;
 
 static int32_t clamp_pad_value(int32_t value) {
   if (value < 0)
@@ -57,6 +63,39 @@ void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
 
 static int cobra_controller_is_connected(void) {
   return __atomic_load_n(&cobra_pad_connected, __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_mobile_control_context(int *mode) {
+  const uint32_t generation =
+      __atomic_load_n(&mobile_control_generation, __ATOMIC_ACQUIRE);
+  if (mode)
+    *mode = (int)__atomic_load_n(&mobile_control_mode, __ATOMIC_ACQUIRE);
+  return generation;
+}
+
+// Entry hook for ScreenTapManager::Update. ControlModeInfo is the original x2
+// argument here, so its methods provide authoritative offense/defense context
+// even while every ButtonObject is idle.
+uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
+  int mode = PES_MOBILE_CONTROL_UNKNOWN;
+  if (control_mode_ptr && mobile_is_mode_defense &&
+      mobile_is_mode_defense(control_mode_ptr))
+    mode = PES_MOBILE_CONTROL_DEFENSE;
+  else if (control_mode_ptr && mobile_is_mode_offense &&
+           mobile_is_mode_offense(control_mode_ptr))
+    mode = PES_MOBILE_CONTROL_OFFENSE;
+  __atomic_store_n(&mobile_control_mode, (uint32_t)mode, __ATOMIC_RELEASE);
+  const uint32_t generation =
+      __atomic_add_fetch(&mobile_control_generation, 1, __ATOMIC_RELEASE);
+  static int previous_mode = -1;
+  if (mode != previous_mode && mobile_context_log_count < 24) {
+    mobile_context_log_count++;
+    debugPrintf("input: ScreenTapManager entry control=%p mode=%d "
+                "generation=%u\n",
+                control_mode_ptr, mode, generation);
+    previous_mode = mode;
+  }
+  return mobile_screen_tap_entry_resume;
 }
 
 // The Android/mobile match initializer calls SetPadNo(1), which this binary
@@ -144,6 +183,7 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
 }
 
 extern void cobra_pad_update_hook(void);
+extern void pes_mobile_screen_tap_entry_hook(void);
 
 static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
   const intptr_t delta = (intptr_t)destination - (intptr_t)source;
@@ -270,6 +310,43 @@ void install_ue4_hooks(so_module *module) {
               "FMemory::Malloc=%p\n",
               (void *)resize_backing, (void *)resize_runtime,
               ue4_object_initializer_resize_hook, ue4_fmemory_malloc);
+
+  // Publish a match/mode heartbeat at ScreenTapManager::Update entry, where the
+  // original ControlModeInfo* is still x2. The hook preserves all arguments,
+  // calls the authoritative IsModeOffence/Defence methods, then replays the
+  // displaced prologue.
+  const char *screen_tap_update_symbol =
+      "_ZN5match16ScreenTapManager6UpdateEPKNS_8registry8RegistryERKNS_15ControlModeInfoERNS1_13ScreenTapInfoEPNS1_12Screen2dInfoEi";
+  const uintptr_t screen_tap_backing =
+      so_find_addr(module, screen_tap_update_symbol);
+  const uintptr_t screen_tap_runtime =
+      so_find_addr_rx(module, screen_tap_update_symbol);
+  uint32_t *screen_tap_entry = (uint32_t *)screen_tap_backing;
+  static const uint32_t expected_screen_tap_entry[4] = {
+      0xd10643ff, // sub sp, sp, #0x190
+      0x6d0f3bef, // stp d15, d14, [sp, #0xf0]
+      0x6d1033ed, // stp d13, d12, [sp, #0x100]
+      0x6d112beb, // stp d11, d10, [sp, #0x110]
+  };
+  if (memcmp(screen_tap_entry, expected_screen_tap_entry,
+             sizeof(expected_screen_tap_entry)) != 0)
+    fatal_error("Unexpected ScreenTapManager::Update entry at %p",
+                (void *)screen_tap_entry);
+  mobile_is_mode_offense =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5match15ControlModeInfo13IsModeOffenceEv");
+  mobile_is_mode_defense =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5match15ControlModeInfo13IsModeDefenceEv");
+  mobile_screen_tap_entry_resume = screen_tap_runtime + 0x10;
+  hook_arm64((uintptr_t)screen_tap_entry,
+             (uintptr_t)&pes_mobile_screen_tap_entry_hook);
+  debugPrintf("UE4 hook: ScreenTapManager entry backing=%p runtime=%p "
+              "hook=%p resume=%p offense=%p defense=%p\n",
+              (void *)screen_tap_backing, (void *)screen_tap_runtime,
+              pes_mobile_screen_tap_entry_hook,
+              (void *)mobile_screen_tap_entry_resume,
+              mobile_is_mode_offense, mobile_is_mode_defense);
 
   // PES consumes Android/UE gamepad events before they reach gameplay. Inject
   // Switch input into cobra::game::Pad after its clear/touch phase instead, so

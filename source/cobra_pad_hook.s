@@ -23,3 +23,35 @@ cobra_pad_update_hook:
     br x17
 
     .size cobra_pad_update_hook, .-cobra_pad_update_hook
+
+    .align 2
+    .global pes_mobile_screen_tap_entry_hook
+    .type pes_mobile_screen_tap_entry_hook, %function
+
+// Entry hook for ScreenTapManager::Update. Preserve every integer argument and
+// the caller frame, publish mode from the original ControlModeInfo* in x2,
+// replay the four overwritten prologue instructions, and resume at +0x10.
+pes_mobile_screen_tap_entry_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    ldr x0, [sp, #0x10]
+    bl pes_mobile_screen_tap_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0x190
+    stp d15, d14, [sp, #0xf0]
+    stp d13, d12, [sp, #0x100]
+    stp d11, d10, [sp, #0x110]
+    br x17
+
+    .size pes_mobile_screen_tap_entry_hook, .-pes_mobile_screen_tap_entry_hook

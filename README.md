@@ -39,7 +39,7 @@ used as the compatibility target during development.
 
 ## Current status
 
-Wrapper version `0.1.77` boots through the splash screen and menus on the
+Wrapper version `0.1.78` boots through the splash screen and menus on the
 tested v5.3.0 game revision. Touch input, offline HTTP bootstrap,
 login/registration flow, PAK/CPK mounting, the render loop, UI/HUD, and the 3D
 gameplay scene are operational in the tested Ryujinx setup.
@@ -50,11 +50,14 @@ the tested Switch Mesa path; the fallback samples the completed offscreen scene
 texture, performs the linear-to-sRGB conversion, and corrects the vertical
 orientation before presentation.
 
-Switch HID polling and a custom bridge into the game's native pad state are
-present, but controller gameplay is still experimental. Input is visible in
-diagnostic logs, while the PES Mobile match-action layer does not yet respond
-reliably. Controller support is therefore **not** listed as working yet. See
-[DEVELOPMENT.md](DEVELOPMENT.md) for the evidence and current next step.
+Controller gameplay now uses a custom multi-touch handler because the original
+PES Mobile match layer does not consume native gamepad input. In the tested
+Ryujinx Classic-control setup, the left analog moves the player, B passes, X
+performs a through pass, Y shoots, A performs a Cross while attacking or a
+Sliding gesture while defending, and R1 holds Dash. Multiple synthetic contacts
+can run together, so movement, sprint, and an action can overlap while the
+physical touchscreen remains available. See [DEVELOPMENT.md](DEVELOPMENT.md)
+for implementation and testing details.
 
 ## Build
 
@@ -85,7 +88,7 @@ source-only release process. Before running it:
 3. Update the matching wrapper section and current progress in
    [DEVELOPMENT.md](DEVELOPMENT.md).
 4. Push the changes, open **Actions > Build and release NRO > Run workflow**,
-   and enter a tag such as `v0.1.77`.
+   and enter a tag such as `v0.1.78`.
 
 The workflow validates that the tag matches `APP_VERSION`, builds in the
 official `devkitpro/devkita64` container, uploads the NRO and SHA-256 checksum

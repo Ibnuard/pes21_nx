@@ -30,6 +30,9 @@
 #define AMOTION_EVENT_ACTION_DOWN 0
 #define AMOTION_EVENT_ACTION_UP 1
 #define AMOTION_EVENT_ACTION_MOVE 2
+#define AMOTION_EVENT_ACTION_POINTER_DOWN 5
+#define AMOTION_EVENT_ACTION_POINTER_UP 6
+#define AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT 8
 #define AINPUT_SOURCE_TOUCHSCREEN 0x00001002
 #define ALOOPER_EVENT_INPUT 1
 #define ALOOPER_POLL_WAKE -1
@@ -85,6 +88,14 @@ typedef struct {
 } FakeLooper;
 
 typedef struct {
+  int pointer_id;
+  float x;
+  float y;
+} FakeMotionPointer;
+
+#define MAX_FAKE_MOTION_POINTERS 8
+
+typedef struct {
   int type;
   int device_id;
   int source;
@@ -93,9 +104,8 @@ typedef struct {
   int keycode;
   int meta_state;
   int button_state;
-  int pointer_id;
-  float x;
-  float y;
+  uint32_t pointer_count;
+  FakeMotionPointer pointers[MAX_FAKE_MOTION_POINTERS];
 } FakeInputEvent;
 
 typedef struct {
@@ -114,10 +124,44 @@ static ANativeActivityCallbacks activity_callbacks;
 static float previous_left_axis_x;
 static float previous_left_axis_y;
 static int previous_left_axis_valid;
-static int previous_touch_active;
-static int previous_touch_id;
-static float previous_touch_x;
-static float previous_touch_y;
+
+typedef struct {
+  FakeMotionPointer pointers[MAX_FAKE_MOTION_POINTERS];
+  uint32_t count;
+} FakeTouchState;
+
+typedef enum {
+  VIRTUAL_SURFACE_NONE = 0,
+  VIRTUAL_SURFACE_BUTTON,
+  VIRTUAL_SURFACE_CROSS,
+  VIRTUAL_SURFACE_SLIDE,
+} VirtualSurfaceOwner;
+
+typedef struct {
+  VirtualSurfaceOwner owner;
+  uint64_t started_ms;
+  int moved;
+} VirtualSurfaceState;
+
+static FakeTouchState active_touch_state;
+static VirtualSurfaceState pass_surface;
+static VirtualSurfaceState through_surface;
+static VirtualSurfaceState shoot_surface;
+static uint64_t previous_hid_buttons;
+static uint32_t previous_mobile_context_generation;
+static uint64_t mobile_context_seen_ms;
+static int previous_mobile_context_mode;
+
+enum {
+  FAKE_POINTER_PHYSICAL = 0,
+  // cobra::game::TouchPanel only accepts pointer IDs 0..9. Reserve 0 for the
+  // real Switch touchscreen and keep every controller finger inside that ABI.
+  FAKE_POINTER_STICK = 1,
+  FAKE_POINTER_PASS = 2,
+  FAKE_POINTER_THROUGH = 3,
+  FAKE_POINTER_SHOOT = 4,
+  FAKE_POINTER_DASH = 5,
+};
 
 #define FAKE_PIPE_BASE 0x70000000
 #define FAKE_PIPE_COUNT 32
@@ -397,7 +441,8 @@ static void input_queue_init(void) {
   fcntl_dispatch_fake(input_queue.pipe_fd[1], F_SETFL, O_NONBLOCK);
 }
 
-static void input_queue_push(FakeInputEvent *event) {
+static int input_queue_push(FakeInputEvent *event) {
+  int queued = 0;
   pthread_mutex_lock(&input_queue.mutex);
   const unsigned int next = (input_queue.tail + 1) % 64;
   if (next != input_queue.head) {
@@ -406,23 +451,136 @@ static void input_queue_push(FakeInputEvent *event) {
     const uint8_t wake = 1;
     (void)write_dispatch_fake(input_queue.pipe_fd[1], &wake, sizeof(wake));
     event = NULL;
+    queued = 1;
   }
   pthread_mutex_unlock(&input_queue.mutex);
   free(event);
+  return queued;
 }
 
-static void push_motion(int action, int pointer_id, float x, float y) {
+static int push_motion_snapshot(int action, const FakeTouchState *state) {
   FakeInputEvent *event = calloc(1, sizeof(*event));
   if (!event)
-    return;
+    return 0;
   event->type = AINPUT_EVENT_TYPE_MOTION;
   event->device_id = 0;
   event->source = AINPUT_SOURCE_TOUCHSCREEN;
   event->action = action;
-  event->pointer_id = pointer_id;
-  event->x = x;
-  event->y = y;
-  input_queue_push(event);
+  event->pointer_count = state->count;
+  memcpy(event->pointers, state->pointers,
+         state->count * sizeof(state->pointers[0]));
+  const int queued = input_queue_push(event);
+
+  static unsigned int transition_log_count;
+  static unsigned int move_log_count;
+  const int is_move = (action & 0xff) == AMOTION_EVENT_ACTION_MOVE;
+  const int should_log =
+      queued && ((is_move && move_log_count < 24) ||
+                 (!is_move && transition_log_count < 256));
+  if (should_log) {
+    if (is_move)
+      move_log_count++;
+    else
+      transition_log_count++;
+    char line[384];
+    int used = snprintf(line, sizeof(line),
+                        "input: motion action=0x%x count=%u", action,
+                        state->count);
+    for (uint32_t index = 0;
+         index < state->count && used > 0 && used < (int)sizeof(line);
+         index++) {
+      const int written = snprintf(
+          line + used, sizeof(line) - (size_t)used, " id%d=%.0f,%.0f",
+          state->pointers[index].pointer_id, state->pointers[index].x,
+          state->pointers[index].y);
+      if (written < 0)
+        break;
+      used += written;
+    }
+    debugPrintf("%s\n", line);
+  }
+  return queued;
+}
+
+static int touch_state_find(const FakeTouchState *state, int pointer_id) {
+  for (uint32_t index = 0; index < state->count; index++) {
+    if (state->pointers[index].pointer_id == pointer_id)
+      return (int)index;
+  }
+  return -1;
+}
+
+static int touch_state_append(FakeTouchState *state, int pointer_id, float x,
+                              float y) {
+  if (state->count >= MAX_FAKE_MOTION_POINTERS ||
+      touch_state_find(state, pointer_id) >= 0)
+    return 0;
+  state->pointers[state->count++] =
+      (FakeMotionPointer){pointer_id, x, y};
+  return 1;
+}
+
+// Reconcile one immutable Android MotionEvent snapshot at a time. Pointer
+// additions/removals are committed only after their event enters the queue, so
+// a temporarily full queue cannot leave UE4 with a permanently stuck finger.
+static void reconcile_touch_state(const FakeTouchState *desired) {
+  FakeTouchState moved = active_touch_state;
+  int coordinates_changed = 0;
+  for (uint32_t index = 0; index < moved.count; index++) {
+    const int desired_index =
+        touch_state_find(desired, moved.pointers[index].pointer_id);
+    if (desired_index < 0)
+      continue;
+    const FakeMotionPointer *target = &desired->pointers[desired_index];
+    if (fabsf(moved.pointers[index].x - target->x) >= 0.75f ||
+        fabsf(moved.pointers[index].y - target->y) >= 0.75f) {
+      moved.pointers[index].x = target->x;
+      moved.pointers[index].y = target->y;
+      coordinates_changed = 1;
+    }
+  }
+  if (coordinates_changed) {
+    if (!push_motion_snapshot(AMOTION_EVENT_ACTION_MOVE, &moved))
+      return;
+    active_touch_state = moved;
+  }
+
+  for (int index = (int)active_touch_state.count - 1; index >= 0; index--) {
+    const int pointer_id = active_touch_state.pointers[index].pointer_id;
+    if (touch_state_find(desired, pointer_id) >= 0)
+      continue;
+    const int action =
+        active_touch_state.count == 1
+            ? AMOTION_EVENT_ACTION_UP
+            : AMOTION_EVENT_ACTION_POINTER_UP |
+                  (index << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+    if (!push_motion_snapshot(action, &active_touch_state))
+      return;
+    memmove(&active_touch_state.pointers[index],
+            &active_touch_state.pointers[index + 1],
+            (active_touch_state.count - (uint32_t)index - 1) *
+                sizeof(active_touch_state.pointers[0]));
+    active_touch_state.count--;
+  }
+
+  for (uint32_t desired_index = 0; desired_index < desired->count;
+       desired_index++) {
+    const FakeMotionPointer *point = &desired->pointers[desired_index];
+    if (touch_state_find(&active_touch_state, point->pointer_id) >= 0)
+      continue;
+    FakeTouchState added = active_touch_state;
+    if (!touch_state_append(&added, point->pointer_id, point->x, point->y))
+      continue;
+    const int action =
+        added.count == 1
+            ? AMOTION_EVENT_ACTION_DOWN
+            : AMOTION_EVENT_ACTION_POINTER_DOWN |
+                  ((int)(added.count - 1)
+                   << AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+    if (!push_motion_snapshot(action, &added))
+      return;
+    active_touch_state = added;
+  }
 }
 
 static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
@@ -441,8 +599,12 @@ static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
   }
 }
 
-static void emit_cobra_pad_input(const HidAnalogStickState *stick,
-                                 int connected, u64 buttons) {
+static uint64_t monotonic_ms(void) {
+  return armTicksToNs(armGetSystemTick()) / 1000000ULL;
+}
+
+static void normalize_left_stick(const HidAnalogStickState *stick,
+                                 int connected, float *out_x, float *out_y) {
   float x = connected ? (float)stick->x / (float)JOYSTICK_MAX : 0.0f;
   // Android's Y axis is positive downward; libnx is positive upward.
   float y = connected ? -(float)stick->y / (float)JOYSTICK_MAX : 0.0f;
@@ -462,6 +624,217 @@ static void emit_cobra_pad_input(const HidAnalogStickState *stick,
     x *= scale;
     y *= scale;
   }
+
+  *out_x = x;
+  *out_y = y;
+}
+
+static int mobile_gameplay_context(uint64_t now_ms, int *out_mode) {
+  int mode = 0;
+  const uint32_t generation = pes_mobile_control_context(&mode);
+  if (generation != previous_mobile_context_generation) {
+    previous_mobile_context_generation = generation;
+    mobile_context_seen_ms = now_ms;
+  }
+  const int active = generation != 0 &&
+                     (mode == PES_MOBILE_CONTROL_OFFENSE ||
+                      mode == PES_MOBILE_CONTROL_DEFENSE) &&
+                     now_ms - mobile_context_seen_ms <= 1000;
+  if (mode != previous_mobile_context_mode) {
+    debugPrintf("input: mobile control context mode=%s generation=%u\n",
+                mode == PES_MOBILE_CONTROL_OFFENSE
+                    ? "offense"
+                    : mode == PES_MOBILE_CONTROL_DEFENSE ? "defense"
+                                                         : "unknown",
+                generation);
+    previous_mobile_context_mode = mode;
+  }
+  *out_mode = mode;
+  return active;
+}
+
+static int surface_should_remain(uint64_t now_ms, uint64_t started_ms,
+                                 int physical_held, uint64_t minimum_ms) {
+  return physical_held || now_ms - started_ms < minimum_ms;
+}
+
+static void reset_virtual_surfaces(void) {
+  memset(&pass_surface, 0, sizeof(pass_surface));
+  memset(&through_surface, 0, sizeof(through_surface));
+  memset(&shoot_surface, 0, sizeof(shoot_surface));
+}
+
+static void append_virtual_gamepad_touches(FakeTouchState *desired,
+                                           float axis_x, float axis_y,
+                                           int connected, u64 buttons,
+                                           int gameplay_active,
+                                           int control_mode,
+                                           uint64_t now_ms) {
+  const int b_held = connected && (buttons & HidNpadButton_B) != 0;
+  const int x_held = connected && (buttons & HidNpadButton_X) != 0;
+  const int y_held = connected && (buttons & HidNpadButton_Y) != 0;
+  const int a_held = connected && (buttons & HidNpadButton_A) != 0;
+  const int r_held = connected && (buttons & HidNpadButton_R) != 0;
+  const int b_pressed = b_held && !(previous_hid_buttons & HidNpadButton_B);
+  const int x_pressed = x_held && !(previous_hid_buttons & HidNpadButton_X);
+  const int y_pressed = y_held && !(previous_hid_buttons & HidNpadButton_Y);
+  const int a_pressed = a_held && !(previous_hid_buttons & HidNpadButton_A);
+
+  if (!connected || !gameplay_active) {
+    reset_virtual_surfaces();
+    return;
+  }
+
+  const float stick_center_x = (float)screen_width * 0.15156f;
+  const float stick_center_y = (float)screen_height * 0.80278f;
+  const float stick_radius = (float)screen_height * 0.10417f;
+  const float pass_x = (float)screen_width * 0.76875f;
+  const float pass_y = (float)screen_height * 0.86944f;
+  const float through_x = (float)screen_width * 0.80000f;
+  const float through_y = (float)screen_height * 0.64444f;
+  const float shoot_x = (float)screen_width * 0.92500f;
+  const float shoot_y = (float)screen_height * 0.58889f;
+  const float dash_x = (float)screen_width * 0.91563f;
+  const float dash_y = (float)screen_height * 0.85000f;
+  // 160-DPI gameplay thresholds are about 44 px for Cross and 88 px for the
+  // defensive Sliding flick at 720p. Keep both safely above threshold while
+  // avoiding overlap with the neighboring action surface.
+  const float cross_distance = (float)screen_height * 0.10000f;
+  const float slide_distance = (float)screen_height * 0.14000f;
+
+  static float stick_target_x;
+  static float stick_target_y;
+  static uint64_t stick_target_ms;
+  const int stick_requested = fabsf(axis_x) > 0.001f ||
+                              fabsf(axis_y) > 0.001f;
+  if (stick_requested) {
+    if (touch_state_find(&active_touch_state, FAKE_POINTER_STICK) < 0) {
+      stick_target_x = stick_center_x;
+      stick_target_y = stick_center_y;
+      stick_target_ms = now_ms;
+    } else if (now_ms - stick_target_ms >= 12) {
+      stick_target_x = stick_center_x + axis_x * stick_radius;
+      stick_target_y = stick_center_y + axis_y * stick_radius;
+      stick_target_ms = now_ms;
+    }
+    touch_state_append(desired, FAKE_POINTER_STICK, stick_target_x,
+                       stick_target_y);
+  }
+
+  // Pass and Cross deliberately share one virtual surface. A fresh Cross gets
+  // priority only when the surface is idle; a held B press is never interrupted
+  // mid-command by a second synthetic finger at the same coordinates.
+  if (pass_surface.owner == VIRTUAL_SURFACE_NONE) {
+    if (a_pressed && control_mode == PES_MOBILE_CONTROL_OFFENSE) {
+      pass_surface.owner = VIRTUAL_SURFACE_CROSS;
+      pass_surface.started_ms = now_ms;
+      pass_surface.moved = 0;
+    } else if (b_pressed) {
+      pass_surface.owner = VIRTUAL_SURFACE_BUTTON;
+      pass_surface.started_ms = now_ms;
+    }
+  }
+  if (pass_surface.owner == VIRTUAL_SURFACE_BUTTON &&
+      !surface_should_remain(now_ms, pass_surface.started_ms, b_held, 80))
+    memset(&pass_surface, 0, sizeof(pass_surface));
+  if (pass_surface.owner == VIRTUAL_SURFACE_CROSS) {
+    if (now_ms - pass_surface.started_ms >= 40)
+      pass_surface.moved = 1;
+    if (!surface_should_remain(now_ms, pass_surface.started_ms, a_held, 120))
+      memset(&pass_surface, 0, sizeof(pass_surface));
+  }
+  if (pass_surface.owner != VIRTUAL_SURFACE_NONE) {
+    const float y = pass_surface.owner == VIRTUAL_SURFACE_CROSS &&
+                            pass_surface.moved
+                        ? pass_y - cross_distance
+                        : pass_y;
+    touch_state_append(desired, FAKE_POINTER_PASS, pass_x, y);
+  }
+
+  // Through has its own surface. PES changes its defensive label/context, but
+  // X continues to address the same physical slot.
+  if (through_surface.owner == VIRTUAL_SURFACE_NONE) {
+    if (x_pressed) {
+      through_surface.owner = VIRTUAL_SURFACE_BUTTON;
+      through_surface.started_ms = now_ms;
+    }
+  }
+  if (through_surface.owner == VIRTUAL_SURFACE_BUTTON &&
+      !surface_should_remain(now_ms, through_surface.started_ms, x_held, 80))
+    memset(&through_surface, 0, sizeof(through_surface));
+  if (through_surface.owner != VIRTUAL_SURFACE_NONE)
+    touch_state_append(desired, FAKE_POINTER_THROUGH, through_x, through_y);
+
+  // ButtonKind 8 (Shoot/Clear) and defensive ButtonKind 11 (Sliding) occupy
+  // the same top-right Classic-control slot. Mode-select A here so it becomes
+  // Cross on offense and Sliding on defense without an accidental shot.
+  if (shoot_surface.owner == VIRTUAL_SURFACE_NONE) {
+    if (a_pressed && control_mode == PES_MOBILE_CONTROL_DEFENSE) {
+      shoot_surface.owner = VIRTUAL_SURFACE_SLIDE;
+      shoot_surface.started_ms = now_ms;
+      shoot_surface.moved = 0;
+    } else if (y_pressed) {
+      shoot_surface.owner = VIRTUAL_SURFACE_BUTTON;
+      shoot_surface.started_ms = now_ms;
+    }
+  }
+  if (shoot_surface.owner == VIRTUAL_SURFACE_BUTTON &&
+      !surface_should_remain(now_ms, shoot_surface.started_ms, y_held, 80))
+    memset(&shoot_surface, 0, sizeof(shoot_surface));
+  if (shoot_surface.owner == VIRTUAL_SURFACE_SLIDE) {
+    if (now_ms - shoot_surface.started_ms >= 40)
+      shoot_surface.moved = 1;
+    if (!surface_should_remain(now_ms, shoot_surface.started_ms, a_held, 120))
+      memset(&shoot_surface, 0, sizeof(shoot_surface));
+  }
+  if (shoot_surface.owner != VIRTUAL_SURFACE_NONE) {
+    const float y = shoot_surface.owner == VIRTUAL_SURFACE_SLIDE &&
+                            shoot_surface.moved
+                        ? shoot_y - slide_distance
+                        : shoot_y;
+    touch_state_append(desired, FAKE_POINTER_SHOOT, shoot_x, y);
+  }
+
+  if (r_held)
+    touch_state_append(desired, FAKE_POINTER_DASH, dash_x, dash_y);
+}
+
+static void log_controller_input(const HidAnalogStickState *stick,
+                                 int connected, u64 buttons, float x,
+                                 float y, int gameplay_active,
+                                 int control_mode) {
+  static u64 previous_buttons;
+  static unsigned int input_log_count;
+  const int changed = !previous_left_axis_valid ||
+                      fabsf(x - previous_left_axis_x) >= 0.04f ||
+                      fabsf(y - previous_left_axis_y) >= 0.04f ||
+                      buttons != previous_buttons;
+  if (changed && input_log_count < 192) {
+    input_log_count++;
+    debugPrintf("input: virtual gamepad hid=0x%llx stick=%d,%d "
+                "axis=%.3f,%.3f connected=%d gameplay=%d mode=%d\n",
+                (unsigned long long)buttons, connected ? stick->x : 0,
+                connected ? stick->y : 0, x, y, connected,
+                gameplay_active, control_mode);
+  }
+  previous_left_axis_x = x;
+  previous_left_axis_y = y;
+  previous_left_axis_valid = 1;
+  previous_buttons = buttons;
+}
+
+static void disable_native_pad_bridge(void) {
+  // PES Mobile consumes Android/native-pad events before its touch ThinkUnits.
+  // Keep the old diagnostic hook inert so the original mobile cursor remains
+  // on the touchscreen route used by the virtual controller below.
+  cobra_pad_set_input(0, 0, 0, 0, 0, 0);
+}
+
+#if 0
+// Retained only as documentation of the rejected native-pad mapping. Gameplay
+// is driven by the multi-touch path above.
+static void emit_cobra_pad_input(const HidAnalogStickState *stick,
+                                 int connected, u64 buttons) {
 
   // Cobra's raw layout is positional: bottom/top/left/right are bits 0/3/2/1.
   // This gives the requested Switch mapping while leaving offense/defense
@@ -510,6 +883,7 @@ static void emit_cobra_pad_input(const HidAnalogStickState *stick,
   previous_left_axis_valid = 1;
   previous_cobra_buttons = cobra_buttons;
 }
+#endif
 
 void android_input_poll(void) {
   // libnx aborts inside padUpdate when HID has already been torn down by a
@@ -522,8 +896,11 @@ void android_input_poll(void) {
     previous_left_axis_x = 0.0f;
     previous_left_axis_y = 0.0f;
     previous_left_axis_valid = 0;
-    cobra_pad_set_input(0, 0, 0, 0, 0, 0);
-    previous_touch_active = 0;
+    previous_hid_buttons = 0;
+    reset_virtual_surfaces();
+    FakeTouchState empty = {0};
+    reconcile_touch_state(&empty);
+    disable_native_pad_bridge();
     return;
   }
 
@@ -553,7 +930,14 @@ void android_input_poll(void) {
   if (hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected))
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
-  emit_cobra_pad_input(&left_stick, have_left_stick, buttons);
+
+  float axis_x = 0.0f;
+  float axis_y = 0.0f;
+  normalize_left_stick(&left_stick, have_left_stick, &axis_x, &axis_y);
+  const uint64_t now_ms = monotonic_ms();
+  int control_mode = 0;
+  const int gameplay_active =
+      mobile_gameplay_context(now_ms, &control_mode);
 
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));
@@ -561,29 +945,45 @@ void android_input_poll(void) {
                         touch_state.count > 0;
   const HidTouchState *touch = has_touch ? &touch_state.touches[0] : NULL;
   const int ended = touch && (touch->attributes & HidTouchAttribute_End);
-  const int active = has_touch && !ended;
-  const float x = touch ? (float)touch->x * (float)screen_width / 1280.0f
-                        : previous_touch_x;
-  const float y = touch ? (float)touch->y * (float)screen_height / 720.0f
-                        : previous_touch_y;
-  const int pointer_id = touch ? (int)touch->finger_id : previous_touch_id;
+  const int physical_active = has_touch && !ended;
+  const float touch_x =
+      touch ? (float)touch->x * (float)screen_width / 1280.0f : 0.0f;
+  const float touch_y =
+      touch ? (float)touch->y * (float)screen_height / 720.0f : 0.0f;
+  const int physical_was_active =
+      touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
 
-  if (active && !previous_touch_active) {
-    push_motion(AMOTION_EVENT_ACTION_DOWN, pointer_id, x, y);
-    debugPrintf("input: touch down raw=%u,%u android=%.1f,%.1f\n",
-                touch->x, touch->y, x, y);
-  } else if (active &&
-             (x != previous_touch_x || y != previous_touch_y)) {
-    push_motion(AMOTION_EVENT_ACTION_MOVE, pointer_id, x, y);
-  } else if (!active && previous_touch_active) {
-    push_motion(AMOTION_EVENT_ACTION_UP, pointer_id, x, y);
-    debugPrintf("input: touch up android=%.1f,%.1f\n", x, y);
+  // An End sample carries the final coordinate. Put it in the UP snapshot even
+  // though the desired set no longer contains the physical pointer.
+  if (ended) {
+    const int active_index =
+        touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL);
+    if (active_index >= 0) {
+      active_touch_state.pointers[active_index].x = touch_x;
+      active_touch_state.pointers[active_index].y = touch_y;
+    }
   }
 
-  previous_touch_active = active;
-  previous_touch_id = pointer_id;
-  previous_touch_x = x;
-  previous_touch_y = y;
+  FakeTouchState desired = {0};
+  if (physical_active)
+    touch_state_append(&desired, FAKE_POINTER_PHYSICAL, touch_x, touch_y);
+  append_virtual_gamepad_touches(
+      &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
+      control_mode, now_ms);
+  reconcile_touch_state(&desired);
+
+  const int physical_is_active =
+      touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
+  if (!physical_was_active && physical_is_active && touch)
+    debugPrintf("input: touch down raw=%u,%u android=%.1f,%.1f\n",
+                touch->x, touch->y, touch_x, touch_y);
+  else if (physical_was_active && !physical_is_active)
+    debugPrintf("input: touch up android=%.1f,%.1f\n", touch_x, touch_y);
+
+  log_controller_input(&left_stick, have_left_stick, buttons, axis_x, axis_y,
+                       gameplay_active, control_mode);
+  disable_native_pad_bridge();
+  previous_hid_buttons = have_left_stick ? buttons : 0;
 }
 
 void *ALooper_prepare_fake(int opts) {
@@ -707,18 +1107,26 @@ int AKeyEvent_getKeyCode_fake(void *event) { return ((FakeInputEvent *)event)->k
 int AKeyEvent_getMetaState_fake(void *event) { return ((FakeInputEvent *)event)->meta_state; }
 int AMotionEvent_getAction_fake(void *event) { return ((FakeInputEvent *)event)->action; }
 int AMotionEvent_getButtonState_fake(void *event) { return ((FakeInputEvent *)event)->button_state; }
-size_t AMotionEvent_getPointerCount_fake(void *event) { (void)event; return 1; }
+size_t AMotionEvent_getPointerCount_fake(void *event) {
+  return ((FakeInputEvent *)event)->pointer_count;
+}
 int AMotionEvent_getPointerId_fake(void *event, size_t pointer_index) {
-  (void)pointer_index;
-  return ((FakeInputEvent *)event)->pointer_id;
+  FakeInputEvent *input = event;
+  if (pointer_index >= input->pointer_count)
+    return -1;
+  return input->pointers[pointer_index].pointer_id;
 }
 float AMotionEvent_getX_fake(void *event, size_t pointer_index) {
-  (void)pointer_index;
-  return ((FakeInputEvent *)event)->x;
+  FakeInputEvent *input = event;
+  if (pointer_index >= input->pointer_count)
+    return 0.0f;
+  return input->pointers[pointer_index].x;
 }
 float AMotionEvent_getY_fake(void *event, size_t pointer_index) {
-  (void)pointer_index;
-  return ((FakeInputEvent *)event)->y;
+  FakeInputEvent *input = event;
+  if (pointer_index >= input->pointer_count)
+    return 0.0f;
+  return input->pointers[pointer_index].y;
 }
 
 typedef struct {
