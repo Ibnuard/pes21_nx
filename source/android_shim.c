@@ -22,17 +22,14 @@
 #include "imports.h"
 #include "jni_fake.h"
 #include "libc_shim.h"
+#include "ue4_hooks.h"
 #include "util.h"
 
 #define AINPUT_EVENT_TYPE_KEY 1
 #define AINPUT_EVENT_TYPE_MOTION 2
-#define AKEY_EVENT_ACTION_DOWN 0
-#define AKEY_EVENT_ACTION_UP 1
 #define AMOTION_EVENT_ACTION_DOWN 0
 #define AMOTION_EVENT_ACTION_UP 1
 #define AMOTION_EVENT_ACTION_MOVE 2
-#define AINPUT_SOURCE_KEYBOARD 0x00000101
-#define AINPUT_SOURCE_GAMEPAD 0x00000401
 #define AINPUT_SOURCE_TOUCHSCREEN 0x00001002
 #define ALOOPER_EVENT_INPUT 1
 #define ALOOPER_POLL_WAKE -1
@@ -114,7 +111,9 @@ static _Thread_local FakeLooper tls_looper;
 static FakeInputQueue input_queue;
 static ANativeActivity activity;
 static ANativeActivityCallbacks activity_callbacks;
-static u64 previous_buttons;
+static float previous_left_axis_x;
+static float previous_left_axis_y;
+static int previous_left_axis_valid;
 static int previous_touch_active;
 static int previous_touch_id;
 static float previous_touch_x;
@@ -412,18 +411,6 @@ static void input_queue_push(FakeInputEvent *event) {
   free(event);
 }
 
-static void push_key(int keycode, int action) {
-  FakeInputEvent *event = calloc(1, sizeof(*event));
-  if (!event)
-    return;
-  event->type = AINPUT_EVENT_TYPE_KEY;
-  event->device_id = 1;
-  event->source = AINPUT_SOURCE_GAMEPAD;
-  event->action = action;
-  event->keycode = keycode;
-  input_queue_push(event);
-}
-
 static void push_motion(int action, int pointer_id, float x, float y) {
   FakeInputEvent *event = calloc(1, sizeof(*event));
   if (!event)
@@ -438,21 +425,93 @@ static void push_motion(int action, int pointer_id, float x, float y) {
   input_queue_push(event);
 }
 
-void android_input_poll(void) {
-  static const struct {
-    u64 button;
-    int keycode;
-  } map[] = {
-    { HidNpadButton_B, 96 }, { HidNpadButton_A, 97 },
-    { HidNpadButton_Y, 99 }, { HidNpadButton_X, 100 },
-    { HidNpadButton_L, 102 }, { HidNpadButton_R, 103 },
-    { HidNpadButton_ZL, 104 }, { HidNpadButton_ZR, 105 },
-    { HidNpadButton_StickL, 106 }, { HidNpadButton_StickR, 107 },
-    { HidNpadButton_Plus, 108 }, { HidNpadButton_Minus, 109 },
-    { HidNpadButton_Up, 19 }, { HidNpadButton_Down, 20 },
-    { HidNpadButton_Left, 21 }, { HidNpadButton_Right, 22 },
-  };
+static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
+                             HidAnalogStickState *left_stick,
+                             int *have_left_stick) {
+  *buttons |= state->buttons;
+  const int64_t candidate_magnitude =
+      (int64_t)state->analog_stick_l.x * state->analog_stick_l.x +
+      (int64_t)state->analog_stick_l.y * state->analog_stick_l.y;
+  const int64_t current_magnitude =
+      (int64_t)left_stick->x * left_stick->x +
+      (int64_t)left_stick->y * left_stick->y;
+  if (!*have_left_stick || candidate_magnitude > current_magnitude) {
+    *left_stick = state->analog_stick_l;
+    *have_left_stick = 1;
+  }
+}
 
+static void emit_cobra_pad_input(const HidAnalogStickState *stick,
+                                 int connected, u64 buttons) {
+  float x = connected ? (float)stick->x / (float)JOYSTICK_MAX : 0.0f;
+  // Android's Y axis is positive downward; libnx is positive upward.
+  float y = connected ? -(float)stick->y / (float)JOYSTICK_MAX : 0.0f;
+  float magnitude = sqrtf(x * x + y * y);
+  if (magnitude > 1.0f) {
+    x /= magnitude;
+    y /= magnitude;
+    magnitude = 1.0f;
+  }
+  const float deadzone = 0.12f;
+  if (magnitude <= deadzone) {
+    x = 0.0f;
+    y = 0.0f;
+  } else {
+    const float scale = (magnitude - deadzone) /
+                        ((1.0f - deadzone) * magnitude);
+    x *= scale;
+    y *= scale;
+  }
+
+  // Cobra's raw layout is positional: bottom/top/left/right are bits 0/3/2/1.
+  // This gives the requested Switch mapping while leaving offense/defense
+  // context to PES: B=Pass, X=Through, Y=Shoot, A=Cross/Sliding.
+  uint32_t cobra_buttons = 0;
+  if (buttons & HidNpadButton_B)      cobra_buttons |= 1u << 0;
+  if (buttons & HidNpadButton_A)      cobra_buttons |= 1u << 1;
+  if (buttons & HidNpadButton_Y)      cobra_buttons |= 1u << 2;
+  if (buttons & HidNpadButton_X)      cobra_buttons |= 1u << 3;
+  if (buttons & HidNpadButton_L)      cobra_buttons |= 1u << 4;
+  if (buttons & HidNpadButton_ZL)     cobra_buttons |= 1u << 5;
+  if (buttons & HidNpadButton_StickL) cobra_buttons |= 1u << 6;
+  if (buttons & HidNpadButton_R)      cobra_buttons |= 1u << 7;
+  if (buttons & HidNpadButton_ZR)     cobra_buttons |= 1u << 8;
+  if (buttons & HidNpadButton_StickR) cobra_buttons |= 1u << 9;
+  if (buttons & HidNpadButton_Up)     cobra_buttons |= 1u << 10;
+  if (buttons & HidNpadButton_Down)   cobra_buttons |= 1u << 11;
+  if (buttons & HidNpadButton_Left)   cobra_buttons |= 1u << 12;
+  if (buttons & HidNpadButton_Right)  cobra_buttons |= 1u << 13;
+  if (buttons & HidNpadButton_Plus)   cobra_buttons |= 1u << 14;
+  if (buttons & HidNpadButton_Minus)  cobra_buttons |= 1u << 15;
+
+  const int32_t up = y < 0.0f ? (int32_t)(-y * 32767.0f + 0.5f) : 0;
+  const int32_t down = y > 0.0f ? (int32_t)(y * 32767.0f + 0.5f) : 0;
+  const int32_t left = x < 0.0f ? (int32_t)(-x * 32767.0f + 0.5f) : 0;
+  const int32_t right = x > 0.0f ? (int32_t)(x * 32767.0f + 0.5f) : 0;
+  cobra_pad_set_input(cobra_buttons, up, down, left, right, connected);
+
+  static uint32_t previous_cobra_buttons;
+  static unsigned int input_log_count;
+  const int changed = !previous_left_axis_valid ||
+                      fabsf(x - previous_left_axis_x) >= 0.002f ||
+                      fabsf(y - previous_left_axis_y) >= 0.002f ||
+                      cobra_buttons != previous_cobra_buttons;
+  if (changed && input_log_count < 48) {
+    input_log_count++;
+    debugPrintf("input: cobra pad hid=0x%llx mask=0x%x "
+                "stick=%d,%d axis=%.3f,%.3f raw=%d,%d,%d,%d "
+                "connected=%d\n",
+                (unsigned long long)buttons, cobra_buttons,
+                connected ? stick->x : 0, connected ? stick->y : 0, x, y,
+                up, down, left, right, connected);
+  }
+  previous_left_axis_x = x;
+  previous_left_axis_y = y;
+  previous_left_axis_valid = 1;
+  previous_cobra_buttons = cobra_buttons;
+}
+
+void android_input_poll(void) {
   // libnx aborts inside padUpdate when HID has already been torn down by a
   // game-side exit request. Read the valid shared-memory slots directly and
   // treat unavailable HID as no input so the original shutdown cause survives.
@@ -460,7 +519,10 @@ void android_input_poll(void) {
     static int warned;
     if (!warned++)
       debugPrintf("input: HID shared memory unavailable; polling disabled\n");
-    previous_buttons = 0;
+    previous_left_axis_x = 0.0f;
+    previous_left_axis_y = 0.0f;
+    previous_left_axis_valid = 0;
+    cobra_pad_set_input(0, 0, 0, 0, 0, 0);
     previous_touch_active = 0;
     return;
   }
@@ -474,29 +536,24 @@ void android_input_poll(void) {
 
   HidNpadCommonState state;
   u64 buttons = 0;
+  HidAnalogStickState left_stick = {0};
+  int have_left_stick = 0;
   if (hidGetNpadStatesFullKey(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected))
-    buttons |= state.buttons;
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
   if (hidGetNpadStatesJoyDual(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected))
-    buttons |= state.buttons;
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
   if (hidGetNpadStatesJoyLeft(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected))
-    buttons |= state.buttons;
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
   if (hidGetNpadStatesJoyRight(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected))
-    buttons |= state.buttons;
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
   if (hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected))
-    buttons |= state.buttons;
-  const u64 changed = buttons ^ previous_buttons;
-  for (unsigned int i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
-    if (changed & map[i].button)
-      push_key(map[i].keycode,
-               (buttons & map[i].button) ? AKEY_EVENT_ACTION_DOWN
-                                         : AKEY_EVENT_ACTION_UP);
-  }
-  previous_buttons = buttons;
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
+  emit_cobra_pad_input(&left_stick, have_left_stick, buttons);
 
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));

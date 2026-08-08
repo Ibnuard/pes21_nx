@@ -26,6 +26,125 @@ static ObjectInitializerArrayState object_initializer_states[
     OBJECT_INITIALIZER_STATE_SLOTS];
 static void *(*ue4_fmemory_malloc)(uint64_t size, uint32_t alignment);
 
+static _Alignas(8) uint64_t cobra_pad_input;
+static _Alignas(4) uint32_t cobra_pad_connected;
+static uintptr_t cobra_pad_update_resume;
+static uint64_t cobra_pad_last_applied = UINT64_MAX;
+static unsigned int cobra_pad_apply_log_count;
+static unsigned int cursor_pad_log_count;
+static unsigned int real_pad_log_count;
+
+static int32_t clamp_pad_value(int32_t value) {
+  if (value < 0)
+    return 0;
+  if (value > 0x7fff)
+    return 0x7fff;
+  return value;
+}
+
+void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
+                         int32_t left, int32_t right, int connected) {
+  const int16_t x = (int16_t)(clamp_pad_value(right) -
+                              clamp_pad_value(left));
+  const int16_t y = (int16_t)(clamp_pad_value(down) -
+                              clamp_pad_value(up));
+  const uint64_t packed = (uint64_t)(buttons & 0x0000ffffu) |
+                          ((uint64_t)(uint16_t)x << 32) |
+                          ((uint64_t)(uint16_t)y << 48);
+  __atomic_store_n(&cobra_pad_input, packed, __ATOMIC_RELEASE);
+  __atomic_store_n(&cobra_pad_connected, connected != 0, __ATOMIC_RELEASE);
+}
+
+static int cobra_controller_is_connected(void) {
+  return __atomic_load_n(&cobra_pad_connected, __ATOMIC_ACQUIRE) != 0;
+}
+
+// The Android/mobile match initializer calls SetPadNo(1), which this binary
+// deliberately collapses to -1. Command::ExecCommand then skips the complete
+// real-pad path for that cursor. When Switch HID is present, attach that primary
+// cursor to port 0; preserve the game's original behavior for every other call.
+static void pes_cursor_set_pad_no(void *cursor_ptr, uint32_t requested) {
+  if (!cursor_ptr)
+    return;
+  const int connected = cobra_controller_is_connected();
+  const int32_t pad_no = connected && requested == 1 ? 0
+                                                     : (requested ? -1 : 0);
+  memcpy((unsigned char *)cursor_ptr + 16, &pad_no, sizeof(pad_no));
+  if (cursor_pad_log_count < 16) {
+    cursor_pad_log_count++;
+    debugPrintf("input: CursorData::SetPadNo cursor=%p requested=%u "
+                "connected=%d stored=%d\n",
+                cursor_ptr, requested, connected, pad_no);
+  }
+}
+
+// Mobile setup also disables all real-pad slots. Keep port 0 enabled only while
+// Ryujinx/libnx reports a controller, leaving the other seven ports and the
+// no-controller touch-only behavior unchanged.
+static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
+                                       uint32_t requested_enable) {
+  if (!pad_input_ptr || pad_no > 7)
+    return;
+  const int connected = cobra_controller_is_connected();
+  const uint8_t enabled =
+      (requested_enable != 0 || (connected && pad_no == 0)) ? 1 : 0;
+  *((unsigned char *)pad_input_ptr + 0x86ca0 + pad_no) = enabled;
+  if ((pad_no == 0 || requested_enable) && real_pad_log_count < 24) {
+    real_pad_log_count++;
+    debugPrintf("input: PadInput::SetRealPadIsEnable object=%p pad=%u "
+                "requested=%u connected=%d stored=%u\n",
+                pad_input_ptr, pad_no, requested_enable != 0, connected,
+                enabled);
+  }
+}
+
+// Called on cobra's game thread at the end of Pad::Update's clear/touch phase,
+// immediately before the game computes clicked/released/repeated edges.
+uintptr_t cobra_pad_apply_input(void *pad_ptr) {
+  unsigned char *pad = pad_ptr;
+  if (pad) {
+    const uint64_t packed =
+        __atomic_load_n(&cobra_pad_input, __ATOMIC_ACQUIRE);
+    const uint32_t buttons = (uint32_t)packed;
+    const int32_t x = (int16_t)(packed >> 32);
+    const int32_t y = (int16_t)(packed >> 48);
+    int32_t pad_id;
+    uint32_t previous;
+    uint32_t current;
+    memcpy(&pad_id, pad + 4, sizeof(pad_id));
+    memcpy(&previous, pad + 12, sizeof(previous));
+    memcpy(&current, pad + 16, sizeof(current));
+    const uint32_t current_before = current;
+    current |= buttons;
+    memcpy(pad + 16, &current, sizeof(current));
+    for (int index = 0; index < 16; index++) {
+      const int32_t value = buttons & (1u << index) ? 0x7fff : 0;
+      memcpy(pad + 140 + index * 4, &value, sizeof(value));
+    }
+    const int32_t directions[4] = {
+        y < 0 ? -y : 0,
+        y > 0 ? y : 0,
+        x < 0 ? -x : 0,
+        x > 0 ? x : 0,
+    };
+    memcpy(pad + 140 + 16 * 4, directions, sizeof(directions));
+    if (packed != cobra_pad_last_applied && cobra_pad_apply_log_count < 64) {
+      cobra_pad_apply_log_count++;
+      debugPrintf("input: cobra apply pad=%p id=%d packed=0x%llx "
+                  "buttons=0x%x previous=0x%x current=0x%x->0x%x "
+                  "axis=%d,%d raw=%d,%d,%d,%d resume=%p\n",
+                  pad_ptr, pad_id, (unsigned long long)packed, buttons,
+                  previous, current_before, current, x, y, directions[0],
+                  directions[1], directions[2], directions[3],
+                  (void *)cobra_pad_update_resume);
+      cobra_pad_last_applied = packed;
+    }
+  }
+  return cobra_pad_update_resume;
+}
+
+extern void cobra_pad_update_hook(void);
+
 static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
   const intptr_t delta = (intptr_t)destination - (intptr_t)source;
   if ((delta & 3) != 0 || delta < -(1LL << 27) || delta >= (1LL << 27))
@@ -151,6 +270,79 @@ void install_ue4_hooks(so_module *module) {
               "FMemory::Malloc=%p\n",
               (void *)resize_backing, (void *)resize_runtime,
               ue4_object_initializer_resize_hook, ue4_fmemory_malloc);
+
+  // PES consumes Android/UE gamepad events before they reach gameplay. Inject
+  // Switch input into cobra::game::Pad after its clear/touch phase instead, so
+  // the game's own edge/repeat logic and context-sensitive actions remain
+  // authoritative while the mobile touch overlay stays enabled.
+  const char *pad_update_symbol = "_ZN5cobra4game3Pad6UpdateEv";
+  const uintptr_t pad_update_backing =
+      so_find_addr(module, pad_update_symbol);
+  const uintptr_t pad_update_runtime =
+      so_find_addr_rx(module, pad_update_symbol);
+  uint32_t *pad_hook = (uint32_t *)(pad_update_backing + 0xd4);
+  static const uint32_t expected_pad_words[4] = {
+      0x2941a66b, // ldp w11, w9, [x19, #12]
+      0xaa1f03e8, // mov x8, xzr
+      0x9100826a, // add x10, x19, #0x20
+      0x0a2b012c, // bic w12, w9, w11
+  };
+  if (memcmp(pad_hook, expected_pad_words, sizeof(expected_pad_words)) != 0)
+    fatal_error("Unexpected cobra::Pad::Update hook bytes at %p",
+                (void *)pad_hook);
+  cobra_pad_update_resume = pad_update_runtime + 0xe4;
+  hook_arm64((uintptr_t)pad_hook, (uintptr_t)&cobra_pad_update_hook);
+  debugPrintf("UE4 hook: cobra Pad::Update backing=%p runtime=%p hook=%p "
+              "resume=%p\n",
+              (void *)pad_update_backing, (void *)pad_update_runtime,
+              cobra_pad_update_hook, (void *)cobra_pad_update_resume);
+
+  // Reconnect the mobile cursor to the real-pad route. These two functions are
+  // fully replaced, so no displaced instructions need to be replayed.
+  const char *cursor_set_pad_symbol =
+      "_ZN5match8registry10CursorData8SetPadNoEj";
+  const uintptr_t cursor_set_pad_backing =
+      so_find_addr(module, cursor_set_pad_symbol);
+  const uintptr_t cursor_set_pad_runtime =
+      so_find_addr_rx(module, cursor_set_pad_symbol);
+  static const uint32_t expected_cursor_words[4] = {
+      0x7100003f, // cmp w1, #0
+      0x5a9f03e8, // csetm w8, ne
+      0xb9001008, // str w8, [x0, #16]
+      0xd65f03c0, // ret
+  };
+  if (memcmp((void *)cursor_set_pad_backing, expected_cursor_words,
+             sizeof(expected_cursor_words)) != 0)
+    fatal_error("Unexpected CursorData::SetPadNo hook bytes at %p",
+                (void *)cursor_set_pad_backing);
+  hook_arm64(cursor_set_pad_backing, (uintptr_t)&pes_cursor_set_pad_no);
+  debugPrintf("UE4 hook: CursorData::SetPadNo backing=%p runtime=%p "
+              "replacement=%p\n",
+              (void *)cursor_set_pad_backing, (void *)cursor_set_pad_runtime,
+              pes_cursor_set_pad_no);
+
+  const char *real_pad_enable_symbol =
+      "_ZN5match8registry8PadInput18SetRealPadIsEnableEjb";
+  const uintptr_t real_pad_enable_backing =
+      so_find_addr(module, real_pad_enable_symbol);
+  const uintptr_t real_pad_enable_runtime =
+      so_find_addr_rx(module, real_pad_enable_symbol);
+  static const uint32_t expected_enable_words[4] = {
+      0x71001c3f, // cmp w1, #7
+      0x540000c8, // b.hi return
+      0x528d940a, // mov w10, #0x6ca0
+      0x12000048, // and w8, w2, #1
+  };
+  if (memcmp((void *)real_pad_enable_backing, expected_enable_words,
+             sizeof(expected_enable_words)) != 0)
+    fatal_error("Unexpected PadInput::SetRealPadIsEnable hook bytes at %p",
+                (void *)real_pad_enable_backing);
+  hook_arm64(real_pad_enable_backing,
+             (uintptr_t)&pes_set_real_pad_is_enable);
+  debugPrintf("UE4 hook: PadInput::SetRealPadIsEnable backing=%p runtime=%p "
+              "replacement=%p\n",
+              (void *)real_pad_enable_backing,
+              (void *)real_pad_enable_runtime, pes_set_real_pad_is_enable);
 
   // OpenSL ES is unavailable on Horizon. Route CRI's Android backend to its
   // built-in pseudo voice backend so audio is silent instead of dereferencing

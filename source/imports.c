@@ -193,6 +193,10 @@ static struct {
   GLuint texture2d[8];
   GLuint sampler[8];
   unsigned int trace_default_draws;
+  GLuint scene_framebuffer;
+  GLuint scene_texture;
+  unsigned int scene_compose_pending;
+  unsigned int scene_compose_count;
 } g_mc[MC_SLOTS];
 
 static inline void *mc_thread_key(void) {
@@ -368,6 +372,992 @@ static volatile uint32_t gl_diag_compile_fail;
 static volatile uint32_t gl_diag_link_ok;
 static volatile uint32_t gl_diag_link_fail;
 
+#ifndef GL_TEXTURE_BASE_LEVEL
+#define GL_TEXTURE_BASE_LEVEL 0x813C
+#endif
+#ifndef GL_TEXTURE_MAX_LEVEL
+#define GL_TEXTURE_MAX_LEVEL 0x813D
+#endif
+#ifndef GL_TEXTURE_IMMUTABLE_LEVELS
+#define GL_TEXTURE_IMMUTABLE_LEVELS 0x82DF
+#endif
+#ifndef GL_TEXTURE_IMMUTABLE_FORMAT
+#define GL_TEXTURE_IMMUTABLE_FORMAT 0x912F
+#endif
+#ifndef GL_TEXTURE_SWIZZLE_R
+#define GL_TEXTURE_SWIZZLE_R 0x8E42
+#endif
+#ifndef GL_TEXTURE_SWIZZLE_G
+#define GL_TEXTURE_SWIZZLE_G 0x8E43
+#endif
+#ifndef GL_TEXTURE_SWIZZLE_B
+#define GL_TEXTURE_SWIZZLE_B 0x8E44
+#endif
+#ifndef GL_TEXTURE_SWIZZLE_A
+#define GL_TEXTURE_SWIZZLE_A 0x8E45
+#endif
+#ifndef GL_RASTERIZER_DISCARD
+#define GL_RASTERIZER_DISCARD 0x8C89
+#endif
+#ifndef GL_DRAW_BUFFER0
+#define GL_DRAW_BUFFER0 0x8825
+#endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER_BINDING
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+#ifndef GL_UNIFORM_BUFFER
+#define GL_UNIFORM_BUFFER 0x8A11
+#endif
+#ifndef GL_UNIFORM_BUFFER_BINDING
+#define GL_UNIFORM_BUFFER_BINDING 0x8A28
+#endif
+#ifndef GL_UNIFORM_BUFFER_START
+#define GL_UNIFORM_BUFFER_START 0x8A29
+#endif
+#ifndef GL_UNIFORM_BUFFER_SIZE
+#define GL_UNIFORM_BUFFER_SIZE 0x8A2A
+#endif
+#ifndef GL_UNIFORM_BLOCK_BINDING
+#define GL_UNIFORM_BLOCK_BINDING 0x8A3F
+#endif
+#ifndef GL_UNIFORM_BLOCK_DATA_SIZE
+#define GL_UNIFORM_BLOCK_DATA_SIZE 0x8A40
+#endif
+#ifndef GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER
+#define GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER 0x8A44
+#endif
+#ifndef GL_VERTEX_ARRAY_BINDING
+#define GL_VERTEX_ARRAY_BINDING 0x85B5
+#endif
+#ifndef GL_BUFFER_MAPPED
+#define GL_BUFFER_MAPPED 0x88BC
+#endif
+#ifndef GL_MAP_READ_BIT
+#define GL_MAP_READ_BIT 0x0001
+#endif
+#ifndef GL_VERTEX_ATTRIB_ARRAY_INTEGER
+#define GL_VERTEX_ATTRIB_ARRAY_INTEGER 0x88FD
+#endif
+#ifndef GL_VERTEX_ATTRIB_ARRAY_DIVISOR
+#define GL_VERTEX_ATTRIB_ARRAY_DIVISOR 0x88FE
+#endif
+
+typedef void (*GLSamplerParameteriProc)(GLuint, GLenum, GLint);
+typedef void (*GLGetSamplerParameterivProc)(GLuint, GLenum, GLint *);
+typedef void (*GLBlitFramebufferProc)(GLint, GLint, GLint, GLint, GLint, GLint,
+                                      GLint, GLint, GLbitfield, GLenum);
+typedef GLuint (*GLGetUniformBlockIndexProc)(GLuint, const GLchar *);
+typedef void (*GLGetActiveUniformBlockivProc)(GLuint, GLuint, GLenum, GLint *);
+typedef void (*GLGetIntegeriVProc)(GLenum, GLuint, GLint *);
+typedef void (*GLGetInteger64iVProc)(GLenum, GLuint, int64_t *);
+typedef void *(*GLMapBufferRangeProc)(GLenum, GLintptr, GLsizeiptr,
+                                      GLbitfield);
+typedef GLboolean (*GLUnmapBufferProc)(GLenum);
+static GLSamplerParameteriProc gl_sampler_parameteri_real;
+static GLGetSamplerParameterivProc gl_get_sampler_parameteriv_real;
+static GLBlitFramebufferProc gl_blit_framebuffer_real;
+static GLGetUniformBlockIndexProc gl_get_uniform_block_index_real;
+static GLGetActiveUniformBlockivProc gl_get_active_uniform_block_iv_real;
+static GLGetIntegeriVProc gl_get_integeri_v_real;
+static GLGetInteger64iVProc gl_get_integer64i_v_real;
+static GLMapBufferRangeProc gl_map_buffer_range_real;
+static GLUnmapBufferProc gl_unmap_buffer_real;
+
+static void gl_diag_sample_rgb(const GLint viewport[4], GLint read_format,
+                               GLint read_type, unsigned int *nonzero,
+                               unsigned int *max_value,
+                               unsigned long long *sum,
+                               unsigned int *alpha_nonzero,
+                               unsigned int *alpha_max,
+                               unsigned long long *alpha_sum);
+static int gl_diag_draw_fallback(GLenum mode, unsigned int curve);
+
+typedef struct {
+  int matched;
+  int log_result;
+  unsigned int sequence;
+  unsigned int mode;
+  GLuint texture;
+  GLuint sampler;
+  GLuint source_framebuffer;
+  GLint saved_active_texture;
+  GLint viewport[4];
+  GLenum pre_draw_error;
+} GLComposeExperiment;
+
+static const char *gl_diag_compose_mode_name(unsigned int mode) {
+  (void)mode;
+  return "fallback-srgb";
+}
+
+static int gl_diag_uniform_is_float(GLenum type) {
+  switch (type) {
+    case GL_FLOAT:
+    case GL_FLOAT_VEC2:
+    case GL_FLOAT_VEC3:
+    case GL_FLOAT_VEC4:
+    case GL_FLOAT_MAT2:
+    case GL_FLOAT_MAT3:
+    case GL_FLOAT_MAT4:
+    case 0x8B65: // GL_FLOAT_MAT2x3
+    case 0x8B66: // GL_FLOAT_MAT2x4
+    case 0x8B67: // GL_FLOAT_MAT3x2
+    case 0x8B68: // GL_FLOAT_MAT3x4
+    case 0x8B69: // GL_FLOAT_MAT4x2
+    case 0x8B6A: // GL_FLOAT_MAT4x3
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+static void gl_diag_dump_program_once(GLuint program) {
+  static GLuint dumped_program;
+  if (!program || dumped_program == program)
+    return;
+  dumped_program = program;
+
+  GLint uniform_count = 0;
+  GLint uniform_name_max = 0;
+  glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
+  glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &uniform_name_max);
+  if (uniform_name_max < 1)
+    uniform_name_max = 1;
+  char *uniform_name = calloc((size_t)uniform_name_max + 1, 1);
+  debugPrintf("GL compose program dump program=%u uniforms=%d name_max=%d\n",
+              program, uniform_count, uniform_name_max);
+  if (uniform_name) {
+    char *element_name = calloc((size_t)uniform_name_max + 32, 1);
+    for (GLint index = 0; index < uniform_count; index++) {
+      GLsizei name_length = 0;
+      GLint array_size = 0;
+      GLenum type = 0;
+      memset(uniform_name, 0, (size_t)uniform_name_max + 1);
+      glGetActiveUniform(program, (GLuint)index, uniform_name_max,
+                         &name_length, &array_size, &type, uniform_name);
+      GLint element_count = array_size > 1 ? array_size : 1;
+      const char *array_suffix = strstr(uniform_name, "[0]");
+      if (!array_suffix || array_suffix[3] != '\0')
+        element_count = 1;
+      for (GLint element = 0; element < element_count; element++) {
+        const char *query_name = uniform_name;
+        if (element_name && element_count > 1) {
+          const int prefix_length = (int)(array_suffix - uniform_name);
+          snprintf(element_name, (size_t)uniform_name_max + 32, "%.*s[%d]",
+                   prefix_length, uniform_name, element);
+          query_name = element_name;
+        }
+        const GLint location = glGetUniformLocation(program, query_name);
+        if (location < 0) {
+          debugPrintf("GL compose uniform[%d.%d] name=%s type=0x%x size=%d "
+                      "location=%d\n",
+                      index, element, query_name, type, array_size, location);
+        } else if (gl_diag_uniform_is_float(type)) {
+          GLfloat values[16] = {0};
+          glGetUniformfv(program, location, values);
+          debugPrintf("GL compose uniform[%d.%d] name=%s type=0x%x size=%d "
+                      "location=%d float=%g,%g,%g,%g\n",
+                      index, element, query_name, type, array_size, location,
+                      values[0], values[1], values[2], values[3]);
+        } else {
+          GLint values[16] = {0};
+          glGetUniformiv(program, location, values);
+          debugPrintf("GL compose uniform[%d.%d] name=%s type=0x%x size=%d "
+                      "location=%d int=%d,%d,%d,%d\n",
+                      index, element, query_name, type, array_size, location,
+                      values[0], values[1], values[2], values[3]);
+        }
+      }
+    }
+    free(element_name);
+    free(uniform_name);
+  }
+
+  GLint attached_count = 0;
+  glGetProgramiv(program, GL_ATTACHED_SHADERS, &attached_count);
+  if (attached_count > 8)
+    attached_count = 8;
+  GLuint shaders[8] = {0};
+  GLsizei returned = 0;
+  glGetAttachedShaders(program, attached_count, &returned, shaders);
+  for (GLsizei index = 0; index < returned; index++) {
+    GLint shader_type = 0;
+    GLint source_length = 0;
+    glGetShaderiv(shaders[index], GL_SHADER_TYPE, &shader_type);
+    glGetShaderiv(shaders[index], GL_SHADER_SOURCE_LENGTH, &source_length);
+    if (source_length < 1)
+      continue;
+    char *source = calloc((size_t)source_length + 1, 1);
+    if (!source)
+      continue;
+    GLsizei actual_length = 0;
+    glGetShaderSource(shaders[index], source_length, &actual_length, source);
+    debugPrintf("GL compose shader begin program=%u shader=%u type=0x%x "
+                "length=%d\n%s\nGL compose shader end program=%u shader=%u\n",
+                program, shaders[index], shader_type, actual_length, source,
+                program, shaders[index]);
+    free(source);
+  }
+  debugPrintf("GL compose program dump end program=%u error=0x%x\n", program,
+              glGetError());
+}
+
+// Identify the first default-framebuffer draw that samples the most recently
+// observed non-black offscreen color attachment.
+static GLComposeExperiment gl_diag_prepare_compose_experiment(void) {
+  GLComposeExperiment experiment = {0};
+  const int slot = mc_current_slot();
+  if (slot < 0 || g_mc[slot].framebuffer != 0 ||
+      !g_mc[slot].scene_compose_pending || !g_mc[slot].scene_texture ||
+      g_mc[slot].texture2d[0] != g_mc[slot].scene_texture)
+    return experiment;
+
+  g_mc[slot].scene_compose_pending = 0;
+  experiment.matched = 1;
+  experiment.sequence = ++g_mc[slot].scene_compose_count;
+  experiment.mode = 3;
+  experiment.log_result = experiment.sequence <= 4 ||
+                          ((experiment.sequence - 1) % 120) < 4;
+  experiment.texture = g_mc[slot].texture2d[0];
+  experiment.sampler = g_mc[slot].sampler[0];
+  experiment.source_framebuffer = g_mc[slot].scene_framebuffer;
+  memcpy(experiment.viewport, g_mc[slot].viewport,
+         sizeof(experiment.viewport));
+  gl_diag_dump_program_once(g_mc[slot].program);
+
+  GLint raw_base = 0;
+  GLint raw_max = 0;
+  GLint immutable_format = GL_FALSE;
+  GLint immutable_levels = 0;
+  GLint texture_min = 0;
+  GLint texture_mag = 0;
+  GLint texture_swizzle[4] = {0};
+  GLint sampler_min = -1;
+  GLint sampler_mag = -1;
+  GLint scissor[4] = {0};
+  GLint cull_mode = 0;
+  GLint front_face = 0;
+  GLint depth_func = 0;
+  GLint stencil_func = 0;
+  GLint blend_src_rgb = 0;
+  GLint blend_dst_rgb = 0;
+  GLint blend_src_alpha = 0;
+  GLint blend_dst_alpha = 0;
+  GLint blend_equation_rgb = 0;
+  GLint blend_equation_alpha = 0;
+  GLint draw_buffer = 0;
+  GLboolean color_mask[4] = {0};
+  const GLenum inherited_error =
+      experiment.log_result ? glGetError() : GL_NO_ERROR;
+
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &experiment.saved_active_texture);
+  if (experiment.saved_active_texture != GL_TEXTURE0)
+    glActiveTexture(GL_TEXTURE0);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, &raw_base);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &raw_max);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_IMMUTABLE_FORMAT,
+                      &immutable_format);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_IMMUTABLE_LEVELS,
+                      &immutable_levels);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &texture_min);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &texture_mag);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R,
+                      &texture_swizzle[0]);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G,
+                      &texture_swizzle[1]);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B,
+                      &texture_swizzle[2]);
+  glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+                      &texture_swizzle[3]);
+
+  if (!gl_get_sampler_parameteriv_real)
+    gl_get_sampler_parameteriv_real = (GLGetSamplerParameterivProc)
+        eglGetProcAddress("glGetSamplerParameteriv");
+  if (experiment.sampler && gl_get_sampler_parameteriv_real) {
+    gl_get_sampler_parameteriv_real(experiment.sampler, GL_TEXTURE_MIN_FILTER,
+                                    &sampler_min);
+    gl_get_sampler_parameteriv_real(experiment.sampler, GL_TEXTURE_MAG_FILTER,
+                                    &sampler_mag);
+  }
+
+  GLenum query_error = GL_NO_ERROR;
+  if (experiment.log_result) {
+    glGetIntegerv(GL_VIEWPORT, experiment.viewport);
+    glGetIntegerv(GL_SCISSOR_BOX, scissor);
+    glGetIntegerv(GL_CULL_FACE_MODE, &cull_mode);
+    glGetIntegerv(GL_FRONT_FACE, &front_face);
+    glGetIntegerv(GL_DEPTH_FUNC, &depth_func);
+    glGetIntegerv(GL_STENCIL_FUNC, &stencil_func);
+    glGetIntegerv(GL_BLEND_SRC_RGB, &blend_src_rgb);
+    glGetIntegerv(GL_BLEND_DST_RGB, &blend_dst_rgb);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &blend_src_alpha);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &blend_dst_alpha);
+    glGetIntegerv(GL_BLEND_EQUATION_RGB, &blend_equation_rgb);
+    glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &blend_equation_alpha);
+    glGetIntegerv(GL_DRAW_BUFFER0, &draw_buffer);
+    glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
+    query_error = glGetError();
+  }
+
+  GLint effective_base = raw_base;
+  GLint effective_max = raw_max;
+  if (immutable_format && immutable_levels > 0) {
+    if (effective_base >= immutable_levels)
+      effective_base = immutable_levels - 1;
+    if (effective_max < effective_base)
+      effective_max = effective_base;
+    if (effective_max >= immutable_levels)
+      effective_max = immutable_levels - 1;
+  }
+
+  if (experiment.saved_active_texture != GL_TEXTURE0)
+    glActiveTexture((GLenum)experiment.saved_active_texture);
+
+  if (experiment.log_result) {
+    debugPrintf("GL compose state seq=%u mode=%s program=%u tex=%u "
+                "sampler=%u levels=raw:%d..%d immutable:%d/%d "
+                "effective:%d..%d texfilter=0x%x/0x%x "
+                "swizzle=0x%x,0x%x,0x%x,0x%x "
+                "samplerfilter=0x%x/0x%x vp=%d,%d,%d,%d "
+                "scissor=%d/%d,%d,%d,%d "
+                "blend=%d/src:0x%x,0x%x,0x%x,0x%x/eq:0x%x,0x%x "
+                "depth=%d/0x%x stencil=%d/0x%x drawbuf=0x%x "
+                "cull=%d/0x%x/0x%x raster=%d mask=%d%d%d%d "
+                "error=inherited:0x%x/query:0x%x\n",
+                experiment.sequence,
+                gl_diag_compose_mode_name(experiment.mode),
+                g_mc[slot].program, experiment.texture, experiment.sampler,
+                raw_base, raw_max, immutable_format, immutable_levels,
+                effective_base, effective_max, texture_min, texture_mag,
+                texture_swizzle[0], texture_swizzle[1], texture_swizzle[2],
+                texture_swizzle[3],
+                sampler_min, sampler_mag, experiment.viewport[0],
+                experiment.viewport[1], experiment.viewport[2],
+                experiment.viewport[3], glIsEnabled(GL_SCISSOR_TEST),
+                scissor[0], scissor[1], scissor[2], scissor[3],
+                glIsEnabled(GL_BLEND), blend_src_rgb, blend_dst_rgb,
+                blend_src_alpha, blend_dst_alpha, blend_equation_rgb,
+                blend_equation_alpha, glIsEnabled(GL_DEPTH_TEST), depth_func,
+                glIsEnabled(GL_STENCIL_TEST), stencil_func, draw_buffer,
+                glIsEnabled(GL_CULL_FACE), cull_mode, front_face,
+                glIsEnabled(GL_RASTERIZER_DISCARD), color_mask[0],
+                color_mask[1], color_mask[2], color_mask[3], inherited_error,
+                query_error);
+    experiment.pre_draw_error = glGetError();
+  }
+  return experiment;
+}
+
+static void gl_diag_finish_compose_experiment(
+    const GLComposeExperiment *experiment) {
+  if (!experiment->matched)
+    return;
+
+  // Program 6's static fullscreen VBO/EBO is corrupt on this driver. Draw the
+  // scene with a gl_VertexID triangle instead; this keeps texture sampling and
+  // sRGB conversion while avoiding all vertex/index-buffer dependencies.
+  const int fallback_drawn = gl_diag_draw_fallback(GL_TRIANGLES, 2);
+
+  if (experiment->log_result) {
+    const GLenum draw_error = glGetError();
+    GLint read_format = 0;
+    GLint read_type = 0;
+    unsigned int nonzero = 0;
+    unsigned int max_value = 0;
+    unsigned long long sum = 0;
+    unsigned int alpha_nonzero = 0;
+    unsigned int alpha_max = 0;
+    unsigned long long alpha_sum = 0;
+    glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_FORMAT, &read_format);
+    glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_TYPE, &read_type);
+    gl_diag_sample_rgb(experiment->viewport, read_format, read_type, &nonzero,
+                       &max_value, &sum, &alpha_nonzero, &alpha_max,
+                       &alpha_sum);
+    const GLenum read_error = glGetError();
+    debugPrintf("GL compose result seq=%u mode=%s tex=%u "
+                "back=0x%x/0x%x/%u/%u/%llu alpha=%u/%u/%llu "
+                "error=pre:0x%x/draw:0x%x/read:0x%x\n",
+                experiment->sequence,
+                gl_diag_compose_mode_name(experiment->mode),
+                experiment->texture, read_format, read_type, nonzero,
+                max_value, sum, alpha_nonzero, alpha_max, alpha_sum,
+                experiment->pre_draw_error, draw_error, read_error);
+  }
+
+  // Diagnostic fallback: copy the known-good scene-color FBO directly to the
+  // window surface after the game's compose shader. This bypasses program 6
+  // while leaving subsequent HUD/UI draws untouched.
+  if (!fallback_drawn && experiment->source_framebuffer &&
+      gl_blit_framebuffer_real &&
+      experiment->viewport[2] > 0 && experiment->viewport[3] > 0) {
+    GLint saved_read_framebuffer = 0;
+    GLint saved_draw_framebuffer = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &saved_read_framebuffer);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &saved_draw_framebuffer);
+    GLenum pre_blit_error = GL_NO_ERROR;
+    if (experiment->log_result)
+      pre_blit_error = glGetError();
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, experiment->source_framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    // Program 6 normally flips texture V before presenting the offscreen
+    // scene. The direct fallback bypasses that shader, so reverse the source
+    // Y rectangle here to preserve the intended screen orientation.
+    gl_blit_framebuffer_real(0, experiment->viewport[3],
+                             experiment->viewport[2], 0, 0, 0,
+                             experiment->viewport[2], experiment->viewport[3],
+                             GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+    if (experiment->log_result) {
+      const GLenum blit_error = glGetError();
+      GLint read_format = 0;
+      GLint read_type = 0;
+      unsigned int nonzero = 0;
+      unsigned int max_value = 0;
+      unsigned long long sum = 0;
+      unsigned int alpha_nonzero = 0;
+      unsigned int alpha_max = 0;
+      unsigned long long alpha_sum = 0;
+      glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_FORMAT, &read_format);
+      glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_TYPE, &read_type);
+      gl_diag_sample_rgb(experiment->viewport, read_format, read_type,
+                         &nonzero, &max_value, &sum, &alpha_nonzero,
+                         &alpha_max, &alpha_sum);
+      const GLenum read_error = glGetError();
+      debugPrintf("GL direct blit result seq=%u source_fbo=%u "
+                  "back=0x%x/0x%x/%u/%u/%llu alpha=%u/%u/%llu "
+                  "error=pre:0x%x/blit:0x%x/read:0x%x\n",
+                  experiment->sequence, experiment->source_framebuffer,
+                  read_format, read_type, nonzero, max_value, sum,
+                  alpha_nonzero, alpha_max, alpha_sum, pre_blit_error,
+                  blit_error, read_error);
+    }
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                      (GLuint)saved_read_framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
+                      (GLuint)saved_draw_framebuffer);
+  }
+
+}
+
+static int gl_diag_gl_type_bytes(GLenum type) {
+  switch (type) {
+    case GL_BYTE:
+    case GL_UNSIGNED_BYTE:
+      return 1;
+    case GL_SHORT:
+    case GL_UNSIGNED_SHORT:
+    case 0x140B: // GL_HALF_FLOAT
+      return 2;
+    case GL_INT:
+    case GL_UNSIGNED_INT:
+    case GL_FLOAT:
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+static void gl_diag_dump_compose_vertex_state(
+    const GLComposeExperiment *experiment, GLenum draw_mode, GLint first,
+    GLsizei count, GLenum index_type, const void *indices) {
+  if (!experiment->matched || !experiment->log_result ||
+      experiment->sequence > 4)
+    return;
+
+  if (!gl_get_uniform_block_index_real)
+    gl_get_uniform_block_index_real = (GLGetUniformBlockIndexProc)
+        eglGetProcAddress("glGetUniformBlockIndex");
+  if (!gl_get_active_uniform_block_iv_real)
+    gl_get_active_uniform_block_iv_real = (GLGetActiveUniformBlockivProc)
+        eglGetProcAddress("glGetActiveUniformBlockiv");
+  if (!gl_get_integeri_v_real)
+    gl_get_integeri_v_real =
+        (GLGetIntegeriVProc)eglGetProcAddress("glGetIntegeri_v");
+  if (!gl_get_integer64i_v_real)
+    gl_get_integer64i_v_real =
+        (GLGetInteger64iVProc)eglGetProcAddress("glGetInteger64i_v");
+  if (!gl_map_buffer_range_real)
+    gl_map_buffer_range_real =
+        (GLMapBufferRangeProc)eglGetProcAddress("glMapBufferRange");
+  if (!gl_unmap_buffer_real)
+    gl_unmap_buffer_real =
+        (GLUnmapBufferProc)eglGetProcAddress("glUnmapBuffer");
+
+  GLint vao = 0;
+  GLint array_buffer = 0;
+  GLint element_buffer = 0;
+  glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+  glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &array_buffer);
+  glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &element_buffer);
+
+  GLuint block_index = 0xffffffffu;
+  GLint block_binding = -1;
+  GLint block_size = 0;
+  GLint block_vertex = 0;
+  GLint uniform_buffer = 0;
+  int64_t uniform_start = 0;
+  int64_t uniform_size = 0;
+  GLfloat uniform_values[12] = {0};
+  GLint uniform_value_count = 0;
+  GLint uniform_buffer_bytes = 0;
+  GLint uniform_buffer_mapped = 0;
+  GLboolean uniform_unmapped = GL_FALSE;
+
+  if (gl_get_uniform_block_index_real &&
+      gl_get_active_uniform_block_iv_real) {
+    block_index = gl_get_uniform_block_index_real(
+        g_mc[mc_current_slot()].program, "vb0");
+    if (block_index != 0xffffffffu) {
+      gl_get_active_uniform_block_iv_real(g_mc[mc_current_slot()].program,
+                                          block_index,
+                                          GL_UNIFORM_BLOCK_BINDING,
+                                          &block_binding);
+      gl_get_active_uniform_block_iv_real(g_mc[mc_current_slot()].program,
+                                          block_index,
+                                          GL_UNIFORM_BLOCK_DATA_SIZE,
+                                          &block_size);
+      gl_get_active_uniform_block_iv_real(
+          g_mc[mc_current_slot()].program, block_index,
+          GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER, &block_vertex);
+    }
+  }
+  if (block_binding >= 0 && gl_get_integeri_v_real) {
+    gl_get_integeri_v_real(GL_UNIFORM_BUFFER_BINDING, (GLuint)block_binding,
+                           &uniform_buffer);
+    if (gl_get_integer64i_v_real) {
+      gl_get_integer64i_v_real(GL_UNIFORM_BUFFER_START,
+                               (GLuint)block_binding, &uniform_start);
+      gl_get_integer64i_v_real(GL_UNIFORM_BUFFER_SIZE,
+                               (GLuint)block_binding, &uniform_size);
+    } else {
+      GLint start32 = 0;
+      GLint size32 = 0;
+      gl_get_integeri_v_real(GL_UNIFORM_BUFFER_START, (GLuint)block_binding,
+                             &start32);
+      gl_get_integeri_v_real(GL_UNIFORM_BUFFER_SIZE, (GLuint)block_binding,
+                             &size32);
+      uniform_start = start32;
+      uniform_size = size32;
+    }
+  }
+
+  GLint saved_uniform_buffer = 0;
+  glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &saved_uniform_buffer);
+  if (uniform_buffer && uniform_start >= 0 && uniform_size > 0 &&
+      gl_map_buffer_range_real && gl_unmap_buffer_real) {
+    glBindBuffer(GL_UNIFORM_BUFFER, (GLuint)uniform_buffer);
+    glGetBufferParameteriv(GL_UNIFORM_BUFFER, GL_BUFFER_SIZE,
+                           &uniform_buffer_bytes);
+    glGetBufferParameteriv(GL_UNIFORM_BUFFER, GL_BUFFER_MAPPED,
+                           &uniform_buffer_mapped);
+    const int64_t available = uniform_buffer_bytes - uniform_start;
+    int64_t read_bytes = uniform_size;
+    if (read_bytes > (int64_t)sizeof(uniform_values))
+      read_bytes = sizeof(uniform_values);
+    if (!uniform_buffer_mapped && available > 0 && read_bytes > available)
+      read_bytes = available;
+    if (!uniform_buffer_mapped && available >= read_bytes &&
+        read_bytes >= (int64_t)sizeof(GLfloat)) {
+      void *mapped = gl_map_buffer_range_real(
+          GL_UNIFORM_BUFFER, (GLintptr)uniform_start,
+          (GLsizeiptr)read_bytes, GL_MAP_READ_BIT);
+      if (mapped) {
+        memcpy(uniform_values, mapped, (size_t)read_bytes);
+        uniform_value_count = (GLint)(read_bytes / sizeof(GLfloat));
+        uniform_unmapped = gl_unmap_buffer_real(GL_UNIFORM_BUFFER);
+      }
+    }
+  }
+  glBindBuffer(GL_UNIFORM_BUFFER, (GLuint)saved_uniform_buffer);
+
+  GLint attrib[2][8] = {{0}};
+  void *attrib_pointer[2] = {0};
+  GLfloat attrib_current[2][4] = {{0}};
+  for (GLuint index = 0; index < 2; index++) {
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_ENABLED,
+                        &attrib[index][0]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_SIZE,
+                        &attrib[index][1]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_TYPE,
+                        &attrib[index][2]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_STRIDE,
+                        &attrib[index][3]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED,
+                        &attrib[index][4]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_INTEGER,
+                        &attrib[index][5]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_DIVISOR,
+                        &attrib[index][6]);
+    glGetVertexAttribiv(index, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING,
+                        &attrib[index][7]);
+    glGetVertexAttribPointerv(index, GL_VERTEX_ATTRIB_ARRAY_POINTER,
+                              &attrib_pointer[index]);
+    glGetVertexAttribfv(index, GL_CURRENT_VERTEX_ATTRIB,
+                        attrib_current[index]);
+  }
+
+  GLuint vertex_indices[3] = {0};
+  GLint vertex_index_count = count < 3 ? count : 3;
+  GLint element_buffer_bytes = 0;
+  GLint element_buffer_mapped = 0;
+  GLboolean element_unmapped = GL_FALSE;
+  GLushort element_head[16] = {0};
+  GLboolean element_head_unmapped = GL_FALSE;
+  if (vertex_index_count < 0)
+    vertex_index_count = 0;
+  if (!index_type) {
+    for (GLint i = 0; i < vertex_index_count; i++)
+      vertex_indices[i] = (GLuint)(first + i);
+  } else {
+    const int index_bytes = gl_diag_gl_type_bytes(index_type);
+    vertex_index_count = 0;
+    if (element_buffer && index_bytes > 0 && count > 0 &&
+        gl_map_buffer_range_real && gl_unmap_buffer_real) {
+      glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_SIZE,
+                             &element_buffer_bytes);
+      glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER, GL_BUFFER_MAPPED,
+                             &element_buffer_mapped);
+      const uintptr_t index_offset = (uintptr_t)indices;
+      const GLint wanted = count < 3 ? count : 3;
+      const uint64_t read_bytes = (uint64_t)wanted * (uint64_t)index_bytes;
+      if (!element_buffer_mapped &&
+          index_offset + read_bytes <= (uint64_t)element_buffer_bytes) {
+        void *mapped = gl_map_buffer_range_real(
+            GL_ELEMENT_ARRAY_BUFFER, (GLintptr)index_offset,
+            (GLsizeiptr)read_bytes, GL_MAP_READ_BIT);
+        if (mapped) {
+          for (GLint i = 0; i < wanted; i++) {
+            if (index_type == GL_UNSIGNED_BYTE)
+              vertex_indices[i] = ((const GLubyte *)mapped)[i];
+            else if (index_type == GL_UNSIGNED_SHORT)
+              vertex_indices[i] = ((const GLushort *)mapped)[i];
+            else if (index_type == GL_UNSIGNED_INT)
+              vertex_indices[i] = ((const GLuint *)mapped)[i];
+          }
+          vertex_index_count = wanted;
+          element_unmapped =
+              gl_unmap_buffer_real(GL_ELEMENT_ARRAY_BUFFER);
+        }
+      }
+    }
+  }
+  if (element_buffer && !element_buffer_mapped &&
+      element_buffer_bytes >= (GLint)sizeof(element_head) &&
+      gl_map_buffer_range_real && gl_unmap_buffer_real) {
+    void *mapped = gl_map_buffer_range_real(
+        GL_ELEMENT_ARRAY_BUFFER, 0, sizeof(element_head), GL_MAP_READ_BIT);
+    if (mapped) {
+      memcpy(element_head, mapped, sizeof(element_head));
+      element_head_unmapped =
+          gl_unmap_buffer_real(GL_ELEMENT_ARRAY_BUFFER);
+    }
+  }
+
+  GLfloat attribute_values[2][3][4] = {{{0}}};
+  GLfloat attribute_base_values[2][3][4] = {{{0}}};
+  uint32_t attribute_raw[2][3][4] = {{{0}}};
+  GLboolean attribute_unmapped[2] = {GL_FALSE, GL_FALSE};
+  GLboolean attribute_base_unmapped[2] = {GL_FALSE, GL_FALSE};
+  GLint attribute_buffer_bytes[2] = {0, 0};
+  for (GLuint attribute = 0; attribute < 2; attribute++) {
+    const GLint enabled = attrib[attribute][0];
+    const GLint components = attrib[attribute][1];
+    const GLenum type = (GLenum)attrib[attribute][2];
+    GLint stride = attrib[attribute][3];
+    const GLuint buffer = (GLuint)attrib[attribute][7];
+    const int type_bytes = gl_diag_gl_type_bytes(type);
+    const int element_bytes = components * type_bytes;
+    if (!enabled || !buffer || type_bytes <= 0 || components < 1 ||
+        components > 4 || vertex_index_count < 1 ||
+        !gl_map_buffer_range_real || !gl_unmap_buffer_real)
+      continue;
+    if (!stride)
+      stride = element_bytes;
+    GLuint min_index = vertex_indices[0];
+    GLuint max_index = vertex_indices[0];
+    for (GLint i = 1; i < vertex_index_count; i++) {
+      if (vertex_indices[i] < min_index)
+        min_index = vertex_indices[i];
+      if (vertex_indices[i] > max_index)
+        max_index = vertex_indices[i];
+    }
+    const uint64_t pointer_offset = (uintptr_t)attrib_pointer[attribute];
+    const uint64_t map_start = pointer_offset + (uint64_t)min_index * stride;
+    const uint64_t map_end = pointer_offset + (uint64_t)max_index * stride +
+                             (uint64_t)element_bytes;
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    GLint buffer_bytes = 0;
+    GLint buffer_mapped = 0;
+    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &buffer_bytes);
+    attribute_buffer_bytes[attribute] = buffer_bytes;
+    glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_MAPPED, &buffer_mapped);
+    if (!buffer_mapped && map_end > map_start &&
+        map_end <= (uint64_t)buffer_bytes) {
+      const uint64_t map_bytes = map_end - map_start;
+      const unsigned char *mapped = (const unsigned char *)
+          gl_map_buffer_range_real(GL_ARRAY_BUFFER, (GLintptr)map_start,
+                                   (GLsizeiptr)map_bytes, GL_MAP_READ_BIT);
+      if (mapped) {
+        for (GLint vertex = 0; vertex < vertex_index_count; vertex++) {
+          const uint64_t relative =
+              (uint64_t)(vertex_indices[vertex] - min_index) * stride;
+          const unsigned char *source = mapped + relative;
+          const int copy_bytes = element_bytes < 16 ? element_bytes : 16;
+          memcpy(attribute_raw[attribute][vertex], source,
+                 (size_t)copy_bytes);
+          if (type == GL_FLOAT)
+            memcpy(attribute_values[attribute][vertex], source,
+                   (size_t)element_bytes);
+        }
+        attribute_unmapped[attribute] =
+            gl_unmap_buffer_real(GL_ARRAY_BUFFER);
+      }
+    }
+    const uint64_t base_start = pointer_offset;
+    const uint64_t base_end = pointer_offset + (uint64_t)2 * stride +
+                              (uint64_t)element_bytes;
+    if (!buffer_mapped && base_end > base_start &&
+        base_end <= (uint64_t)buffer_bytes) {
+      const uint64_t base_bytes = base_end - base_start;
+      const unsigned char *mapped = (const unsigned char *)
+          gl_map_buffer_range_real(GL_ARRAY_BUFFER, (GLintptr)base_start,
+                                   (GLsizeiptr)base_bytes, GL_MAP_READ_BIT);
+      if (mapped) {
+        if (type == GL_FLOAT) {
+          for (GLint vertex = 0; vertex < 3; vertex++)
+            memcpy(attribute_base_values[attribute][vertex],
+                   mapped + (uint64_t)vertex * stride,
+                   (size_t)element_bytes);
+        }
+        attribute_base_unmapped[attribute] =
+            gl_unmap_buffer_real(GL_ARRAY_BUFFER);
+      }
+    }
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, (GLuint)array_buffer);
+
+  const GLenum diag_error = glGetError();
+  debugPrintf("GL compose vertex seq=%u draw=0x%x first=%d count=%d "
+              "index=0x%x/%p vao=%d array=%d element=%d/%d/%d/%d "
+              "indices=%u,%u,%u error=0x%x\n",
+              experiment->sequence, draw_mode, first, count, index_type,
+              indices, vao, array_buffer, element_buffer,
+              element_buffer_bytes, element_buffer_mapped,
+              element_unmapped, vertex_indices[0], vertex_indices[1],
+              vertex_indices[2], diag_error);
+  debugPrintf("GL compose element head seq=%u unmapped=%d "
+              "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+              experiment->sequence, element_head_unmapped,
+              element_head[0], element_head[1], element_head[2],
+              element_head[3], element_head[4], element_head[5],
+              element_head[6], element_head[7], element_head[8],
+              element_head[9], element_head[10], element_head[11],
+              element_head[12], element_head[13], element_head[14],
+              element_head[15]);
+  debugPrintf("GL compose vb0 seq=%u block=%u binding=%d bytes=%d "
+              "vertex=%d buffer=%d range=%lld+%lld storage=%d mapped=%d "
+              "unmapped=%d values=%d "
+              "%g,%g,%g,%g / %g,%g,%g,%g / %g,%g,%g,%g\n",
+              experiment->sequence, block_index, block_binding, block_size,
+              block_vertex, uniform_buffer, (long long)uniform_start,
+              (long long)uniform_size, uniform_buffer_bytes,
+              uniform_buffer_mapped, uniform_unmapped, uniform_value_count,
+              uniform_values[0], uniform_values[1], uniform_values[2],
+              uniform_values[3], uniform_values[4], uniform_values[5],
+              uniform_values[6], uniform_values[7], uniform_values[8],
+              uniform_values[9], uniform_values[10], uniform_values[11]);
+  for (GLuint attribute = 0; attribute < 2; attribute++) {
+    debugPrintf("GL compose attrib%u seq=%u enabled=%d size=%d type=0x%x "
+                "stride=%d normalized=%d integer=%d divisor=%d buffer=%d "
+                "pointer=%p storage=%d current=%g,%g,%g,%g unmapped=%d "
+                "v0=%g,%g,%g,%g v1=%g,%g,%g,%g v2=%g,%g,%g,%g "
+                "base=%d/%g,%g,%g,%g / %g,%g,%g,%g / %g,%g,%g,%g "
+                "raw0=%08x,%08x,%08x,%08x\n",
+                attribute, experiment->sequence, attrib[attribute][0],
+                attrib[attribute][1], attrib[attribute][2],
+                attrib[attribute][3], attrib[attribute][4],
+                attrib[attribute][5], attrib[attribute][6],
+                attrib[attribute][7], attrib_pointer[attribute],
+                attribute_buffer_bytes[attribute],
+                attrib_current[attribute][0], attrib_current[attribute][1],
+                attrib_current[attribute][2], attrib_current[attribute][3],
+                attribute_unmapped[attribute],
+                attribute_values[attribute][0][0],
+                attribute_values[attribute][0][1],
+                attribute_values[attribute][0][2],
+                attribute_values[attribute][0][3],
+                attribute_values[attribute][1][0],
+                attribute_values[attribute][1][1],
+                attribute_values[attribute][1][2],
+                attribute_values[attribute][1][3],
+                attribute_values[attribute][2][0],
+                attribute_values[attribute][2][1],
+                attribute_values[attribute][2][2],
+                attribute_values[attribute][2][3],
+                attribute_base_unmapped[attribute],
+                attribute_base_values[attribute][0][0],
+                attribute_base_values[attribute][0][1],
+                attribute_base_values[attribute][0][2],
+                attribute_base_values[attribute][0][3],
+                attribute_base_values[attribute][1][0],
+                attribute_base_values[attribute][1][1],
+                attribute_base_values[attribute][1][2],
+                attribute_base_values[attribute][1][3],
+                attribute_base_values[attribute][2][0],
+                attribute_base_values[attribute][2][1],
+                attribute_base_values[attribute][2][2],
+                attribute_base_values[attribute][2][3],
+                attribute_raw[attribute][0][0],
+                attribute_raw[attribute][0][1],
+                attribute_raw[attribute][0][2],
+                attribute_raw[attribute][0][3]);
+  }
+}
+
+#define GL_FALLBACK_PROGRAM_SLOTS 4
+typedef struct {
+  EGLContext context;
+  GLuint program;
+  GLint scene_location;
+  GLint curve_location;
+  int attempted;
+} GLFallbackProgram;
+
+static GLFallbackProgram gl_fallback_programs[GL_FALLBACK_PROGRAM_SLOTS];
+
+static GLuint gl_diag_compile_fallback_shader(GLenum type,
+                                               const char *source) {
+  const GLuint shader = glCreateShader(type);
+  if (!shader)
+    return 0;
+  glShaderSource(shader, 1, &source, NULL);
+  glCompileShader(shader);
+  GLint compiled = GL_FALSE;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+  if (compiled == GL_TRUE)
+    return shader;
+  char log[2048] = {0};
+  GLsizei length = 0;
+  glGetShaderInfoLog(shader, sizeof(log) - 1, &length, log);
+  debugPrintf("GL fallback shader compile failed type=0x%x len=%d: %s\n",
+              type, length, log[0] ? log : "(empty)");
+  glDeleteShader(shader);
+  return 0;
+}
+
+static GLFallbackProgram *gl_diag_get_fallback_program(void) {
+  const EGLContext context = eglGetCurrentContext();
+  GLFallbackProgram *entry = NULL;
+  for (int i = 0; i < GL_FALLBACK_PROGRAM_SLOTS; i++) {
+    if (gl_fallback_programs[i].context == context)
+      return &gl_fallback_programs[i];
+    if (!entry && gl_fallback_programs[i].context == EGL_NO_CONTEXT)
+      entry = &gl_fallback_programs[i];
+  }
+  if (!entry)
+    return NULL;
+  entry->context = context;
+  if (entry->attempted)
+    return entry;
+  entry->attempted = 1;
+
+  static const char vertex_source[] =
+      "#version 300 es\n"
+      "precision highp float;\n"
+      "out highp vec2 fallback_uv;\n"
+      "void main() {\n"
+      "  vec2 p;\n"
+      "  if (gl_VertexID == 0) p = vec2(-1.0, -1.0);\n"
+      "  else if (gl_VertexID == 1) p = vec2(3.0, -1.0);\n"
+      "  else p = vec2(-1.0, 3.0);\n"
+      "  gl_Position = vec4(p, 0.0, 1.0);\n"
+      "  fallback_uv = vec2(p.x * 0.5 + 0.5, "
+      "1.0 - (p.y * 0.5 + 0.5));\n"
+      "}\n";
+  static const char fragment_source[] =
+      "#version 300 es\n"
+      "precision highp float;\n"
+      "uniform sampler2D fallback_scene;\n"
+      "uniform int fallback_curve;\n"
+      "in highp vec2 fallback_uv;\n"
+      "layout(location = 0) out vec4 fallback_color;\n"
+      "void main() {\n"
+      "  vec3 c = texture(fallback_scene, fallback_uv).rgb;\n"
+      "  if (fallback_curve == 1) c = sqrt(max(c, vec3(0.0)));\n"
+      "  else if (fallback_curve == 2) "
+      "c = pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));\n"
+      "  fallback_color = vec4(c, 1.0);\n"
+      "}\n";
+
+  const GLuint vertex =
+      gl_diag_compile_fallback_shader(GL_VERTEX_SHADER, vertex_source);
+  const GLuint fragment =
+      gl_diag_compile_fallback_shader(GL_FRAGMENT_SHADER, fragment_source);
+  if (!vertex || !fragment) {
+    if (vertex)
+      glDeleteShader(vertex);
+    if (fragment)
+      glDeleteShader(fragment);
+    return entry;
+  }
+  const GLuint program = glCreateProgram();
+  if (program) {
+    glAttachShader(program, vertex);
+    glAttachShader(program, fragment);
+    glLinkProgram(program);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked == GL_TRUE) {
+      entry->program = program;
+      entry->scene_location =
+          glGetUniformLocation(program, "fallback_scene");
+      entry->curve_location =
+          glGetUniformLocation(program, "fallback_curve");
+      debugPrintf("GL fallback program ready context=%p program=%u "
+                  "scene=%d curve=%d\n",
+                  context, program, entry->scene_location,
+                  entry->curve_location);
+    } else {
+      char log[2048] = {0};
+      GLsizei length = 0;
+      glGetProgramInfoLog(program, sizeof(log) - 1, &length, log);
+      debugPrintf("GL fallback program link failed len=%d: %s\n", length,
+                  log[0] ? log : "(empty)");
+      glDeleteProgram(program);
+    }
+  }
+  glDeleteShader(vertex);
+  glDeleteShader(fragment);
+  return entry;
+}
+
+static int gl_diag_draw_fallback(GLenum mode, unsigned int curve) {
+  GLFallbackProgram *entry = gl_diag_get_fallback_program();
+  if (!entry || !entry->program)
+    return 0;
+  GLint saved_program = 0;
+  glGetIntegerv(GL_CURRENT_PROGRAM, &saved_program);
+  glUseProgram(entry->program);
+  if (entry->scene_location >= 0)
+    glUniform1i(entry->scene_location, 0);
+  if (entry->curve_location >= 0)
+    glUniform1i(entry->curve_location, (GLint)curve);
+  glDrawArrays(mode, 0, 3);
+  glUseProgram((GLuint)saved_program);
+  return 1;
+}
+
 static void gl_diag_trace_default_draw(const char *kind, GLsizei count,
                                        GLsizei instances) {
   const int slot = mc_current_slot();
@@ -396,7 +1386,11 @@ static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
   if (count > 0)
     __atomic_fetch_add(&gl_diag_vertices, (uint64_t)count, __ATOMIC_RELAXED);
   gl_diag_trace_default_draw("arrays", count, 1);
+  const GLComposeExperiment experiment =
+      gl_diag_prepare_compose_experiment();
+  gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
   glDrawArrays(mode, first, count);
+  gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
@@ -414,7 +1408,12 @@ static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
                        (uint64_t)count, __ATOMIC_RELAXED);
   }
   gl_diag_trace_default_draw("elements", count, 1);
+  const GLComposeExperiment experiment =
+      gl_diag_prepare_compose_experiment();
+  gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
+                                    indices);
   glDrawElements(mode, count, type, indices);
+  gl_diag_finish_compose_experiment(&experiment);
 }
 
 #ifndef GL_DRAW_FRAMEBUFFER
@@ -424,10 +1423,16 @@ static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
 static void gl_diag_sample_rgb(const GLint viewport[4], GLint read_format,
                                GLint read_type, unsigned int *nonzero,
                                unsigned int *max_value,
-                               unsigned long long *sum) {
+                               unsigned long long *sum,
+                               unsigned int *alpha_nonzero,
+                               unsigned int *alpha_max,
+                               unsigned long long *alpha_sum) {
   *nonzero = 0;
   *max_value = 0;
   *sum = 0;
+  *alpha_nonzero = 0;
+  *alpha_max = 0;
+  *alpha_sum = 0;
   if (viewport[2] < 16 || viewport[3] < 16 ||
       (read_format != GL_RGBA && read_format != 0x80E1))
     return;
@@ -437,7 +1442,7 @@ static void gl_diag_sample_rgb(const GLint viewport[4], GLint read_format,
   if (read_type == GL_UNSIGNED_BYTE) {
     unsigned char pixels[16 * 16 * 4] = {0};
     glReadPixels(x, y, 16, 16, (GLenum)read_format, (GLenum)read_type, pixels);
-    for (unsigned int pixel = 0; pixel < 16 * 16; pixel++)
+    for (unsigned int pixel = 0; pixel < 16 * 16; pixel++) {
       for (unsigned int channel = 0; channel < 3; channel++) {
         const unsigned int value = pixels[pixel * 4 + channel];
         *sum += value;
@@ -446,10 +1451,17 @@ static void gl_diag_sample_rgb(const GLint viewport[4], GLint read_format,
         if (value > *max_value)
           *max_value = value;
       }
+      const unsigned int alpha = pixels[pixel * 4 + 3];
+      *alpha_sum += alpha;
+      if (alpha)
+        (*alpha_nonzero)++;
+      if (alpha > *alpha_max)
+        *alpha_max = alpha;
+    }
   } else if (read_type == 0x140B) { // GL_HALF_FLOAT
     uint16_t pixels[16 * 16 * 4] = {0};
     glReadPixels(x, y, 16, 16, (GLenum)read_format, (GLenum)read_type, pixels);
-    for (unsigned int pixel = 0; pixel < 16 * 16; pixel++)
+    for (unsigned int pixel = 0; pixel < 16 * 16; pixel++) {
       for (unsigned int channel = 0; channel < 3; channel++) {
         const unsigned int value = pixels[pixel * 4 + channel];
         *sum += value;
@@ -458,10 +1470,20 @@ static void gl_diag_sample_rgb(const GLint viewport[4], GLint read_format,
         if (value > *max_value)
           *max_value = value;
       }
+      const unsigned int alpha = pixels[pixel * 4 + 3];
+      *alpha_sum += alpha;
+      if (alpha)
+        (*alpha_nonzero)++;
+      if (alpha > *alpha_max)
+        *alpha_max = alpha;
+    }
   }
 }
 
-static unsigned int gl_diag_sample_offscreen(GLuint framebuffer) {
+static unsigned int gl_diag_sample_offscreen(GLuint framebuffer,
+                                             GLuint *color_texture) {
+  if (color_texture)
+    *color_texture = 0;
   static volatile uint32_t transition_count;
   const uint32_t transition =
       __atomic_add_fetch(&transition_count, 1, __ATOMIC_RELAXED);
@@ -484,6 +1506,8 @@ static unsigned int gl_diag_sample_offscreen(GLuint framebuffer) {
   glGetFramebufferAttachmentParameteriv(
       GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
       GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &color_name);
+  if (color_texture && color_type == GL_TEXTURE && color_name > 0)
+    *color_texture = (GLuint)color_name;
   glGetFramebufferAttachmentParameteriv(
       GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
       GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &depth_type);
@@ -495,16 +1519,20 @@ static unsigned int gl_diag_sample_offscreen(GLuint framebuffer) {
   unsigned int nonzero = 0;
   unsigned int max_value = 0;
   unsigned long long sum = 0;
+  unsigned int alpha_nonzero = 0;
+  unsigned int alpha_max = 0;
+  unsigned long long alpha_sum = 0;
   if (status == GL_FRAMEBUFFER_COMPLETE && color_type != GL_NONE)
     gl_diag_sample_rgb(viewport, read_format, read_type, &nonzero, &max_value,
-                       &sum);
+                       &sum, &alpha_nonzero, &alpha_max, &alpha_sum);
 
   debugPrintf("GL offscreen transition=%u fbo=%u status=0x%x "
               "vp=%d,%d,%d,%d color=0x%x/%d depth=0x%x/%d "
-              "read=0x%x/0x%x sample=%u/%u/%llu\n",
+              "read=0x%x/0x%x sample=%u/%u/%llu alpha=%u/%u/%llu\n",
               transition, framebuffer, status, viewport[0], viewport[1],
               viewport[2], viewport[3], color_type, color_name, depth_type,
-              depth_name, read_format, read_type, nonzero, max_value, sum);
+              depth_name, read_format, read_type, nonzero, max_value, sum,
+              alpha_nonzero, alpha_max, alpha_sum);
   return nonzero;
 }
 
@@ -512,8 +1540,20 @@ static void glBindFramebuffer_diag(GLenum target, GLuint framebuffer) {
   const int slot = mc_current_slot();
   if ((target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) &&
       slot >= 0 && g_mc[slot].framebuffer != 0 && framebuffer == 0) {
-    const unsigned int sample =
-        gl_diag_sample_offscreen(g_mc[slot].framebuffer);
+    const GLuint previous_framebuffer = g_mc[slot].framebuffer;
+    GLuint color_texture = 0;
+    const unsigned int sample = gl_diag_sample_offscreen(
+        previous_framebuffer, &color_texture);
+    if (sample && color_texture) {
+      if (g_mc[slot].scene_framebuffer != previous_framebuffer ||
+          g_mc[slot].scene_texture != color_texture)
+        g_mc[slot].scene_compose_count = 0;
+      g_mc[slot].scene_framebuffer = previous_framebuffer;
+      g_mc[slot].scene_texture = color_texture;
+    }
+    if (g_mc[slot].scene_framebuffer == previous_framebuffer &&
+        g_mc[slot].scene_texture)
+      g_mc[slot].scene_compose_pending = 1;
     if (sample)
       g_mc[slot].trace_default_draws = 12;
   }
@@ -560,9 +1600,6 @@ static GLenum glCheckFramebufferStatus_diag(GLenum target) {
   return status;
 }
 
-typedef void (*GLBlitFramebufferProc)(GLint, GLint, GLint, GLint, GLint, GLint,
-                                      GLint, GLint, GLbitfield, GLenum);
-static GLBlitFramebufferProc gl_blit_framebuffer_real;
 typedef void (*GLDrawElementsInstancedProc)(GLenum, GLsizei, GLenum,
                                             const void *, GLsizei);
 typedef void (*GLDrawArraysInstancedProc)(GLenum, GLint, GLsizei, GLsizei);
@@ -573,7 +1610,6 @@ typedef void (*GLClearBufferfiProc)(GLenum, GLint, GLfloat, GLint);
 typedef void (*GLDiscardFramebufferEXTProc)(GLenum, GLsizei, const GLenum *);
 typedef void (*GLTexStorage2DProc)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
 typedef void (*GLBindSamplerProc)(GLuint, GLuint);
-typedef void (*GLSamplerParameteriProc)(GLuint, GLenum, GLint);
 static GLDrawElementsInstancedProc gl_draw_elements_instanced_real;
 static GLDrawArraysInstancedProc gl_draw_arrays_instanced_real;
 static GLClearBufferfvProc gl_clear_buffer_fv_real;
@@ -583,7 +1619,6 @@ static GLClearBufferfiProc gl_clear_buffer_fi_real;
 static GLDiscardFramebufferEXTProc gl_discard_framebuffer_real;
 static GLTexStorage2DProc gl_tex_storage_2d_real;
 static GLBindSamplerProc gl_bind_sampler_real;
-static GLSamplerParameteriProc gl_sampler_parameteri_real;
 
 static void glBlitFramebuffer_diag(GLint src_x0, GLint src_y0, GLint src_x1,
                                    GLint src_y1, GLint dst_x0, GLint dst_y0,
@@ -610,7 +1645,12 @@ static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
                                : &gl_diag_indices_default,
                      total, __ATOMIC_RELAXED);
   gl_diag_trace_default_draw("elements-instanced", count, instances);
+  const GLComposeExperiment experiment =
+      gl_diag_prepare_compose_experiment();
+  gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
+                                    indices);
   gl_draw_elements_instanced_real(mode, count, type, indices, instances);
+  gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
@@ -625,7 +1665,11 @@ static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
                                : &gl_diag_draw_default,
                      1, __ATOMIC_RELAXED);
   gl_diag_trace_default_draw("arrays-instanced", count, instances);
+  const GLComposeExperiment experiment =
+      gl_diag_prepare_compose_experiment();
+  gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
   gl_draw_arrays_instanced_real(mode, first, count, instances);
+  gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void gl_diag_dynamic_clear(void) {
@@ -683,7 +1727,15 @@ static void glTexStorage2D_compat(GLenum target, GLsizei levels,
                                   GLenum internal_format, GLsizei width,
                                   GLsizei height) {
   GLenum actual_format = internal_format;
-  if (internal_format == 0x881A) { // GL_RGBA16F
+  // nouveau/Tegra Mesa 20.1 GLES can render to RGBA16F (EXT_color_buffer_half_
+  // float) but cannot LINEAR-sample it (no OES_texture_half_float_linear), so
+  // UE4's mobile tonemap pass that samples the scene-color HDR target returns
+  // black. Downgrade 4-channel float color targets to RGBA8: still renderable,
+  // and filterable, so the resolve produces a visible image. HDR highlights
+  // clip, which is an acceptable trade to get the 3D scene on screen.
+  if (internal_format == 0x881A ||   // GL_RGBA16F
+      internal_format == 0x8814) {   // GL_RGBA32F
+    actual_format = 0x8058;          // GL_RGBA8
     static volatile uint32_t conversion_count;
     const uint32_t conversion =
         __atomic_add_fetch(&conversion_count, 1, __ATOMIC_RELAXED);
@@ -863,14 +1915,19 @@ static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
     unsigned int back_nonzero = 0;
     unsigned int back_max = 0;
     unsigned long long back_sum = 0;
+    unsigned int back_alpha_nonzero = 0;
+    unsigned int back_alpha_max = 0;
+    unsigned long long back_alpha_sum = 0;
     glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_FORMAT, &read_format);
     glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_TYPE, &read_type);
     gl_diag_sample_rgb(viewport, read_format, read_type, &back_nonzero,
-                       &back_max, &back_sum);
+                       &back_max, &back_sum, &back_alpha_nonzero,
+                       &back_alpha_max, &back_alpha_sum);
     debugPrintf("GL frame=%u draw_arrays=%llu/%llu draw_elements=%llu/%llu "
                 "target=%llu/%llu idx=%llu/%llu bind=%llu/%llu "
                 "clear=%llu/%llu blit=%llu fbo=%d/0x%x vp=%d,%d,%d,%d "
                 "program=%d mask=%d%d%d%d depth=%d back=0x%x/0x%x/%u/%u/%llu "
+                "alpha=%u/%u/%llu "
                 "shader=%u/%u link=%u/%u tls=%p surface=%p\n",
                 frame, (unsigned long long)arrays,
                 (unsigned long long)vertices, (unsigned long long)elements,
@@ -886,7 +1943,7 @@ static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
                 viewport[0], viewport[1], viewport[2], viewport[3], program,
                 color_mask[0], color_mask[1], color_mask[2], color_mask[3],
                 depth_mask, read_format, read_type, back_nonzero, back_max,
-                back_sum,
+                back_sum, back_alpha_nonzero, back_alpha_max, back_alpha_sum,
                 __atomic_load_n(&gl_diag_compile_ok, __ATOMIC_RELAXED),
                 __atomic_load_n(&gl_diag_compile_fail, __ATOMIC_RELAXED),
                 __atomic_load_n(&gl_diag_link_ok, __ATOMIC_RELAXED),
@@ -1238,6 +2295,22 @@ static void gl_load_drain(void) {
 static void glTexImage2D_w(GLenum t, GLint l, GLint i, GLsizei w, GLsizei h,
                            GLint b, GLenum f, GLenum y, const void *p) {
   gl_load_drain();
+  // Same half-float-linear limitation as glTexStorage2D_compat: an RGBA
+  // color render target allocated as half-float can't be LINEAR-sampled, so
+  // the mobile tonemap resolves to black. Downgrade to 8-bit unorm, but ONLY
+  // for storage allocations (p == NULL) so real half-float pixel uploads are
+  // never reinterpreted. RGB path handled too since UE4 may omit alpha.
+  if (p == NULL && (y == 0x140B || y == 0x8D61)) { // GL_HALF_FLOAT / _OES
+    if (i == 0x881A || i == 0x8814 || i == (GLint)0x1908) { // RGBA16F/32F/RGBA
+      i = 0x8058;       // GL_RGBA8
+      f = 0x1908;       // GL_RGBA
+      y = 0x1401;       // GL_UNSIGNED_BYTE
+    } else if (i == 0x881B || i == 0x8815 || i == (GLint)0x1907) { // RGB16F/32F/RGB
+      i = 0x8051;       // GL_RGB8
+      f = 0x1907;       // GL_RGB
+      y = 0x1401;       // GL_UNSIGNED_BYTE
+    }
+  }
   glTexImage2D(t, l, i, w, h, b, f, y, p);
 }
 static void glCompressedTexImage2D_w(GLenum t, GLint l, GLenum i, GLsizei w,

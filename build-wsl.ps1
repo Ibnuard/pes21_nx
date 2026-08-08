@@ -22,7 +22,14 @@ build_dir=$(mktemp -d /tmp/pes21_nx.XXXXXX)
 trap 'rm -rf "$build_dir"' EXIT
 
 tar -C "$PES21_NX_PROJECT_ROOT" \
-  --exclude=dist --exclude=build \
+  --exclude=.git --exclude=dist --exclude=build \
+  --exclude=.codex-dex --exclude=.codex-jadx --exclude=.codex-pak \
+  --exclude=clean-package-removed --exclude=logs \
+  --exclude=offline-responses --exclude=runtime-unused-cpk \
+  --exclude=assets --exclude=Download --exclude=PesMobile \
+  --exclude=SaveData --exclude=UE4Game \
+  --exclude='*.so' --exclude='*.obb' --exclude='*.pak' \
+  --exclude='*.cpk' --exclude='*.cfg' --exclude='debug*.log' \
   --exclude=pes21_nx.nro --exclude=pes21_nx.elf --exclude=pes21_nx.nacp \
   -cf - . | tar -C "$build_dir" -xf -
 cd "$build_dir"

@@ -39,16 +39,22 @@ used as the compatibility target during development.
 
 ## Current status
 
-Wrapper version `0.1.65` boots through the splash screen and menus on the
+Wrapper version `0.1.77` boots through the splash screen and menus on the
 tested v5.3.0 game revision. Touch input, offline HTTP bootstrap,
-login/registration flow, PAK/CPK mounting, and the render loop are operational.
-Gameplay can be reached, but the 3D scene is still black.
+login/registration flow, PAK/CPK mounting, the render loop, UI/HUD, and the 3D
+gameplay scene are operational in the tested Ryujinx setup.
 
-Diagnostics show valid geometry and RGB output in offscreen FBO 8 / texture
-85, and the relevant shaders compile and link successfully. The remaining
-rendering defect is believed to be in the final offscreen-to-backbuffer
-compose/sampling pass. See [DEVELOPMENT.md](DEVELOPMENT.md) for the detailed
-progress log.
+The former gameplay black screen is fixed by a GLES 3 fullscreen fallback
+compositor. The original mobile final pass produces no covered fragments on
+the tested Switch Mesa path; the fallback samples the completed offscreen scene
+texture, performs the linear-to-sRGB conversion, and corrects the vertical
+orientation before presentation.
+
+Switch HID polling and a custom bridge into the game's native pad state are
+present, but controller gameplay is still experimental. Input is visible in
+diagnostic logs, while the PES Mobile match-action layer does not yet respond
+reliably. Controller support is therefore **not** listed as working yet. See
+[DEVELOPMENT.md](DEVELOPMENT.md) for the evidence and current next step.
 
 ## Build
 
@@ -79,7 +85,7 @@ source-only release process. Before running it:
 3. Update the matching wrapper section and current progress in
    [DEVELOPMENT.md](DEVELOPMENT.md).
 4. Push the changes, open **Actions > Build and release NRO > Run workflow**,
-   and enter a tag such as `v0.1.65`.
+   and enter a tag such as `v0.1.77`.
 
 The workflow validates that the tag matches `APP_VERSION`, builds in the
 official `devkitpro/devkita64` container, uploads the NRO and SHA-256 checksum
