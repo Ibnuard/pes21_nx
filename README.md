@@ -69,6 +69,27 @@ On a configured Linux/devkitPro environment, run `make`. The resulting NRO,
 ELF, NACP, map, and build directory are intentionally ignored and rejected by
 the public-tree audit; publish source from this tree, not local build output.
 
+## Automated releases
+
+The `Build and release NRO` GitHub Actions workflow provides a manual,
+source-only release process. Before running it:
+
+1. Update `APP_VERSION` in `Makefile`.
+2. Add the matching version section to [CHANGELOG.md](CHANGELOG.md).
+3. Update the matching wrapper section and current progress in
+   [DEVELOPMENT.md](DEVELOPMENT.md).
+4. Push the changes, open **Actions > Build and release NRO > Run workflow**,
+   and enter a tag such as `v0.1.65`.
+
+The workflow validates that the tag matches `APP_VERSION`, builds in the
+official `devkitpro/devkita64` container, uploads the NRO and SHA-256 checksum
+as a CI artifact, creates the Git tag and GitHub Release, and generates release
+notes from the changelog and development-progress documents.
+
+The repository must allow GitHub Actions read/write workflow permissions so
+the provided `GITHUB_TOKEN` can create tags and releases. Release assets contain
+only the wrapper NRO and checksum; users still supply all game files themselves.
+
 ## Runtime layout
 
 The following is documentation only. None of these proprietary runtime files

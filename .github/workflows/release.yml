@@ -1,0 +1,130 @@
+name: Build and release NRO
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag matching APP_VERSION, for example v0.1.65
+        required: true
+        default: v0.1.65
+        type: string
+      prerelease:
+        description: Mark the GitHub release as a prerelease
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pesnx-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify source-only public tree
+        shell: pwsh
+        run: ./scripts/check-public-tree.ps1
+
+  build:
+    needs: audit
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must look like v0.1.65."
+            exit 1
+          fi
+          makefile_version="$(awk -F ':=' '/^APP_VERSION/ { value=$2; gsub(/[[:space:]]/, "", value); print value }' Makefile)"
+          if [[ "$RELEASE_VERSION" != "v$makefile_version" ]]; then
+            echo "Input $RELEASE_VERSION does not match Makefile APP_VERSION $makefile_version."
+            exit 1
+          fi
+          if ! grep -Eq "^## \[?${makefile_version//./\\.}\]?([[:space:]]|$)" CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $makefile_version."
+            exit 1
+          fi
+
+      - name: Install Switch portlibs
+        shell: bash
+        run: |
+          set -euo pipefail
+          dkp-pacman -Syu --noconfirm --needed \
+            switch-mesa switch-libdrm_nouveau switch-sdl2 \
+            switch-openal-soft switch-zlib switch-mpg123
+
+      - name: Build wrapper
+        shell: bash
+        run: make -j"$(nproc)"
+
+      - name: Package NRO and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          release_name="pes21_nx-${RELEASE_VERSION}.nro"
+          cp pes21_nx.nro "release/$release_name"
+          cd release
+          sha256sum "$release_name" > "$release_name.sha256"
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pes21_nx-${{ inputs.version }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download built NRO
+        uses: actions/download-artifact@v4
+        with:
+          name: pes21_nx-${{ inputs.version }}
+          path: release
+
+      - name: Generate changelog and progress notes
+        run: >-
+          python3 scripts/make-release-notes.py
+          --version "$RELEASE_VERSION"
+          --output release-notes.md
+
+      - name: Create tag and GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_VERSION already exists; refusing to overwrite it."
+            exit 1
+          fi
+          release_flags=(
+            --target "$GITHUB_SHA"
+            --title "PES 2021 NX $RELEASE_VERSION"
+            --notes-file release-notes.md
+          )
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_flags+=(--prerelease)
+          else
+            release_flags+=(--latest)
+          fi
+          gh release create "$RELEASE_VERSION" release/* "${release_flags[@]}"
