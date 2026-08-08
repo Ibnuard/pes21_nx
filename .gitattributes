@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.bin binary
+*.c text diff=c
+*.h text diff=c
+*.s text
+Makefile text

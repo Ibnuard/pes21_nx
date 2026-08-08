@@ -1,0 +1,59 @@
+# Build products
+/build/
+/dist/
+/mesa-install/
+/*.elf
+/*.map
+/*.nacp
+/*.nro
+/*.nso
+/*.nsp
+/*.npdm
+*.o
+*.d
+*.a
+
+# Runtime and extracted game data
+*.apk
+*.obb
+*.so
+*.pak
+*.cpk
+*.dex
+*.odex
+*.vdex
+*.bin
+!data/silent.bin
+/assets/
+/Download/
+/PesMobile/
+/UE4Game/
+/SaveData/
+/offline-responses/
+
+# Local state and diagnostics
+*.cfg
+*.log
+appstate.txt
+shadercache/
+.codex-*/
+
+# Keys, certificates, and archives
+*.keys
+*.pem
+*.p12
+*.pfx
+*.zip
+*.7z
+*.rar
+*.tar
+*.tgz
+*.gz
+*.bz2
+*.xz
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
