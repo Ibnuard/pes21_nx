@@ -55,6 +55,7 @@
 #include "util.h"
 #include "libc_shim.h"
 #include "overlay.h"
+#include "perf_trace.h"
 
 extern uintptr_t __stack_chk_fail;
 extern so_module avs_mod;
@@ -198,6 +199,8 @@ static struct {
   unsigned int scene_compose_pending;
   unsigned int scene_compose_count;
 } g_mc[MC_SLOTS];
+static __thread int g_mc_tls_slot = -1;
+static __thread void *g_mc_tls_key;
 
 static inline void *mc_thread_key(void) {
   void *p;
@@ -207,9 +210,18 @@ static inline void *mc_thread_key(void) {
 
 static int mc_current_slot(void) {
   void *key = mc_thread_key();
+  const int cached = g_mc_tls_slot;
+  if (g_mc_tls_key == key && cached >= 0 && cached < MC_SLOTS &&
+      g_mc[cached].key == key)
+    return cached;
   for (int i = 0; i < MC_SLOTS; i++)
-    if (g_mc[i].key == key)
+    if (g_mc[i].key == key) {
+      g_mc_tls_key = key;
+      g_mc_tls_slot = i;
       return i;
+    }
+  g_mc_tls_key = key;
+  g_mc_tls_slot = -1;
   return -1;
 }
 
@@ -224,16 +236,17 @@ static int mc_current_slot(void) {
 // Program} invalidate the bind caches so a reused id is never wrongly skipped.
 // Set glc_enabled = 0 for a pure pass-through if a rendering glitch is suspected.
 // ---------------------------------------------------------------------------
-// UE4 drives several shared EGL contexts from different threads. This cache was
-// designed for GTA's single-context renderer and can suppress state changes from
-// the wrong context, so keep PES on the correct pass-through path.
-static int glc_enabled = 0;
+// UE4 drives shared EGL contexts from several threads. Keep the cache in native
+// TLS, reset it on every real eglMakeCurrent and every swap, and validate the
+// thread's mc slot above. This avoids cross-context suppression while still
+// dropping repeated state calls within one frame.
+static const int glc_enabled = 1;
 
 #define GLC_MAXCAPS 24
-static struct { GLenum cap; GLboolean on; } glc_caps[GLC_MAXCAPS];
-static int glc_ncaps;
+static __thread struct { GLenum cap; GLboolean on; } glc_caps[GLC_MAXCAPS];
+static __thread int glc_ncaps;
 
-static struct {
+static __thread struct {
   int have_blend;  GLenum bsf, bdf;
   int have_dfunc;  GLenum dfunc;
   int have_dmask;  GLboolean dmask;
@@ -632,6 +645,13 @@ static GLComposeExperiment gl_diag_prepare_compose_experiment(void) {
   experiment.source_framebuffer = g_mc[slot].scene_framebuffer;
   memcpy(experiment.viewport, g_mc[slot].viewport,
          sizeof(experiment.viewport));
+
+#ifndef DEBUG_LOG
+  // The release path only needs the cached compose identity. All state below
+  // was diagnostic scaffolding and issues synchronous driver queries every
+  // gameplay frame.
+  return experiment;
+#else
   gl_diag_dump_program_once(g_mc[slot].program);
 
   GLint raw_base = 0;
@@ -754,6 +774,7 @@ static GLComposeExperiment gl_diag_prepare_compose_experiment(void) {
                 query_error);
     experiment.pre_draw_error = glGetError();
   }
+#endif
   return experiment;
 }
 
@@ -1231,6 +1252,8 @@ typedef struct {
   GLuint program;
   GLint scene_location;
   GLint curve_location;
+  GLint configured_curve;
+  int uniforms_initialized;
   int attempted;
 } GLFallbackProgram;
 
@@ -1346,13 +1369,20 @@ static int gl_diag_draw_fallback(GLenum mode, unsigned int curve) {
   GLFallbackProgram *entry = gl_diag_get_fallback_program();
   if (!entry || !entry->program)
     return 0;
-  GLint saved_program = 0;
-  glGetIntegerv(GL_CURRENT_PROGRAM, &saved_program);
+  const int slot = mc_current_slot();
+  GLint saved_program = slot >= 0 ? (GLint)g_mc[slot].program : 0;
+  if (slot < 0)
+    glGetIntegerv(GL_CURRENT_PROGRAM, &saved_program);
   glUseProgram(entry->program);
-  if (entry->scene_location >= 0)
-    glUniform1i(entry->scene_location, 0);
-  if (entry->curve_location >= 0)
-    glUniform1i(entry->curve_location, (GLint)curve);
+  if (!entry->uniforms_initialized ||
+      entry->configured_curve != (GLint)curve) {
+    if (entry->scene_location >= 0)
+      glUniform1i(entry->scene_location, 0);
+    if (entry->curve_location >= 0)
+      glUniform1i(entry->curve_location, (GLint)curve);
+    entry->configured_curve = (GLint)curve;
+    entry->uniforms_initialized = 1;
+  }
   glDrawArrays(mode, 0, 3);
   glUseProgram((GLuint)saved_program);
   return 1;
@@ -1377,6 +1407,7 @@ static void gl_diag_trace_default_draw(const char *kind, GLsizei count,
 }
 
 static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
+#ifdef DEBUG_LOG
   __atomic_fetch_add(&gl_diag_draw_arrays, 1, __ATOMIC_RELAXED);
   const int slot = mc_current_slot();
   const int offscreen = slot >= 0 && g_mc[slot].framebuffer != 0;
@@ -1386,15 +1417,19 @@ static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
   if (count > 0)
     __atomic_fetch_add(&gl_diag_vertices, (uint64_t)count, __ATOMIC_RELAXED);
   gl_diag_trace_default_draw("arrays", count, 1);
+#endif
   const GLComposeExperiment experiment =
       gl_diag_prepare_compose_experiment();
+#ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
+#endif
   glDrawArrays(mode, first, count);
   gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
                                 const void *indices) {
+#ifdef DEBUG_LOG
   __atomic_fetch_add(&gl_diag_draw_elements, 1, __ATOMIC_RELAXED);
   const int slot = mc_current_slot();
   const int offscreen = slot >= 0 && g_mc[slot].framebuffer != 0;
@@ -1408,10 +1443,13 @@ static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
                        (uint64_t)count, __ATOMIC_RELAXED);
   }
   gl_diag_trace_default_draw("elements", count, 1);
+#endif
   const GLComposeExperiment experiment =
       gl_diag_prepare_compose_experiment();
+#ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
                                     indices);
+#endif
   glDrawElements(mode, count, type, indices);
   gl_diag_finish_compose_experiment(&experiment);
 }
@@ -1542,8 +1580,33 @@ static void glBindFramebuffer_diag(GLenum target, GLuint framebuffer) {
       slot >= 0 && g_mc[slot].framebuffer != 0 && framebuffer == 0) {
     const GLuint previous_framebuffer = g_mc[slot].framebuffer;
     GLuint color_texture = 0;
-    const unsigned int sample = gl_diag_sample_offscreen(
-        previous_framebuffer, &color_texture);
+    unsigned int sample = 0;
+    if (g_mc[slot].scene_framebuffer == previous_framebuffer &&
+        g_mc[slot].scene_texture) {
+      color_texture = g_mc[slot].scene_texture;
+      sample = 1;
+    } else {
+#ifdef DEBUG_LOG
+      sample = gl_diag_sample_offscreen(previous_framebuffer, &color_texture);
+#else
+      // The gameplay target is the full-size texture-backed FBO that is
+      // immediately composed to the window. Capturing its attachment directly
+      // avoids the old 16x16 glReadPixels probe and its GPU pipeline stall.
+      GLint color_type = GL_NONE;
+      GLint color_name = 0;
+      glGetFramebufferAttachmentParameteriv(
+          GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &color_type);
+      glGetFramebufferAttachmentParameteriv(
+          GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &color_name);
+      if (color_type == GL_TEXTURE && color_name > 0 &&
+          g_mc[slot].viewport[2] > 0 && g_mc[slot].viewport[3] > 0) {
+        color_texture = (GLuint)color_name;
+        sample = 1;
+      }
+#endif
+    }
     if (sample && color_texture) {
       if (g_mc[slot].scene_framebuffer != previous_framebuffer ||
           g_mc[slot].scene_texture != color_texture)
@@ -1561,9 +1624,11 @@ static void glBindFramebuffer_diag(GLenum target, GLuint framebuffer) {
   if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) {
     if (slot >= 0)
       g_mc[slot].framebuffer = framebuffer;
+#ifdef DEBUG_LOG
     __atomic_fetch_add(framebuffer ? &gl_diag_bind_offscreen
                                    : &gl_diag_bind_default,
                        1, __ATOMIC_RELAXED);
+#endif
   }
 }
 
@@ -1579,11 +1644,13 @@ static void glViewport_diag(GLint x, GLint y, GLsizei width, GLsizei height) {
 }
 
 static void glClear_diag(GLbitfield mask) {
+#ifdef DEBUG_LOG
   const int slot = mc_current_slot();
   const int offscreen = slot >= 0 && g_mc[slot].framebuffer != 0;
   __atomic_fetch_add(offscreen ? &gl_diag_clear_offscreen
                                : &gl_diag_clear_default,
                      1, __ATOMIC_RELAXED);
+#endif
   glClear(mask);
 }
 
@@ -1624,7 +1691,9 @@ static void glBlitFramebuffer_diag(GLint src_x0, GLint src_y0, GLint src_x1,
                                    GLint src_y1, GLint dst_x0, GLint dst_y0,
                                    GLint dst_x1, GLint dst_y1,
                                    GLbitfield mask, GLenum filter) {
+#ifdef DEBUG_LOG
   __atomic_fetch_add(&gl_diag_blits, 1, __ATOMIC_RELAXED);
+#endif
   gl_blit_framebuffer_real(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0,
                            dst_x1, dst_y1, mask, filter);
 }
@@ -1632,6 +1701,7 @@ static void glBlitFramebuffer_diag(GLint src_x0, GLint src_y0, GLint src_x1,
 static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
                                          GLenum type, const void *indices,
                                          GLsizei instances) {
+#ifdef DEBUG_LOG
   const uint64_t total =
       count > 0 && instances > 0 ? (uint64_t)count * instances : 0;
   __atomic_fetch_add(&gl_diag_draw_elements, 1, __ATOMIC_RELAXED);
@@ -1645,16 +1715,20 @@ static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
                                : &gl_diag_indices_default,
                      total, __ATOMIC_RELAXED);
   gl_diag_trace_default_draw("elements-instanced", count, instances);
+#endif
   const GLComposeExperiment experiment =
       gl_diag_prepare_compose_experiment();
+#ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
                                     indices);
+#endif
   gl_draw_elements_instanced_real(mode, count, type, indices, instances);
   gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
                                        GLsizei instances) {
+#ifdef DEBUG_LOG
   const uint64_t total =
       count > 0 && instances > 0 ? (uint64_t)count * instances : 0;
   __atomic_fetch_add(&gl_diag_draw_arrays, 1, __ATOMIC_RELAXED);
@@ -1665,19 +1739,24 @@ static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
                                : &gl_diag_draw_default,
                      1, __ATOMIC_RELAXED);
   gl_diag_trace_default_draw("arrays-instanced", count, instances);
+#endif
   const GLComposeExperiment experiment =
       gl_diag_prepare_compose_experiment();
+#ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
+#endif
   gl_draw_arrays_instanced_real(mode, first, count, instances);
   gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void gl_diag_dynamic_clear(void) {
+#ifdef DEBUG_LOG
   const int slot = mc_current_slot();
   const int offscreen = slot >= 0 && g_mc[slot].framebuffer != 0;
   __atomic_fetch_add(offscreen ? &gl_diag_clear_offscreen
                                : &gl_diag_clear_default,
                      1, __ATOMIC_RELAXED);
+#endif
 }
 
 static void glClearBufferfv_diag(GLenum buffer, GLint drawbuffer,
@@ -1706,6 +1785,7 @@ static void glClearBufferfi_diag(GLenum buffer, GLint drawbuffer, GLfloat depth,
 
 static void glDiscardFramebufferEXT_diag(GLenum target, GLsizei count,
                                          const GLenum *attachments) {
+#ifdef DEBUG_LOG
   static volatile uint32_t discard_count;
   const uint32_t discard =
       __atomic_add_fetch(&discard_count, 1, __ATOMIC_RELAXED);
@@ -1720,6 +1800,7 @@ static void glDiscardFramebufferEXT_diag(GLenum target, GLsizei count,
                 "attachments=0x%x,0x%x,0x%x,0x%x\n",
                 discard, framebuffer, target, count, a0, a1, a2, a3);
   }
+#endif
   gl_discard_framebuffer_real(target, count, attachments);
 }
 
@@ -1736,6 +1817,7 @@ static void glTexStorage2D_compat(GLenum target, GLsizei levels,
   if (internal_format == 0x881A ||   // GL_RGBA16F
       internal_format == 0x8814) {   // GL_RGBA32F
     actual_format = 0x8058;          // GL_RGBA8
+#ifdef DEBUG_LOG
     static volatile uint32_t conversion_count;
     const uint32_t conversion =
         __atomic_add_fetch(&conversion_count, 1, __ATOMIC_RELAXED);
@@ -1748,6 +1830,7 @@ static void glTexStorage2D_compat(GLenum target, GLsizei levels,
                   conversion, texture, target, levels, width, height,
                   internal_format, actual_format);
     }
+#endif
   }
   gl_tex_storage_2d_real(target, levels, actual_format, width, height);
 }
@@ -1760,24 +1843,28 @@ static void glBindSampler_diag(GLuint unit, GLuint sampler) {
 }
 
 static void glSamplerParameteri_diag(GLuint sampler, GLenum pname, GLint param) {
+#ifdef DEBUG_LOG
   static volatile uint32_t parameter_count;
   const uint32_t setting =
       __atomic_add_fetch(&parameter_count, 1, __ATOMIC_RELAXED);
   if (setting <= 80)
     debugPrintf("GL sampler parameter[%u] sampler=%u pname=0x%x value=0x%x\n",
                 setting, sampler, pname, param);
+#endif
   gl_sampler_parameteri_real(sampler, pname, param);
 }
 
 static __eglMustCastToProperFunctionPointerType
 eglGetProcAddress_diag(const char *name) {
   __eglMustCastToProperFunctionPointerType proc = eglGetProcAddress(name);
+#ifdef DEBUG_LOG
   static volatile uint32_t getproc_count;
   const uint32_t request =
       __atomic_add_fetch(&getproc_count, 1, __ATOMIC_RELAXED);
   if (request <= 160)
     debugPrintf("eglGetProcAddress[%u](%s) -> %p\n", request,
                 name ? name : "(null)", (void *)proc);
+#endif
   if (name && !strcmp(name, "glBlitFramebuffer") && proc) {
     gl_blit_framebuffer_real = (GLBlitFramebufferProc)proc;
     return (__eglMustCastToProperFunctionPointerType)&glBlitFramebuffer_diag;
@@ -1829,6 +1916,7 @@ eglGetProcAddress_diag(const char *name) {
 
 static void glCompileShader_diag(GLuint shader) {
   glCompileShader(shader);
+#ifdef DEBUG_LOG
   GLint status = GL_FALSE;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
   if (status == GL_TRUE) {
@@ -1844,10 +1932,12 @@ static void glCompileShader_diag(GLuint shader) {
   glGetShaderInfoLog(shader, sizeof(log) - 1, &length, log);
   debugPrintf("GL shader compile FAILED id=%u type=0x%x len=%d: %s\n",
               shader, type, length, log[0] ? log : "(empty log)");
+#endif
 }
 
 static void glLinkProgram_diag(GLuint program) {
   glLinkProgram(program);
+#ifdef DEBUG_LOG
   GLint status = GL_FALSE;
   glGetProgramiv(program, GL_LINK_STATUS, &status);
   if (status == GL_TRUE) {
@@ -1861,6 +1951,7 @@ static void glLinkProgram_diag(GLuint program) {
   glGetProgramInfoLog(program, sizeof(log) - 1, &length, log);
   debugPrintf("GL program link FAILED id=%u len=%d: %s\n", program, length,
               log[0] ? log : "(empty log)");
+#endif
 }
 
 // Frame boundary: invalidate the state cache once per frame, then run the real
@@ -1870,6 +1961,17 @@ static void glLinkProgram_diag(GLuint program) {
 // defined in movie_player.c (already referenced by the import table below).
 extern unsigned int eglSwapBuffersHook(void *display, void *surface);
 static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
+#ifdef PERF_TRACE
+  static volatile uint64_t previous_swap_ns;
+  const uint64_t swap_begin_ns = perf_trace_now_ns();
+  const uint64_t previous =
+      __atomic_exchange_n(&previous_swap_ns, swap_begin_ns, __ATOMIC_RELAXED);
+  void *const caller = __builtin_return_address(0);
+  if (previous)
+    perf_trace_record(PERF_TRACE_FRAME, caller, 0,
+                      swap_begin_ns - previous, 0);
+#endif
+#ifdef DEBUG_LOG
   static volatile unsigned int swap_count;
   const unsigned int frame = __sync_add_and_fetch(&swap_count, 1);
   const uint64_t arrays =
@@ -1950,9 +2052,53 @@ static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
                 __atomic_load_n(&gl_diag_link_fail, __ATOMIC_RELAXED),
                 mc_thread_key(), surface);
   }
+#endif
   gl_state_cache_reset();
-  return eglSwapBuffersHook(display, surface);
+  const unsigned int result = eglSwapBuffersHook(display, surface);
+#ifdef PERF_TRACE
+  perf_trace_record(PERF_TRACE_SWAP, caller, 0,
+                    perf_trace_now_ns() - swap_begin_ns, result ? 0 : 1);
+  perf_trace_report();
+#endif
+  return result;
 }
+
+#ifdef PERF_TRACE
+static uint64_t perf_timespec_ns(const struct timespec *request) {
+  if (!request || request->tv_sec < 0 || request->tv_nsec < 0)
+    return 0;
+  return (uint64_t)request->tv_sec * 1000000000ULL +
+         (uint64_t)request->tv_nsec;
+}
+
+static int nanosleep_perf(const struct timespec *request,
+                          struct timespec *remain) {
+  const uint64_t begin = perf_trace_now_ns();
+  const int result = nanosleep(request, remain);
+  perf_trace_record(PERF_TRACE_NANOSLEEP, __builtin_return_address(0),
+                    perf_timespec_ns(request), perf_trace_now_ns() - begin,
+                    result ? errno : 0);
+  return result;
+}
+
+static int usleep_perf(useconds_t usec) {
+  const uint64_t begin = perf_trace_now_ns();
+  const int result = usleep(usec);
+  perf_trace_record(PERF_TRACE_USLEEP, __builtin_return_address(0),
+                    (uint64_t)usec * 1000ULL,
+                    perf_trace_now_ns() - begin, result ? errno : 0);
+  return result;
+}
+
+static unsigned int sleep_perf(unsigned int seconds) {
+  const uint64_t begin = perf_trace_now_ns();
+  const unsigned int result = sleep(seconds);
+  perf_trace_record(PERF_TRACE_SLEEP, __builtin_return_address(0),
+                    (uint64_t)seconds * 1000000000ULL,
+                    perf_trace_now_ns() - begin, result ? EINTR : 0);
+  return result;
+}
+#endif
 
 #ifndef EGL_OPENGL_ES3_BIT
 #define EGL_OPENGL_ES3_BIT 0x00000040
@@ -2146,6 +2292,8 @@ static EGLBoolean eglMakeCurrent_dedup(EGLDisplay dpy, EGLSurface draw,
     g_mc[slot].key = key; g_mc[slot].dpy = dpy;
     g_mc[slot].draw = real_draw; g_mc[slot].read = real_read;
     g_mc[slot].ctx = ctx;
+    g_mc_tls_key = key;
+    g_mc_tls_slot = slot;
   }
   return r;
 }
@@ -2507,7 +2655,10 @@ int pthread_cond_wait_fake(pthread_cond_t **cnd, pthread_mutex_t **mtx) {
   if (trace)
     debugPrintf("late cond WAIT tls=%p cnd=%p/%p mtx=%p/%p ra=%p\n",
                 mc_thread_key(), cnd, *cnd, mtx, *mtx, caller);
+  const uint64_t perf_begin = perf_trace_now_ns();
   const int result = pthread_cond_wait(*cnd, *mtx);
+  perf_trace_record(PERF_TRACE_COND_WAIT, caller, 0,
+                    perf_trace_now_ns() - perf_begin, result);
   if (trace)
     debugPrintf("late cond WAKE tls=%p cnd=%p ra=%p -> %d\n",
                 mc_thread_key(), cnd, caller, result);
@@ -2525,7 +2676,21 @@ int pthread_cond_timedwait_fake(pthread_cond_t **cnd, pthread_mutex_t **mtx, con
   if (trace)
     debugPrintf("late timedcond WAIT tls=%p cnd=%p/%p mtx=%p/%p ra=%p\n",
                 mc_thread_key(), cnd, *cnd, mtx, *mtx, caller);
+  uint64_t requested_ns = 0;
+#ifdef PERF_TRACE
+  struct timeval perf_now;
+  if (t && gettimeofday(&perf_now, NULL) == 0) {
+    const int64_t deadline_ns = (int64_t)t->tv_sec * 1000000000LL + t->tv_nsec;
+    const int64_t now_ns = (int64_t)perf_now.tv_sec * 1000000000LL +
+                           (int64_t)perf_now.tv_usec * 1000LL;
+    if (deadline_ns > now_ns)
+      requested_ns = (uint64_t)(deadline_ns - now_ns);
+  }
+#endif
+  const uint64_t perf_begin = perf_trace_now_ns();
   const int result = pthread_cond_timedwait(*cnd, *mtx, t);
+  perf_trace_record(PERF_TRACE_COND_TIMEDWAIT, caller, requested_ns,
+                    perf_trace_now_ns() - perf_begin, result);
   if (trace)
     debugPrintf("late timedcond WAKE tls=%p cnd=%p ra=%p -> %d\n",
                 mc_thread_key(), cnd, caller, result);
@@ -2557,6 +2722,8 @@ int pthread_once_fake(volatile int *once_control, void (*init_routine) (void)) {
 // Android-side keys and per-thread values separate from newlib's TSD storage.
 #define FAKE_TLS_MAX_KEYS 4096
 #define FAKE_TLS_MAX_THREADS 64
+_Static_assert((FAKE_TLS_MAX_THREADS & (FAKE_TLS_MAX_THREADS - 1)) == 0,
+               "fake TLS thread table must be a power of two");
 
 static volatile unsigned int fake_tls_next_key = 1;
 static volatile unsigned int pthread_tls_get_trace_count;
@@ -2571,22 +2738,33 @@ static int fake_tls_thread_slot(int create) {
   if (!thread_id)
     thread_id = (void *)(uintptr_t)pthread_self();
 
-  for (int i = 0; i < FAKE_TLS_MAX_THREADS; i++) {
+  // UE4 calls pthread_getspecific heavily from its render/task threads. Start
+  // probing from a pointer hash instead of scanning the table from slot zero on
+  // every lookup; the table is power-of-two sized and remains lock-free.
+  const uintptr_t identity = (uintptr_t)thread_id;
+  const unsigned int start =
+      (unsigned int)((identity >> 4) ^ (identity >> 12) ^ (identity >> 20)) &
+      (FAKE_TLS_MAX_THREADS - 1);
+  for (unsigned int probe = 0; probe < FAKE_TLS_MAX_THREADS; probe++) {
+    const unsigned int i =
+        (start + probe) & (FAKE_TLS_MAX_THREADS - 1);
     void *current = __atomic_load_n(&fake_tls_thread_ids[i], __ATOMIC_ACQUIRE);
     if (current == thread_id)
-      return i;
+      return (int)i;
   }
   if (!create)
     return -1;
 
-  for (int i = 0; i < FAKE_TLS_MAX_THREADS; i++) {
+  for (unsigned int probe = 0; probe < FAKE_TLS_MAX_THREADS; probe++) {
+    const unsigned int i =
+        (start + probe) & (FAKE_TLS_MAX_THREADS - 1);
     void *expected = NULL;
     if (__atomic_compare_exchange_n(&fake_tls_thread_ids[i], &expected,
                                     thread_id, 0, __ATOMIC_ACQ_REL,
                                     __ATOMIC_ACQUIRE))
-      return i;
+      return (int)i;
     if (expected == thread_id)
-      return i;
+      return (int)i;
   }
   return -1;
 }
@@ -2930,8 +3108,13 @@ DynLibFunction dynlib_functions[] = {
   { "localtime_r", (uintptr_t)&localtime_r },
   { "strftime", (uintptr_t)&strftime },
   { "strftime_l", (uintptr_t)&strftime_l_fake },
+#ifdef PERF_TRACE
+  { "nanosleep", (uintptr_t)&nanosleep_perf },
+  { "usleep", (uintptr_t)&usleep_perf },
+#else
   { "nanosleep", (uintptr_t)&nanosleep },
   { "usleep", (uintptr_t)&usleep },
+#endif
 
   // EGL: the game creates and manages its own context now
   { "eglGetProcAddress", (uintptr_t)&eglGetProcAddress_diag },
@@ -3583,7 +3766,11 @@ DynLibFunction dynlib_functions[] = {
   { "setrlimit", (uintptr_t)&setrlimit_fake },
   { "sigaction", (uintptr_t)&sigaction_fake },
   { "sigemptyset", (uintptr_t)&sigemptyset_fake },
+#ifdef PERF_TRACE
+  { "sleep", (uintptr_t)&sleep_perf },
+#else
   { "sleep", (uintptr_t)&sleep },
+#endif
   { "strcasestr", (uintptr_t)&strcasestr },
   { "strcspn", (uintptr_t)&strcspn },
   { "strnlen", (uintptr_t)&strnlen },

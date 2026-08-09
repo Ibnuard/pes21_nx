@@ -33,6 +33,7 @@ static uintptr_t mobile_screen_tap_entry_resume;
 static uintptr_t exhibition_flow_create_resume;
 static uintptr_t exhibition_tutorial_main_resume;
 static uintptr_t exhibition_strategy_main_resume;
+static uintptr_t ue4_tickrate_resume;
 static void **exhibition_flow_listener_instance;
 static void (*exhibition_flow_direct_set)(void *transition,
                                            const char *flow_name);
@@ -567,6 +568,12 @@ extern void pes_mobile_screen_tap_entry_hook(void);
 extern void pes_exhibition_flow_create_hook(void);
 extern void pes_exhibition_tutorial_main_hook(void);
 extern void pes_exhibition_strategy_main_hook(void);
+extern void ue4_tickrate_clamp_hook(void);
+
+uintptr_t ue4_tickrate_clamp(void *engine) {
+  (void)engine;
+  return ue4_tickrate_resume;
+}
 
 static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
   const intptr_t delta = (intptr_t)destination - (intptr_t)source;
@@ -690,6 +697,33 @@ int32_t ue4_object_initializer_resize_hook_c(Ue4Array *array,
 extern void ue4_object_initializer_resize_hook(void);
 
 void install_ue4_hooks(so_module *module) {
+  // UE4's mobile quality path can return a 5-FPS effective max tick rate on
+  // Horizon. Rendering itself is fast, but
+  // UpdateTimeAndHandleMaxTickRate then sleeps about 180 ms every gameplay
+  // frame. The assembly hook clamps only the final positive effective rate
+  // below 30; zero/unlimited and normal 30/60-FPS settings remain untouched.
+  const char *tickrate_symbol =
+      "_ZN7UEngine30UpdateTimeAndHandleMaxTickRateEv";
+  const uintptr_t tickrate_backing = so_find_addr(module, tickrate_symbol);
+  const uintptr_t tickrate_runtime = so_find_addr_rx(module, tickrate_symbol);
+  const uintptr_t tickrate_site = tickrate_backing + 0x2bc;
+  static const uint32_t expected_tickrate_words[4] = {
+      0x395e0268, // ldrb w8, [x19, #1920]
+      0x36300048, // tbz w8, #6, +8
+      0xbd478660, // ldr s0, [x19, #1924]
+      0x1e202008, // fcmp s0, #0.0
+  };
+  if (memcmp((void *)tickrate_site, expected_tickrate_words,
+             sizeof(expected_tickrate_words)) != 0)
+    fatal_error("Unexpected UEngine tick-rate limiter bytes at %p",
+                (void *)tickrate_site);
+  ue4_tickrate_resume = tickrate_runtime + 0x2cc;
+  hook_arm64(tickrate_site, (uintptr_t)&ue4_tickrate_clamp_hook);
+  debugPrintf("UE4 hook: fixed tick-rate clamp backing=%p runtime=%p "
+              "hook=%p resume=%p\n",
+              (void *)tickrate_site, (void *)(tickrate_runtime + 0x2bc),
+              ue4_tickrate_clamp_hook, (void *)ue4_tickrate_resume);
+
   // Reuse the first/tutorial match builder as a self-contained offline
   // exhibition bootstrap. The stock routine already copies both selected
   // clubs, coaches, formations and every roster player from CommonWork into

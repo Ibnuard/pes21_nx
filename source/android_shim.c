@@ -22,6 +22,7 @@
 #include "imports.h"
 #include "jni_fake.h"
 #include "libc_shim.h"
+#include "perf_trace.h"
 #include "ue4_hooks.h"
 #include "util.h"
 
@@ -134,7 +135,6 @@ typedef enum {
   VIRTUAL_SURFACE_NONE = 0,
   VIRTUAL_SURFACE_BUTTON,
   VIRTUAL_SURFACE_CROSS,
-  VIRTUAL_SURFACE_SLIDE,
 } VirtualSurfaceOwner;
 
 typedef struct {
@@ -147,6 +147,7 @@ static FakeTouchState active_touch_state;
 static VirtualSurfaceState pass_surface;
 static VirtualSurfaceState through_surface;
 static VirtualSurfaceState shoot_surface;
+static VirtualSurfaceState pause_surface;
 static uint64_t previous_hid_buttons;
 static uint32_t previous_mobile_context_generation;
 static uint64_t mobile_context_seen_ms;
@@ -161,6 +162,7 @@ enum {
   FAKE_POINTER_THROUGH = 3,
   FAKE_POINTER_SHOOT = 4,
   FAKE_POINTER_DASH = 5,
+  FAKE_POINTER_PAUSE = 6,
 };
 
 #define FAKE_PIPE_BASE 0x70000000
@@ -444,6 +446,36 @@ static void input_queue_init(void) {
 static int input_queue_push(FakeInputEvent *event) {
   int queued = 0;
   pthread_mutex_lock(&input_queue.mutex);
+
+  // Android may batch touch MOVE samples before the application consumes
+  // them.  Our producer runs independently from UE4, so retaining every
+  // intermediate analog-stick position can otherwise fill the 64-event ring
+  // while a gameplay frame is busy.  Replace the newest unconsumed MOVE when
+  // its pointer topology is unchanged; DOWN/UP transitions are never merged.
+  if ((event->action & 0xff) == AMOTION_EVENT_ACTION_MOVE &&
+      input_queue.head != input_queue.tail) {
+    const unsigned int previous_index =
+        (input_queue.tail + 63) % 64;
+    FakeInputEvent *previous = input_queue.events[previous_index];
+    int same_topology =
+        previous &&
+        (previous->action & 0xff) == AMOTION_EVENT_ACTION_MOVE &&
+        previous->pointer_count == event->pointer_count;
+    for (uint32_t index = 0;
+         same_topology && index < event->pointer_count; index++) {
+      if (previous->pointers[index].pointer_id !=
+          event->pointers[index].pointer_id)
+        same_topology = 0;
+    }
+    if (same_topology) {
+      *previous = *event;
+      queued = 1;
+      pthread_mutex_unlock(&input_queue.mutex);
+      free(event);
+      return queued;
+    }
+  }
+
   const unsigned int next = (input_queue.tail + 1) % 64;
   if (next != input_queue.head) {
     input_queue.events[input_queue.tail] = event;
@@ -662,6 +694,7 @@ static void reset_virtual_surfaces(void) {
   memset(&pass_surface, 0, sizeof(pass_surface));
   memset(&through_surface, 0, sizeof(through_surface));
   memset(&shoot_surface, 0, sizeof(shoot_surface));
+  memset(&pause_surface, 0, sizeof(pause_surface));
 }
 
 static void append_virtual_gamepad_touches(FakeTouchState *desired,
@@ -674,11 +707,16 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   const int x_held = connected && (buttons & HidNpadButton_X) != 0;
   const int y_held = connected && (buttons & HidNpadButton_Y) != 0;
   const int a_held = connected && (buttons & HidNpadButton_A) != 0;
+  const int l_held = connected && (buttons & HidNpadButton_L) != 0;
   const int r_held = connected && (buttons & HidNpadButton_R) != 0;
+  const int plus_held = connected && (buttons & HidNpadButton_Plus) != 0;
   const int b_pressed = b_held && !(previous_hid_buttons & HidNpadButton_B);
   const int x_pressed = x_held && !(previous_hid_buttons & HidNpadButton_X);
   const int y_pressed = y_held && !(previous_hid_buttons & HidNpadButton_Y);
   const int a_pressed = a_held && !(previous_hid_buttons & HidNpadButton_A);
+  const int l_pressed = l_held && !(previous_hid_buttons & HidNpadButton_L);
+  const int plus_pressed =
+      plus_held && !(previous_hid_buttons & HidNpadButton_Plus);
 
   if (!connected || !gameplay_active) {
     reset_virtual_surfaces();
@@ -696,11 +734,11 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   const float shoot_y = (float)screen_height * 0.58889f;
   const float dash_x = (float)screen_width * 0.91563f;
   const float dash_y = (float)screen_height * 0.85000f;
-  // 160-DPI gameplay thresholds are about 44 px for Cross and 88 px for the
-  // defensive Sliding flick at 720p. Keep both safely above threshold while
-  // avoiding overlap with the neighboring action surface.
+  const float pause_x = (float)screen_width * 0.95625f;
+  const float pause_y = (float)screen_height * 0.06944f;
+  // 160-DPI gameplay threshold is about 44 px for Cross at 720p. Keep the
+  // gesture safely above it while avoiding the neighboring Through surface.
   const float cross_distance = (float)screen_height * 0.10000f;
-  const float slide_distance = (float)screen_height * 0.14000f;
 
   static float stick_target_x;
   static float stick_target_y;
@@ -721,21 +759,26 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
                        stick_target_y);
   }
 
-  // Pass and Cross deliberately share one virtual surface. A fresh Cross gets
-  // priority only when the surface is idle; a held B press is never interrupted
-  // mid-command by a second synthetic finger at the same coordinates.
+  // Physical screen slots change meaning with possession. On offense this
+  // lower-left action slot is Pass/Cross (B/A); on defense it is Switch (L1).
+  // Keep a single owner so two controller buttons never place two fingers on
+  // the same Android ButtonObject.
   if (pass_surface.owner == VIRTUAL_SURFACE_NONE) {
-    if (a_pressed && control_mode == PES_MOBILE_CONTROL_OFFENSE) {
+    if (control_mode == PES_MOBILE_CONTROL_OFFENSE && a_pressed) {
       pass_surface.owner = VIRTUAL_SURFACE_CROSS;
       pass_surface.started_ms = now_ms;
       pass_surface.moved = 0;
-    } else if (b_pressed) {
+    } else if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && b_pressed) ||
+               (control_mode == PES_MOBILE_CONTROL_DEFENSE && l_pressed)) {
       pass_surface.owner = VIRTUAL_SURFACE_BUTTON;
       pass_surface.started_ms = now_ms;
     }
   }
+  const int pass_button_held =
+      control_mode == PES_MOBILE_CONTROL_OFFENSE ? b_held : l_held;
   if (pass_surface.owner == VIRTUAL_SURFACE_BUTTON &&
-      !surface_should_remain(now_ms, pass_surface.started_ms, b_held, 80))
+      !surface_should_remain(now_ms, pass_surface.started_ms,
+                             pass_button_held, 80))
     memset(&pass_surface, 0, sizeof(pass_surface));
   if (pass_surface.owner == VIRTUAL_SURFACE_CROSS) {
     if (now_ms - pass_surface.started_ms >= 40)
@@ -751,52 +794,58 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
     touch_state_append(desired, FAKE_POINTER_PASS, pass_x, y);
   }
 
-  // Through has its own surface. PES changes its defensive label/context, but
-  // X continues to address the same physical slot.
+  // The middle-left action slot is Through (X) on offense and Press (B) on
+  // defense. Select its source button from the authoritative control mode.
   if (through_surface.owner == VIRTUAL_SURFACE_NONE) {
-    if (x_pressed) {
+    if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && x_pressed) ||
+        (control_mode == PES_MOBILE_CONTROL_DEFENSE && b_pressed)) {
       through_surface.owner = VIRTUAL_SURFACE_BUTTON;
       through_surface.started_ms = now_ms;
     }
   }
+  const int through_button_held =
+      control_mode == PES_MOBILE_CONTROL_OFFENSE ? x_held : b_held;
   if (through_surface.owner == VIRTUAL_SURFACE_BUTTON &&
-      !surface_should_remain(now_ms, through_surface.started_ms, x_held, 80))
+      !surface_should_remain(now_ms, through_surface.started_ms,
+                             through_button_held, 80))
     memset(&through_surface, 0, sizeof(through_surface));
   if (through_surface.owner != VIRTUAL_SURFACE_NONE)
     touch_state_append(desired, FAKE_POINTER_THROUGH, through_x, through_y);
 
-  // ButtonKind 8 (Shoot/Clear) and defensive ButtonKind 11 (Sliding) occupy
-  // the same top-right Classic-control slot. Mode-select A here so it becomes
-  // Cross on offense and Sliding on defense without an accidental shot.
+  // The top-right action slot is Shoot (Y) on offense and Tackle (A) on
+  // defense. Tackle is a normal press in this Classic-control layout; the old
+  // forced swipe was the reason A could select the wrong defensive action.
   if (shoot_surface.owner == VIRTUAL_SURFACE_NONE) {
-    if (a_pressed && control_mode == PES_MOBILE_CONTROL_DEFENSE) {
-      shoot_surface.owner = VIRTUAL_SURFACE_SLIDE;
-      shoot_surface.started_ms = now_ms;
-      shoot_surface.moved = 0;
-    } else if (y_pressed) {
+    if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && y_pressed) ||
+        (control_mode == PES_MOBILE_CONTROL_DEFENSE && a_pressed)) {
       shoot_surface.owner = VIRTUAL_SURFACE_BUTTON;
       shoot_surface.started_ms = now_ms;
     }
   }
+  const int shoot_button_held =
+      control_mode == PES_MOBILE_CONTROL_OFFENSE ? y_held : a_held;
   if (shoot_surface.owner == VIRTUAL_SURFACE_BUTTON &&
-      !surface_should_remain(now_ms, shoot_surface.started_ms, y_held, 80))
+      !surface_should_remain(now_ms, shoot_surface.started_ms,
+                             shoot_button_held, 80))
     memset(&shoot_surface, 0, sizeof(shoot_surface));
-  if (shoot_surface.owner == VIRTUAL_SURFACE_SLIDE) {
-    if (now_ms - shoot_surface.started_ms >= 40)
-      shoot_surface.moved = 1;
-    if (!surface_should_remain(now_ms, shoot_surface.started_ms, a_held, 120))
-      memset(&shoot_surface, 0, sizeof(shoot_surface));
-  }
-  if (shoot_surface.owner != VIRTUAL_SURFACE_NONE) {
-    const float y = shoot_surface.owner == VIRTUAL_SURFACE_SLIDE &&
-                            shoot_surface.moved
-                        ? shoot_y - slide_distance
-                        : shoot_y;
-    touch_state_append(desired, FAKE_POINTER_SHOOT, shoot_x, y);
-  }
+  if (shoot_surface.owner != VIRTUAL_SURFACE_NONE)
+    touch_state_append(desired, FAKE_POINTER_SHOOT, shoot_x, shoot_y);
 
   if (r_held)
     touch_state_append(desired, FAKE_POINTER_DASH, dash_x, dash_y);
+
+  // PES Mobile has no native gamepad pause binding. Translate Plus to a short
+  // Android tap on the on-screen pause icon. When the pause screen takes over,
+  // the gameplay heartbeat stops and the reconciler emits the matching UP.
+  if (pause_surface.owner == VIRTUAL_SURFACE_NONE && plus_pressed) {
+    pause_surface.owner = VIRTUAL_SURFACE_BUTTON;
+    pause_surface.started_ms = now_ms;
+  }
+  if (pause_surface.owner == VIRTUAL_SURFACE_BUTTON &&
+      !surface_should_remain(now_ms, pause_surface.started_ms, plus_held, 80))
+    memset(&pause_surface, 0, sizeof(pause_surface));
+  if (pause_surface.owner != VIRTUAL_SURFACE_NONE)
+    touch_state_append(desired, FAKE_POINTER_PAUSE, pause_x, pause_y);
 }
 
 static void log_controller_input(const HidAnalogStickState *stick,
@@ -1009,11 +1058,25 @@ int ALooper_addFd_fake(void *looper_ptr, int fd, int ident, int events,
 
 int ALooper_pollAll_fake(int timeout_ms, int *out_fd, int *out_events,
                          void **out_data) {
+#ifdef PERF_TRACE
+  const uint64_t perf_begin = perf_trace_now_ns();
+  void *const perf_caller = __builtin_return_address(0);
+#define ALOOPER_RETURN(value)                                                  \
+  do {                                                                         \
+    const int perf_result = (value);                                            \
+    perf_trace_record(PERF_TRACE_LOOPER, perf_caller,                           \
+                      timeout_ms > 0 ? (uint64_t)timeout_ms * 1000000ULL : 0,   \
+                      perf_trace_now_ns() - perf_begin, perf_result < -3);      \
+    return perf_result;                                                         \
+  } while (0)
+#else
+#define ALOOPER_RETURN(value) return (value)
+#endif
   FakeLooper *looper = &tls_looper;
   if (looper->count == 0) {
     if (timeout_ms > 0)
       svcSleepThread((int64_t)timeout_ms * 1000000LL);
-    return ALOOPER_POLL_TIMEOUT;
+    ALOOPER_RETURN(ALOOPER_POLL_TIMEOUT);
   }
 
   struct pollfd poll_fds[8];
@@ -1024,9 +1087,9 @@ int ALooper_pollAll_fake(int timeout_ms, int *out_fd, int *out_events,
   }
   const int rc = poll_dispatch_fake(poll_fds, looper->count, timeout_ms);
   if (rc == 0)
-    return ALOOPER_POLL_TIMEOUT;
+    ALOOPER_RETURN(ALOOPER_POLL_TIMEOUT);
   if (rc < 0)
-    return errno == EINTR ? ALOOPER_POLL_WAKE : ALOOPER_POLL_ERROR;
+    ALOOPER_RETURN(errno == EINTR ? ALOOPER_POLL_WAKE : ALOOPER_POLL_ERROR);
 
   for (int i = 0; i < looper->count; i++) {
     if (!poll_fds[i].revents)
@@ -1040,11 +1103,12 @@ int ALooper_pollAll_fake(int timeout_ms, int *out_fd, int *out_events,
       *out_data = entry->data;
     if (entry->callback) {
       entry->callback(entry->fd, entry->events, entry->data);
-      return ALOOPER_POLL_CALLBACK;
+      ALOOPER_RETURN(ALOOPER_POLL_CALLBACK);
     }
-    return entry->ident;
+    ALOOPER_RETURN(entry->ident);
   }
-  return ALOOPER_POLL_WAKE;
+  ALOOPER_RETURN(ALOOPER_POLL_WAKE);
+#undef ALOOPER_RETURN
 }
 
 int AInputQueue_attachLooper_fake(void *queue_ptr, void *looper_ptr, int ident,
@@ -1337,22 +1401,38 @@ int mlock_fake(const void *addr, size_t length) {
 
 int clock_nanosleep_fake(int clock_id, int flags, const void *request_ptr,
                          void *remain_ptr) {
+  const uint64_t perf_begin = perf_trace_now_ns();
+  void *const perf_caller = __builtin_return_address(0);
   const struct timespec *request = request_ptr;
   struct timespec delay = *request;
   if (flags & TIMER_ABSTIME) {
     struct timespec now;
-    if (clock_gettime(clock_id, &now) < 0)
-      return errno;
+    if (clock_gettime(clock_id, &now) < 0) {
+      const int result = errno;
+      perf_trace_record(PERF_TRACE_CLOCK_NANOSLEEP, perf_caller, 0,
+                        perf_trace_now_ns() - perf_begin, result);
+      return result;
+    }
     delay.tv_sec -= now.tv_sec;
     delay.tv_nsec -= now.tv_nsec;
     if (delay.tv_nsec < 0) {
       delay.tv_sec--;
       delay.tv_nsec += 1000000000L;
     }
-    if (delay.tv_sec < 0)
+    if (delay.tv_sec < 0) {
+      perf_trace_record(PERF_TRACE_CLOCK_NANOSLEEP, perf_caller, 0,
+                        perf_trace_now_ns() - perf_begin, 0);
       return 0;
+    }
   }
-  return nanosleep(&delay, remain_ptr) < 0 ? errno : 0;
+  uint64_t requested_ns = 0;
+  if (delay.tv_sec >= 0 && delay.tv_nsec >= 0)
+    requested_ns = (uint64_t)delay.tv_sec * 1000000000ULL +
+                   (uint64_t)delay.tv_nsec;
+  const int result = nanosleep(&delay, remain_ptr) < 0 ? errno : 0;
+  perf_trace_record(PERF_TRACE_CLOCK_NANOSLEEP, perf_caller, requested_ns,
+                    perf_trace_now_ns() - perf_begin, result);
+  return result;
 }
 
 int fdatasync_fake(int fd) { return fsync(fd); }

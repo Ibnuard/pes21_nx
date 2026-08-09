@@ -52,16 +52,27 @@ INCLUDES	:=	include
 # options for code generation
 #---------------------------------------------------------------------------------
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+LTOFLAGS := -flto=auto -fuse-linker-plugin
+DIAGNOSTICS ?= 0
+PERF_TRACE ?= 0
 
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
+CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
 
-CFLAGS	+=	$(INCLUDE) -D__SWITCH__
+CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DNDEBUG
+
+ifeq ($(DIAGNOSTICS),1)
+CFLAGS	+=	-UNDEBUG -DDEBUG_LOG=1
+endif
+
+ifeq ($(PERF_TRACE),1)
+CFLAGS	+=	-DPERF_TRACE=1
+endif
 
 CXXFLAGS	:= $(CFLAGS)
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
+LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,-Map,$(notdir $*.map) \
 			-Wl,--wrap=nouveau_mm_allocate -Wl,--wrap=nouveau_mm_free \
 			-Wl,--wrap=nouveau_mm_free_work \
 			-Wl,--build-id=sha1

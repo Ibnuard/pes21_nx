@@ -383,7 +383,11 @@ int main(void) {
   while (appletMainLoop()) {
     android_input_poll();
     jni_poll_platform_callbacks();
-    svcSleepThread(4000000);
+    // Android touch/gamepad delivery is frame-oriented.  Polling at 250 Hz
+    // created far more synthetic MotionEvents than the 30 FPS game thread
+    // could consume during a live match.  60 Hz preserves responsive controls
+    // while preventing input work from starving gameplay simulation.
+    svcSleepThread(16000000);
   }
 
   hard_exit();

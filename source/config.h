@@ -20,9 +20,8 @@
 #define LOG_NAME "debug.log"
 #define APPSTATE_NAME "appstate.txt"
 
-// Define to write debug.log and nxlink stdout. Off for release (debugPrintf
-// becomes a no-op).
-#define DEBUG_LOG 1
+// DEBUG_LOG is supplied by `make DIAGNOSTICS=1`. Release builds leave it
+// undefined, making debugPrintf a no-op and removing expensive GL readbacks.
 
 // actual screen size
 extern int screen_width;
