@@ -52,6 +52,8 @@
 # Local state and diagnostics
 *.cfg
 *.log
+*.pyc
+__pycache__/
 appstate.txt
 shadercache/
 .codex-*/

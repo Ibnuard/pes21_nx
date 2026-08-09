@@ -4,6 +4,44 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.94] - 2026-08-09
+
+### Fixed
+
+- Replaced the title's unintended 5 FPS gameplay tick-rate request with a
+  narrowly validated 30 FPS floor while preserving normal unlimited and
+  already-valid frame-rate requests.
+- Moved render-state tracking to native thread-local storage and enabled the
+  release GLES state cache, reducing redundant wrapper calls and improving
+  gameplay pacing, replay stability, and player-name flicker in Ryujinx.
+- Made the Classic-control gamepad mapping possession-aware without changing
+  the confirmed attacking controls. Defense now maps B to Press, A to Tackle,
+  L1 to Switch, and R1 to Dash.
+- Added a synthetic touch binding from Switch Plus to the in-match Pause
+  button because the original mobile title has no usable native gamepad pause
+  route.
+
+### Added
+
+- Added optional low-overhead timing instrumentation for swap, looper, sleep,
+  and selected runtime paths. It is disabled in release builds and can be
+  enabled explicitly for performance diagnostics.
+
+### Verified
+
+- Match gameplay no longer remains at the former fixed 5 FPS in the tested
+  Ryujinx setup, and replay sequences can remain near 29-30 FPS.
+- The latest release configuration reduces slow-motion and HUD/player-name
+  flicker compared with the previous build.
+
+### Known issues
+
+- Active gameplay is improved but is not yet locked to 30 FPS in Ryujinx;
+  camera load can still lower frame rate and produce some slow-motion or text
+  flicker. Native Switch performance still requires hardware validation.
+- The revised defense and Plus mappings are testable in this release but need
+  a complete match validation before being marked hardware-verified.
+
 ## [0.1.93] - 2026-08-09
 
 ### Added

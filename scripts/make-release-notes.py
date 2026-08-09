@@ -55,7 +55,7 @@ def extract_changelog(text: str, version: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", required=True, help="Release tag, e.g. v0.1.93")
+    parser.add_argument("--version", required=True, help="Release tag, e.g. v0.1.94")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 

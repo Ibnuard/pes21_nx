@@ -15,7 +15,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.93
+## Wrapper version 0.1.94
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -40,6 +40,12 @@ Working in the currently tested revision:
   layout, including simultaneous movement, Dash, and action input
 - eFootball-to-Exhibition routing with master-data FC Barcelona and Madrid
   squads, a valid Strategy screen, and a playable local CPU match
+- a validated gameplay tick-rate hook that replaces the erroneous 5 FPS
+  request with a 30 FPS floor while leaving valid rates unchanged
+- native-TLS render-state tracking and a release GLES state cache that reduce
+  redundant wrapper work during active gameplay
+- possession-aware Classic controls: attack retains B/X/Y/A actions, while
+  defense uses B Press, A Tackle, L1 Switch, and R1 Dash; Plus taps Pause
 - reproducible generation of the exact 48 offline HTTP payloads from a
   user-supplied compatible APK
 - a one-folder runtime preparer that discovers the APK, both OBBs, and release
@@ -156,6 +162,28 @@ affected GLES state so later UI rendering remains game-owned.
 The experimental shader-cache Mesa patch used during earlier diagnostics is
 not required and is not included in this repository.
 
+## Match performance and timing
+
+The mobile title can request a positive five-frame-per-second maximum from
+`UEngine::UpdateTimeAndHandleMaxTickRate` during the playable match state. That
+request is deliberate engine pacing rather than raw GPU saturation: gameplay
+then advances in slow motion while replay and lighter scenes can approach the
+normal 30 FPS target. Version 0.1.94 installs a checked title-specific hook
+that raises only positive requests below 30 to 30. Zero/unlimited requests and
+rates already at or above 30 are passed through unchanged.
+
+The GLES wrapper also keeps its redundant-state cache in native thread-local
+storage. This avoids repeated state calls without sharing a cache between
+render contexts or threads; the cache is reset after a real context change and
+at frame boundaries. Optional timing counters can be compiled explicitly for
+diagnostic builds, but release builds do not collect them.
+
+On the current Ryujinx test system this removes the fixed 5 FPS behavior,
+reduces slow-motion and player-name flicker, and allows replay sequences to
+remain near 29-30 FPS. Active gameplay still varies below 30 FPS under heavier
+camera loads, so this is a measurable improvement rather than a claim of a
+stable 30 FPS lock. Real Switch behavior remains a separate hardware test.
+
 ## Custom controller handler
 
 Ryujinx exposes a connected Bluetooth controller as Switch HID, but PES Mobile
@@ -164,12 +192,11 @@ ThinkUnits. Version 0.1.78 therefore translates Switch HID into the same
 multi-touch protocol consumed by the Classic mobile controls:
 
 - left analog controls the virtual movement stick with a radial deadzone;
-- Switch B holds/releases the Pass surface;
-- Switch X holds/releases the Through surface;
-- Switch Y holds/releases the Shoot or contextual Clear surface;
-- Switch A performs a Pass-surface Cross swipe in offense mode and a dedicated
-  Sliding swipe in defense mode;
-- Switch R1 holds the Dash surface.
+- offense keeps Switch B for Pass, X for Through, Y for Shoot, and A for the
+  Pass-surface Cross swipe;
+- defense maps Switch B to Press, A to Tackle, and L1 to Switch;
+- Switch R1 holds Dash in both possession modes;
+- Switch Plus taps the on-screen Pause button.
 
 The fake Android motion event stores a complete immutable pointer snapshot.
 It emits Android `DOWN`, indexed `POINTER_DOWN`, `MOVE`, indexed `POINTER_UP`,
@@ -185,10 +212,10 @@ older native Cobra pad bridge remains inert because enabling it changes the
 mobile cursor route without feeding match gameplay.
 
 Ryujinx runtime traces confirm left-stick movement, B, X, Y, offense A Cross,
-R1 Dash, and simultaneous multi-pointer input. Defensive A Sliding is
-implemented with a larger threshold-safe swipe but still needs broader runtime
-and hardware coverage. Advanced controls and user-relocated mobile button
-layouts are not supported by this coordinate-based handler yet.
+R1 Dash, and simultaneous multi-pointer input. The possession-aware defense
+mapping and Plus pause binding are included for complete-match validation in
+version 0.1.94. Advanced controls and user-relocated mobile button layouts are
+not supported by this coordinate-based handler yet.
 
 ## Testing notes
 
