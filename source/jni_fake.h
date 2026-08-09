@@ -26,6 +26,8 @@ extern volatile int jni_frontend_ready;
 
 void jni_init(void);
 void jni_set_native_init_hmds(void (*callback)(void *env, void *activity));
+void jni_set_webview_finish_navigation(void (*callback)(void));
+void jni_poll_platform_callbacks(void);
 
 // ---------------------------------------------------------------------------
 // deferred native callbacks: GameNative entry points the Java platform layer

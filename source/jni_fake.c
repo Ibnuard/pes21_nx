@@ -78,11 +78,26 @@ typedef struct {
 volatile int jni_quit_requested = 0;
 volatile int jni_frontend_ready = 0;
 static void (*native_init_hmds_callback)(void *env, void *activity);
+static void (*webview_finish_navigation_callback)(void);
+static _Alignas(4) uint32_t webview_finish_navigation_pending;
 static int software_keyboard_done;
 static char software_keyboard_text[256];
 
 void jni_set_native_init_hmds(void (*callback)(void *, void *)) {
   native_init_hmds_callback = callback;
+}
+
+void jni_set_webview_finish_navigation(void (*callback)(void)) {
+  webview_finish_navigation_callback = callback;
+}
+
+void jni_poll_platform_callbacks(void) {
+  if (__atomic_exchange_n(&webview_finish_navigation_pending, 0,
+                          __ATOMIC_ACQ_REL) &&
+      webview_finish_navigation_callback) {
+    debugPrintf("JNI: KWebDialog navigation complete -> native callback\n");
+    webview_finish_navigation_callback();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +536,18 @@ static void hal_void(void *obj, const FakeID *id, va_list va) {
     cpu_boost(0);
     jni_frontend_ready = 1;
     debugPrintf("JNI: hideSplashScreen -> frontend ready\n");
+    return;
+  }
+
+  // The Android KWebDialog owns the actual WebView. There is no Java UI on
+  // Switch, but menu::WebView still waits for Java's finish-navigation event
+  // before it enables its native checkbox/footer controls. Queue the matching
+  // native callback after openWebView returns; this preserves the native user
+  // confirmation flow while avoiding a permanent loading spinner.
+  if (!strcmp(id->cls, "osobject") && name_is(id, "openWebView")) {
+    __atomic_store_n(&webview_finish_navigation_pending, 1,
+                     __ATOMIC_RELEASE);
+    debugPrintf("JNI: KWebDialog.openWebView -> queue navigation complete\n");
     return;
   }
 

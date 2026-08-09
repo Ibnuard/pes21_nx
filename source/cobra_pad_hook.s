@@ -55,3 +55,100 @@ pes_mobile_screen_tap_entry_hook:
     br x17
 
     .size pes_mobile_screen_tap_entry_hook, .-pes_mobile_screen_tap_entry_hook
+
+    .align 2
+    .global pes_exhibition_flow_create_hook
+    .type pes_exhibition_flow_create_hook, %function
+
+// Entry hook for menu::FactoryMobile::CreateFlow. Preserve its sret pointer
+// (x8) and all arguments, let C rewrite only the Divisions flow string, replay
+// the displaced prologue, and continue in the original function.
+pes_exhibition_flow_create_hook:
+    sub sp, sp, #0x60
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    str x8, [sp, #0x40]
+    stp x29, x30, [sp, #0x50]
+    mov x0, x1
+    bl pes_exhibition_redirect_flow
+    mov x17, x0
+    ldp x29, x30, [sp, #0x50]
+    ldr x8, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x60
+
+    sub sp, sp, #0x70
+    stp x19, x30, [sp, #96]
+    mov x19, x8
+    and w8, w2, #1
+    br x17
+
+    .size pes_exhibition_flow_create_hook, .-pes_exhibition_flow_create_hook
+
+    .align 2
+    .global pes_exhibition_tutorial_main_hook
+    .type pes_exhibition_tutorial_main_hook, %function
+
+// Entry hook for MyClubFlowTutorialMatch::Main. The C helper changes its state
+// only while a one-shot Exhibition request is armed. Preserve the original
+// this pointer and caller state, replay the displaced 16-byte prologue, then
+// continue at Main+0x10.
+pes_exhibition_tutorial_main_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_exhibition_tutorial_main_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0x70
+    stp x23, x22, [sp, #64]
+    stp x21, x20, [sp, #80]
+    stp x19, x30, [sp, #96]
+    br x17
+
+    .size pes_exhibition_tutorial_main_hook, .-pes_exhibition_tutorial_main_hook
+
+    .align 2
+    .global pes_exhibition_strategy_main_hook
+    .type pes_exhibition_strategy_main_hook, %function
+
+// Entry hook for MyClubFlowMatchMenu::Main. The C helper seeds a master-data
+// roster only for the pending custom Exhibition request. Preserve arguments,
+// replay the displaced prologue, and continue at Main+0x10.
+pes_exhibition_strategy_main_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_exhibition_strategy_main_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0x40
+    stp x19, x30, [sp, #48]
+    ldrb w1, [x0, #552]
+    str x20, [sp, #32]
+    br x17
+
+    .size pes_exhibition_strategy_main_hook, .-pes_exhibition_strategy_main_hook

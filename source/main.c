@@ -368,6 +368,10 @@ int main(void) {
   debugPrintf("stage: JNI_OnLoad begin at %p\n", jni_on_load);
   const int jni_version = jni_on_load(fake_vm, NULL);
   debugPrintf("JNI_OnLoad returned %08x\n", jni_version);
+  jni_set_webview_finish_navigation(
+      (void *)so_find_addr_rx(
+          &ue4_mod,
+          "Java_jp_konami_android_common_KWebDialog_callbackOnFinishNavigation"));
 
   debugPrintf("stage: NativeActivity bootstrap begin\n");
   android_runtime_bootstrap(&ue4_mod);
@@ -378,6 +382,7 @@ int main(void) {
 
   while (appletMainLoop()) {
     android_input_poll();
+    jni_poll_platform_callbacks();
     svcSleepThread(4000000);
   }
 

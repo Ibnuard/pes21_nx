@@ -30,6 +30,36 @@ static _Alignas(8) uint64_t cobra_pad_input;
 static _Alignas(4) uint32_t cobra_pad_connected;
 static uintptr_t cobra_pad_update_resume;
 static uintptr_t mobile_screen_tap_entry_resume;
+static uintptr_t exhibition_flow_create_resume;
+static uintptr_t exhibition_tutorial_main_resume;
+static uintptr_t exhibition_strategy_main_resume;
+static void **exhibition_flow_listener_instance;
+static void (*exhibition_flow_direct_set)(void *transition,
+                                           const char *flow_name);
+static void *(*exhibition_matchplan_get_instance)(void);
+static void (*exhibition_matchplan_setup_team)(void *data,
+                                                const uint32_t *team_id,
+                                                uint32_t home_away);
+static void (*exhibition_matchplan_setup_tmpdb)(void *data);
+static void (*exhibition_matchplan_update_tmpdb)(void *data);
+static void (*exhibition_set_team)(const uint32_t *team_id,
+                                   uint32_t home_away,
+                                   uint32_t preserve_player_data);
+static void *(*exhibition_tmpdb_manager_get_instance)(void);
+static void *(*exhibition_tmpdb_match_get_team)(void *match,
+                                                 const uint32_t *home_away);
+static void (*exhibition_tmpdb_match_set_user_id)(void *match,
+                                                   uint32_t home_away,
+                                                   uint32_t user_id);
+static void *(*exhibition_online_parameter_get_instance)(void);
+static uint32_t (*exhibition_parameter_common_get_user_id)(void *common);
+static uint32_t (*exhibition_get_match_my_side)(void);
+static void *(*exhibition_commonwork_update_team)(void *common_work,
+                                                   const uint32_t *team_id);
+static void *(*exhibition_commonwork_update_player)(void *common_work,
+                                                     uint64_t player_id);
+static uint64_t (*exhibition_get_player_id_by_unique_id)(
+    const uint32_t *unique_id);
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
 static _Alignas(4) uint32_t mobile_control_mode;
@@ -39,6 +69,356 @@ static unsigned int cobra_pad_apply_log_count;
 static unsigned int cursor_pad_log_count;
 static unsigned int real_pad_log_count;
 static unsigned int mobile_context_log_count;
+static unsigned int exhibition_flow_log_count;
+static _Alignas(4) uint32_t exhibition_requested;
+static _Alignas(4) uint32_t exhibition_strategy_pending;
+
+typedef struct {
+  const uint32_t *player_unique_ids;
+  const uint8_t *shirt_numbers;
+  uint32_t player_count;
+} ExhibitionMasterRoster;
+
+// PlayerAssignment.raw is the authoritative base-club membership table. The
+// mobile build loads Team.raw and Player.raw, but its old myClub-only startup
+// path leaves the Team records' runtime member arrays empty. Keep only the two
+// fixed MVP clubs here; every PlayerId is resolved back through CommonWork so
+// the match uses the game's real master player records and abilities.
+static const uint32_t exhibition_barcelona_players[] = {
+    61672u,  108662u, 104418u, 126426u, 121314u, 38568u,
+    138298u, 121985u, 126673u, 42316u,  7511u,   43202u,
+    116578u, 45330u,  132153u, 40425u,  37422u,  114661u,
+    133157u, 122908u, 110626u, 138300u, 60622u,  138292u,
+    8639u,   132535u, 132544u, 42892u,  42641u,  133215u,
+};
+static const uint8_t exhibition_barcelona_shirts[] = {
+    0, 20, 14, 27, 23, 4, 26, 11, 16, 6, 9, 12, 25, 22, 1,
+    17, 7, 18, 15, 29, 10, 28, 8, 35, 2, 31, 3, 19, 13, 21,
+};
+static const uint32_t exhibition_madrid_players[] = {
+    44383u,  43076u,  42874u,  57353u,  107889u, 42669u,
+    34098u,  36770u,  103420u, 117047u, 8944u,   123124u,
+    131379u, 7329u,   140837u, 112940u, 34908u,  113911u,
+    42556u,  103408u, 140573u, 36998u,  111343u, 138545u,
+    141001u, 113525u, 141417u, 142849u, 118977u, 131387u,
+    141615u, 118968u,
+};
+static const uint8_t exhibition_madrid_shirts[] = {
+    0, 4, 5, 1, 22, 13, 9, 7, 10, 19, 8, 12, 25, 3, 31, 18,
+    11, 14, 21, 16, 29, 6, 23, 32, 41, 2, 39, 30, 24, 27, 42, 26,
+};
+
+static uint32_t exhibition_install_master_roster(
+    void *common_work, const uint32_t *team_id,
+    const ExhibitionMasterRoster *roster) {
+  if (!common_work || !team_id || !roster ||
+      !exhibition_commonwork_update_team ||
+      !exhibition_commonwork_update_player ||
+      !exhibition_get_player_id_by_unique_id)
+    return 0;
+
+  // SetExhibitionTeam imports from CommonWork::UpdateTeam, not the immutable
+  // pesdb view returned by GetTeam. Patch that exact runtime Team object.
+  unsigned char *team =
+      exhibition_commonwork_update_team(common_work, team_id);
+  uint32_t actual_team_id = 0;
+  if (team)
+    memcpy(&actual_team_id, team, sizeof(actual_team_id));
+  if (!team || actual_team_id != *team_id) {
+    debugPrintf("exhibition: master team lookup failed requested=0x%x "
+                "actual=0x%x ptr=%p\n",
+                *team_id, actual_team_id, team);
+    return 0;
+  }
+
+  uint64_t *member_ids = (uint64_t *)(team + 272);
+  uint8_t *appointment_order = team + 0x218;
+  uint16_t *shirt_numbers = (uint16_t *)(team + 604);
+  memset(member_ids, 0, 40 * sizeof(*member_ids));
+  memset(appointment_order, 0xff, 40);
+  memset(shirt_numbers, 0, 40 * sizeof(*shirt_numbers));
+
+  uint32_t valid = 0;
+  uint32_t missing = 0;
+  for (uint32_t i = 0; i < roster->player_count && valid < 40; i++) {
+    const uint32_t unique_id = roster->player_unique_ids[i];
+    const uint64_t player_id =
+        exhibition_get_player_id_by_unique_id(&unique_id);
+    if ((uint32_t)(player_id >> 32) != unique_id ||
+        !exhibition_commonwork_update_player(common_work, player_id)) {
+      missing++;
+      continue;
+    }
+    member_ids[valid] = player_id;
+    shirt_numbers[valid] = roster->shirt_numbers[i];
+    appointment_order[valid] = (uint8_t)valid;
+    valid++;
+  }
+
+  uint32_t member_flags;
+  memcpy(&member_flags, team + 0x3a6, sizeof(member_flags));
+  member_flags &= ~(0x7fu << 9);
+  member_flags |= (valid & 0x7fu) << 9;
+  memcpy(team + 0x3a6, &member_flags, sizeof(member_flags));
+  debugPrintf("exhibition: master roster team=0x%x valid=%u missing=%u "
+              "flags=0x%x\n",
+              *team_id, valid, missing, member_flags);
+  return valid;
+}
+
+// cobra::stl::basic_string uses a one-byte short-string tag or the usual
+// [capacity, size, data] long representation. Menu flow names longer than 23
+// bytes use the latter. Redirect only the stock eFootball/Divisions target;
+// every other flow and all startup/network state remain untouched.
+uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
+  static const char online_target[] = "MyClub/MainMenu/MenuOnlineMatchTop";
+  static const char divisions_target[] = "MyClub/MainMenu/MenuDivisionsTop";
+  static const char replacement[] = "MyClub/TutorialMatch";
+  unsigned char *object = flow_name_ptr;
+  char *data = NULL;
+  size_t length = 0;
+
+  if (object) {
+    if (object[0] & 1) {
+      memcpy(&length, object + 8, sizeof(length));
+      memcpy(&data, object + 16, sizeof(data));
+    } else {
+      length = object[0] >> 1;
+      data = (char *)object + 1;
+    }
+  }
+
+  if (data && length < 128 && exhibition_flow_log_count < 64) {
+    exhibition_flow_log_count++;
+    debugPrintf("exhibition: FactoryMobile flow=%.*s length=%u\n",
+                (int)length, data, (unsigned int)length);
+  }
+
+  const char *matched_target = NULL;
+  if (data && (object[0] & 1)) {
+    if (length == sizeof(online_target) - 1 &&
+        memcmp(data, online_target, sizeof(online_target) - 1) == 0)
+      matched_target = online_target;
+    else if (length == sizeof(divisions_target) - 1 &&
+             memcmp(data, divisions_target,
+                    sizeof(divisions_target) - 1) == 0)
+      matched_target = divisions_target;
+  }
+  if (matched_target) {
+    const size_t replacement_length = sizeof(replacement) - 1;
+    memcpy(data, replacement, sizeof(replacement));
+    memcpy(object + 8, &replacement_length, sizeof(replacement_length));
+    __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
+    debugPrintf("exhibition: redirected %s -> %s\n", matched_target,
+                replacement);
+  }
+
+  return exhibition_flow_create_resume;
+}
+
+// TutorialMatch is also visited by the normal startup flow. Leave that visit
+// completely stock. A Divisions/eFootball redirect arms a one-shot request;
+// only then change state 0 to the complete local-team initializer (state 3).
+// Once the stock graphics/font wait has selected its normal post-tutorial
+// route (state 7), schedule the built-in Team Strategy flow directly. State 9
+// is outside TutorialMatch's 0..8 dispatcher, so the original Main returns
+// without also emitting its stock proceed event while FlowTransition owns the
+// fade. This keeps the master-data teams produced by state 3 and avoids the
+// invalid myClub squad converter entirely.
+uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
+  if (tutorial_flow &&
+      __atomic_load_n(&exhibition_requested, __ATOMIC_ACQUIRE)) {
+    uint32_t *state = (uint32_t *)((unsigned char *)tutorial_flow + 540);
+    if (*state == 0) {
+      *state = 3;
+      debugPrintf("exhibition: TutorialMatch state 0 -> 3 (initialize)\n");
+    } else if (*state == 7) {
+      void *listener = exhibition_flow_listener_instance
+                           ? *exhibition_flow_listener_instance
+                           : NULL;
+      if (listener && exhibition_flow_direct_set) {
+        static const char strategy_flow[] = "MyClub/Match/MenuMatchMenu";
+        __atomic_store_n(&exhibition_strategy_pending, 1, __ATOMIC_RELEASE);
+        exhibition_flow_direct_set((unsigned char *)listener + 0x118,
+                                   strategy_flow);
+        *state = 9;
+        __atomic_store_n(&exhibition_requested, 0, __ATOMIC_RELEASE);
+        debugPrintf("exhibition: TutorialMatch initialized master teams; "
+                    "DirectSet -> %s\n",
+                    strategy_flow);
+      } else {
+        debugPrintf("exhibition: waiting for FlowListener instance=%p "
+                    "DirectSet=%p\n",
+                    listener, exhibition_flow_direct_set);
+      }
+    }
+  }
+  return exhibition_tutorial_main_resume;
+}
+
+// MyClubFlowMatchMenu's constructor creates matchPlan::Data in mode 2 and
+// imports tmpdb::Match. Some mobile/tutorial configurations leave that tmpdb
+// object empty even though the selected master TeamIds are valid. Build both
+// sides directly from CommonWork here, before Strategy's state-0 loader runs,
+// then publish the complete plan back to tmpdb::Match for MatchSetup.
+uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
+  if (strategy_flow &&
+      __atomic_load_n(&exhibition_strategy_pending, __ATOMIC_ACQUIRE)) {
+    uint32_t state;
+    memcpy(&state, (unsigned char *)strategy_flow + 540, sizeof(state));
+    if (state == 0 &&
+        __atomic_exchange_n(&exhibition_strategy_pending, 0,
+                            __ATOMIC_ACQ_REL)) {
+      void *data = exhibition_matchplan_get_instance
+                       ? exhibition_matchplan_get_instance()
+                       : NULL;
+      if (data && exhibition_set_team &&
+          exhibition_matchplan_setup_tmpdb) {
+        static const uint32_t barcelona_team_id = 108u << 14;
+        static const uint32_t madrid_team_id = 109u << 14;
+        static const ExhibitionMasterRoster barcelona_roster = {
+            exhibition_barcelona_players, exhibition_barcelona_shirts,
+            sizeof(exhibition_barcelona_players) /
+                sizeof(exhibition_barcelona_players[0]),
+        };
+        static const ExhibitionMasterRoster madrid_roster = {
+            exhibition_madrid_players, exhibition_madrid_shirts,
+            sizeof(exhibition_madrid_players) /
+                sizeof(exhibition_madrid_players[0]),
+        };
+        uint32_t data_mode;
+        memcpy(&data_mode, (unsigned char *)data + 8, sizeof(data_mode));
+
+        void *manager = exhibition_tmpdb_manager_get_instance
+                            ? exhibition_tmpdb_manager_get_instance()
+                            : NULL;
+        void *common_work = NULL;
+        if (manager)
+          memcpy(&common_work, (unsigned char *)manager + 64,
+                 sizeof(common_work));
+        const uint32_t home_count = exhibition_install_master_roster(
+            common_work, &barcelona_team_id, &barcelona_roster);
+        const uint32_t away_count = exhibition_install_master_roster(
+            common_work, &madrid_team_id, &madrid_roster);
+
+        // TutorialMatch called SetExhibitionTeam before the mobile master
+        // Team records had member arrays, so tmpdb::Match still contains two
+        // empty squads. Re-run the same stock importer now that the authentic
+        // PlayerAssignment rosters are installed. Then rebuild matchPlan from
+        // tmpdb exactly as MyClubFlowMatchMenu's constructor normally does.
+        // This populates the badge, coach, formation and tmpdb Player objects
+        // consumed by MyClubSquadEdit, not merely matchPlan's local team copy.
+        exhibition_set_team(&barcelona_team_id, 0, 0);
+        exhibition_set_team(&madrid_team_id, 1, 0);
+
+        // Verify the exact tmpdb::Match objects consumed by
+        // SetupDataFromTmpdbMatch. This distinguishes a failed master-team
+        // import from a later matchPlan/UI reset without relying on what the
+        // screen happens to render.
+        unsigned char *tmpdb_match = NULL;
+        if (manager) {
+          void *tmpdb_data = NULL;
+          memcpy(&tmpdb_data, (unsigned char *)manager + 72,
+                 sizeof(tmpdb_data));
+          if (tmpdb_data)
+            tmpdb_match = (unsigned char *)tmpdb_data + 0x4b38;
+        }
+
+        // The MyClub Strategy loader immediately returns without creating a
+        // SquadData when UtilityCommon::GetMatchMySide() is NONE (2). The
+        // tutorial team initializer assigns clubs but does not associate the
+        // local account with either side. Bind the current account to HOME so
+        // the stock loader consumes the complete matchPlan we just built;
+        // AWAY remains the CPU side.
+        uint32_t local_user_id = 0;
+        void *online_parameter = exhibition_online_parameter_get_instance
+                                     ? exhibition_online_parameter_get_instance()
+                                     : NULL;
+        void *parameter_common = NULL;
+        if (online_parameter)
+          memcpy(&parameter_common, (unsigned char *)online_parameter + 8,
+                 sizeof(parameter_common));
+        if (parameter_common && exhibition_parameter_common_get_user_id)
+          local_user_id =
+              exhibition_parameter_common_get_user_id(parameter_common);
+        if (tmpdb_match && exhibition_tmpdb_match_set_user_id)
+          exhibition_tmpdb_match_set_user_id(tmpdb_match, 0, local_user_id);
+        const uint32_t match_my_side = exhibition_get_match_my_side
+                                           ? exhibition_get_match_my_side()
+                                           : UINT32_MAX;
+        debugPrintf("exhibition: local user=%u assigned HOME mySide=%u "
+                    "match=%p parameter=%p common=%p\n",
+                    local_user_id, match_my_side, tmpdb_match,
+                    online_parameter, parameter_common);
+
+        for (uint32_t side = 0; side < 2; side++) {
+          unsigned char *match_team =
+              (tmpdb_match && exhibition_tmpdb_match_get_team)
+                  ? exhibition_tmpdb_match_get_team(tmpdb_match, &side)
+                  : NULL;
+          uint32_t match_team_id = 0;
+          uint32_t match_flags = 0;
+          uint64_t first_player_id = 0;
+          if (match_team) {
+            memcpy(&match_team_id, match_team, sizeof(match_team_id));
+            memcpy(&first_player_id, match_team + 272,
+                   sizeof(first_player_id));
+            memcpy(&match_flags, match_team + 0x3a6,
+                   sizeof(match_flags));
+          }
+          debugPrintf("exhibition: tmpdb side=%u team=0x%x count=%u "
+                      "first=0x%llx ptr=%p\n",
+                      side, match_team_id, (match_flags >> 9) & 0x7f,
+                      (unsigned long long)first_player_id, match_team);
+        }
+
+        const uint32_t strategy_mode = 2;
+        memcpy((unsigned char *)data + 8, &strategy_mode,
+               sizeof(strategy_mode));
+        exhibition_matchplan_setup_tmpdb(data);
+
+        uint32_t plan_team_ids[2] = {0, 0};
+        uint32_t plan_counts[2] = {0, 0};
+        uint32_t plan_player_ptrs[2] = {0, 0};
+        void *plan_first_players[2] = {NULL, NULL};
+        for (uint32_t side = 0; side < 2; side++) {
+          unsigned char *side_info = (unsigned char *)data + side * 0x218;
+          plan_counts[side] = side_info[20];
+          memcpy(&plan_team_ids[side],
+                 (unsigned char *)data + 0x1048 + side * 4,
+                 sizeof(plan_team_ids[side]));
+          for (uint32_t member = 0; member < 40; member++) {
+            void *player = NULL;
+            memcpy(&player,
+                   (unsigned char *)data + 0x508 + side * 0x340 +
+                       member * 16,
+                   sizeof(player));
+            if (player) {
+              plan_player_ptrs[side]++;
+              if (!plan_first_players[side])
+                plan_first_players[side] = player;
+            }
+          }
+        }
+        debugPrintf("exhibition: Strategy seeded matchPlan=%p "
+                    "teams=108v109 players=%uv%u old_mode=%u plan="
+                    "0x%x/%u/%u/%p vs 0x%x/%u/%u/%p via refreshed "
+                    "tmpdb::Match\n",
+                    data, home_count, away_count, data_mode,
+                    plan_team_ids[0], plan_counts[0], plan_player_ptrs[0],
+                    plan_first_players[0], plan_team_ids[1], plan_counts[1],
+                    plan_player_ptrs[1], plan_first_players[1]);
+      } else {
+        debugPrintf("exhibition: Strategy seed unavailable data=%p get=%p "
+                    "setTeam=%p setupTmpdb=%p\n",
+                    data, exhibition_matchplan_get_instance,
+                    exhibition_set_team,
+                    exhibition_matchplan_setup_tmpdb);
+      }
+    }
+  }
+  return exhibition_strategy_main_resume;
+}
 
 static int32_t clamp_pad_value(int32_t value) {
   if (value < 0)
@@ -184,6 +564,9 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
 
 extern void cobra_pad_update_hook(void);
 extern void pes_mobile_screen_tap_entry_hook(void);
+extern void pes_exhibition_flow_create_hook(void);
+extern void pes_exhibition_tutorial_main_hook(void);
+extern void pes_exhibition_strategy_main_hook(void);
 
 static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
   const intptr_t delta = (intptr_t)destination - (intptr_t)source;
@@ -192,6 +575,16 @@ static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
                 (void *)destination);
   *(uint32_t *)source =
       0x14000000u | ((uint32_t)(delta >> 2) & 0x03ffffffu);
+}
+
+static void patch_checked_u32(uintptr_t address, uint32_t expected,
+                              uint32_t replacement, const char *name) {
+  const uint32_t found = *(const uint32_t *)address;
+  if (found != expected)
+    fatal_error("Unexpected %s instruction at %p: 0x%08x (expected "
+                "0x%08x)",
+                name, (void *)address, found, expected);
+  *(uint32_t *)address = replacement;
 }
 
 static ObjectInitializerArrayState *find_array_state(Ue4Array *array) {
@@ -297,6 +690,161 @@ int32_t ue4_object_initializer_resize_hook_c(Ue4Array *array,
 extern void ue4_object_initializer_resize_hook(void);
 
 void install_ue4_hooks(so_module *module) {
+  // Reuse the first/tutorial match builder as a self-contained offline
+  // exhibition bootstrap. The stock routine already copies both selected
+  // clubs, coaches, formations and every roster player from CommonWork into
+  // tmpdb::Match. Normally it is gated by the one-time tutorial save flag,
+  // chooses team 108 vs team 100 through two availability booleans, and sets
+  // game mode 0x45 (which enters TutorialLoadFirst). The FactoryMobile hook
+  // below routes the eFootball tile to MyClub/TutorialMatch; these narrowly
+  // checked patches make that node always build Barcelona (108) vs Madrid
+  // Chamartin B (109), emit proceed_tutorial, and let Match/MatchSetup enter
+  // the ordinary offline MatchIdle path through generic game mode 5. The
+  // stock settings dispatcher does not cover mode 5, so its call is replaced
+  // with the self-contained SetMatchSettingsBase initializer below.
+  const char *tutorial_match_symbol =
+      "_ZN4menu23MyClubFlowTutorialMatch4MainEv";
+  const uintptr_t tutorial_main =
+      so_find_addr(module, tutorial_match_symbol);
+  const uintptr_t tutorial_main_runtime =
+      so_find_addr_rx(module, tutorial_match_symbol);
+  exhibition_flow_listener_instance =
+      (void *)so_find_addr_rx(module,
+                             "_ZN4flow12FlowListener11s_pInstanceE");
+  exhibition_flow_direct_set =
+      (void *)so_find_addr_rx(module,
+                             "_ZN4flow14FlowTransition9DirectSetEPKc");
+
+  static const uint32_t expected_tutorial_main_entry[4] = {
+      0xd101c3ff, // sub sp, sp, #0x70
+      0xa9045bf7, // stp x23, x22, [sp, #64]
+      0xa90553f5, // stp x21, x20, [sp, #80]
+      0xa9067bf3, // stp x19, x30, [sp, #96]
+  };
+  if (memcmp((void *)tutorial_main, expected_tutorial_main_entry,
+             sizeof(expected_tutorial_main_entry)) != 0)
+    fatal_error("Unexpected MyClubFlowTutorialMatch::Main entry at %p",
+                (void *)tutorial_main);
+
+  patch_checked_u32(tutorial_main + 0x6c,
+                    0x1a9f1128, // csel w8, w9, wzr, ne
+                    0x2a0903e8, // mov w8, w9 (team 108 << 14)
+                    "TutorialMatch home-team");
+  patch_checked_u32(tutorial_main + 0x94,
+                    0x7100011f, // cmp w8, #0
+                    0x11409288, // add w8, w20, #0x24, lsl #12
+                    "TutorialMatch away-team constant");
+  patch_checked_u32(tutorial_main + 0x98,
+                    0x1a9f1288, // csel w8, w20, wzr, ne
+                    0xd503201f, // nop; w8 is team 109 << 14
+                    "TutorialMatch away-team gate");
+  patch_checked_u32(tutorial_main + 0x25c,
+                    0x528008a1, // mov w1, #0x45 (first tutorial)
+                    0x528000a1, // mov w1, #5 (generic offline match)
+                    "TutorialMatch game mode");
+  patch_checked_u32(tutorial_main + 0x264,
+                    0x973d8635, // bl UtilityMatchSettings::SetMatchSettings
+                    0x9406b872, // bl SetMatchSettingsBase
+                    "TutorialMatch base settings");
+  exhibition_tutorial_main_resume = tutorial_main_runtime + 0x10;
+  hook_arm64(tutorial_main,
+             (uintptr_t)&pes_exhibition_tutorial_main_hook);
+  debugPrintf("UE4 patch: TutorialMatch exhibition bootstrap backing=%p "
+              "runtime=%p hook=%p resume=%p teams=108v109 mode=5 scoped=1 "
+              "listener=%p DirectSet=%p\n",
+              (void *)tutorial_main, (void *)tutorial_main_runtime,
+              pes_exhibition_tutorial_main_hook,
+              (void *)exhibition_tutorial_main_resume,
+              exhibition_flow_listener_instance, exhibition_flow_direct_set);
+
+  // Seed the custom Exhibition roster after MyClubFlowMatchMenu's constructor
+  // has created its matchPlan singleton, but before Main state 0 loads it into
+  // the visible Team Strategy editor.
+  const char *strategy_main_symbol =
+      "_ZN4menu19MyClubFlowMatchMenu4MainEv";
+  const uintptr_t strategy_main =
+      so_find_addr(module, strategy_main_symbol);
+  const uintptr_t strategy_main_runtime =
+      so_find_addr_rx(module, strategy_main_symbol);
+  static const uint32_t expected_strategy_main_entry[4] = {
+      0xd10103ff, // sub sp, sp, #0x40
+      0xa9037bf3, // stp x19, x30, [sp, #48]
+      0x3948a001, // ldrb w1, [x0, #552]
+      0xf90013f4, // str x20, [sp, #32]
+  };
+  if (memcmp((void *)strategy_main, expected_strategy_main_entry,
+             sizeof(expected_strategy_main_entry)) != 0)
+    fatal_error("Unexpected MyClubFlowMatchMenu::Main entry at %p",
+                (void *)strategy_main);
+  exhibition_matchplan_get_instance =
+      (void *)so_find_addr_rx(module,
+          "_ZN9matchPlan4Data11GetInstanceEv");
+  exhibition_matchplan_setup_team =
+      (void *)so_find_addr_rx(module,
+          "_ZN9matchPlan4Data17SetupDataByTeamIdEN6common6TeamIdE8HomeAway");
+  exhibition_matchplan_setup_tmpdb =
+      (void *)so_find_addr_rx(module,
+          "_ZN9matchPlan4Data23SetupDataFromTmpdbMatchEv");
+  exhibition_matchplan_update_tmpdb =
+      (void *)so_find_addr_rx(module,
+          "_ZN9matchPlan4Data24UpdateTmpdbMatchTeamDataEv");
+  exhibition_set_team =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb4util17SetExhibitionTeamEN6common6TeamIdEhb");
+  exhibition_tmpdb_manager_get_instance =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb7Manager11GetInstanceEv");
+  exhibition_tmpdb_match_get_team =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb5Match7GetTeamERK8HomeAway");
+  exhibition_tmpdb_match_set_user_id =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb5Match9SetUserIdE8HomeAwayj");
+  exhibition_online_parameter_get_instance =
+      (void *)so_find_addr_rx(module,
+          "_ZN12onlinesystem9Parameter11GetInstanceEv");
+  exhibition_parameter_common_get_user_id =
+      (void *)so_find_addr_rx(module,
+          "_ZN12onlinesystem15ParameterCommon9GetUserIDEv");
+  exhibition_get_match_my_side =
+      (void *)so_find_addr_rx(module,
+          "_ZN10onlinemode13UtilityCommon14GetMatchMySideEv");
+  exhibition_commonwork_update_team =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb10CommonWork10UpdateTeamEN6common6TeamIdE");
+  exhibition_commonwork_update_player =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb10CommonWork12UpdatePlayerEN6common8PlayerIdE");
+  exhibition_get_player_id_by_unique_id =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb4util21GetPlayerIdByUniqueIdERKj");
+  exhibition_strategy_main_resume = strategy_main_runtime + 0x10;
+  hook_arm64(strategy_main,
+             (uintptr_t)&pes_exhibition_strategy_main_hook);
+  debugPrintf("UE4 hook: Exhibition Strategy seed backing=%p runtime=%p "
+              "hook=%p resume=%p get=%p setupTeam=%p setupTmpdb=%p "
+              "setTeam=%p update=%p\n",
+              (void *)strategy_main, (void *)strategy_main_runtime,
+              pes_exhibition_strategy_main_hook,
+              (void *)exhibition_strategy_main_resume,
+              exhibition_matchplan_get_instance,
+              exhibition_matchplan_setup_team,
+              exhibition_matchplan_setup_tmpdb,
+              exhibition_set_team,
+              exhibition_matchplan_update_tmpdb);
+  debugPrintf("UE4 hook: Exhibition master roster manager=%p updateTeam=%p "
+              "updatePlayer=%p getPlayerId=%p getMatchTeam=%p "
+              "setUser=%p getOnlineParam=%p getUser=%p getSide=%p\n",
+              exhibition_tmpdb_manager_get_instance,
+              exhibition_commonwork_update_team,
+              exhibition_commonwork_update_player,
+              exhibition_get_player_id_by_unique_id,
+              exhibition_tmpdb_match_get_team,
+              exhibition_tmpdb_match_set_user_id,
+              exhibition_online_parameter_get_instance,
+              exhibition_parameter_common_get_user_id,
+              exhibition_get_match_my_side);
+
   const char *resize_symbol =
       "_ZN6TArrayIP18FObjectInitializer17FDefaultAllocatorE10ResizeGrowEi";
   const char *malloc_symbol = "_ZN7FMemory6MallocEyj";
@@ -310,6 +858,36 @@ void install_ue4_hooks(so_module *module) {
               "FMemory::Malloc=%p\n",
               (void *)resize_backing, (void *)resize_runtime,
               ue4_object_initializer_resize_hook, ue4_fmemory_malloc);
+
+  // Reuse the built-in tutorial-match flow as an offline Exhibition entry.
+  // The factory hook changes only the eFootball tile's Divisions destination.
+  // TutorialMatch is then made deterministic: it builds Barcelona and Madrid
+  // directly from the game's master database, bypasses stale tutorial flags,
+  // and enters the ordinary offline match mode.
+  const char *flow_create_symbol =
+      "_ZN4menu13FactoryMobile10CreateFlowEPN3sys8TaskUnitERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS5_9AllocatorIcEEEEb";
+  const uintptr_t flow_create_backing =
+      so_find_addr(module, flow_create_symbol);
+  const uintptr_t flow_create_runtime =
+      so_find_addr_rx(module, flow_create_symbol);
+  static const uint32_t expected_flow_create_entry[4] = {
+      0xd101c3ff, // sub sp, sp, #0x70
+      0xa9067bf3, // stp x19, x30, [sp, #96]
+      0xaa0803f3, // mov x19, x8
+      0x12000048, // and w8, w2, #1
+  };
+  if (memcmp((void *)flow_create_backing, expected_flow_create_entry,
+             sizeof(expected_flow_create_entry)) != 0)
+    fatal_error("Unexpected FactoryMobile::CreateFlow entry at %p",
+                (void *)flow_create_backing);
+  exhibition_flow_create_resume = flow_create_runtime + 0x10;
+  hook_arm64(flow_create_backing,
+             (uintptr_t)&pes_exhibition_flow_create_hook);
+  debugPrintf("UE4 hook: Exhibition flow redirect backing=%p runtime=%p "
+              "hook=%p resume=%p\n",
+              (void *)flow_create_backing, (void *)flow_create_runtime,
+              pes_exhibition_flow_create_hook,
+              (void *)exhibition_flow_create_resume);
 
   // Publish a match/mode heartbeat at ScreenTapManager::Update entry, where the
   // original ControlModeInfo* is still x2. The hook preserves all arguments,
