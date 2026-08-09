@@ -55,7 +55,7 @@ def extract_changelog(text: str, version: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", required=True, help="Release tag, e.g. v0.1.65")
+    parser.add_argument("--version", required=True, help="Release tag, e.g. v0.1.93")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -67,7 +67,8 @@ def main() -> None:
     compatibility = extract_heading(readme, "Compatibility target")
     changes = extract_changelog(changelog, version)
     progress = extract_heading(development, f"Wrapper version {version}")
-    rendering_issue = extract_heading(development, "Open rendering issue")
+    runtime_preparer = extract_heading(development, "Runtime preparer")
+    rendering_fix = extract_heading(development, "Rendering fix")
 
     notes = f"""# PES 2021 NX v{version}
 
@@ -83,18 +84,26 @@ def main() -> None:
 
 {progress}
 
-## Current rendering issue
+## Runtime preparer
 
-{rendering_issue}
+{runtime_preparer}
+
+## Rendering fix
+
+{rendering_fix}
 
 ## Release files
 
 - `pes21_nx-v{version}.nro` - source-built Nintendo Switch wrapper
 - `pes21_nx-v{version}.nro.sha256` - SHA-256 checksum
+- `PES21NX-Prepare-v{version}.zip` - Windows three-input preparation bundle
+- `PES21NX-Prepare-v{version}.zip.sha256` - bundle SHA-256 checksum
+- `PES21NX-Prepare.exe` - standalone Windows runtime preparer
 
-This release contains wrapper code only. It does not contain an APK, OBB,
-native game libraries, PAK/CPK archives, extracted assets, offline response
-payloads, keys, or other proprietary game content.
+This release contains the compatibility wrapper and project-owned preparation
+tools only. It does not contain an APK, OBB, native game libraries, PAK/CPK
+archives, extracted assets, generated offline response payloads, private keys,
+or other proprietary game content.
 """
     args.output.write_text(notes, encoding="utf-8", newline="\n")
 
