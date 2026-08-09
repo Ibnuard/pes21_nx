@@ -1,0 +1,40 @@
+{
+  "target": {
+    "package": "jp.nyan2021.pesam",
+    "version_code": 305030001,
+    "game_version": "5.3.0"
+  },
+  "required_root_files": [
+    "pes21_nx.nro",
+    "libUE4.so",
+    "libafp-core.so",
+    "libavs2-core.so",
+    "patch.305030001.jp.nyan2021.pesam.obb"
+  ],
+  "main_obb_extract": [
+    "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak"
+  ],
+  "patch_obb_extract": [
+    "Download/dt530_mobile_bra_all.cpk",
+    "Download/dt530_mobile_can_all.cpk",
+    "Download/dt530_mobile_eng_all.cpk",
+    "Download/dt530_mobile_fra_all.cpk",
+    "Download/dt530_mobile_ger_all.cpk",
+    "Download/dt530_mobile_ita_all.cpk",
+    "Download/dt530_mobile_jpn_all.cpk",
+    "Download/dt530_mobile_kor_all.cpk",
+    "Download/dt530_mobile_man_all.cpk",
+    "Download/dt530_mobile_spa_all.cpk"
+  ],
+  "generated": [
+    "assets/responses/*.bin",
+    "SaveData/*"
+  ],
+  "not_required": [
+    "PES21.apk",
+    "main.305030001.jp.nyan2021.pesam.obb",
+    "assets/offline_keystore.p12",
+    "login-identifier.txt",
+    "debug*.log"
+  ]
+}

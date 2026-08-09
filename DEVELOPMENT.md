@@ -9,10 +9,13 @@ small set of title-specific hooks, creates a fake JNI/NativeActivity runtime,
 and then transfers control to the original initialization path.
 
 The public repository deliberately stops at that compatibility boundary. Game
-binaries, data archives, extracted assets, offline response payloads, keys,
-and local reverse-engineering output stay outside the repository.
+binaries, data archives, extracted assets, generated offline response
+payloads, private keys, and local reverse-engineering output stay outside the
+repository. Project-authored response transformations and an empty runtime
+directory template are included so a legally supplied target can be prepared
+reproducibly.
 
-## Wrapper version 0.1.79
+## Wrapper version 0.1.93
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -35,6 +38,10 @@ Working in the currently tested revision:
 - visible, correctly oriented 3D gameplay through the fallback compositor
 - custom Switch-HID-to-mobile-touch controls in the tested Ryujinx Classic
   layout, including simultaneous movement, Dash, and action input
+- eFootball-to-Exhibition routing with master-data FC Barcelona and Madrid
+  squads, a valid Strategy screen, and a playable local CPU match
+- reproducible generation of the exact 48 offline HTTP payloads from a
+  user-supplied compatible APK
 
 ## Runtime packaging findings
 
@@ -47,9 +54,33 @@ Working in the currently tested revision:
   present loose under `Download/`.
 - Runtime validation currently checks the expected file set before executing
   the game libraries, making incomplete SD-card copies fail early.
+- `runtime-template/` mirrors the required and runtime-generated directories
+  with `.DONOTDELETE` placeholders. It contains no game payloads.
 
 These findings describe compatibility behavior only; none of the mentioned
 archives are included in the source repository.
+
+## Offline response pipeline
+
+The Android-mod server data is not compiled into the wrapper. The JNI HTTP
+shim reads encrypted payloads from `assets/responses/` on each emulated HTTP
+request. Seven endpoint names use compatibility aliases; direct-name lookup is
+next, followed by `generic.bin`.
+
+The tested APK contains 48 JSON response documents. Forty-six are retained
+semantically unchanged. The public builder makes `CmdLogin` and
+`CmdGetMyclubEntryInfo` share the corrected 30-player existing-account entry,
+clears the default-manager onboarding list, repairs duplicated serials, and
+adds the fixed-size neutral formation required by the native parser. It then
+MessagePacks, GZIPs, and encrypts every response exactly as the client expects.
+All generated sizes and all 48 byte streams were checked against the live
+Ryujinx runtime used for the successful Exhibition match.
+
+The nearby `.json` files used in private diagnostic runs are not runtime input.
+Only `.bin` files are opened by `jni_fake.c`. The Exhibition hook separately
+loads player, shirt, formation, and manager records from the game's master data
+already present in the user's OBB/PAK; those records are not copied into this
+repository or into the response fixtures.
 
 ## Rendering fix
 

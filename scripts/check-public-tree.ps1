@@ -7,6 +7,13 @@ param(
 $ErrorActionPreference = "Stop"
 $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
 $allowedBinary = "data/silent.bin"
+$allowedPlaceholders = @(
+  "runtime-template/assets/responses/.donotdelete",
+  "runtime-template/download/.donotdelete",
+  "runtime-template/pesmobile/content/paks/.donotdelete",
+  "runtime-template/ue4game/pesmobile/pesmobile/content/paks/.donotdelete",
+  "runtime-template/savedata/.donotdelete"
+)
 $forbiddenExtensions = @(
   ".apk", ".obb", ".so", ".pak", ".cpk",
   ".nro", ".elf", ".nacp", ".nso", ".nsp", ".npdm",
@@ -35,6 +42,10 @@ foreach ($file in $files) {
   $relativeLower = $relative.ToLowerInvariant()
   $parts = $relativeLower.Split('/')
   $extension = $file.Extension.ToLowerInvariant()
+
+  if ($allowedPlaceholders -contains $relativeLower) {
+    continue
+  }
 
   foreach ($part in $parts[0..([Math]::Max(0, $parts.Length - 2))]) {
     if ($forbiddenDirectories -contains $part -or $part -like ".codex-*") {

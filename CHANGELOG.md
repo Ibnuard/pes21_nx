@@ -4,6 +4,28 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.93] - 2026-08-09
+
+### Added
+
+- Routed the eFootball main-menu action into a local Exhibition proof of
+  concept using the title's normal matchmaking, Strategy, and match flows.
+- Bound FC Barcelona and Madrid Chamartin B from the game's own master data,
+  producing valid players, managers, kits, formations, and a playable CPU
+  match instead of an empty myClub squad or immediate 3-0 forfeit.
+- Added a public `runtime-template/` with `.DONOTDELETE` placeholders for all
+  required, optional-mirror, and runtime-generated directories.
+- Added a deterministic offline-response builder. It extracts the original
+  fixtures from a user-supplied APK, applies the two existing-account
+  overrides, generates all 48 encrypted payloads, and validates their sizes.
+
+### Verified
+
+- A clean Ryujinx run entered Barcelona vs Madrid gameplay through eFootball,
+  with visible 3D player models and the custom multi-touch controller handler.
+- All generated offline payloads are byte-identical to the files used by the
+  tested live runtime; proprietary APK/OBB/PAK/CPK data remains uncommitted.
+
 ## [0.1.79] - 2026-08-09
 
 ### Fixed

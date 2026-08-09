@@ -6,12 +6,13 @@ homebrew process, resolves their Bionic/Android imports through native shims,
 and starts the game as a simulated Android `NativeActivity` without running
 Android itself.
 
-This repository contains wrapper source code and build tooling only. It does
-**not** contain an APK, OBB, native game libraries, PAK/CPK archives, extracted
-assets, saved data, network-response payloads, encryption keys, or game
-artwork. You must supply a legally obtained compatible copy of the game and
-prepare its runtime files yourself. Do not open issues asking for copyrighted
-files, download links, keys, or piracy support.
+This repository contains wrapper source code, a safe runtime-directory
+template, and build tooling only. It does **not** contain an APK, OBB, native
+game libraries, PAK/CPK archives, extracted game assets, saved data, generated
+network-response payloads, private keys, or game artwork. You must supply a
+legally obtained compatible copy of the game and prepare its runtime files
+yourself. Do not open issues asking for copyrighted files, download links,
+private keys, or piracy support.
 
 This is an independent compatibility project. It is not affiliated with,
 authorized, sponsored, or endorsed by Konami. All product names, trademarks,
@@ -35,11 +36,12 @@ used as the compatibility target during development.
 - EGL/GLES2, input, audio, filesystem, and networking compatibility glue
 - UE4-specific runtime hooks and diagnostic instrumentation
 - A synthetic silent audio fixture and a project-authored numeric FPS font
+- A placeholder-only runtime tree and a reproducible offline-response builder
 - devkitPro/libnx Makefile and a WSL build helper
 
 ## Current status
 
-Wrapper version `0.1.79` boots through the splash screen and menus on the
+Wrapper version `0.1.93` boots through the splash screen and menus on the
 tested v5.3.0 game revision. Touch input, offline HTTP bootstrap,
 login/registration flow, PAK/CPK mounting, the render loop, UI/HUD, and the 3D
 gameplay scene are operational in the tested Ryujinx setup.
@@ -63,6 +65,12 @@ Sliding gesture while defending, and R1 holds Dash. Multiple synthetic contacts
 can run together, so movement, sprint, and an action can overlap while the
 physical touchscreen remains available. See [DEVELOPMENT.md](DEVELOPMENT.md)
 for implementation and testing details.
+
+The eFootball tile now provides a local Exhibition proof of concept. It uses
+the title's own master club/player data instead of the incomplete myClub squad
+fixture, currently selecting FC Barcelona against Madrid Chamartin B, then
+continues through Strategy into a normal CPU match. Runtime testing reached
+active gameplay with valid player models and no immediate 3-0 forfeit.
 
 ## Build
 
@@ -93,7 +101,7 @@ source-only release process. Before running it:
 3. Update the matching wrapper section and current progress in
    [DEVELOPMENT.md](DEVELOPMENT.md).
 4. Push the changes, open **Actions > Build and release NRO > Run workflow**,
-   and enter a tag such as `v0.1.78`.
+   and enter a tag such as `v0.1.93`.
 
 The workflow validates that the tag matches `APP_VERSION`, builds in the
 official `devkitpro/devkita64` container, uploads the NRO and SHA-256 checksum
@@ -106,8 +114,9 @@ only the wrapper NRO and checksum; users still supply all game files themselves.
 
 ## Runtime layout
 
-The following is documentation only. None of these proprietary runtime files
-may be committed to this repository:
+The repository includes the empty [runtime-template](runtime-template/) tree.
+Its `.DONOTDELETE` files preserve the tested folder structure; none of the
+proprietary files shown below may be committed:
 
 ```text
 sdmc:/switch/pes21_nx/
@@ -118,7 +127,9 @@ sdmc:/switch/pes21_nx/
 |-- PesMobile/Content/Paks/PesMobile-Android_ETC1.pak
 |-- patch.305030001.jp.nyan2021.pesam.obb
 |-- Download/dt530_mobile_*_all.cpk
-`-- assets/responses/*.bin
+|-- assets/responses/*.bin
+|-- SaveData/                         (generated locally)
+`-- UE4Game/PesMobile/PesMobile/Content/Paks/ (optional mirror)
 ```
 
 For the tested revision, the main OBB is a ZIP containing the main PAK. Extract
@@ -127,10 +138,19 @@ needed afterward. The patch OBB is an active CPK container rather than a ZIP,
 so it remains mounted under its original filename. Ten small locale CPK files
 are also required loose under `Download/`.
 
-The current offline bootstrap additionally expects locally prepared response
-payloads under `assets/responses/`. Those payloads and the private preparation
-tooling are deliberately not distributed here, so this source tree is not a
-plug-and-play game package.
+The offline response files are used directly: `jni_fake.c` maps each requested
+PHP command to `assets/responses/<name>.bin`, applies seven compatibility
+aliases, and falls back to `generic.bin` for an unknown command. They are not
+embedded into the NRO and the stale JSON files sometimes used during local
+debugging are not read by the game.
+
+The public builder extracts the 48 original response documents from a
+user-supplied APK, changes only `CmdLogin` and `CmdGetMyclubEntryInfo` so both
+describe one existing account, and emits byte-for-byte reproducible encrypted
+payloads. The APK's VS-COM response remains unmodified; the new Exhibition path
+does not use its incomplete myClub roster and instead binds valid master teams
+inside the native flow. See [runtime-template/README.md](runtime-template/README.md)
+for the exact command and provenance of every runtime directory.
 
 For an already-created offline account, `coach_list` and `squad_list` contain
 the owned club data while `default_coach_list` is empty. The game interprets a

@@ -31,6 +31,20 @@
 /SaveData/
 /offline-responses/
 
+# Keep only the public runtime skeleton, never locally populated payloads.
+/runtime-template/assets/responses/*
+!/runtime-template/assets/responses/.DONOTDELETE
+/runtime-template/Download/*
+!/runtime-template/Download/.DONOTDELETE
+/runtime-template/PesMobile/Content/Paks/*
+!/runtime-template/PesMobile/Content/Paks/.DONOTDELETE
+/runtime-template/UE4Game/PesMobile/PesMobile/Content/Paks/*
+!/runtime-template/UE4Game/PesMobile/PesMobile/Content/Paks/.DONOTDELETE
+/runtime-template/SaveData/*
+!/runtime-template/SaveData/.DONOTDELETE
+/runtime-template/login-identifier.txt
+/runtime-template/PesMobile.uproject
+
 # Local state and diagnostics
 *.cfg
 *.log
