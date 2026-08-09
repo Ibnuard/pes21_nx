@@ -23,6 +23,7 @@ trap 'rm -rf "$build_dir"' EXIT
 
 tar -C "$PES21_NX_PROJECT_ROOT" \
   --exclude=.git --exclude=dist --exclude=build \
+  --exclude=local-inputs --exclude=local-debug \
   --exclude=.codex-dex --exclude=.codex-jadx --exclude=.codex-pak \
   --exclude=clean-package-removed --exclude=logs \
   --exclude=offline-responses --exclude=runtime-unused-cpk \
@@ -64,8 +65,18 @@ cp pes21_nx.nacp "$PES21_NX_PROJECT_ROOT/"
     Remove-Item -LiteralPath $temporaryScript -Force -ErrorAction SilentlyContinue
   }
 
-  Get-Item -LiteralPath (Join-Path $projectRoot "pes21_nx.nro") |
+  $builtNro = Join-Path $projectRoot "pes21_nx.nro"
+  $runtimeNro = Join-Path $projectRoot "dist\pes21_nx\pes21_nx.nro"
+  if (Test-Path -LiteralPath (Split-Path -Parent $runtimeNro)) {
+    Copy-Item -LiteralPath $builtNro -Destination $runtimeNro -Force
+  }
+
+  Get-Item -LiteralPath $builtNro |
     Select-Object FullName, Length, LastWriteTime
+  if (Test-Path -LiteralPath $runtimeNro) {
+    Get-Item -LiteralPath $runtimeNro |
+      Select-Object FullName, Length, LastWriteTime
+  }
 } finally {
   if ($null -eq $oldProjectRoot) {
     Remove-Item Env:PES21_NX_PROJECT_ROOT -ErrorAction SilentlyContinue

@@ -163,6 +163,13 @@ extract ten locale archives, generates all offline responses, validates and
 hashes 64 required runtime files, and publishes the output atomically. It does
 not depend on CriPakTools or overwrite SaveData.
 
+For local porting work, the same repository can be populated without dirtying
+Git: keep the four source files under ignored `local-inputs/`, the complete
+runtime under ignored `dist/pes21_nx/`, and readable diagnostic response files
+under ignored `local-debug/`. The WSL build helper updates the NRO inside that
+runtime automatically when it exists. See [DEVELOPMENT.md](DEVELOPMENT.md) for
+the local workspace commands and safety boundary.
+
 For an already-created offline account, `coach_list` and `squad_list` contain
 the owned club data while `default_coach_list` is empty. The game interprets a
 non-empty default list as the choices for a new-account manager wizard; mixing

@@ -108,6 +108,31 @@ arguments it uses one native directory picker. Release users extract the bundle,
 put the APK and both OBBs beside its included NRO, select that directory, and
 receive a complete `switch/pes21_nx` tree inside it.
 
+### Local development workspace
+
+A locally complete source checkout may use the following ignored directories:
+
+- `local-inputs/` for the compatible APK, both OBBs, and a development NRO;
+- `dist/pes21_nx/` for the validated runtime launched by Ryujinx or copied to
+  Switch;
+- `local-debug/offline-responses/` for optional decrypted JSON and generated
+  response payloads used during diagnostics;
+- `logs/` for local traces, dumps, and screenshots.
+
+These paths are deliberately excluded by `.gitignore` and the public-tree
+audit. They may contain user-owned proprietary data and must never be staged or
+published. Populate the runtime from the ignored inputs with:
+
+```powershell
+python -B tools/prepare_runtime.py `
+  --input-dir local-inputs `
+  --output dist/pes21_nx
+```
+
+The preparer refuses to overwrite an existing runtime so it cannot silently
+destroy `SaveData`. Use a separate output for experiments, or explicitly move
+the old local runtime aside before rebuilding it.
+
 ## Rendering fix
 
 The gameplay scene was always rendered successfully into the offscreen color

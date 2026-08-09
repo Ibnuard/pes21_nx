@@ -15,6 +15,9 @@
 *.a
 
 # Runtime and extracted game data
+/local-inputs/
+/local-debug/
+/logs
 *.apk
 *.obb
 *.so

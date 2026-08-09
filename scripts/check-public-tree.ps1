@@ -33,8 +33,25 @@ $localPathPattern = '(?i)([A-Z]:\\' + 'Users\\|/ho' +
   'me/[^/\s]+/|/mnt/[a-z]/' + 'Users/)'
 $failures = [System.Collections.Generic.List[string]]::new()
 
-$files = Get-ChildItem -LiteralPath $rootPath -Recurse -Force -File |
-  Where-Object { $_.FullName -notlike "$rootPath\.git\*" }
+$gitDirectory = Join-Path $rootPath ".git"
+if (Test-Path -LiteralPath $gitDirectory) {
+  $publishablePaths = @(
+    & git -C $rootPath ls-files --cached --others --exclude-standard
+  )
+  if ($LASTEXITCODE -ne 0) {
+    throw "git ls-files failed with exit code $LASTEXITCODE"
+  }
+  $files = @(
+    foreach ($relativePath in $publishablePaths) {
+      $candidate = Join-Path $rootPath $relativePath
+      if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        Get-Item -LiteralPath $candidate -Force
+      }
+    }
+  )
+} else {
+  $files = Get-ChildItem -LiteralPath $rootPath -Recurse -Force -File
+}
 
 foreach ($file in $files) {
   $relative = $file.FullName.Substring($rootPath.Length).TrimStart('\', '/')
