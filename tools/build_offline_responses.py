@@ -59,7 +59,7 @@ EXPECTED_PAYLOAD_SIZES = {
     "CmdGetMyclubVscomOpponent.bin": 248,
     "CmdGetProductList.bin": 448,
     "CmdGetServerEnv.bin": 1608,
-    "CmdLogin.bin": 2504,
+    "CmdLogin.bin": 2544,
     "CmdRecoverEnergy.bin": 112,
     "CmdSendDownloadStatsData.bin": 88,
     "CmdSendHeartbeat.bin": 96,
@@ -67,7 +67,7 @@ EXPECTED_PAYLOAD_SIZES = {
     "CmdSendPlaylog.bin": 72,
     "CmdSetDevicetoken.bin": 80,
     "CmdSetMatchResult.bin": 312,
-    "CmdSetMyclubEntryInfo.bin": 2648,
+    "CmdSetMyclubEntryInfo.bin": 2520,
     "CmdSetMyclubLanguage.bin": 80,
     "CmdSetMyclubLockGameplayer.bin": 104,
     "CmdSetMyclubMainSquad.bin": 96,
@@ -85,12 +85,12 @@ EXPECTED_PAYLOAD_SIZES = {
     "get_myclub_mainmenu_info.bin": 1272,
     "get_product_list.bin": 448,
     "GetCountryList.bin": 2384,
-    "set_myclub_entry_info.bin": 2648,
+    "set_myclub_entry_info.bin": 2520,
 }
 
 
 def build_formation_data() -> str:
-    """Create the fixed-size neutral formation accepted by the entry parser."""
+    """Create the fixed-size neutral formation used by the stable baseline."""
 
     return base64.b64encode(bytes(792)).decode("ascii")
 
@@ -115,6 +115,10 @@ def load_apk_responses(apk: Path) -> dict[str, dict[str, Any]]:
 def build_existing_account_entry(
     documents: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
+    # Keep the exact Liverpool/GetEntry schema used by working-baseline-0051.
+    # The native ModeEntry patch drops the obsolete season-change/profile
+    # event without replacing this stable command layout with the crash-prone
+    # Barcelona Login fixture.
     entry = copy.deepcopy(documents["CmdGetMyclubEntryInfo.json"]["entry_info"])
     coach = entry["coach_list"][0]
     coach["formation_data"] = build_formation_data()
@@ -127,11 +131,29 @@ def build_existing_account_entry(
     players = entry["gameplayer_list"]
     entry["gameplayer_list_num"] = len(players)
     entry["total_get_player_num"] = len(players)
-    # The APK fixture duplicates serial 1027. Keep all 30 identities unique so
-    # the existing-account import does not collapse the final two players.
-    for index in range(28, len(players)):
-        players[index]["gameplayer_id"]["serial"] = 1885223288000001000 + index
+    first_serial = players[0]["gameplayer_id"]["serial"]
+    for index, player in enumerate(players):
+        player["gameplayer_id"]["serial"] = first_serial + index
     return entry
+
+
+def add_preconfigured_user_agreements(login: dict[str, Any]) -> None:
+    """Mark the bundled offline account's title agreements as complete.
+
+    ``CmdLoginResult`` carries these values separately from ``entry_info``.
+    The stock offline-server fixture omits them, so the native unpacker leaves
+    ``ParameterCommon``'s Term-of-Use and Privacy-Policy flags false and opens
+    the obsolete WebView agreement flow on every fresh installation.  Keep the
+    normal login/profile initialization path while only setting the two fields
+    consumed by ``ConvertUserAgreementsStatusFrom``.  Do not synthesize
+    ``user_eula_info`` here: its nested wire layout varies by server revision,
+    and an incorrect shape corrupts the native MsgPack result object.
+    """
+
+    login["user_agreements_status"] = {
+        "term_of_use": "YES",
+        "privacy_policy": "YES",
+    }
 
 
 def apply_compatibility_overrides(documents: dict[str, dict[str, Any]]) -> None:
@@ -139,11 +161,17 @@ def apply_compatibility_overrides(documents: dict[str, dict[str, Any]]) -> None:
     documents["CmdGetMyclubEntryInfo.json"]["entry_info"] = copy.deepcopy(entry)
 
     # Login and GetEntry must describe the same account. The stock APK mixes a
-    # Barcelona login fixture with a malformed Liverpool GetEntry fixture,
-    # which reopens onboarding or produces a critical response error.
+    # Barcelona login fixture with a malformed Liverpool GetEntry fixture.
     login = copy.deepcopy(documents["CmdGetMyclubEntryInfo.json"])
     login["msgid"] = "CMD_LOGIN"
+    add_preconfigured_user_agreements(login)
     documents["CmdLogin.json"] = login
+
+    # Profile edits use either spelling depending on the endpoint route.  A
+    # stock SetEntry response would reintroduce the default-manager onboarding
+    # record immediately after the corrected Login/GetEntry import.
+    for name in ("CmdSetMyclubEntryInfo.json", "set_myclub_entry_info.json"):
+        documents[name]["entry_info"] = copy.deepcopy(entry)
 
 
 def encode_response(name: str, value: dict[str, Any]) -> bytes:

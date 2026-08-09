@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <string.h>
+#include <switch.h>
 
 #include "error.h"
 #include "so_util.h"
@@ -34,6 +35,7 @@ static uintptr_t exhibition_flow_create_resume;
 static uintptr_t exhibition_tutorial_main_resume;
 static uintptr_t exhibition_strategy_main_resume;
 static uintptr_t ue4_tickrate_resume;
+uintptr_t pes_virtual_pad_update_resume;
 static void **exhibition_flow_listener_instance;
 static void (*exhibition_flow_direct_set)(void *transition,
                                            const char *flow_name);
@@ -63,8 +65,11 @@ static uint64_t (*exhibition_get_player_id_by_unique_id)(
     const uint32_t *unique_id);
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
+static void (*virtual_pad_set_color)(void *movie_clip, float red, float green,
+                                     float blue, float alpha);
 static _Alignas(4) uint32_t mobile_control_mode;
 static _Alignas(4) uint32_t mobile_control_generation;
+static _Alignas(8) uint64_t mobile_control_seen_tick;
 static uint64_t cobra_pad_last_applied = UINT64_MAX;
 static unsigned int cobra_pad_apply_log_count;
 static unsigned int cursor_pad_log_count;
@@ -454,6 +459,17 @@ uint32_t pes_mobile_control_context(int *mode) {
   return generation;
 }
 
+int pes_mobile_control_active_mode(void) {
+  const uint64_t seen =
+      __atomic_load_n(&mobile_control_seen_tick, __ATOMIC_ACQUIRE);
+  if (!seen)
+    return PES_MOBILE_CONTROL_UNKNOWN;
+  const uint64_t age_ns = armTicksToNs(armGetSystemTick() - seen);
+  if (age_ns > 250000000ULL)
+    return PES_MOBILE_CONTROL_UNKNOWN;
+  return (int)__atomic_load_n(&mobile_control_mode, __ATOMIC_ACQUIRE);
+}
+
 // Entry hook for ScreenTapManager::Update. ControlModeInfo is the original x2
 // argument here, so its methods provide authoritative offense/defense context
 // even while every ButtonObject is idle.
@@ -466,6 +482,8 @@ uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
            mobile_is_mode_offense(control_mode_ptr))
     mode = PES_MOBILE_CONTROL_OFFENSE;
   __atomic_store_n(&mobile_control_mode, (uint32_t)mode, __ATOMIC_RELEASE);
+  __atomic_store_n(&mobile_control_seen_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
   const uint32_t generation =
       __atomic_add_fetch(&mobile_control_generation, 1, __ATOMIC_RELEASE);
   static int previous_mode = -1;
@@ -569,10 +587,33 @@ extern void pes_exhibition_flow_create_hook(void);
 extern void pes_exhibition_tutorial_main_hook(void);
 extern void pes_exhibition_strategy_main_hook(void);
 extern void ue4_tickrate_clamp_hook(void);
+extern void pes_virtual_pad_update_original(void *virtual_pad);
 
 uintptr_t ue4_tickrate_clamp(void *engine) {
   (void)engine;
   return ue4_tickrate_resume;
+}
+
+// Visibility is part of the mobile control state: forcing these MovieClips
+// hidden also prevents their ButtonObjects from accepting the synthetic touch
+// stream. Keep every clip visible and interactive, but tint the six persistent
+// pieces once after construction to a nearly transparent alpha.
+void pes_virtual_pad_update_info(void *virtual_pad) {
+  static void *tinted_clips[6];
+  static const uint32_t clip_offsets[6] = {72, 80, 88, 96, 104, 112};
+
+  pes_virtual_pad_update_original(virtual_pad);
+  if (!virtual_pad || !virtual_pad_set_color)
+    return;
+  for (unsigned int index = 0; index < 6; index++) {
+    void *clip = NULL;
+    memcpy(&clip, (const uint8_t *)virtual_pad + clip_offsets[index],
+           sizeof(clip));
+    if (clip && clip != tinted_clips[index]) {
+      virtual_pad_set_color(clip, 1.0f, 1.0f, 1.0f, 0.02f);
+      tinted_clips[index] = clip;
+    }
+  }
 }
 
 static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
@@ -697,6 +738,26 @@ int32_t ue4_object_initializer_resize_hook_c(Ue4Array *array,
 extern void ue4_object_initializer_resize_hook(void);
 
 void install_ue4_hooks(so_module *module) {
+  // The offline bundle already seeds a complete UserInfoData identity and a
+  // complete MyClub entry.  Even with UtilityCommon::IsNewUser() returning
+  // false, ModeEntry can receive a stale season-update action list and route
+  // state 5 through SubMainInputUserInfo (the User Profile screen), followed
+  // by the old coach/squad onboarding.  Ignore only that pending-list branch.
+  // The existing state-6 code still validates the seeded squad and falls back
+  // to the game's normal CreateSquad path when it is actually empty, so login
+  // and ParameterMyClub initialization are not bypassed.
+  const char *mode_entry_symbol =
+      "_ZN4menu19MyClubFlowModeEntry4MainEv";
+  const uintptr_t mode_entry_main =
+      so_find_addr(module, mode_entry_symbol);
+  patch_checked_u32(mode_entry_main + 0x248,
+                    0x540002a1, // b.ne state 9 (SubMainInputUserInfo)
+                    0xd503201f, // nop; continue to state 6 squad validation
+                    "MyClub ModeEntry seeded-profile gate");
+  debugPrintf("UE4 patch: seeded MyClub profile skips legacy onboarding "
+              "backing=%p\n",
+              (void *)(mode_entry_main + 0x248));
+
   // UE4's mobile quality path can return a 5-FPS effective max tick rate on
   // Horizon. Rendering itself is fast, but
   // UpdateTimeAndHandleMaxTickRate then sleeps about 180 ms every gameplay
@@ -959,6 +1020,56 @@ void install_ue4_hooks(so_module *module) {
               pes_mobile_screen_tap_entry_hook,
               (void *)mobile_screen_tap_entry_resume,
               mobile_is_mode_offense, mobile_is_mode_defense);
+
+  // VirtualPad::NeedDisp also gates ScreenTap updates in this mobile build.
+  // Returning false hid the graphics but stopped the offense/defense heartbeat
+  // and therefore disabled every synthetic controller touch. Keep it enabled;
+  // visual-only hiding must be implemented later through alpha/render state.
+  const char *virtual_pad_need_disp_symbol =
+      "_ZN7match2D6Screen10VirtualPad8NeedDispEv";
+  const uintptr_t virtual_pad_need_disp =
+      so_find_addr(module, virtual_pad_need_disp_symbol);
+  static const uint32_t expected_virtual_pad_need_disp[2] = {
+      0x320003e0, // orr w0, wzr, #1
+      0xd65f03c0, // ret
+  };
+  if (memcmp((void *)virtual_pad_need_disp,
+             expected_virtual_pad_need_disp,
+             sizeof(expected_virtual_pad_need_disp)) != 0)
+    fatal_error("Unexpected VirtualPad::NeedDisp bytes at %p",
+                (void *)virtual_pad_need_disp);
+  debugPrintf("UE4 input: stock virtual pad retained at %p for ScreenTap "
+              "controller routing\n",
+              (void *)virtual_pad_need_disp);
+
+  // Do not force SetVisible(false): that also disables the ButtonObject state
+  // needed by the synthetic controller touches. Wrap UpdateInfo instead and
+  // tint its two movement and four action clips to 2% alpha after the stock
+  // routine has made them visible.
+  const char *virtual_pad_update_symbol =
+      "_ZN7match2D6Screen10VirtualPad10UpdateInfoEv";
+  const uintptr_t virtual_pad_update =
+      so_find_addr(module, virtual_pad_update_symbol);
+  const uintptr_t virtual_pad_update_runtime =
+      so_find_addr_rx(module, virtual_pad_update_symbol);
+  static const uint32_t expected_virtual_pad_update[4] = {
+      0xd10383ff, // sub sp, sp, #0xe0
+      0xfd0033ea, // str d10, [sp, #96]
+      0x6d0723e9, // stp d9, d8, [sp, #112]
+      0xa9086ffc, // stp x28, x27, [sp, #128]
+  };
+  if (memcmp((const void *)virtual_pad_update, expected_virtual_pad_update,
+             sizeof(expected_virtual_pad_update)) != 0)
+    fatal_error("Unexpected VirtualPad::UpdateInfo bytes at %p",
+                (void *)virtual_pad_update);
+  virtual_pad_set_color =
+      (void *)so_find_addr_rx(module,
+                             "_ZN5flash9MovieClip8SetColorEffff");
+  pes_virtual_pad_update_resume = virtual_pad_update_runtime + 0x10;
+  hook_arm64(virtual_pad_update, (uintptr_t)&pes_virtual_pad_update_info);
+  debugPrintf("UE4 input: virtual pad clips retained and tinted to 2%% alpha "
+              "at %p; ScreenTap state remains interactive\n",
+              (void *)virtual_pad_update);
 
   // PES consumes Android/UE gamepad events before they reach gameplay. Inject
   // Switch input into cobra::game::Pad after its clear/touch phase instead, so

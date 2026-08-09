@@ -19,6 +19,7 @@
 #include "config.h"
 #include "overlay.h"
 #include "font_atlas.h"
+#include "ue4_hooks.h"
 
 // text-overlay GL objects, created lazily on first draw
 static struct {
@@ -100,8 +101,18 @@ static void atlas_ready(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, FONT_ATLAS_W, FONT_ATLAS_H, 0,
-               GL_LUMINANCE, GL_UNSIGNED_BYTE, font_atlas);
+  static uint8_t font_atlas[FONT_ATLAS_W * FONT_ATLAS_H];
+  for (int glyph = 0; glyph < FONT_COUNT; glyph++) {
+    for (int row = 0; row < FONT_CELL_H; row++) {
+      const uint8_t bits = font_glyph_rows[glyph][row];
+      for (int col = 0; col < FONT_CELL_W; col++)
+        font_atlas[row * FONT_ATLAS_W + glyph * FONT_CELL_W + col] =
+            (bits & (1u << (FONT_CELL_W - 1 - col))) ? 0xff : 0x00;
+    }
+  }
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, FONT_ATLAS_W,
+               FONT_ATLAS_H, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+               font_atlas);
   glPixelStorei(GL_UNPACK_ALIGNMENT, prev_align);
   gl.uploaded = 1;
 }
@@ -115,9 +126,9 @@ static int emit_line(const char *text, int len, float x, float y,
     const char c = text[j];
     if (c == ' ')
       continue;
-    if (c < FONT_FIRST || c >= FONT_FIRST + FONT_COUNT)
+    const int idx = font_glyph_index(c);
+    if (idx < 0)
       continue;
-    const int idx = c - FONT_FIRST;
     const float u0 = (float)((idx % FONT_COLS) * FONT_CELL_W) / (float)FONT_ATLAS_W;
     const float v0 = (float)((idx / FONT_COLS) * FONT_CELL_H) / (float)FONT_ATLAS_H;
     const float u1 = u0 + (float)FONT_CELL_W / (float)FONT_ATLAS_W;
@@ -145,7 +156,7 @@ static struct {
   char text[8];
 } fps;
 
-static void fps_render(void) {
+static void overlay_render(void) {
   const u64 now = armGetSystemTick();
   const u64 freq = armGetSystemTickFreq();
   fps.frames++;
@@ -158,13 +169,37 @@ static void fps_render(void) {
     fps.window_start = now;
   }
 
-  if (!fps.text[0] || !gl_init())
+  const int control_mode = pes_mobile_control_active_mode();
+  const char *controls = NULL;
+  if (control_mode == PES_MOBILE_CONTROL_OFFENSE)
+    controls = "ATTACK: B PASS  X THROUGH  Y SHOOT  A CROSS  R DASH  + PAUSE";
+  else if (control_mode == PES_MOBILE_CONTROL_DEFENSE)
+    controls = "DEFEND: B PRESS  A TACKLE  L SWITCH  R DASH  + PAUSE";
+
+  if ((!config.show_fps || !fps.text[0]) && !controls)
+    return;
+  if (!gl_init())
     return;
 
-  const float gh = (float)screen_height / 30.0f;
-  const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-  static GLfloat verts[8 * 24];
-  const int quads = emit_line(fps.text, (int)strlen(fps.text), 10.0f, 8.0f, gw, gh, verts);
+  static GLfloat verts[128 * 24];
+  int quads = 0;
+  if (config.show_fps && fps.text[0]) {
+    const float gh = (float)screen_height / 30.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    quads += emit_line(fps.text, (int)strlen(fps.text), 10.0f, 8.0f,
+                       gw, gh, verts + quads * 24);
+  }
+  if (controls) {
+    const int len = (int)strlen(controls);
+    const float gh = (float)screen_height / 54.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    float x = (float)screen_width - 12.0f - (float)len * gw;
+    if (x < 12.0f)
+      x = 12.0f;
+    const float y = (float)screen_height - gh - 12.0f;
+    quads += emit_line(controls, len, x, y, gw, gh,
+                       verts + quads * 24);
+  }
   if (!quads)
     return;
 
@@ -248,7 +283,6 @@ static void fps_render(void) {
 }
 
 unsigned int eglSwapBuffersHook(void *display, void *surface) {
-  if (config.show_fps)
-    fps_render();
+  overlay_render();
   return eglSwapBuffers((EGLDisplay)display, (EGLSurface)surface);
 }

@@ -774,11 +774,8 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
       pass_surface.started_ms = now_ms;
     }
   }
-  const int pass_button_held =
-      control_mode == PES_MOBILE_CONTROL_OFFENSE ? b_held : l_held;
   if (pass_surface.owner == VIRTUAL_SURFACE_BUTTON &&
-      !surface_should_remain(now_ms, pass_surface.started_ms,
-                             pass_button_held, 80))
+      now_ms - pass_surface.started_ms >= 96)
     memset(&pass_surface, 0, sizeof(pass_surface));
   if (pass_surface.owner == VIRTUAL_SURFACE_CROSS) {
     if (now_ms - pass_surface.started_ms >= 40)

@@ -8,6 +8,12 @@ of this changelog.
 
 ### Fixed
 
+- Seeded the offline account consistently across Login, GetEntry, and SetEntry,
+  pre-accepted the supported agreement flags, and bypassed only the obsolete
+  season-change branch that reopened User Profile and legacy onboarding.
+- Kept the mobile VirtualPad active for synthetic Switch-controller input while
+  tinting its persistent stick and action clips to 2% alpha; added a compact
+  attack/defense mapping legend that does not intercept gameplay touches.
 - Replaced the title's unintended 5 FPS gameplay tick-rate request with a
   narrowly validated 30 FPS floor while preserving normal unlimited and
   already-valid frame-rate requests.

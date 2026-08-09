@@ -121,7 +121,7 @@ static const RuntimeFile required_runtime_files[] = {
   { "assets/responses/CmdGetMyclubVscomOpponent.bin", 248 },
   { "assets/responses/CmdGetProductList.bin", 448 },
   { "assets/responses/CmdGetServerEnv.bin", 1608 },
-  { "assets/responses/CmdLogin.bin", 2504 },
+  { "assets/responses/CmdLogin.bin", 2544 },
   { "assets/responses/CmdRecoverEnergy.bin", 112 },
   { "assets/responses/CmdSendDownloadStatsData.bin", 88 },
   { "assets/responses/CmdSendHeartbeat.bin", 96 },
@@ -129,7 +129,7 @@ static const RuntimeFile required_runtime_files[] = {
   { "assets/responses/CmdSendPlaylog.bin", 72 },
   { "assets/responses/CmdSetDevicetoken.bin", 80 },
   { "assets/responses/CmdSetMatchResult.bin", 312 },
-  { "assets/responses/CmdSetMyclubEntryInfo.bin", 2648 },
+  { "assets/responses/CmdSetMyclubEntryInfo.bin", 2520 },
   { "assets/responses/CmdSetMyclubLanguage.bin", 80 },
   { "assets/responses/CmdSetMyclubLockGameplayer.bin", 104 },
   { "assets/responses/CmdSetMyclubMainSquad.bin", 96 },
@@ -147,7 +147,7 @@ static const RuntimeFile required_runtime_files[] = {
   { "assets/responses/get_myclub_mainmenu_info.bin", 1272 },
   { "assets/responses/get_product_list.bin", 448 },
   { "assets/responses/GetCountryList.bin", 2384 },
-  { "assets/responses/set_myclub_entry_info.bin", 2648 },
+  { "assets/responses/set_myclub_entry_info.bin", 2520 },
 };
 
 static void check_data(void) {

@@ -33,3 +33,16 @@ ue4_tickrate_clamp_hook:
     br x17
 
     .size ue4_tickrate_clamp_hook, .-ue4_tickrate_clamp_hook
+
+    .align 2
+    .global pes_virtual_pad_update_original
+    .type pes_virtual_pad_update_original, %function
+pes_virtual_pad_update_original:
+    sub sp, sp, #0xe0
+    str d10, [sp, #96]
+    stp d9, d8, [sp, #112]
+    stp x28, x27, [sp, #128]
+    adrp x17, pes_virtual_pad_update_resume
+    ldr x17, [x17, :lo12:pes_virtual_pad_update_resume]
+    br x17
+    .size pes_virtual_pad_update_original, .-pes_virtual_pad_update_original
