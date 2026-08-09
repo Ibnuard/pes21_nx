@@ -42,6 +42,8 @@ Working in the currently tested revision:
   squads, a valid Strategy screen, and a playable local CPU match
 - reproducible generation of the exact 48 offline HTTP payloads from a
   user-supplied compatible APK
+- a three-input runtime preparer with an independently implemented minimal CPK
+  table reader for the ten required locale archives
 
 ## Runtime packaging findings
 
@@ -81,6 +83,26 @@ Only `.bin` files are opened by `jni_fake.c`. The Exhibition hook separately
 loads player, shirt, formation, and manager records from the game's master data
 already present in the user's OBB/PAK; those records are not copied into this
 repository or into the response fixtures.
+
+## Runtime preparer
+
+`tools/prepare_runtime.py` accepts the exact supported APK, main OBB, and patch
+OBB. It validates their complete SHA-256 hashes before creating a staging
+directory. It then extracts the arm64 libraries, main PAK, and ten locale CPKs,
+generates the response payloads, copies the release NRO, and hashes all 64
+required runtime files. Only a fully validated staging directory is renamed to
+the requested output; existing output is rejected to protect user SaveData.
+
+The patch OBB extractor is implemented in this repository. It decrypts and
+parses the CRI UTF CPK header and TOC, bounds-checks each requested member, and
+accepts only the expected uncompressed locale entries. Testing produced ten of
+ten CPK files byte-identical to the live runtime without invoking the local
+third-party CriPakTools binary.
+
+The GitHub release workflow packages this source as a standalone Windows
+`PES21NX-Prepare.exe` with its Python dependencies. When launched without
+arguments it uses native file dialogs, so release users need only the APK and
+two OBB files; the matching NRO is already beside the executable.
 
 ## Rendering fix
 

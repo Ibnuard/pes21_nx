@@ -9,6 +9,7 @@
 /*.nso
 /*.nsp
 /*.npdm
+/*.spec
 *.o
 *.d
 *.a

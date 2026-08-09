@@ -1,8 +1,33 @@
 # Runtime template
 
-Copy the completed contents of this directory to
-`sdmc:/switch/pes21_nx/`. The committed `.DONOTDELETE` files preserve the
-tested directory layout without redistributing game data.
+The release preparer turns three user-owned inputs into a complete, validated
+`pes21_nx/` directory:
+
+1. Download and extract the PES 2021 NX release bundle.
+2. Double-click `PES21NX-Prepare.exe` beside `pes21_nx.nro`.
+3. Select the compatible `PES21.apk`, main OBB, and patch OBB.
+4. Select the SD card's `switch/` directory as the output parent.
+5. Copy or retain the generated `switch/pes21_nx/` directory.
+
+The preparer validates the exact supported revision before creating output,
+extracts every required file, builds the offline responses, hashes the final
+runtime, and writes `install-report.json`. Existing output is never
+overwritten, protecting an existing `SaveData` directory.
+
+For source-tree use, install the Python dependencies and run:
+
+```powershell
+python -m pip install -r tools/offline-response-requirements.txt
+python tools/prepare_runtime.py `
+  --apk PES21.apk `
+  --main-obb main.305030001.jp.nyan2021.pesam.obb `
+  --patch-obb patch.305030001.jp.nyan2021.pesam.obb `
+  --nro pes21_nx.nro `
+  --output X:\switch\pes21_nx
+```
+
+The committed `.DONOTDELETE` files preserve the tested directory layout
+without redistributing game data.
 
 ## Required files
 
@@ -17,7 +42,7 @@ tested directory layout without redistributing game data.
 | `Download/dt530_mobile_*_all.cpk` | Extract the ten locale CPK files listed in `runtime-manifest.json` from the patch OBB. |
 | `assets/responses/*.bin` | Generate from your APK with the public builder below. |
 
-Generate the response payloads after installing the two Python dependencies:
+The response builder can also be run independently for debugging:
 
 ```powershell
 python -m pip install -r tools/offline-response-requirements.txt

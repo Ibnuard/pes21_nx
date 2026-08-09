@@ -4,6 +4,20 @@
     "version_code": 305030001,
     "game_version": "5.3.0"
   },
+  "supported_inputs": {
+    "apk": {
+      "size": 99876725,
+      "sha256": "c9cc96236199444a6effceb75049d419642b004a2b07eaa664dd8cd42d0a1589"
+    },
+    "main_obb": {
+      "size": 459211392,
+      "sha256": "70a1d6a25dfa186034d4903e01a926fef71911260b6fcc6b13be3cb9a7f2cdd7"
+    },
+    "patch_obb": {
+      "size": 1376863488,
+      "sha256": "675533cd0d056450897d19821e6009072a6a0f9ac60ea273f57b709c45f0a490"
+    }
+  },
   "required_root_files": [
     "pes21_nx.nro",
     "libUE4.so",

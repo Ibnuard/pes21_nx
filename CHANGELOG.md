@@ -18,6 +18,11 @@ of this changelog.
 - Added a deterministic offline-response builder. It extracts the original
   fixtures from a user-supplied APK, applies the two existing-account
   overrides, generates all 48 encrypted payloads, and validates their sizes.
+- Added a three-input runtime preparer that validates the APK and both OBBs,
+  extracts all libraries/PAK/locale CPK data, generates responses, and
+  atomically publishes a complete SD-card directory with an install report.
+- Added a project-owned minimal CRI UTF/CPK reader, removing the runtime
+  preparation dependency on the unlicensed third-party CriPakTools binary.
 
 ### Verified
 
@@ -25,6 +30,8 @@ of this changelog.
   with visible 3D player models and the custom multi-touch controller handler.
 - All generated offline payloads are byte-identical to the files used by the
   tested live runtime; proprietary APK/OBB/PAK/CPK data remains uncommitted.
+- A fresh full preparation generated and hashed 64 required files; the ten
+  extracted locale CPK archives matched the working runtime byte-for-byte.
 
 ## [0.1.79] - 2026-08-09
 
