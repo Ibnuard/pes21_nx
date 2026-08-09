@@ -151,7 +151,7 @@ jobs:
           name: pes21nx-windows-preparer
           path: release
 
-      - name: Package the three-input preparation bundle
+      - name: Package the one-folder preparation bundle
         shell: bash
         run: |
           set -euo pipefail

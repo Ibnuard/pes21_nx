@@ -65,6 +65,64 @@ APK_LIBRARIES = {
 BUFFER_SIZE = 8 * 1024 * 1024
 
 
+def discover_sized_input(
+    directory: Path, suffix: str, expected_size: int, label: str
+) -> Path:
+    candidates = [
+        path
+        for path in directory.iterdir()
+        if path.is_file()
+        and path.suffix.lower() == suffix
+        and path.stat().st_size == expected_size
+    ]
+    if len(candidates) != 1:
+        names = ", ".join(path.name for path in candidates) or "none"
+        raise RuntimeError(
+            f"expected exactly one supported {label} in {directory}; "
+            f"size-matching candidates: {names}"
+        )
+    return candidates[0]
+
+
+def discover_inputs(directory: Path) -> tuple[Path, Path, Path, Path]:
+    directory = directory.resolve()
+    if not directory.is_dir():
+        raise RuntimeError(f"input directory not found: {directory}")
+
+    apk = discover_sized_input(directory, ".apk", TARGET_APK["size"], "APK")
+    main_obb = discover_sized_input(
+        directory, ".obb", TARGET_MAIN_OBB["size"], "main OBB"
+    )
+    patch_obb = discover_sized_input(
+        directory, ".obb", TARGET_PATCH_OBB["size"], "patch OBB"
+    )
+
+    nro_candidates = [
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() == ".nro"
+    ]
+    exact_nro = [
+        path for path in nro_candidates if path.name.lower() == "pes21_nx.nro"
+    ]
+    if len(exact_nro) == 1:
+        nro = exact_nro[0]
+    elif len(nro_candidates) == 1:
+        nro = nro_candidates[0]
+    else:
+        names = ", ".join(path.name for path in nro_candidates) or "none"
+        raise RuntimeError(
+            f"expected one NRO in {directory}; candidates: {names}. "
+            "Keep only the release NRO or name the preferred file pes21_nx.nro."
+        )
+
+    print(f"Detected APK: {apk.name}")
+    print(f"Detected main OBB: {main_obb.name}")
+    print(f"Detected patch OBB: {patch_obb.name}")
+    print(f"Detected NRO: {nro.name}")
+    return apk, main_obb, patch_obb, nro
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -313,7 +371,8 @@ def prepare_runtime(
     output = output.resolve()
     if output.exists():
         raise RuntimeError(
-            f"output already exists: {output}. Select a new destination to protect SaveData."
+            f"output already exists: {output}. Move or remove that folder before "
+            "preparing again; it is never overwritten so SaveData stays protected."
         )
     if not nro.is_file() or nro.stat().st_size <= 0:
         raise RuntimeError(f"NRO not found or empty: {nro}")
@@ -376,7 +435,7 @@ def prepare_runtime(
     print(f"Runtime ready: {output}")
 
 
-def interactive_arguments() -> tuple[Path, Path, Path, Path]:
+def interactive_input_directory() -> Path:
     try:
         import tkinter as tk
         from tkinter import filedialog, messagebox
@@ -387,28 +446,30 @@ def interactive_arguments() -> tuple[Path, Path, Path, Path]:
     root.withdraw()
     messagebox.showinfo(
         "PES 2021 NX Preparer",
-        "Select the compatible PES21.apk, main OBB, patch OBB, then an output parent folder.",
+        "Select one folder containing PES21.apk, the main OBB, the patch OBB, "
+        "and the release NRO. A ready-to-copy switch/pes21_nx folder will be "
+        "created inside it.",
     )
-
-    def select_file(title: str, patterns: list[tuple[str, str]]) -> Path:
-        selected = filedialog.askopenfilename(title=title, filetypes=patterns)
-        if not selected:
-            raise RuntimeError("preparation canceled")
-        return Path(selected)
-
-    apk = select_file("Select PES21.apk", [("Android APK", "*.apk")])
-    main_obb = select_file("Select main OBB", [("Android OBB", "*.obb"), ("All", "*")])
-    patch_obb = select_file("Select patch OBB", [("Android OBB", "*.obb"), ("All", "*")])
-    parent = filedialog.askdirectory(title="Select the output parent folder")
-    if not parent:
+    selected = filedialog.askdirectory(
+        title="Select the folder containing the four input files"
+    )
+    if not selected:
         raise RuntimeError("preparation canceled")
     root.destroy()
-    return apk, main_obb, patch_obb, Path(parent) / "pes21_nx"
+    return Path(selected)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build switch/pes21_nx from a compatible APK and two OBB files"
+        description=(
+            "Build switch/pes21_nx from one folder containing a compatible APK, "
+            "two OBB files, and the release NRO"
+        )
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        help="folder containing the APK, both OBBs, and one release NRO",
     )
     parser.add_argument("--apk", type=Path)
     parser.add_argument("--main-obb", type=Path)
@@ -417,18 +478,41 @@ def main() -> None:
     parser.add_argument("--nro", type=Path)
     args = parser.parse_args()
 
-    provided = (args.apk, args.main_obb, args.patch_obb, args.output)
+    explicit_inputs = (args.apk, args.main_obb, args.patch_obb)
+    interactive_mode = False
     try:
-        if all(value is None for value in provided):
-            apk, main_obb, patch_obb, output = interactive_arguments()
-        elif any(value is None for value in provided):
-            parser.error("--apk, --main-obb, --patch-obb, and --output are required together")
+        if args.input_dir is not None:
+            if (
+                any(value is not None for value in explicit_inputs)
+                or args.nro is not None
+            ):
+                parser.error("--input-dir cannot be combined with explicit APK/OBB/NRO paths")
+            input_dir = args.input_dir.resolve()
+            apk, main_obb, patch_obb, nro = discover_inputs(input_dir)
+            output = args.output or input_dir / "switch" / "pes21_nx"
+        elif (
+            all(value is None for value in explicit_inputs)
+            and args.output is None
+            and args.nro is None
+        ):
+            interactive_mode = True
+            input_dir = interactive_input_directory().resolve()
+            apk, main_obb, patch_obb, nro = discover_inputs(input_dir)
+            output = input_dir / "switch" / "pes21_nx"
+        elif any(value is None for value in explicit_inputs) or args.output is None:
+            parser.error("explicit mode requires --apk, --main-obb, --patch-obb, and --output")
         else:
-            apk, main_obb, patch_obb, output = provided  # type: ignore[misc]
-        prepare_runtime(apk, main_obb, patch_obb, resolve_nro(args.nro), output)
+            apk, main_obb, patch_obb = explicit_inputs  # type: ignore[misc]
+            nro = resolve_nro(args.nro)
+            output = args.output
+        prepare_runtime(apk, main_obb, patch_obb, nro, output)
+        if interactive_mode:
+            from tkinter import messagebox
+
+            messagebox.showinfo("PES 2021 NX Preparer", f"Runtime ready:\n{output}")
     except Exception as error:
         print(f"ERROR: {error}", file=sys.stderr)
-        if all(value is None for value in provided):
+        if interactive_mode:
             try:
                 from tkinter import messagebox
 

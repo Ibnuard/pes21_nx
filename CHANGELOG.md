@@ -18,9 +18,9 @@ of this changelog.
 - Added a deterministic offline-response builder. It extracts the original
   fixtures from a user-supplied APK, applies the two existing-account
   overrides, generates all 48 encrypted payloads, and validates their sizes.
-- Added a three-input runtime preparer that validates the APK and both OBBs,
-  extracts all libraries/PAK/locale CPK data, generates responses, and
-  atomically publishes a complete SD-card directory with an install report.
+- Added a one-folder runtime preparer that automatically discovers the APK,
+  both OBBs, and release NRO, then validates and atomically publishes a complete
+  `switch/pes21_nx` SD-card directory with an install report.
 - Added a project-owned minimal CRI UTF/CPK reader, removing the runtime
   preparation dependency on the unlicensed third-party CriPakTools binary.
 

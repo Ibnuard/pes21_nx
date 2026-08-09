@@ -37,7 +37,7 @@ used as the compatibility target during development.
 - UE4-specific runtime hooks and diagnostic instrumentation
 - A synthetic silent audio fixture and a project-authored numeric FPS font
 - A placeholder-only runtime tree and a reproducible offline-response builder
-- A Windows release preparer that accepts only the APK and two OBB inputs
+- A one-folder Windows preparer for the APK, two OBBs, and release NRO
 - devkitPro/libnx Makefile and a WSL build helper
 
 ## Current status
@@ -154,12 +154,14 @@ does not use its incomplete myClub roster and instead binds valid master teams
 inside the native flow. See [runtime-template/README.md](runtime-template/README.md)
 for the exact command and provenance of every runtime directory.
 
-Release bundles include `PES21NX-Prepare.exe` beside the NRO. The user selects
-the compatible APK, main OBB, patch OBB, and an output parent. The preparer
-validates exact input hashes, extracts the three libraries and main PAK, parses
-the patch CPK directly to extract ten locale archives, generates all offline
-responses, validates and hashes 64 required runtime files, and publishes the
-output atomically. It does not depend on CriPakTools or overwrite SaveData.
+Release bundles include `PES21NX-Prepare.exe` beside the NRO. Put the compatible
+APK and both OBBs in that same directory, launch the preparer, and select that
+one directory. It detects all four inputs and creates a ready-to-copy
+`switch/pes21_nx/` below them. The preparer validates exact input hashes,
+extracts the three libraries and main PAK, parses the patch CPK directly to
+extract ten locale archives, generates all offline responses, validates and
+hashes 64 required runtime files, and publishes the output atomically. It does
+not depend on CriPakTools or overwrite SaveData.
 
 For an already-created offline account, `coach_list` and `squad_list` contain
 the owned club data while `default_coach_list` is empty. The game interprets a

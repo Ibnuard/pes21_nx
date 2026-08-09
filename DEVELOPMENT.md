@@ -42,8 +42,9 @@ Working in the currently tested revision:
   squads, a valid Strategy screen, and a playable local CPU match
 - reproducible generation of the exact 48 offline HTTP payloads from a
   user-supplied compatible APK
-- a three-input runtime preparer with an independently implemented minimal CPK
-  table reader for the ten required locale archives
+- a one-folder runtime preparer that discovers the APK, both OBBs, and release
+  NRO, with an independently implemented minimal CPK table reader for the ten
+  required locale archives
 
 ## Runtime packaging findings
 
@@ -86,12 +87,14 @@ repository or into the response fixtures.
 
 ## Runtime preparer
 
-`tools/prepare_runtime.py` accepts the exact supported APK, main OBB, and patch
-OBB. It validates their complete SHA-256 hashes before creating a staging
-directory. It then extracts the arm64 libraries, main PAK, and ten locale CPKs,
-generates the response payloads, copies the release NRO, and hashes all 64
-required runtime files. Only a fully validated staging directory is renamed to
-the requested output; existing output is rejected to protect user SaveData.
+`tools/prepare_runtime.py` discovers the exact supported APK, main OBB, patch
+OBB, and one release NRO in a selected directory. It validates the proprietary
+inputs' complete SHA-256 hashes before creating a staging directory. It then
+extracts the arm64 libraries, main PAK, and ten locale CPKs, generates the
+response payloads, copies the release NRO, and hashes all 64 required runtime
+files. Only a fully validated staging directory is renamed to
+`<selected>/switch/pes21_nx`; existing output is rejected to protect user
+SaveData. Explicit file-path arguments remain available for development.
 
 The patch OBB extractor is implemented in this repository. It decrypts and
 parses the CRI UTF CPK header and TOC, bounds-checks each requested member, and
@@ -101,8 +104,9 @@ third-party CriPakTools binary.
 
 The GitHub release workflow packages this source as a standalone Windows
 `PES21NX-Prepare.exe` with its Python dependencies. When launched without
-arguments it uses native file dialogs, so release users need only the APK and
-two OBB files; the matching NRO is already beside the executable.
+arguments it uses one native directory picker. Release users extract the bundle,
+put the APK and both OBBs beside its included NRO, select that directory, and
+receive a complete `switch/pes21_nx` tree inside it.
 
 ## Rendering fix
 

@@ -96,7 +96,7 @@ def main() -> None:
 
 - `pes21_nx-v{version}.nro` - source-built Nintendo Switch wrapper
 - `pes21_nx-v{version}.nro.sha256` - SHA-256 checksum
-- `PES21NX-Prepare-v{version}.zip` - Windows three-input preparation bundle
+- `PES21NX-Prepare-v{version}.zip` - Windows one-folder preparation bundle
 - `PES21NX-Prepare-v{version}.zip.sha256` - bundle SHA-256 checksum
 - `PES21NX-Prepare.exe` - standalone Windows runtime preparer
 

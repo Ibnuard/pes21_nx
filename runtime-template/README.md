@@ -1,13 +1,14 @@
 # Runtime template
 
-The release preparer turns three user-owned inputs into a complete, validated
-`pes21_nx/` directory:
+The release preparer turns one folder containing the four required files into a
+complete, validated `switch/pes21_nx/` directory:
 
 1. Download and extract the PES 2021 NX release bundle.
-2. Double-click `PES21NX-Prepare.exe` beside `pes21_nx.nro`.
-3. Select the compatible `PES21.apk`, main OBB, and patch OBB.
-4. Select the SD card's `switch/` directory as the output parent.
-5. Copy or retain the generated `switch/pes21_nx/` directory.
+2. Copy the compatible `PES21.apk`, main OBB, and patch OBB into that extracted
+   folder beside `PES21NX-Prepare.exe` and `pes21_nx.nro`.
+3. Double-click `PES21NX-Prepare.exe` and select that one folder.
+4. Wait for `<selected folder>/switch/pes21_nx/` to be created.
+5. Copy the generated `switch/` directory to the root of the SD card.
 
 The preparer validates the exact supported revision before creating output,
 extracts every required file, builds the offline responses, hashes the final
@@ -18,13 +19,14 @@ For source-tree use, install the Python dependencies and run:
 
 ```powershell
 python -m pip install -r tools/offline-response-requirements.txt
-python tools/prepare_runtime.py `
-  --apk PES21.apk `
-  --main-obb main.305030001.jp.nyan2021.pesam.obb `
-  --patch-obb patch.305030001.jp.nyan2021.pesam.obb `
-  --nro pes21_nx.nro `
-  --output X:\switch\pes21_nx
+python tools/prepare_runtime.py --input-dir X:\PES21NX-Prepare
 ```
+
+The selected directory may contain the EXE, README, and manifest as well. The
+preparer identifies the APK and OBBs by the supported revision's exact sizes
+and hashes, and accepts a single `.nro` file (including versioned release names).
+Explicit `--apk`, `--main-obb`, `--patch-obb`, `--nro`, and `--output` arguments
+remain available for development automation.
 
 The committed `.DONOTDELETE` files preserve the tested directory layout
 without redistributing game data.
