@@ -144,11 +144,251 @@ pes_exhibition_strategy_main_hook:
     ldp x2, x3, [sp, #0x10]
     ldp x0, x1, [sp, #0x00]
     add sp, sp, #0x50
+    cbz x17, 1f
 
     sub sp, sp, #0x40
     stp x19, x30, [sp, #48]
     ldrb w1, [x0, #552]
     str x20, [sp, #32]
     br x17
+1:
+    ret
 
     .size pes_exhibition_strategy_main_hook, .-pes_exhibition_strategy_main_hook
+
+    .align 2
+    .global pes_exhibition_strategy_created_hook
+    .type pes_exhibition_strategy_created_hook, %function
+
+// Mid-function hook immediately after MyClubSquadEdit::CreateObject. At this
+// point x19 is the Strategy flow and x1 is the new child. The helper performs
+// the displaced state transition and returns the common epilogue address.
+pes_exhibition_strategy_created_hook:
+    stp x29, x30, [sp, #-16]!
+    mov x0, x19
+    bl pes_exhibition_strategy_created_entry
+    mov x17, x0
+    ldp x29, x30, [sp], #16
+    mov w0, wzr
+    br x17
+
+    .size pes_exhibition_strategy_created_hook, .-pes_exhibition_strategy_created_hook
+
+    .align 2
+    .global pes_exhibition_training_touch_hook
+    .type pes_exhibition_training_touch_hook, %function
+
+// Entry hook for MyClubMatchTrainingTeamSelect::PadEventTouch. Record which
+// of the two team panels opened the shared master-club selector.
+pes_exhibition_training_touch_hook:
+    sub sp, sp, #0x30
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x29, x30, [sp, #0x20]
+    bl pes_exhibition_training_touch_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x30
+
+    sub sp, sp, #0x40
+    stp x19, x30, [sp, #48]
+    ldr w8, [x1, #4]
+    str x20, [sp, #32]
+    br x17
+
+    .size pes_exhibition_training_touch_hook, .-pes_exhibition_training_touch_hook
+
+    .align 2
+    .global pes_exhibition_training_list_hook
+    .type pes_exhibition_training_list_hook, %function
+
+// Entry hook for SetupListInfo. Publish the selected team for the row that is
+// about to be rendered before the stock COM-team formatter reads DebugMode.
+pes_exhibition_training_list_hook:
+    sub sp, sp, #0x40
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x29, x30, [sp, #0x30]
+    bl pes_exhibition_training_list_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x30]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x40
+
+    stp x28, x24, [sp, #-64]!
+    stp x23, x22, [sp, #16]
+    stp x21, x20, [sp, #32]
+    stp x19, x30, [sp, #48]
+    br x17
+
+    .size pes_exhibition_training_list_hook, .-pes_exhibition_training_list_hook
+
+    .align 2
+    .global pes_exhibition_training_child_hook
+    .type pes_exhibition_training_child_hook, %function
+
+// Capture the raw TeamId returned by MyClubFlowTeamSelect before the stock
+// training window refreshes its two matchup rows.
+pes_exhibition_training_child_hook:
+    sub sp, sp, #0x40
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x29, x30, [sp, #0x30]
+    bl pes_exhibition_training_child_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x30]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x40
+
+    str x20, [sp, #-32]!
+    stp x19, x30, [sp, #16]
+    ldrb w8, [x1]
+    ldr x9, [x1, #8]
+    br x17
+
+    .size pes_exhibition_training_child_hook, .-pes_exhibition_training_child_hook
+
+    .align 2
+    .global pes_exhibition_training_footer_hook
+    .type pes_exhibition_training_footer_hook, %function
+
+// Turn Practice Match into the Exhibition hub. The helper swallows Next and
+// Game Plan after handing their transition to FlowTransition::DirectSet; all
+// other footer keys replay the stock function prologue.
+pes_exhibition_training_footer_hook:
+    sub sp, sp, #0x30
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x29, x30, [sp, #0x20]
+    bl pes_exhibition_training_footer_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x30
+    cbz x17, 1f
+
+    sub sp, sp, #0x80
+    cmp w1, #3
+    stp x27, x26, [sp, #48]
+    stp x25, x24, [sp, #64]
+    br x17
+1:
+    ret
+
+    .size pes_exhibition_training_footer_hook, .-pes_exhibition_training_footer_hook
+
+    .align 2
+    .global pes_exhibition_search_post_hook
+    .type pes_exhibition_search_post_hook, %function
+
+// Tail hook for MyClubMatchSearching::UpdatePostControlWindow. The original
+// state machine has finished deciding footer visibility here. Configure the
+// four-button Exhibition footer, then replay the two saved-register restores
+// and continue through the stock epilogue.
+pes_exhibition_search_post_hook:
+    sub sp, sp, #0x10
+    stp x29, x30, [sp]
+    mov x0, x19
+    bl pes_exhibition_search_post_entry
+    mov x17, x0
+    ldp x29, x30, [sp]
+    add sp, sp, #0x10
+
+    ldp x19, x30, [sp, #32]
+    ldp x21, x20, [sp, #16]
+    br x17
+
+    .size pes_exhibition_search_post_hook, .-pes_exhibition_search_post_hook
+
+    .align 2
+    .global pes_exhibition_search_user_name_hook
+    .type pes_exhibition_search_user_name_hook, %function
+
+// TaskMatchSearchingTraining::ActInit calls GetUserName on a nullable
+// MyClubUserInfo. Ask C for either the stock string or the local Exhibition
+// fallback, then replay the two string-layout loads overwritten by the
+// 16-byte detour and resume after them.
+pes_exhibition_search_user_name_hook:
+    sub sp, sp, #0x20
+    stp x29, x30, [sp, #0x00]
+    mov x0, x20
+    add x1, sp, #0x10
+    bl pes_exhibition_search_user_name
+    mov x17, x0
+    ldr x0, [sp, #0x10]
+    ldp x29, x30, [sp, #0x00]
+    add sp, sp, #0x20
+
+    ldrb w8, [x0]
+    ldp x10, x9, [x0, #8]
+    br x17
+
+    .size pes_exhibition_search_user_name_hook, .-pes_exhibition_search_user_name_hook
+
+    .align 2
+    .global pes_exhibition_filter_teams_hook
+    .type pes_exhibition_filter_teams_hook, %function
+
+// Narrow each category vector to clubs with an installed wrapper roster. The
+// original function then applies its normal availability intersection.
+pes_exhibition_filter_teams_hook:
+    sub sp, sp, #0x30
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x29, x30, [sp, #0x20]
+    bl pes_exhibition_filter_teams_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x30
+
+    sub sp, sp, #0x70
+    stp x28, x27, [sp, #16]
+    stp x26, x25, [sp, #32]
+    stp x24, x23, [sp, #48]
+    br x17
+
+    .size pes_exhibition_filter_teams_hook, .-pes_exhibition_filter_teams_hook
+
+    .align 2
+    .global pes_exhibition_string_get_hook
+    .type pes_exhibition_string_get_hook, %function
+
+// C returns a low-bit-tagged wrapper literal for Exhibition-specific labels;
+// stock lookups return the aligned resume address. Untagged calls replay the
+// manager's prologue and continue unchanged.
+pes_exhibition_string_get_hook:
+    sub sp, sp, #0x40
+    stp x0, x1, [sp, #0x00]
+    str x8, [sp, #0x10]
+    stp x29, x30, [sp, #0x30]
+    mov w0, w1
+    bl pes_exhibition_string_get_target
+    tbz x0, #0, 1f
+    bic x0, x0, #1
+    ldp x29, x30, [sp, #0x30]
+    add sp, sp, #0x40
+    ldp x19, x30, [sp, #32]
+    ldp x21, x20, [sp, #16]
+    ldr x22, [sp], #48
+    ret
+1:
+    mov x17, x0
+    ldp x29, x30, [sp, #0x30]
+    ldr x8, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x40
+
+    ldr x8, [x8, #856]
+    add x21, x0, #0x48
+    mov x22, x0
+    mov x0, x21
+    br x17
+
+    .size pes_exhibition_string_get_hook, .-pes_exhibition_string_get_hook

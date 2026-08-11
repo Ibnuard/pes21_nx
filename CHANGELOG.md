@@ -4,6 +4,44 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.95] - 2026-08-11
+
+### Added
+
+- Replaced the eFootball entry with a focused Exhibition matchup hub built
+  from the title's existing Matchmaking UI.
+- Added independent HOME and COM club pickers, touchable team cards, COM-level
+  selection, an optional Game Plan editor, and a direct Proceed action.
+- Added complete verified master-data roster mappings for FC Barcelona and
+  Madrid Chamartin B. Selecting the same club on both sides automatically
+  moves the other side to the remaining valid opponent.
+
+### Fixed
+
+- Kept selected HOME and COM identities synchronized across badges, names,
+  Strategy data, match setup, and the final playable squads.
+- Preserved edited Game Plan data when returning to Matchmaking and removed
+  the previous repeated Matchmaking/Strategy flow.
+- Changed direct Proceed to save and fade the stock Strategy child during its
+  creation tick, avoiding a visible Strategy-screen flash before the pitch.
+- Re-ran the game's native uniform collision selector after replacing both
+  teams so the final home/away kits follow the selected clubs instead of stale
+  Madrid uniform IDs.
+
+### Verified
+
+- The HOME/COM selectors can be changed independently and the resulting clubs
+  reach a playable CPU match with valid players.
+- Direct Proceed and the optional Game Plan route both complete the Exhibition
+  setup without returning to the main tile menu.
+
+### Known issues
+
+- The public Exhibition selector is intentionally limited to FC Barcelona and
+  Madrid Chamartin B until more master rosters are mapped and validated.
+- Active gameplay performance and pacing in Ryujinx remain dependent on host
+  load; native Nintendo Switch performance still needs hardware validation.
+
 ## [0.1.94] - 2026-08-09
 
 ### Fixed

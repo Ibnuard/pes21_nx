@@ -12,5 +12,8 @@ void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                          int32_t left, int32_t right, int connected);
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
+void pes_exhibition_matchmaking_tap(float normalized_x, float normalized_y);
+uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
+                                                void *squad_edit);
 
 #endif

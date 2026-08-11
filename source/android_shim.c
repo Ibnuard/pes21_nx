@@ -152,6 +152,11 @@ static uint64_t previous_hid_buttons;
 static uint32_t previous_mobile_context_generation;
 static uint64_t mobile_context_seen_ms;
 static int previous_mobile_context_mode;
+static float physical_touch_start_x;
+static float physical_touch_start_y;
+static float physical_touch_last_x;
+static float physical_touch_last_y;
+static int physical_touch_tracking;
 
 enum {
   FAKE_POINTER_PHYSICAL = 0,
@@ -943,6 +948,7 @@ void android_input_poll(void) {
     previous_left_axis_y = 0.0f;
     previous_left_axis_valid = 0;
     previous_hid_buttons = 0;
+    physical_touch_tracking = 0;
     reset_virtual_surfaces();
     FakeTouchState empty = {0};
     reconcile_touch_state(&empty);
@@ -999,6 +1005,19 @@ void android_input_poll(void) {
   const int physical_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
 
+  if (physical_active) {
+    physical_touch_last_x = touch_x;
+    physical_touch_last_y = touch_y;
+    if (!physical_was_active) {
+      physical_touch_start_x = touch_x;
+      physical_touch_start_y = touch_y;
+      physical_touch_tracking = 1;
+    }
+  } else if (ended) {
+    physical_touch_last_x = touch_x;
+    physical_touch_last_y = touch_y;
+  }
+
   // An End sample carries the final coordinate. Put it in the UP snapshot even
   // though the desired set no longer contains the physical pointer.
   if (ended) {
@@ -1020,6 +1039,20 @@ void android_input_poll(void) {
 
   const int physical_is_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
+  if (physical_was_active && !physical_is_active &&
+      physical_touch_tracking && screen_width > 0 && screen_height > 0) {
+    const float dx = physical_touch_last_x - physical_touch_start_x;
+    const float dy = physical_touch_last_y - physical_touch_start_y;
+    // Only a short click may activate the Matchmaking cards; normal swipes
+    // continue exclusively through Android's original touch stream.
+    if (fabsf(dx) <= (float)screen_width * 0.06f &&
+        fabsf(dy) <= (float)screen_height * 0.08f) {
+      pes_exhibition_matchmaking_tap(
+          physical_touch_last_x / (float)screen_width,
+          physical_touch_last_y / (float)screen_height);
+    }
+    physical_touch_tracking = 0;
+  }
   if (!physical_was_active && physical_is_active && touch)
     debugPrintf("input: touch down raw=%u,%u android=%.1f,%.1f\n",
                 touch->x, touch->y, touch_x, touch_y);

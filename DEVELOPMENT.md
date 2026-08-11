@@ -15,7 +15,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.94
+## Wrapper version 0.1.95
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -38,8 +38,12 @@ Working in the currently tested revision:
 - visible, correctly oriented 3D gameplay through the fallback compositor
 - custom Switch-HID-to-mobile-touch controls in the tested Ryujinx Classic
   layout, including simultaneous movement, Dash, and action input
-- eFootball-to-Exhibition routing with master-data FC Barcelona and Madrid
-  squads, a valid Strategy screen, and a playable local CPU match
+- an Exhibition matchup hub reached from the renamed main-menu tile, with
+  independent HOME/COM club selection, COM level, optional Game Plan, and
+  direct Proceed into a local CPU match
+- validated master-data FC Barcelona and Madrid squads, refreshed stock kit
+  selection, and a same-tick Strategy save/fade path that avoids an extra
+  visible Strategy screen when starting directly
 - a validated gameplay tick-rate hook that replaces the erroneous 5 FPS
   request with a 30 FPS floor while leaving valid rates unchanged
 - native-TLS render-state tracking and a release GLES state cache that reduce
