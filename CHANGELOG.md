@@ -4,6 +4,29 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.96] - 2026-08-14
+
+### Fixed
+
+- Changed the runtime preparer to extract the PES/eFootball application icon
+  from the user's validated APK and embed a converted 256x256 JPEG into the
+  installed NRO, replacing the missing or stale launcher icon.
+- Rebuilt the NRO ASET metadata while preserving the original executable,
+  NACP, and optional RomFS sections, and included icon provenance and hashes in
+  `install-report.json`.
+
+### Verified
+
+- The Python preparer and standalone PyInstaller executable both completed a
+  full preparation from the supported APK and two OBBs. The resulting runtime
+  passed all file validation with a valid JPEG icon in its NRO asset section.
+
+### Notes
+
+- The public release NRO intentionally contains no proprietary artwork. Run
+  the supplied preparer to generate the personalized NRO before copying it to
+  the SD card.
+
 ## [0.1.95] - 2026-08-11
 
 ### Added

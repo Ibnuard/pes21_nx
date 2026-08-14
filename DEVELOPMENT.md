@@ -15,7 +15,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.95
+## Wrapper version 0.1.96
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -55,6 +55,9 @@ Working in the currently tested revision:
 - a one-folder runtime preparer that discovers the APK, both OBBs, and release
   NRO, with an independently implemented minimal CPK table reader for the ten
   required locale archives
+- local NRO icon personalization: the preparer converts the verified APK's
+  application icon to the Switch JPEG format and rebuilds the NRO ASET section
+  without committing or redistributing the proprietary artwork
 
 ## Runtime packaging findings
 

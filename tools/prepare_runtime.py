@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -62,6 +63,11 @@ APK_LIBRARIES = {
     "lib/arm64-v8a/libafp-core.so": "libafp-core.so",
     "lib/arm64-v8a/libavs2-core.so": "libavs2-core.so",
 }
+APK_ICON_PATH = "res/drawable-xxxhdpi-v4/icon.png"
+NRO_ASSET_HEADER_SIZE = 0x38
+NRO_ASSET_OFFSET_FIELD = 0x18
+NRO_ASSET_MAGIC = b"ASET"
+NRO_ICON_DIMENSIONS = (256, 256)
 BUFFER_SIZE = 8 * 1024 * 1024
 
 
@@ -146,6 +152,104 @@ def validate_input(path: Path, label: str, expected: dict[str, Any]) -> str:
             "PES 2021 Mobile v5.3.0 Nyan Mod Offline target."
         )
     return digest
+
+
+def build_nro_icon(apk: Path) -> tuple[bytes, str]:
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError(
+            "Pillow is required to convert the APK icon for the NRO"
+        ) from error
+
+    with zipfile.ZipFile(apk) as archive:
+        try:
+            source_icon = archive.read(APK_ICON_PATH)
+        except KeyError as error:
+            raise RuntimeError(
+                f"APK icon is missing: {APK_ICON_PATH}"
+            ) from error
+
+    try:
+        with Image.open(io.BytesIO(source_icon)) as image:
+            image.load()
+            image = image.convert("RGB")
+            if image.size != NRO_ICON_DIMENSIONS:
+                image = image.resize(NRO_ICON_DIMENSIONS, Image.Resampling.LANCZOS)
+            encoded = io.BytesIO()
+            image.save(
+                encoded,
+                format="JPEG",
+                quality=95,
+                optimize=True,
+                progressive=False,
+            )
+    except Exception as error:
+        raise RuntimeError("failed to decode the APK application icon") from error
+
+    icon = encoded.getvalue()
+    if not icon.startswith(b"\xff\xd8") or not icon.endswith(b"\xff\xd9"):
+        raise RuntimeError("converted NRO icon is not a valid JPEG stream")
+    return icon, hashlib.sha256(source_icon).hexdigest()
+
+
+def inject_apk_icon_into_nro(apk: Path, nro: Path, output: Path) -> dict[str, Any]:
+    source = nro.read_bytes()
+    if len(source) < NRO_ASSET_OFFSET_FIELD + 4:
+        raise RuntimeError("release NRO is too small to contain an NRO header")
+
+    asset_offset = struct.unpack_from("<I", source, NRO_ASSET_OFFSET_FIELD)[0]
+    if (
+        asset_offset < NRO_ASSET_HEADER_SIZE
+        or asset_offset + NRO_ASSET_HEADER_SIZE > len(source)
+        or source[asset_offset : asset_offset + 4] != NRO_ASSET_MAGIC
+    ):
+        raise RuntimeError("release NRO has no valid ASET metadata header")
+
+    old_header = source[asset_offset : asset_offset + NRO_ASSET_HEADER_SIZE]
+
+    def read_asset(pair_offset: int, label: str) -> bytes:
+        relative, size = struct.unpack_from("<QQ", old_header, pair_offset)
+        if size == 0:
+            return b""
+        start = asset_offset + relative
+        end = start + size
+        if relative < NRO_ASSET_HEADER_SIZE or start < asset_offset or end > len(source):
+            raise RuntimeError(f"release NRO has an invalid {label} asset range")
+        return source[start:end]
+
+    nacp = read_asset(0x18, "NACP")
+    romfs = read_asset(0x28, "RomFS")
+    if not nacp:
+        raise RuntimeError("release NRO is missing its NACP metadata")
+
+    icon, apk_icon_sha256 = build_nro_icon(apk)
+    header = bytearray(old_header)
+    payload = bytearray()
+    cursor = NRO_ASSET_HEADER_SIZE
+    for pair_offset, asset in ((0x08, icon), (0x18, nacp), (0x28, romfs)):
+        if asset:
+            struct.pack_into("<QQ", header, pair_offset, cursor, len(asset))
+            payload.extend(asset)
+            cursor += len(asset)
+        else:
+            struct.pack_into("<QQ", header, pair_offset, 0, 0)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("wb") as prepared:
+        prepared.write(source[:asset_offset])
+        prepared.write(header)
+        prepared.write(payload)
+
+    return {
+        "source": APK_ICON_PATH,
+        "source_sha256": apk_icon_sha256,
+        "format": "JPEG",
+        "width": NRO_ICON_DIMENSIONS[0],
+        "height": NRO_ICON_DIMENSIONS[1],
+        "size": len(icon),
+        "sha256": hashlib.sha256(icon).hexdigest(),
+    }
 
 
 def copy_stream(source: BinaryIO, destination: Path, size: int | None = None) -> None:
@@ -410,11 +514,13 @@ def prepare_runtime(
         apply_compatibility_overrides(responses)
         write_responses(responses, staging / "assets" / "responses", keep_json=False)
 
-        shutil.copyfile(nro, staging / "pes21_nx.nro")
+        print("Embedding the APK application icon into the NRO...")
+        prepared_nro = staging / "pes21_nx.nro"
+        nro_icon = inject_apk_icon_into_nro(apk, nro, prepared_nro)
         (staging / "SaveData").mkdir()
 
         print("Hashing and validating the completed runtime...")
-        files = validate_runtime(staging, nro.stat().st_size)
+        files = validate_runtime(staging, prepared_nro.stat().st_size)
         report = {
             "target": {
                 "package": "jp.nyan2021.pesam",
@@ -422,6 +528,7 @@ def prepare_runtime(
                 "game_version": "5.3.0",
             },
             "inputs": input_hashes,
+            "nro_icon": nro_icon,
             "files": files,
             "result": "validated",
         }

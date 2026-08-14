@@ -11,9 +11,10 @@ complete, validated `switch/pes21_nx/` directory:
 5. Copy the generated `switch/` directory to the root of the SD card.
 
 The preparer validates the exact supported revision before creating output,
-extracts every required file, builds the offline responses, hashes the final
-runtime, and writes `install-report.json`. Existing output is never
-overwritten, protecting an existing `SaveData` directory.
+extracts every required file, embeds the application icon from the user's APK
+into the installed NRO, builds the offline responses, hashes the final runtime,
+and writes `install-report.json`. Existing output is never overwritten,
+protecting an existing `SaveData` directory.
 
 For source-tree use, install the Python dependencies and run:
 

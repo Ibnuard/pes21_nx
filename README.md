@@ -34,7 +34,8 @@ goes to **Nyan Mod** for the offline modification used during development.
    - `main.305030001.jp.nyan2021.pesam.obb`;
    - `patch.305030001.jp.nyan2021.pesam.obb`.
 3. Run `PES21NX-Prepare.exe` and select that folder. The release NRO is already
-   included in the preparation bundle.
+   included in the preparation bundle. The preparer also embeds the PES
+   application icon extracted from your APK into the installed NRO.
 4. Wait for the tool to create `switch/pes21_nx/`, then copy the generated
    `switch` folder to the root of the Nintendo Switch SD card and merge it with
    the existing folder.
