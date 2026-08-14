@@ -5,10 +5,10 @@ Nintendo Switch homebrew. It runs the original game libraries through native
 libnx-backed Android, Bionic, JNI, audio, input, filesystem, and graphics
 compatibility shims; it is not an Android emulator.
 
-This repository contains wrapper source code and project-authored preparation
-tools only. It does **not** contain an APK, OBB, native game libraries,
-extracted game assets, saved data, private keys, or other proprietary game
-content. Supply a legally obtained compatible copy of the game. Do not request
+This repository contains wrapper source code, project-authored preparation
+tools, and compatibility screenshots only. It does **not** contain an APK,
+OBB, native game libraries, extracted runtime assets, saved data, or private
+keys. Supply a legally obtained compatible copy of the game. Do not request
 copyrighted files, download links, private keys, or piracy support.
 
 This independent project is not affiliated with, authorized, sponsored, or
@@ -24,6 +24,16 @@ work without source changes.
 
 The Nyan Mod files are not included, maintained, or distributed here. Credit
 goes to **Nyan Mod** for the offline modification used during development.
+
+## Screenshots
+
+<p align="center">
+  <img src="public/0.JPG" alt="PES 2021 title screen running in Ryujinx" width="49%">
+  <img src="public/1.JPG" alt="PES 2021 NX main menu with the Exhibition tile" width="49%">
+  <img src="public/2.JPG" alt="Exhibition HOME and COM matchmaking screen" width="49%">
+  <img src="public/3.JPG" alt="Exhibition Game Plan screen with a valid Barcelona squad" width="49%">
+  <img src="public/4.JPG" alt="Barcelona versus Madrid Exhibition kickoff" width="99%">
+</p>
 
 ## How to install
 
