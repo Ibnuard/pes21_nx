@@ -80,6 +80,16 @@ static void *(*exhibition_commonwork_update_player)(void *common_work,
                                                      uint64_t player_id);
 static uint64_t (*exhibition_get_player_id_by_unique_id)(
     const uint32_t *unique_id);
+static void *(*exhibition_squad_edit_get_squad_data)(void *squad_edit,
+                                                      uint32_t home_away);
+static uint32_t (*exhibition_squad_data_get_player_count)(void *squad_data);
+static void *(*exhibition_squad_data_get_player_by_index)(
+    void *squad_data, const uint32_t *index);
+static void (*exhibition_squad_edit_update_player)(
+    void *squad_edit, const void *player_id, const void *player,
+    uint32_t parameter_type);
+static uint32_t (*exhibition_get_player_overall)(
+    const void *player, const uint32_t *position, uint32_t condition);
 static void (*exhibition_set_test_match_team_id)(uint32_t team_id);
 static void (*exhibition_set_test_match_cpu_level)(uint32_t level);
 static void *(*exhibition_status_get_instance)(void);
@@ -159,6 +169,7 @@ static _Alignas(4) uint32_t exhibition_search_refresh_pending;
 static _Alignas(4) uint32_t exhibition_search_initial_refresh_ticks;
 static _Alignas(4) uint32_t exhibition_search_touch_pending;
 static _Alignas(4) uint32_t exhibition_team_picker_open;
+static _Alignas(4) uint32_t exhibition_cpu_level_popup_open;
 #define EXHIBITION_INITIAL_REFRESH_TICKS 180u
 #define EXHIBITION_FALLBACK_HOME_TEAM 100u
 #define EXHIBITION_FALLBACK_AWAY_TEAM 101u
@@ -790,6 +801,104 @@ static uint32_t exhibition_install_master_roster(
   return valid;
 }
 
+static uint32_t exhibition_refresh_squad_side_player_stats(
+    unsigned char *squad_edit, void *common_work, uint32_t side) {
+  const uint32_t raw_team = __atomic_load_n(
+      side ? &exhibition_away_team_id : &exhibition_home_team_id,
+      __ATOMIC_ACQUIRE);
+  const ExhibitionMasterRoster *roster = exhibition_find_roster(raw_team);
+  void *squad_data = exhibition_squad_edit_get_squad_data(squad_edit, side);
+  if (!roster || !squad_data)
+    return 0;
+
+  uint32_t squad_count = exhibition_squad_data_get_player_count(squad_data);
+  if (squad_count > 40)
+    squad_count = 40;
+
+  uint32_t updated = 0;
+  uint32_t roster_index = 0;
+  while (updated < squad_count && roster_index < roster->player_count) {
+    const uint32_t unique_id =
+        roster->player_unique_ids[roster_index++];
+    const uint64_t player_id =
+        exhibition_get_player_id_by_unique_id(&unique_id);
+    unsigned char *player =
+        exhibition_commonwork_update_player(common_work, player_id);
+    uint64_t actual_player_id = 0;
+    if (player)
+      memcpy(&actual_player_id, player + 44, sizeof(actual_player_id));
+    if (!player || actual_player_id != player_id)
+      continue;
+
+    void *squad_player = exhibition_squad_data_get_player_by_index(
+        squad_data, &updated);
+    if (!squad_player)
+      break;
+
+    // SquadPlayer stores its lookup key first, followed by normal and boosted
+    // tmpdb::Player copies. Refresh both copies from the authentic master row.
+    exhibition_squad_edit_update_player(squad_edit, squad_player, player, 0);
+    exhibition_squad_edit_update_player(squad_edit, squad_player, player, 1);
+
+#ifdef DEBUG_LOG
+    if (exhibition_get_player_overall && updated < 4) {
+      const uint32_t natural_position = 13;
+      const uint32_t overall = exhibition_get_player_overall(
+          player, &natural_position, 2);
+      debugPrintf("exhibition: squad stats side=%u slot=%u unique=%u "
+                  "player=0x%llx overall=%u\n",
+                  side, updated, unique_id,
+                  (unsigned long long)player_id, overall);
+    }
+#endif
+    updated++;
+  }
+
+  debugPrintf("exhibition: refreshed squad stats side=%u team=%u "
+              "players=%u/%u\n",
+              side, raw_team, updated, squad_count);
+  return updated;
+}
+
+static uint32_t exhibition_refresh_squad_player_stats(void) {
+  if (!exhibition_tmpdb_manager_get_instance ||
+      !exhibition_commonwork_update_player ||
+      !exhibition_get_player_id_by_unique_id ||
+      !exhibition_squad_edit_get_squad_data ||
+      !exhibition_squad_data_get_player_count ||
+      !exhibition_squad_data_get_player_by_index ||
+      !exhibition_squad_edit_update_player)
+    return 0;
+
+  void *manager = exhibition_tmpdb_manager_get_instance();
+  void *common_work = NULL;
+  void *tmpdb_data = NULL;
+  if (manager) {
+    memcpy(&common_work, (unsigned char *)manager + 64,
+           sizeof(common_work));
+    memcpy(&tmpdb_data, (unsigned char *)manager + 72,
+           sizeof(tmpdb_data));
+  }
+  if (!common_work || !tmpdb_data)
+    return 0;
+
+  unsigned char *squad_edit = (unsigned char *)tmpdb_data + 0x18360;
+  uint32_t previous_side = 0;
+  memcpy(&previous_side, squad_edit + 5312, sizeof(previous_side));
+
+  uint32_t updated = 0;
+  for (uint32_t side = 0; side < 2; side++) {
+    // UpdateMemberTmpdbPlayer targets the side stored in SquadEdit, so switch
+    // it briefly while refreshing both the home and away squad copies.
+    memcpy(squad_edit + 5312, &side, sizeof(side));
+    updated += exhibition_refresh_squad_side_player_stats(
+        squad_edit, common_work, side);
+  }
+
+  memcpy(squad_edit + 5312, &previous_side, sizeof(previous_side));
+  return updated;
+}
+
 static int exhibition_refresh_selected_tmpdb(void) {
   uint32_t home_raw =
       __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE);
@@ -1218,6 +1327,8 @@ static const char *exhibition_cobra_string_data(const void *string_object,
 // lock-free "no request" state.
 void pes_exhibition_matchmaking_tap(float normalized_x, float normalized_y) {
   if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
       normalized_y < 0.18f || normalized_y > 0.87f)
     return;
 
@@ -1317,10 +1428,14 @@ void pes_exhibition_search_child(void *window, const void *child_name,
   }
 
   if (length == sizeof(cpu_level_name) - 1 &&
-      memcmp(name, cpu_level_name, sizeof(cpu_level_name) - 1) == 0 &&
-      exhibition_set_test_match_cpu_level) {
-    exhibition_set_test_match_cpu_level(selected_value);
-    debugPrintf("exhibition: COM level=%u\n", selected_value);
+      memcmp(name, cpu_level_name, sizeof(cpu_level_name) - 1) == 0) {
+    __atomic_store_n(&exhibition_cpu_level_popup_open, 0,
+                     __ATOMIC_RELEASE);
+    if (selected_value != UINT32_MAX &&
+        exhibition_set_test_match_cpu_level) {
+      exhibition_set_test_match_cpu_level(selected_value);
+      debugPrintf("exhibition: COM level=%u\n", selected_value);
+    }
   }
 }
 
@@ -1340,8 +1455,11 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
   }
 
   if (footer_key == 2) {
-    if (exhibition_training_footer_original)
+    if (exhibition_training_footer_original) {
+      __atomic_store_n(&exhibition_cpu_level_popup_open, 1,
+                       __ATOMIC_RELEASE);
       exhibition_training_footer_original(window, footer_key);
+    }
     return;
   }
 
@@ -1981,6 +2099,11 @@ uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
     memcpy((unsigned char *)strategy_flow + 540, &state, sizeof(state));
 
   if (strategy_flow && squad_edit &&
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
+    exhibition_refresh_squad_player_stats();
+
+  if (strategy_flow && squad_edit &&
       __atomic_exchange_n(&exhibition_strategy_auto_proceed, 0,
                           __ATOMIC_ACQ_REL)) {
     if (exhibition_matchplan_save_squad)
@@ -2511,6 +2634,21 @@ void install_ue4_hooks(so_module *module) {
   exhibition_get_player_id_by_unique_id =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb4util21GetPlayerIdByUniqueIdERKj");
+  exhibition_squad_edit_get_squad_data =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadEdit12GetSquadDataE8HomeAway");
+  exhibition_squad_data_get_player_count =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadData17GetSquadPlayerNumEv");
+  exhibition_squad_data_get_player_by_index =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadData14GetSquadPlayerERKj");
+  exhibition_squad_edit_update_player =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadEdit23UpdateMemberTmpdbPlayerERKNS_8PlayerIdERKNS_6PlayerENS_11SquadPlayer14PARAMETER_TYPEE");
+  exhibition_get_player_overall =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb11utilitycore16GetPlayerOverAllERKNS_6PlayerERK8PositionNS1_13ConditionTypeE");
   exhibition_strategy_main_resume = strategy_main_runtime + 0x10;
   hook_arm64(strategy_main,
              (uintptr_t)&pes_exhibition_strategy_main_hook);

@@ -187,8 +187,10 @@ static void set_screen_size(void) {
     screen_width = config.screen_width;
     screen_height = config.screen_height;
   } else {
-    screen_width = appletGetOperationMode() == AppletOperationMode_Console ? 1920 : 1280;
-    screen_height = appletGetOperationMode() == AppletOperationMode_Console ? 1080 : 720;
+    // The game renders its 3D scene near 576p. Matching that surface avoids a
+    // costly full-screen upscale/composite on Switch while keeping a 16:9 UI.
+    screen_width = 1024;
+    screen_height = 576;
   }
 }
 

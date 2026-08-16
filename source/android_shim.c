@@ -371,10 +371,18 @@ static int poll_fake_pipes(struct pollfd *fds, nfds_t nfds) {
 int poll_dispatch_fake(void *fds_ptr, unsigned long nfds_value, int timeout_ms) {
   struct pollfd *fds = fds_ptr;
   const nfds_t nfds = (nfds_t)nfds_value;
-  struct pollfd *native = calloc(nfds ? nfds : 1, sizeof(*native));
-  if (!native) {
-    errno = ENOMEM;
-    return -1;
+  struct pollfd native_stack[64];
+  struct pollfd *native = native_stack;
+  if (nfds > sizeof(native_stack) / sizeof(native_stack[0])) {
+    if (nfds > SIZE_MAX / sizeof(*native)) {
+      errno = ENOMEM;
+      return -1;
+    }
+    native = malloc(nfds * sizeof(*native));
+    if (!native) {
+      errno = ENOMEM;
+      return -1;
+    }
   }
 
   int elapsed = 0;
@@ -390,7 +398,8 @@ int poll_dispatch_fake(void *fds_ptr, unsigned long nfds_value, int timeout_ms) 
     }
     int ready = native_count ? poll(native, native_count, 0) : 0;
     if (ready < 0) {
-      free(native);
+      if (native != native_stack)
+        free(native);
       return -1;
     }
     nfds_t native_index = 0;
@@ -401,7 +410,8 @@ int poll_dispatch_fake(void *fds_ptr, unsigned long nfds_value, int timeout_ms) 
     }
     ready += poll_fake_pipes(fds, nfds);
     if (ready || timeout_ms == 0 || (timeout_ms > 0 && elapsed >= timeout_ms)) {
-      free(native);
+      if (native != native_stack)
+        free(native);
       return ready;
     }
     svcSleepThread(1000000LL);
@@ -730,7 +740,11 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
 
   const float stick_center_x = (float)screen_width * 0.15156f;
   const float stick_center_y = (float)screen_height * 0.80278f;
-  const float stick_radius = (float)screen_height * 0.10417f;
+  // PES applies a fixed pixel threshold before its virtual stick leaves the
+  // dead zone. A purely scaled 576p gesture tops out too early, so retain the
+  // calibrated 720p travel distance while still scaling the stick center.
+  const float stick_radius =
+      fmaxf((float)screen_height * 0.10417f, 75.0f);
   const float pass_x = (float)screen_width * 0.76875f;
   const float pass_y = (float)screen_height * 0.86944f;
   const float through_x = (float)screen_width * 0.80000f;
