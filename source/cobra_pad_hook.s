@@ -392,3 +392,25 @@ pes_exhibition_string_get_hook:
     br x17
 
     .size pes_exhibition_string_get_hook, .-pes_exhibition_string_get_hook
+
+    .align 2
+    .global pes_main_menu_simplify_hook
+    .type pes_main_menu_simplify_hook, %function
+
+// Tail hook for MyClubMain::SetupWindow. The stock Match page remains fully
+// initialized so Exhibition and Training retain their native handlers, then C
+// hides the unused category strip and match choices. Replay the displaced
+// epilogue and return directly to the caller.
+pes_main_menu_simplify_hook:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    mov x0, x19
+    bl pes_main_menu_simplify
+    ldp x29, x30, [sp], #16
+
+    ldp x19, x30, [sp, #32]
+    ldp x21, x20, [sp, #16]
+    ldr x22, [sp], #48
+    ret
+
+    .size pes_main_menu_simplify_hook, .-pes_main_menu_simplify_hook

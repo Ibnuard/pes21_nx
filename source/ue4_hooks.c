@@ -167,9 +167,11 @@ typedef struct {
 
 // PlayerAssignment.raw is the authoritative base-club membership table. The
 // mobile build loads Team.raw and Player.raw, but its old myClub-only startup
-// path leaves the Team records' runtime member arrays empty. Keep only the two
-// fixed MVP clubs here; every PlayerId is resolved back through CommonWork so
-// the match uses the game's real master player records and abilities.
+// path leaves the Team records' runtime member arrays empty. Every PlayerId is
+// resolved back through CommonWork so matches use the game's real master
+// player records and abilities. The expanded clubs below were admitted only
+// after their complete PlayerAssignment membership was validated against
+// Player.raw.
 static const uint32_t exhibition_barcelona_players[] = {
     61672u,  108662u, 104418u, 126426u, 121314u, 38568u,
     138298u, 121985u, 126673u, 42316u,  7511u,   43202u,
@@ -194,7 +196,84 @@ static const uint8_t exhibition_madrid_shirts[] = {
     11, 14, 21, 16, 29, 6, 23, 32, 41, 2, 39, 30, 24, 27, 42, 26,
 };
 
+#include "exhibition_rosters.inc"
+
+#define EXHIBITION_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+#define EXHIBITION_ASSERT_ROSTER(name)                                      \
+  _Static_assert(EXHIBITION_ARRAY_COUNT(exhibition_##name##_players) ==     \
+                     EXHIBITION_ARRAY_COUNT(exhibition_##name##_shirts),    \
+                 "Exhibition roster and shirt counts must match")
+EXHIBITION_ASSERT_ROSTER(manchester_united);
+EXHIBITION_ASSERT_ROSTER(arsenal);
+EXHIBITION_ASSERT_ROSTER(chelsea);
+EXHIBITION_ASSERT_ROSTER(liverpool);
+EXHIBITION_ASSERT_ROSTER(leeds);
+EXHIBITION_ASSERT_ROSTER(west_ham);
+EXHIBITION_ASSERT_ROSTER(newcastle);
+EXHIBITION_ASSERT_ROSTER(aston);
+EXHIBITION_ASSERT_ROSTER(barcelona);
+EXHIBITION_ASSERT_ROSTER(madrid);
+EXHIBITION_ASSERT_ROSTER(valencia);
+#undef EXHIBITION_ASSERT_ROSTER
+#undef EXHIBITION_ARRAY_COUNT
+
 static const ExhibitionMasterRoster exhibition_master_rosters[] = {
+    {
+        100,
+        exhibition_manchester_united_players,
+        exhibition_manchester_united_shirts,
+        sizeof(exhibition_manchester_united_players) /
+            sizeof(exhibition_manchester_united_players[0]),
+    },
+    {
+        101,
+        exhibition_arsenal_players,
+        exhibition_arsenal_shirts,
+        sizeof(exhibition_arsenal_players) /
+            sizeof(exhibition_arsenal_players[0]),
+    },
+    {
+        102,
+        exhibition_chelsea_players,
+        exhibition_chelsea_shirts,
+        sizeof(exhibition_chelsea_players) /
+            sizeof(exhibition_chelsea_players[0]),
+    },
+    {
+        103,
+        exhibition_liverpool_players,
+        exhibition_liverpool_shirts,
+        sizeof(exhibition_liverpool_players) /
+            sizeof(exhibition_liverpool_players[0]),
+    },
+    {
+        104,
+        exhibition_leeds_players,
+        exhibition_leeds_shirts,
+        sizeof(exhibition_leeds_players) /
+            sizeof(exhibition_leeds_players[0]),
+    },
+    {
+        105,
+        exhibition_west_ham_players,
+        exhibition_west_ham_shirts,
+        sizeof(exhibition_west_ham_players) /
+            sizeof(exhibition_west_ham_players[0]),
+    },
+    {
+        106,
+        exhibition_newcastle_players,
+        exhibition_newcastle_shirts,
+        sizeof(exhibition_newcastle_players) /
+            sizeof(exhibition_newcastle_players[0]),
+    },
+    {
+        107,
+        exhibition_aston_players,
+        exhibition_aston_shirts,
+        sizeof(exhibition_aston_players) /
+            sizeof(exhibition_aston_players[0]),
+    },
     {
         108,
         exhibition_barcelona_players,
@@ -208,6 +287,13 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
         exhibition_madrid_shirts,
         sizeof(exhibition_madrid_players) /
             sizeof(exhibition_madrid_players[0]),
+    },
+    {
+        110,
+        exhibition_valencia_players,
+        exhibition_valencia_shirts,
+        sizeof(exhibition_valencia_players) /
+            sizeof(exhibition_valencia_players[0]),
     },
 };
 
@@ -225,6 +311,17 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
 
 static int exhibition_is_valid_team(uint32_t team_id) {
   return exhibition_find_roster(team_id) != NULL;
+}
+
+static uint32_t exhibition_first_other_team(uint32_t team_id) {
+  for (uint32_t i = 0;
+       i < sizeof(exhibition_master_rosters) /
+               sizeof(exhibition_master_rosters[0]);
+       i++) {
+    if (exhibition_master_rosters[i].team_id != team_id)
+      return exhibition_master_rosters[i].team_id;
+  }
+  return team_id;
 }
 
 static void exhibition_refresh_uniforms(void *tmpdb_match,
@@ -246,10 +343,28 @@ static void exhibition_refresh_uniforms(void *tmpdb_match,
 }
 
 static const char *exhibition_team_name(uint32_t team_id) {
+  if (team_id == 100)
+    return "MANCHESTER UNITED";
+  if (team_id == 101)
+    return "ARSENAL";
+  if (team_id == 102)
+    return "CHELSEA B";
+  if (team_id == 103)
+    return "LIVERPOOL R";
+  if (team_id == 104)
+    return "LEEDS W";
+  if (team_id == 105)
+    return "WEST HAM RB";
+  if (team_id == 106)
+    return "NEWCASTLE WB";
+  if (team_id == 107)
+    return "ASTON RB";
   if (team_id == 108)
     return "FC BARCELONA";
   if (team_id == 109)
     return "MADRID CHAMARTIN B";
+  if (team_id == 110)
+    return "VALENCIA BN";
   return "";
 }
 
@@ -266,11 +381,13 @@ static void exhibition_select_team(uint32_t side, uint32_t team_id) {
   if (side == 0) {
     home = team_id;
     if (home == away)
-      away = old_home != team_id ? old_home : (team_id == 108 ? 109 : 108);
+      away = old_home != team_id ? old_home
+                                 : exhibition_first_other_team(team_id);
   } else {
     away = team_id;
     if (away == home)
-      home = old_away != team_id ? old_away : (team_id == 108 ? 109 : 108);
+      home = old_away != team_id ? old_away
+                                 : exhibition_first_other_team(team_id);
   }
   __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
@@ -284,6 +401,10 @@ uintptr_t pes_exhibition_string_get_target(uint32_t string_id) {
   // dialog is repurposed as the Exhibition game-plan editor.
   static const char exhibition_label[] __attribute__((aligned(2))) =
       "Exhibition";
+  static const char training_label[] __attribute__((aligned(2))) =
+      "Training";
+  static const char training_description[] __attribute__((aligned(2))) =
+      "Practice matches and controls";
   static const char game_plan_label[] __attribute__((aligned(2))) =
       "Game Plan";
   static const char change_team_label[] __attribute__((aligned(2))) =
@@ -291,6 +412,10 @@ uintptr_t pes_exhibition_string_get_target(uint32_t string_id) {
   static const char proceed_label[] __attribute__((aligned(2))) = "Proceed";
   if (string_id == 0x0460005d)
     return (uintptr_t)exhibition_label | 1u;
+  if (string_id == 0x0460005e)
+    return (uintptr_t)training_label | 1u;
+  if (string_id == 0x045d01d4)
+    return (uintptr_t)training_description | 1u;
   if (string_id == 0x01f9003d &&
       __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE))
     return (uintptr_t)game_plan_label | 1u;
@@ -984,6 +1109,43 @@ static void *exhibition_find_root_node(void *root, const char *name) {
   return ((void *(*)(void *, const char *))vtable[30])(root, name);
 }
 
+void pes_main_menu_simplify(void *window) {
+  static int logged;
+  if (!window || !exhibition_window_get_window ||
+      !exhibition_node_set_visible)
+    return;
+
+  void *root = exhibition_window_get_window(window);
+  if (!root)
+    return;
+
+  // Keep stock choice 0 (eFootball, relabelled Exhibition) and choice 2
+  // (Friend Match, relabelled Training). Hiding instead of deleting retains
+  // their proven touch handlers and flow destinations.
+  void *tab_strip = exhibition_find_root_node(root, "p_tab");
+  void *match_page = exhibition_find_root_node(root, "page_0");
+  if (tab_strip)
+    exhibition_node_set_visible(tab_strip, 0, 2);
+  if (match_page) {
+    void *event_mode = exhibition_find_root_node(match_page, "choice_1");
+    void *campaign = exhibition_find_root_node(match_page, "choice_3");
+    if (event_mode)
+      exhibition_node_set_visible(event_mode, 0, 2);
+    if (campaign)
+      exhibition_node_set_visible(campaign, 0, 2);
+  }
+
+  // The unused pages are no longer constructed and swipe navigation is
+  // disabled, so always leave the menu on its Match page.
+  *(uint32_t *)((unsigned char *)window + 532) = 0;
+  if (!logged) {
+    debugPrintf("UE4 menu: compact mode active (Exhibition + Training) "
+                "root=%p page=%p\n",
+                root, match_page);
+    logged = 1;
+  }
+}
+
 static void *exhibition_find_holder_node(void *holder, const char *name) {
   if (!holder || !name)
     return NULL;
@@ -1530,6 +1692,7 @@ extern void pes_exhibition_search_post_hook(void);
 extern void pes_exhibition_search_user_name_hook(void);
 extern void pes_exhibition_filter_teams_hook(void);
 extern void pes_exhibition_string_get_hook(void);
+extern void pes_main_menu_simplify_hook(void);
 extern void ue4_tickrate_clamp_hook(void);
 extern void pes_virtual_pad_update_original(void *virtual_pad);
 
@@ -2003,7 +2166,7 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(filter_teams,
              (uintptr_t)&pes_exhibition_filter_teams_hook);
   debugPrintf("UE4 hook: Exhibition matchup UI touch=%p list=%p child=%p "
-              "footer=%p filter=%p setTeamId=%p valid=108,109\n",
+              "footer=%p filter=%p setTeamId=%p valid=100..110\n",
               (void *)training_touch_runtime,
               (void *)training_list_runtime,
               (void *)training_child_runtime,
@@ -2082,6 +2245,45 @@ void install_ue4_hooks(so_module *module) {
   exhibition_node_set_visible =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node10SetVisibleEbj");
+
+  // Build only the Match page, force it selected, and retain just the native
+  // Exhibition and Training choices. This is deliberately a UI/setup trim:
+  // it avoids entering unsupported myClub pages without claiming to change
+  // the separate in-match renderer/simulation cost.
+  const char *main_setup_symbol =
+      "_ZN4menu10MyClubMain11SetupWindowEv";
+  const char *main_swipe_symbol =
+      "_ZN4menu10MyClubMain16PadEventSwipeEndEjj";
+  const uintptr_t main_setup = so_find_addr(module, main_setup_symbol);
+  const uintptr_t main_setup_runtime =
+      so_find_addr_rx(module, main_setup_symbol);
+  const uintptr_t main_swipe = so_find_addr(module, main_swipe_symbol);
+  static const uint32_t expected_main_tail[4] = {
+      0xa9427bf3, 0xa94153f5, 0xf84307f6, 0xd65f03c0,
+  };
+  if (memcmp((void *)(main_setup + 0x11c), expected_main_tail,
+             sizeof(expected_main_tail)) != 0)
+    fatal_error("Unexpected MyClubMain::SetupWindow tail at %p",
+                (void *)(main_setup + 0x11c));
+  patch_checked_u32(main_setup + 0x20, 0x973cd496, 0xd503201f,
+                    "MyClubMain Club House setup");
+  patch_checked_u32(main_setup + 0x28, 0x973e458c, 0xd503201f,
+                    "MyClubMain Contract setup");
+  patch_checked_u32(main_setup + 0x30, 0x974087ee, 0xd503201f,
+                    "MyClubMain Extras setup");
+  patch_checked_u32(main_setup + 0xf4, 0x2a1603e1, 0x2a1f03e1,
+                    "MyClubMain selected page");
+  patch_checked_u32(main_setup + 0xfc, 0x110006c1, 0x52800021,
+                    "MyClubMain swipe page");
+  patch_checked_u32(main_swipe, 0xf81e0ff4, 0xd65f03c0,
+                    "MyClubMain page swipe disable");
+  hook_arm64(main_setup + 0x11c,
+             (uintptr_t)&pes_main_menu_simplify_hook);
+  debugPrintf("UE4 menu: installed compact Exhibition + Training main menu "
+              "setup=%p tail=%p swipe=%p\n",
+              (void *)main_setup_runtime,
+              (void *)(main_setup_runtime + 0x11c),
+              (void *)so_find_addr_rx(module, main_swipe_symbol));
   exhibition_text_set_string =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem12NodeRectText6SetStrERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
@@ -2203,9 +2405,9 @@ void install_ue4_hooks(so_module *module) {
 
   // Reuse the built-in tutorial-match flow as an offline Exhibition entry.
   // The factory hook changes only the eFootball tile's Divisions destination.
-  // TutorialMatch is then made deterministic: it builds Barcelona and Madrid
-  // directly from the game's master database, bypasses stale tutorial flags,
-  // and enters the ordinary offline match mode.
+  // TutorialMatch is then made deterministic: it builds the two user-selected
+  // validated clubs directly from the game's master database, bypasses stale
+  // tutorial flags, and enters the ordinary offline match mode.
   const char *flow_create_symbol =
       "_ZN4menu13FactoryMobile10CreateFlowEPN3sys8TaskUnitERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS5_9AllocatorIcEEEEb";
   const uintptr_t flow_create_backing =

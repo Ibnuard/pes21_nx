@@ -6,6 +6,17 @@ of this changelog.
 
 ## [0.1.96] - 2026-08-14
 
+### Added
+
+- Added a compact main-menu mode that keeps only Exhibition and the native
+  Training entry. Unsupported Event, Campaign, Club House, Contract, and
+  Extras pages are no longer exposed; their page setup and tab-swiping paths
+  are disabled before the menu becomes interactive.
+- Expanded Exhibition from two clubs to eleven fully validated master-data
+  clubs: Manchester United, Arsenal, Chelsea B, Liverpool R, Leeds W, West
+  Ham RB, Newcastle WB, Aston RB, FC Barcelona, Madrid Chamartin B, and
+  Valencia BN.
+
 ### Fixed
 
 - Changed the runtime preparer to extract the PES/eFootball application icon
@@ -20,12 +31,20 @@ of this changelog.
 - The Python preparer and standalone PyInstaller executable both completed a
   full preparation from the supported APK and two OBBs. The resulting runtime
   passed all file validation with a valid JPEG icon in its NRO asset section.
+- All 336 membership entries across the eleven exposed clubs resolve to
+  unique players present in the supported `Player.raw`; every club has a
+  complete match-capable squad and valid shirt-number data.
+- The release NRO builds successfully with the compact menu hook and expanded
+  roster table, and the generated binary is copied into the local runtime.
 
 ### Notes
 
 - The public release NRO intentionally contains no proprietary artwork. Run
   the supplied preparer to generate the personalized NRO before copying it to
   the SD card.
+- Removing unsupported menu pages reduces menu setup and prevents accidental
+  entry into incomplete myClub paths. It is not presented as an in-match FPS
+  optimization; renderer and match-simulation cost remain separate work.
 
 ## [0.1.95] - 2026-08-11
 
