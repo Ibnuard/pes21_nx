@@ -471,3 +471,575 @@ static const uint8_t exhibition_barra_funda_shirts[] = {
     2, 11, 15, 4, 17, 24, 19, 13, 26, 8, 28, 71,
     38, 18, 6, 27,
 };
+
+// National-team rosters recovered from the user-supplied master database.
+static const uint32_t exhibition_ireland_players[] = {
+    101265u, 40701u, 47375u, 40283u, 45439u, 101102u,
+    112973u, 61081u, 45124u, 100407u, 34626u, 117560u,
+    126908u, 38790u, 100292u, 43166u, 5434u, 101777u,
+    106435u, 59767u, 101767u, 47645u, 130414u,
+};
+static const uint8_t exhibition_ireland_shirts[] = {
+    22, 3, 4, 19, 2, 12, 13, 11, 10, 8, 17, 0,
+    15, 16, 14, 1, 5, 20, 7, 9, 18, 6, 21,
+};
+static const uint32_t exhibition_northern_ireland_players[] = {
+    110698u, 42808u, 35505u, 101761u, 118225u, 7946u,
+    104668u, 101764u, 39206u, 121485u, 35508u, 59897u,
+    101086u, 101087u, 112193u, 107484u, 43054u, 42657u,
+    47385u, 101091u, 101756u, 111118u, 112194u,
+};
+static const uint8_t exhibition_northern_ireland_shirts[] = {
+    0, 19, 4, 13, 2, 7, 16, 5, 6, 14, 9, 11,
+    22, 1, 18, 15, 12, 10, 3, 20, 17, 21, 8,
+};
+static const uint32_t exhibition_scotland_players[] = {
+    59895u, 58654u, 121439u, 101191u, 101028u, 116605u,
+    103559u, 121448u, 42918u, 112070u, 114182u, 112747u,
+    112803u, 103567u, 121589u, 112069u, 115231u, 121434u,
+    108243u, 116139u, 101784u, 101103u, 37477u,
+};
+static const uint8_t exhibition_scotland_shirts[] = {
+    0, 14, 5, 1, 4, 21, 9, 10, 6, 7, 19, 11,
+    20, 12, 2, 22, 13, 3, 16, 17, 15, 18, 8,
+};
+static const uint32_t exhibition_wales_players[] = {
+    32135u, 123206u, 114948u, 115652u, 45134u, 44560u,
+    111139u, 35496u, 110947u, 38082u, 114999u, 45458u,
+    112962u, 39755u, 118657u, 126958u, 44565u, 114032u,
+    109128u, 115227u, 103511u, 39245u, 109129u,
+};
+static const uint8_t exhibition_wales_shirts[] = {
+    0, 15, 4, 13, 3, 6, 17, 10, 19, 9, 12, 20,
+    11, 5, 14, 16, 2, 22, 7, 18, 21, 8, 1,
+};
+static const uint32_t exhibition_england_players[] = {
+    47286u, 104337u, 109329u, 113405u, 110079u, 108959u,
+    40295u, 44702u, 118007u, 45268u, 47287u, 103830u,
+    111450u, 47785u, 100400u, 100299u, 37201u, 107691u,
+    45126u, 114036u, 118096u, 110638u, 113066u,
+};
+static const uint8_t exhibition_england_shirts[] = {
+    12, 15, 4, 1, 2, 3, 7, 20, 10, 6, 8, 0,
+    22, 14, 5, 11, 13, 9, 18, 17, 16, 19, 21,
+};
+static const uint32_t exhibition_portugal_players[] = {
+    34868u, 9133u, 111800u, 46819u, 59835u, 43015u,
+    60512u, 9138u, 104226u, 126336u, 4522u, 40406u,
+    60709u, 34799u, 47787u, 102766u, 60627u, 104204u,
+    42348u, 47543u, 108233u, 44063u, 109343u,
+};
+static const uint8_t exhibition_portugal_shirts[] = {
+    0, 2, 3, 14, 4, 12, 15, 7, 9, 22, 6, 21,
+    11, 5, 1, 18, 13, 17, 20, 10, 19, 8, 16,
+};
+static const uint32_t exhibition_spain_players[] = {
+    40571u, 7329u, 45290u, 57353u, 61058u, 38568u,
+    63497u, 41126u, 42538u, 42556u, 43094u, 47242u,
+    61147u, 5518u, 109997u, 7327u, 44946u, 110815u,
+    9375u, 108239u, 110596u, 43262u, 46828u,
+};
+static const uint8_t exhibition_spain_shirts[] = {
+    0, 14, 3, 1, 17, 4, 7, 9, 18, 5, 6, 12,
+    22, 2, 11, 21, 13, 15, 19, 16, 20, 10, 8,
+};
+static const uint32_t exhibition_france_players[] = {
+    8574u, 43076u, 45330u, 104752u, 104717u, 45023u,
+    101334u, 110718u, 32159u, 42316u, 38627u, 37026u,
+    42825u, 103206u, 104418u, 104271u, 60443u, 60906u,
+    114053u, 100967u, 59838u, 60446u, 42296u,
+};
+static const uint8_t exhibition_france_shirts[] = {
+    0, 3, 4, 1, 14, 5, 12, 9, 13, 6, 8, 15,
+    22, 2, 18, 20, 21, 11, 16, 7, 17, 10, 19,
+};
+static const uint32_t exhibition_belgium_players[] = {
+    44383u, 103293u, 38796u, 34905u, 37827u, 59801u,
+    46647u, 63916u, 44379u, 36998u, 40122u, 42664u,
+    106754u, 113241u, 119566u, 46642u, 59802u, 113244u,
+    117886u, 57213u, 38845u, 40065u, 47788u,
+};
+static const uint8_t exhibition_belgium_shirts[] = {
+    0, 2, 1, 4, 5, 7, 22, 15, 6, 9, 8, 11,
+    12, 3, 14, 18, 21, 17, 20, 10, 19, 13, 16,
+};
+static const uint32_t exhibition_netherlands_players[] = {
+    38635u, 114105u, 44840u, 111986u, 38797u, 46866u,
+    108662u, 44849u, 6259u, 36288u, 46879u, 39161u,
+    42539u, 40875u, 59766u, 42660u, 38499u, 107941u,
+    114627u, 63489u, 38491u, 103142u, 117832u,
+};
+static const uint8_t exhibition_netherlands_shirts[] = {
+    0, 2, 3, 21, 5, 14, 20, 16, 8, 7, 9, 12,
+    22, 1, 4, 11, 15, 19, 6, 10, 18, 13, 17,
+};
+static const uint32_t exhibition_switzerland_players[] = {
+    36627u, 59486u, 109126u, 109124u, 32395u, 43467u,
+    113338u, 42424u, 101875u, 40422u, 41063u, 117410u,
+    119461u, 110790u, 59496u, 101011u, 103036u, 110812u,
+    111138u, 117420u, 111032u, 117803u, 111428u,
+};
+static const uint8_t exhibition_switzerland_shirts[] = {
+    0, 21, 3, 4, 1, 12, 16, 9, 6, 22, 8, 11,
+    20, 13, 5, 19, 2, 14, 17, 7, 10, 15, 18,
+};
+static const uint32_t exhibition_italy_players[] = {
+    108279u, 33079u, 44676u, 47011u, 100630u, 59458u,
+    103686u, 46003u, 114235u, 46235u, 41066u, 32764u,
+    104485u, 8851u, 47190u, 116970u, 63667u, 118171u,
+    108206u, 114909u, 100117u, 38858u, 100607u,
+};
+static const uint8_t exhibition_italy_shirts[] = {
+    20, 18, 14, 4, 6, 7, 17, 5, 13, 9, 16, 0,
+    11, 2, 12, 1, 22, 15, 3, 10, 19, 21, 8,
+};
+static const uint32_t exhibition_czech_republic_players[] = {
+    105061u, 45065u, 36203u, 42446u, 107208u, 118021u,
+    128348u, 46564u, 123125u, 104699u, 102719u, 45383u,
+    110654u, 45208u, 126345u, 117424u, 45253u, 116060u,
+    128349u, 36207u, 40836u, 116061u, 136771u,
+};
+static const uint8_t exhibition_czech_republic_shirts[] = {
+    22, 3, 16, 1, 21, 14, 20, 7, 11, 13, 18, 0,
+    15, 5, 4, 17, 9, 2, 12, 19, 6, 10, 8,
+};
+static const uint32_t exhibition_germany_players[] = {
+    33185u, 61681u, 104677u, 116647u, 109915u, 109005u,
+    36770u, 114506u, 60884u, 60928u, 116652u, 45144u,
+    61672u, 112376u, 113284u, 105083u, 105084u, 45945u,
+    46825u, 60380u, 125870u, 132959u, 134044u,
+};
+static const uint8_t exhibition_germany_shirts[] = {
+    0, 3, 16, 12, 13, 5, 7, 6, 19, 9, 8, 11,
+    21, 4, 1, 15, 2, 20, 22, 17, 14, 10, 18,
+};
+static const uint32_t exhibition_denmark_players[] = {
+    9042u, 38054u, 103845u, 101644u, 40154u, 59547u,
+    40150u, 40871u, 105057u, 60622u, 113707u, 104289u,
+    116137u, 36807u, 103551u, 38338u, 58646u, 120439u,
+    32618u, 113297u, 120514u, 47076u, 47145u,
+};
+static const uint8_t exhibition_denmark_shirts[] = {
+    0, 3, 5, 13, 16, 22, 7, 9, 19, 10, 11, 15,
+    21, 12, 2, 17, 1, 14, 18, 4, 6, 20, 8,
+};
+static const uint32_t exhibition_norway_players[] = {
+    32844u, 40273u, 121422u, 46860u, 112178u, 111227u,
+    116066u, 103404u, 61079u, 133543u, 59959u, 100133u,
+    105039u, 107137u, 44669u, 103506u, 41034u, 103133u,
+    125778u, 113663u, 38576u, 110838u, 118202u,
+};
+static const uint8_t exhibition_norway_shirts[] = {
+    0, 5, 2, 13, 1, 17, 14, 19, 7, 12, 6, 11,
+    21, 4, 15, 16, 18, 20, 22, 10, 9, 8, 3,
+};
+static const uint32_t exhibition_sweden_players[] = {
+    101870u, 109123u, 35191u, 38765u, 104794u, 100526u,
+    38062u, 9425u, 101872u, 45368u, 100992u, 46865u,
+    47550u, 120699u, 109911u, 34135u, 116226u, 120854u,
+    123721u, 102893u, 43084u, 115079u, 130292u,
+};
+static const uint8_t exhibition_sweden_shirts[] = {
+    0, 2, 3, 1, 5, 19, 7, 6, 9, 21, 8, 22,
+    11, 17, 12, 4, 16, 10, 20, 15, 13, 14, 18,
+};
+static const uint32_t exhibition_finland_players[] = {
+    43415u, 35067u, 40904u, 36743u, 105043u, 30341u,
+    106409u, 45374u, 130412u, 45373u, 40173u, 35492u,
+    57011u, 46857u, 118050u, 129045u, 129043u, 105041u,
+    45504u, 114085u, 129042u, 120933u, 136761u,
+};
+static const uint8_t exhibition_finland_shirts[] = {
+    0, 3, 1, 21, 15, 13, 5, 7, 12, 19, 9, 22,
+    11, 17, 14, 2, 4, 18, 10, 8, 20, 16, 6,
+};
+static const uint32_t exhibition_poland_players[] = {
+    40937u, 42647u, 117709u, 58594u, 125652u, 116233u,
+    44659u, 132059u, 44328u, 47374u, 40002u, 34437u,
+    60502u, 58595u, 100165u, 59706u, 40936u, 103797u,
+    47680u, 35535u, 123148u, 58653u, 125740u,
+};
+static const uint8_t exhibition_poland_shirts[] = {
+    0, 14, 4, 17, 12, 5, 9, 18, 10, 19, 8, 21,
+    11, 2, 3, 20, 7, 1, 13, 15, 16, 6, 22,
+};
+static const uint32_t exhibition_slovakia_players[] = {
+    107142u, 59997u, 111174u, 39730u, 126110u, 116254u,
+    39324u, 33799u, 116252u, 107821u, 135410u, 107934u,
+    136866u, 100219u, 118614u, 107224u, 107541u, 101883u,
+    102905u, 121361u, 57031u, 57032u, 126077u,
+};
+static const uint8_t exhibition_slovakia_shirts[] = {
+    0, 4, 13, 1, 15, 21, 18, 16, 10, 6, 8, 11,
+    22, 3, 2, 5, 12, 7, 9, 14, 19, 20, 17,
+};
+static const uint32_t exhibition_austria_players[] = {
+    58633u, 40742u, 58632u, 116356u, 101378u, 40740u,
+    117766u, 58636u, 41124u, 102526u, 34813u, 130355u,
+    136776u, 118471u, 130357u, 136775u, 58634u, 116357u,
+    116354u, 136777u, 116355u, 102945u, 112378u,
+};
+static const uint8_t exhibition_austria_shirts[] = {
+    0, 2, 3, 20, 1, 13, 17, 21, 7, 8, 6, 12,
+    11, 14, 4, 16, 5, 9, 22, 15, 10, 18, 19,
+};
+static const uint32_t exhibition_hungary_players[] = {
+    38784u, 105020u, 38711u, 59710u, 102846u, 110657u,
+    136836u, 130319u, 37432u, 114078u, 39976u, 100287u,
+    105028u, 130315u, 112307u, 57017u, 105023u, 105025u,
+    116331u, 107236u, 130316u, 37837u, 130318u,
+};
+static const uint8_t exhibition_hungary_shirts[] = {
+    0, 1, 3, 13, 2, 7, 5, 9, 6, 19, 8, 21,
+    11, 4, 20, 15, 12, 14, 18, 16, 17, 10, 22,
+};
+static const uint32_t exhibition_slovenia_players[] = {
+    44104u, 100509u, 116397u, 104159u, 121193u, 39230u,
+    43206u, 103892u, 107412u, 42888u, 110839u, 40520u,
+    107146u, 123210u, 130235u, 102691u, 35514u, 125394u,
+    130236u, 42654u, 112098u, 37436u, 107209u,
+};
+static const uint8_t exhibition_slovenia_shirts[] = {
+    0, 4, 16, 19, 2, 5, 7, 13, 20, 6, 8, 11,
+    15, 1, 3, 21, 12, 14, 17, 10, 9, 22, 18,
+};
+static const uint32_t exhibition_croatia_players[] = {
+    113596u, 38346u, 43540u, 40856u, 126768u, 34098u,
+    43135u, 38439u, 60851u, 118494u, 60565u, 105080u,
+    110010u, 47807u, 125039u, 136884u, 128288u, 38345u,
+    36625u, 47396u, 61720u, 110675u, 100412u,
+};
+static const uint8_t exhibition_croatia_shirts[] = {
+    0, 5, 20, 13, 2, 9, 7, 3, 17, 12, 19, 11,
+    22, 15, 4, 21, 1, 18, 6, 10, 14, 16, 8,
+};
+static const uint32_t exhibition_romania_players[] = {
+    44048u, 136766u, 123360u, 116056u, 123359u, 130354u,
+    116055u, 113792u, 118398u, 46694u, 104685u, 46553u,
+    103949u, 46554u, 104021u, 136765u, 123361u, 109438u,
+    110659u, 38697u, 109447u, 7889u, 63331u,
+};
+static const uint8_t exhibition_romania_shirts[] = {
+    11, 3, 4, 1, 10, 14, 17, 9, 22, 7, 8, 0,
+    15, 5, 2, 20, 21, 13, 18, 16, 19, 12, 6,
+};
+static const uint32_t exhibition_bulgaria_players[] = {
+    102786u, 103915u, 112391u, 105014u, 37829u, 116102u,
+    107329u, 116101u, 60966u, 37830u, 103925u, 36343u,
+    136848u, 136893u, 112393u, 101842u, 116099u, 102626u,
+    116104u, 130327u, 36349u, 105015u, 136847u,
+};
+static const uint8_t exhibition_bulgaria_shirts[] = {
+    22, 20, 14, 1, 2, 6, 15, 10, 8, 9, 18, 12,
+    0, 4, 13, 5, 21, 3, 11, 17, 19, 7, 16,
+};
+static const uint32_t exhibition_greece_players[] = {
+    111172u, 40097u, 43266u, 107325u, 128309u, 59646u,
+    117475u, 118101u, 127662u, 59657u, 128022u, 117476u,
+    118304u, 36358u, 43046u, 117474u, 117885u, 59813u,
+    46599u, 105056u, 40844u, 107667u, 117483u,
+};
+static const uint8_t exhibition_greece_shirts[] = {
+    0, 16, 2, 1, 21, 20, 14, 17, 6, 13, 15, 12,
+    11, 18, 4, 3, 22, 5, 7, 19, 9, 10, 8,
+};
+static const uint32_t exhibition_turkey_players[] = {
+    37225u, 112084u, 59548u, 123160u, 46179u, 116229u,
+    107100u, 116230u, 101097u, 121095u, 34862u, 121088u,
+    1352u, 58617u, 121006u, 126807u, 124270u, 57340u,
+    107854u, 121079u, 121172u, 124385u, 38841u,
+};
+static const uint8_t exhibition_turkey_shirts[] = {
+    11, 3, 21, 1, 2, 7, 13, 8, 9, 10, 16, 22,
+    4, 5, 18, 14, 17, 19, 15, 6, 20, 12, 0,
+};
+static const uint32_t exhibition_ukraine_players[] = {
+    34431u, 42605u, 116375u, 103327u, 118347u, 42602u,
+    102711u, 38261u, 113340u, 107498u, 108807u, 123124u,
+    136804u, 121955u, 125367u, 59741u, 105073u, 106782u,
+    112078u, 112079u, 106778u, 43374u, 110431u,
+};
+static const uint8_t exhibition_ukraine_shirts[] = {
+    11, 3, 21, 18, 15, 12, 10, 6, 16, 7, 17, 22,
+    0, 5, 2, 1, 4, 13, 20, 19, 14, 9, 8,
+};
+static const uint32_t exhibition_russia_players[] = {
+    37481u, 61674u, 116365u, 43784u, 116364u, 112062u,
+    107338u, 63907u, 30199u, 107800u, 36256u, 39538u,
+    116433u, 122082u, 131021u, 61426u, 122119u, 61675u,
+    105053u, 116363u, 117834u, 117905u, 113236u,
+};
+static const uint8_t exhibition_russia_shirts[] = {
+    0, 4, 13, 1, 12, 16, 10, 19, 17, 14, 21, 11,
+    15, 5, 2, 3, 22, 7, 6, 20, 8, 9, 18,
+};
+static const uint32_t exhibition_morocco_players[] = {
+    57133u, 102045u, 100624u, 119889u, 113960u, 102395u,
+    35189u, 47002u, 100904u, 114191u, 114238u, 102339u,
+    136824u, 63266u, 114013u, 9169u, 45179u, 40632u,
+    42624u, 38563u, 36967u, 41889u, 57267u,
+};
+static const uint8_t exhibition_morocco_shirts[] = {
+    0, 20, 3, 17, 1, 5, 7, 6, 8, 9, 18, 11,
+    21, 16, 2, 4, 10, 19, 12, 13, 15, 14, 22,
+};
+static const uint32_t exhibition_tunisia_players[] = {
+    319301u, 376153u, 374262u, 392544u, 367056u, 369857u,
+    366924u, 392542u, 363084u, 308070u, 308625u, 308069u,
+    309480u, 303753u, 364216u, 378357u, 369441u, 378239u,
+    374260u, 377341u, 385507u, 368896u, 369550u,
+};
+static const uint8_t exhibition_tunisia_shirts[] = {
+    0, 5, 3, 14, 11, 16, 12, 18, 8, 6, 9, 21,
+    15, 2, 1, 20, 4, 19, 7, 17, 13, 22, 10,
+};
+static const uint32_t exhibition_egypt_players[] = {
+    107227u, 130382u, 47005u, 37707u, 107243u, 123186u,
+    101849u, 57123u, 107612u, 116276u, 47220u, 45893u,
+    123185u, 103170u, 130383u, 6864u, 112384u, 114464u,
+    104886u, 122658u, 115092u, 102533u, 136830u,
+};
+static const uint8_t exhibition_egypt_shirts[] = {
+    0, 19, 5, 2, 11, 7, 16, 9, 20, 21, 8, 12,
+    15, 4, 1, 6, 3, 14, 13, 10, 18, 17, 22,
+};
+static const uint32_t exhibition_nigeria_players[] = {
+    323863u, 322621u, 307535u, 373312u, 371071u, 294424u,
+    377105u, 368554u, 389202u, 368917u, 389039u, 374408u,
+    380874u, 366826u, 371518u, 392592u, 375389u, 374427u,
+    379504u, 379891u, 300831u, 305075u, 370853u,
+};
+static const uint8_t exhibition_nigeria_shirts[] = {
+    15, 4, 20, 19, 1, 9, 3, 17, 12, 14, 8, 0,
+    22, 21, 11, 2, 5, 7, 16, 10, 18, 6, 13,
+};
+static const uint32_t exhibition_cameroon_players[] = {
+    104804u, 107983u, 116349u, 116347u, 104876u, 118211u,
+    108402u, 116350u, 112417u, 42245u, 102695u, 3200u,
+    102424u, 38235u, 130334u, 44637u, 33817u, 41136u,
+    38806u, 102638u, 63739u, 42246u, 47427u,
+};
+static const uint8_t exhibition_cameroon_shirts[] = {
+    22, 21, 4, 18, 5, 14, 7, 10, 9, 12, 6, 15,
+    0, 17, 11, 1, 2, 3, 16, 20, 13, 19, 8,
+};
+static const uint32_t exhibition_south_africa_players[] = {
+    364173u, 367050u, 364176u, 392373u, 385308u, 379792u,
+    304190u, 364180u, 378537u, 385313u, 376159u, 367044u,
+    369958u, 364174u, 370110u, 364177u, 385309u, 306977u,
+    322066u, 385310u, 369457u, 308222u, 373289u,
+};
+static const uint8_t exhibition_south_africa_shirts[] = {
+    0, 13, 3, 10, 6, 5, 11, 7, 18, 22, 8, 21,
+    15, 2, 20, 4, 1, 9, 14, 19, 12, 16, 17,
+};
+static const uint32_t exhibition_senegal_players[] = {
+    309339u, 302269u, 364901u, 300882u, 366557u, 378572u,
+    374196u, 304719u, 319448u, 322707u, 306745u, 303138u,
+    375585u, 305218u, 321980u, 378510u, 322767u, 379871u,
+    369840u, 376345u, 383476u, 364838u, 371404u,
+};
+static const uint8_t exhibition_senegal_shirts[] = {
+    22, 7, 2, 20, 11, 13, 16, 4, 9, 10, 8, 0,
+    15, 5, 3, 21, 1, 12, 19, 17, 14, 18, 6,
+};
+static const uint32_t exhibition_usa_players[] = {
+    385446u, 392454u, 323836u, 323837u, 371075u, 296010u,
+    309868u, 379757u, 378465u, 374248u, 367152u, 369424u,
+    392452u, 305756u, 378469u, 394297u, 398979u, 398978u,
+    367105u, 369948u, 392457u, 300066u, 399040u,
+};
+static const uint8_t exhibition_usa_shirts[] = {
+    11, 2, 4, 1, 14, 5, 16, 7, 6, 9, 8, 0,
+    22, 12, 3, 17, 19, 13, 20, 10, 15, 21, 18,
+};
+static const uint32_t exhibition_mexico_players[] = {
+    296246u, 307868u, 299581u, 302773u, 378261u, 380894u,
+    322139u, 302809u, 374478u, 304865u, 319474u, 303458u,
+    305823u, 305824u, 369898u, 381025u, 374479u, 381062u,
+    392400u, 380909u, 381039u, 374481u, 298700u,
+};
+static const uint8_t exhibition_mexico_shirts[] = {
+    12, 1, 14, 18, 22, 3, 17, 7, 21, 11, 8, 20,
+    0, 4, 16, 2, 6, 15, 5, 9, 10, 19, 13,
+};
+static const uint32_t exhibition_jamaica_players[] = {
+    367143u, 296782u, 362732u, 319472u, 374471u, 399041u,
+    398986u, 374475u, 377262u, 371085u, 378393u, 319470u,
+    385458u, 378388u, 321000u, 385465u, 385461u, 369480u,
+    385463u, 385467u, 385470u, 385468u, 392398u,
+};
+static const uint8_t exhibition_jamaica_shirts[] = {
+    0, 18, 2, 14, 19, 7, 3, 5, 6, 22, 10, 21,
+    12, 16, 4, 1, 13, 8, 11, 15, 20, 9, 17,
+};
+static const uint32_t exhibition_costa_rica_players[] = {
+    39777u, 61688u, 46577u, 47655u, 130478u, 112434u,
+    107231u, 39773u, 119569u, 44407u, 107732u, 42369u,
+    130476u, 43625u, 126583u, 43626u, 136875u, 37907u,
+    107946u, 130483u, 63911u, 120548u, 135913u,
+};
+static const uint8_t exhibition_costa_rica_shirts[] = {
+    0, 18, 2, 14, 3, 21, 19, 4, 16, 11, 8, 22,
+    17, 5, 12, 20, 1, 9, 6, 7, 15, 10, 13,
+};
+static const uint32_t exhibition_honduras_players[] = {
+    61691u, 130241u, 33431u, 116339u, 112310u, 136838u,
+    107762u, 112313u, 126173u, 136840u, 107614u, 130239u,
+    136839u, 107795u, 136837u, 37909u, 130244u, 130248u,
+    61694u, 117600u, 46787u, 136841u, 114610u,
+};
+static const uint8_t exhibition_honduras_shirts[] = {
+    21, 14, 2, 1, 4, 7, 5, 16, 11, 12, 10, 0,
+    17, 3, 18, 6, 13, 20, 9, 15, 19, 22, 8,
+};
+static const uint32_t exhibition_colombia_players[] = {
+    36703u, 61468u, 104612u, 44857u, 109607u, 109947u,
+    40631u, 120033u, 44636u, 119907u, 111355u, 47988u,
+    108893u, 60551u, 119922u, 45677u, 104540u, 47784u,
+    109629u, 41581u, 45685u, 31044u, 60060u,
+};
+static const uint8_t exhibition_colombia_shirts[] = {
+    0, 12, 22, 3, 5, 15, 10, 7, 18, 13, 8, 11,
+    21, 2, 20, 1, 16, 4, 14, 9, 19, 17, 6,
+};
+static const uint32_t exhibition_brazil_players[] = {
+    46815u, 39173u, 45993u, 7312u, 43985u, 31052u,
+    106614u, 42641u, 38297u, 61451u, 110866u, 63560u,
+    108824u, 32586u, 46240u, 43989u, 114523u, 45641u,
+    63607u, 111804u, 114333u, 106609u, 113247u,
+};
+static const uint8_t exhibition_brazil_shirts[] = {
+    22, 2, 3, 12, 5, 4, 7, 10, 9, 18, 8, 0,
+    11, 13, 14, 1, 15, 19, 16, 17, 6, 20, 21,
+};
+static const uint32_t exhibition_peru_players[] = {
+    44023u, 59949u, 106339u, 43387u, 110223u, 102915u,
+    61583u, 42033u, 109772u, 44030u, 8823u, 61577u,
+    109869u, 105033u, 110130u, 39798u, 48134u, 45780u,
+    46570u, 109725u, 102019u, 103781u, 41260u,
+};
+static const uint8_t exhibition_peru_shirts[] = {
+    0, 4, 1, 16, 5, 12, 15, 17, 19, 9, 8, 11,
+    20, 21, 3, 2, 22, 13, 18, 6, 14, 7, 10,
+};
+static const uint32_t exhibition_chile_players[] = {
+    102214u, 39699u, 59356u, 61012u, 59179u, 36714u,
+    37337u, 63426u, 60817u, 38906u, 36718u, 9567u,
+    47959u, 59407u, 60571u, 59265u, 41451u, 59196u,
+    101509u, 106838u, 41425u, 43686u, 59188u,
+};
+static const uint8_t exhibition_chile_shirts[] = {
+    11, 16, 4, 5, 12, 7, 3, 17, 20, 1, 6, 0,
+    22, 2, 15, 21, 19, 9, 14, 18, 13, 8, 10,
+};
+static const uint32_t exhibition_paraguay_players[] = {
+    41180u, 45756u, 61475u, 42125u, 109743u, 103038u,
+    123146u, 63297u, 103424u, 48009u, 112170u, 43698u,
+    43806u, 61568u, 104564u, 128028u, 42091u, 106320u,
+    108055u, 43668u, 44987u, 65142u, 61164u,
+};
+static const uint8_t exhibition_paraguay_shirts[] = {
+    21, 14, 12, 1, 19, 17, 5, 7, 22, 10, 18, 0,
+    11, 3, 4, 6, 2, 13, 15, 20, 16, 9, 8,
+};
+static const uint32_t exhibition_uruguay_players[] = {
+    36727u, 58839u, 34475u, 36888u, 60000u, 108129u,
+    105297u, 104594u, 61525u, 35477u, 34881u, 39804u,
+    43001u, 41153u, 45807u, 44953u, 135400u, 45823u,
+    113911u, 47909u, 37304u, 61393u, 109846u,
+};
+static const uint8_t exhibition_uruguay_shirts[] = {
+    0, 1, 2, 21, 16, 13, 5, 7, 9, 20, 8, 22,
+    11, 18, 12, 6, 3, 4, 14, 15, 10, 19, 17,
+};
+static const uint32_t exhibition_argentina_players[] = {
+    41555u, 45071u, 40725u, 60201u, 41596u, 45356u,
+    60241u, 103317u, 7511u, 47179u, 33702u, 45674u,
+    60238u, 119139u, 122697u, 104324u, 108751u, 110608u,
+    40919u, 37106u, 45255u, 60143u, 108657u,
+};
+static const uint8_t exhibition_argentina_shirts[] = {
+    22, 5, 18, 3, 2, 4, 14, 7, 9, 20, 8, 0,
+    11, 1, 15, 17, 19, 13, 6, 10, 16, 12, 21,
+};
+static const uint32_t exhibition_ecuador_players[] = {
+    305524u, 323773u, 327278u, 305111u, 365659u, 323754u,
+    323762u, 366687u, 304316u, 366186u, 304317u, 323756u,
+    385281u, 385283u, 385284u, 388522u, 307852u, 370751u,
+    306905u, 394717u, 304328u, 304902u, 378365u,
+};
+static const uint8_t exhibition_ecuador_shirts[] = {
+    21, 3, 20, 1, 5, 9, 17, 4, 14, 6, 12, 0,
+    11, 15, 16, 2, 13, 7, 22, 19, 10, 8, 18,
+};
+static const uint32_t exhibition_japan_players[] = {
+    15217u, 121813u, 15433u, 15808u, 15814u, 16453u,
+    16346u, 105985u, 16851u, 16800u, 39020u, 2489u,
+    63746u, 16823u, 61322u, 115659u, 61325u, 16474u,
+    121864u, 121860u, 38956u, 16577u, 63759u,
+};
+static const uint8_t exhibition_japan_shirts[] = {
+    11, 15, 21, 18, 4, 12, 6, 20, 9, 8, 14, 0,
+    22, 1, 3, 19, 2, 5, 16, 13, 7, 17, 10,
+};
+static const uint32_t exhibition_republic_of_korea_players[] = {
+    385537u, 278115u, 384604u, 391918u, 278720u, 373694u,
+    373725u, 320708u, 305207u, 388569u, 305208u, 278945u,
+    323558u, 320586u, 392482u, 300875u, 392479u, 390419u,
+    278252u, 387180u, 320563u, 380088u, 367129u,
+};
+static const uint8_t exhibition_republic_of_korea_shirts[] = {
+    20, 18, 3, 15, 2, 4, 12, 21, 6, 17, 8, 11,
+    0, 19, 14, 13, 5, 16, 7, 1, 10, 22, 9,
+};
+static const uint32_t exhibition_china_players[] = {
+    364729u, 302949u, 272557u, 326043u, 326018u, 381446u,
+    320589u, 295699u, 308154u, 364842u, 305578u, 294043u,
+    298756u, 322045u, 323588u, 367078u, 364844u, 326941u,
+    381345u, 272916u, 320608u, 295701u, 364841u,
+};
+static const uint8_t exhibition_china_shirts[] = {
+    0, 4, 1, 16, 2, 13, 14, 7, 10, 6, 8, 11,
+    22, 15, 5, 3, 18, 9, 20, 19, 17, 21, 12,
+};
+static const uint32_t exhibition_iran_players[] = {
+    323843u, 377819u, 367079u, 367082u, 374482u, 319185u,
+    368101u, 295185u, 397822u, 368094u, 323846u, 373638u,
+    392603u, 377821u, 367080u, 301915u, 377817u, 321219u,
+    321733u, 367081u, 385502u, 373659u, 382986u,
+};
+static const uint8_t exhibition_iran_shirts[] = {
+    0, 12, 7, 22, 4, 8, 5, 6, 20, 16, 19, 11,
+    21, 18, 1, 2, 3, 13, 14, 10, 9, 17, 15,
+};
+static const uint32_t exhibition_saudi_arabia_players[] = {
+    319236u, 392563u, 373845u, 327051u, 321056u, 398924u,
+    327050u, 308215u, 391871u, 319239u, 398925u, 322021u,
+    391836u, 321250u, 365406u, 368209u, 368212u, 368234u,
+    384578u, 321241u, 319238u, 319241u, 321252u,
+};
+static const uint8_t exhibition_saudi_arabia_shirts[] = {
+    21, 4, 3, 5, 12, 11, 14, 8, 16, 6, 9, 20,
+    0, 13, 2, 1, 17, 19, 15, 10, 7, 22, 18,
+};
+static const uint32_t exhibition_australia_players[] = {
+    58503u, 58501u, 34140u, 112352u, 104931u, 61715u,
+    64750u, 47712u, 57393u, 16245u, 61716u, 34630u,
+    57394u, 61714u, 116315u, 111744u, 108903u, 47417u,
+    64734u, 118049u, 121524u, 108263u, 45363u,
+};
+static const uint8_t exhibition_australia_shirts[] = {
+    0, 19, 4, 16, 15, 18, 12, 22, 6, 10, 9, 17,
+    11, 7, 1, 3, 2, 21, 5, 20, 8, 13, 14,
+};
+static const uint32_t exhibition_latvia_players[] = {
+    136821u, 129253u, 129244u, 129252u, 136818u, 130300u,
+    141681u, 141678u, 113636u, 130301u, 129242u, 129251u,
+    126903u, 129247u, 129248u, 130298u, 141677u, 104742u,
+    132504u, 141682u, 136822u, 126305u, 141680u,
+};
+static const uint8_t exhibition_latvia_shirts[] = {
+    11, 5, 1, 10, 12, 16, 20, 4, 13, 21, 8, 0,
+    2, 15, 7, 3, 6, 9, 17, 22, 14, 19, 18,
+};

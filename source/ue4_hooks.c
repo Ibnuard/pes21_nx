@@ -254,6 +254,10 @@ EXHIBITION_ASSERT_ROSTER(dynamo_kyiv);
 EXHIBITION_ASSERT_ROSTER(spartak);
 EXHIBITION_ASSERT_ROSTER(vasco);
 EXHIBITION_ASSERT_ROSTER(barra_funda);
+#define EXHIBITION_NATION(name, team_id, display_name) \
+  EXHIBITION_ASSERT_ROSTER(name);
+#include "exhibition_nations.inc"
+#undef EXHIBITION_NATION
 #undef EXHIBITION_ASSERT_ROSTER
 #undef EXHIBITION_ARRAY_COUNT
 
@@ -515,6 +519,14 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
         sizeof(exhibition_barra_funda_players) /
             sizeof(exhibition_barra_funda_players[0]),
     },
+#define EXHIBITION_NATION(name, team_id, display_name)                    \
+  {                                                                      \
+      team_id, exhibition_##name##_players, exhibition_##name##_shirts, \
+      sizeof(exhibition_##name##_players) /                              \
+          sizeof(exhibition_##name##_players[0]),                        \
+  },
+#include "exhibition_nations.inc"
+#undef EXHIBITION_NATION
 };
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
@@ -576,6 +588,11 @@ static void exhibition_refresh_uniforms(void *tmpdb_match,
 }
 
 static const char *exhibition_team_name(uint32_t team_id) {
+#define EXHIBITION_NATION(name, nation_team_id, display_name) \
+  if (team_id == nation_team_id)                              \
+    return display_name;
+#include "exhibition_nations.inc"
+#undef EXHIBITION_NATION
   if (team_id == 100)
     return "MANCHESTER UNITED";
   if (team_id == 101)
@@ -1550,7 +1567,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       "Game: PES 2021 Mobile v5.3.0\n\n"
       "Latest changes:\n"
       "- Direct Start > Menu flow\n"
-      "- 38 Exhibition clubs\n"
+      "- 95 Exhibition teams\n"
       "- Credits and version popups\n"
       "- Hidden unused header icons";
   const char *body = choice == 1 ? credits_body : version_body;
