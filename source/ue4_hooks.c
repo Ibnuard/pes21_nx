@@ -123,6 +123,14 @@ static void (*exhibition_training_footer_original)(void *window,
 static const void *(*exhibition_user_info_get_name)(void *user_info);
 static void *(*exhibition_parameter_get_instance)(uint32_t create);
 static void (*exhibition_parameter_myclub_create_work)(void *myclub);
+static void *(*main_menu_dialog_create)(const void *name,
+                                        const unsigned char *modal);
+static void (*main_menu_dialog_set_text)(void *dialog, const void *text);
+static void (*main_menu_dialog_set_button)(void *dialog, const void *text);
+static void (*main_menu_choice_set_active)(void *choice, uint32_t active,
+                                           uint32_t reaction,
+                                           uint32_t flags);
+static uintptr_t main_menu_selected_resume;
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
 static void (*virtual_pad_set_color)(void *movie_clip, float red, float green,
@@ -214,6 +222,17 @@ EXHIBITION_ASSERT_ROSTER(aston);
 EXHIBITION_ASSERT_ROSTER(barcelona);
 EXHIBITION_ASSERT_ROSTER(madrid);
 EXHIBITION_ASSERT_ROSTER(valencia);
+EXHIBITION_ASSERT_ROSTER(psg);
+EXHIBITION_ASSERT_ROSTER(ajax);
+EXHIBITION_ASSERT_ROSTER(psv);
+EXHIBITION_ASSERT_ROSTER(inter);
+EXHIBITION_ASSERT_ROSTER(juventus);
+EXHIBITION_ASSERT_ROSTER(milan);
+EXHIBITION_ASSERT_ROSTER(lazio);
+EXHIBITION_ASSERT_ROSTER(roma);
+EXHIBITION_ASSERT_ROSTER(bayern);
+EXHIBITION_ASSERT_ROSTER(river);
+EXHIBITION_ASSERT_ROSTER(boca);
 #undef EXHIBITION_ASSERT_ROSTER
 #undef EXHIBITION_ARRAY_COUNT
 
@@ -295,6 +314,74 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
         sizeof(exhibition_valencia_players) /
             sizeof(exhibition_valencia_players[0]),
     },
+    {
+        114,
+        exhibition_psg_players,
+        exhibition_psg_shirts,
+        sizeof(exhibition_psg_players) / sizeof(exhibition_psg_players[0]),
+    },
+    {
+        116,
+        exhibition_ajax_players,
+        exhibition_ajax_shirts,
+        sizeof(exhibition_ajax_players) / sizeof(exhibition_ajax_players[0]),
+    },
+    {
+        118,
+        exhibition_psv_players,
+        exhibition_psv_shirts,
+        sizeof(exhibition_psv_players) / sizeof(exhibition_psv_players[0]),
+    },
+    {
+        119,
+        exhibition_inter_players,
+        exhibition_inter_shirts,
+        sizeof(exhibition_inter_players) / sizeof(exhibition_inter_players[0]),
+    },
+    {
+        120,
+        exhibition_juventus_players,
+        exhibition_juventus_shirts,
+        sizeof(exhibition_juventus_players) /
+            sizeof(exhibition_juventus_players[0]),
+    },
+    {
+        121,
+        exhibition_milan_players,
+        exhibition_milan_shirts,
+        sizeof(exhibition_milan_players) / sizeof(exhibition_milan_players[0]),
+    },
+    {
+        122,
+        exhibition_lazio_players,
+        exhibition_lazio_shirts,
+        sizeof(exhibition_lazio_players) / sizeof(exhibition_lazio_players[0]),
+    },
+    {
+        125,
+        exhibition_roma_players,
+        exhibition_roma_shirts,
+        sizeof(exhibition_roma_players) / sizeof(exhibition_roma_players[0]),
+    },
+    {
+        127,
+        exhibition_bayern_players,
+        exhibition_bayern_shirts,
+        sizeof(exhibition_bayern_players) /
+            sizeof(exhibition_bayern_players[0]),
+    },
+    {
+        138,
+        exhibition_river_players,
+        exhibition_river_shirts,
+        sizeof(exhibition_river_players) / sizeof(exhibition_river_players[0]),
+    },
+    {
+        139,
+        exhibition_boca_players,
+        exhibition_boca_shirts,
+        sizeof(exhibition_boca_players) / sizeof(exhibition_boca_players[0]),
+    },
 };
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
@@ -365,6 +452,28 @@ static const char *exhibition_team_name(uint32_t team_id) {
     return "MADRID CHAMARTIN B";
   if (team_id == 110)
     return "VALENCIA BN";
+  if (team_id == 114)
+    return "PSG";
+  if (team_id == 116)
+    return "AJAX";
+  if (team_id == 118)
+    return "PSV";
+  if (team_id == 119)
+    return "LOMBARDIA NA";
+  if (team_id == 120)
+    return "JUVENTUS";
+  if (team_id == 121)
+    return "MILANO RN";
+  if (team_id == 122)
+    return "LAZIO";
+  if (team_id == 125)
+    return "ROMA";
+  if (team_id == 127)
+    return "FC BAYERN MUNCHEN";
+  if (team_id == 138)
+    return "RIVER PLATE";
+  if (team_id == 139)
+    return "BOCA JUNIORS";
   return "";
 }
 
@@ -1109,6 +1218,48 @@ static void *exhibition_find_root_node(void *root, const char *name) {
   return ((void *(*)(void *, const char *))vtable[30])(root, name);
 }
 
+static void exhibition_make_short_string(unsigned char object[24],
+                                          const char *text);
+
+static void main_menu_make_string_view(unsigned char object[24],
+                                       const char *text) {
+  const size_t length = text ? strlen(text) : 0;
+  if (length <= 23) {
+    exhibition_make_short_string(object, text);
+    return;
+  }
+
+  // Cobra uses libc++'s 24-byte string layout. A long read-only view is safe
+  // here because the dialog setters synchronously copy the supplied text.
+  const uint64_t long_marker = 1;
+  memset(object, 0, 24);
+  memcpy(object, &long_marker, sizeof(long_marker));
+  memcpy(object + 8, &length, sizeof(length));
+  memcpy(object + 16, &text, sizeof(text));
+}
+
+static void main_menu_set_tile_text(void *tile, const char *title,
+                                    const char *description) {
+  if (!tile || !exhibition_text_set_string)
+    return;
+
+  unsigned char text[24];
+  void *title_node = exhibition_find_root_node(tile, "textLarge_item");
+  if (title_node) {
+    exhibition_make_short_string(text, title);
+    exhibition_text_set_string(title_node, text);
+  }
+
+  const char *description_nodes[] = {"textSmall_item", "textLarge_sub"};
+  for (uint32_t i = 0; i < 2; i++) {
+    void *node = exhibition_find_root_node(tile, description_nodes[i]);
+    if (!node)
+      continue;
+    exhibition_make_short_string(text, description);
+    exhibition_text_set_string(node, text);
+  }
+}
+
 void pes_main_menu_simplify(void *window) {
   static int logged;
   if (!window || !exhibition_window_get_window ||
@@ -1119,31 +1270,86 @@ void pes_main_menu_simplify(void *window) {
   if (!root)
     return;
 
-  // Keep stock choice 0 (eFootball, relabelled Exhibition) and choice 2
-  // (Friend Match, relabelled Training). Hiding instead of deleting retains
-  // their proven touch handlers and flow destinations.
+  // Keep the stock 2x2 Match grid and relabel all four choices. Exhibition and
+  // Training retain their proven handlers; the other two open local windows.
   void *tab_strip = exhibition_find_root_node(root, "p_tab");
   void *match_page = exhibition_find_root_node(root, "page_0");
   if (tab_strip)
     exhibition_node_set_visible(tab_strip, 0, 2);
   if (match_page) {
-    void *event_mode = exhibition_find_root_node(match_page, "choice_1");
-    void *campaign = exhibition_find_root_node(match_page, "choice_3");
-    if (event_mode)
-      exhibition_node_set_visible(event_mode, 0, 2);
-    if (campaign)
-      exhibition_node_set_visible(campaign, 0, 2);
+    void *tiles[4] = {0};
+    for (uint32_t i = 0; i < 4; i++) {
+      char choice_name[] = "choice_0";
+      choice_name[7] = (char)('0' + i);
+      tiles[i] = exhibition_find_root_node(match_page, choice_name);
+      if (tiles[i]) {
+        exhibition_node_set_visible(tiles[i], 1, 2);
+        if (main_menu_choice_set_active)
+          main_menu_choice_set_active(tiles[i], 1, 1, 2);
+      }
+    }
+    main_menu_set_tile_text(tiles[0], "Exhibition", "Local match");
+    main_menu_set_tile_text(tiles[1], "Credits", "Credits and support");
+    main_menu_set_tile_text(tiles[2], "Training", "Practice controls");
+    main_menu_set_tile_text(tiles[3], "Version Info", "Build and game version");
   }
 
   // The unused pages are no longer constructed and swipe navigation is
   // disabled, so always leave the menu on its Match page.
   *(uint32_t *)((unsigned char *)window + 532) = 0;
   if (!logged) {
-    debugPrintf("UE4 menu: compact mode active (Exhibition + Training) "
+    debugPrintf("UE4 menu: four-tile mode active "
                 "root=%p page=%p\n",
                 root, match_page);
     logged = 1;
   }
+}
+
+uintptr_t pes_main_menu_selected_entry(void *window,
+                                       const void *touch_info) {
+  if (!window || !touch_info)
+    return main_menu_selected_resume;
+
+  uint32_t choice = UINT32_MAX;
+  memcpy(&choice, (const unsigned char *)touch_info + 8, sizeof(choice));
+  if (choice != 1 && choice != 3)
+    return main_menu_selected_resume;
+
+  if (!main_menu_dialog_create || !main_menu_dialog_set_text ||
+      !main_menu_dialog_set_button || !exhibition_task_add_unit)
+    return main_menu_selected_resume;
+
+  static const char credits_body[] =
+      "Credits\n\n"
+      "Port & Mod by Ibnuard";
+  static const char version_body[] =
+      "Build & Game Version\n\n"
+      "NRO: PES 2021 NX v0.1.96\n"
+      "Game: PES 2021 Mobile v5.3.0\n\n"
+      "Latest changes:\n"
+      "- Direct Start > Menu flow\n"
+      "- 22 Exhibition clubs\n"
+      "- Credits and version popups\n"
+      "- Hidden unused header icons";
+  const char *body = choice == 1 ? credits_body : version_body;
+
+  unsigned char dialog_name[24];
+  unsigned char dialog_body[24];
+  unsigned char dialog_button[24];
+  unsigned char modal = 0;
+  exhibition_make_short_string(
+      dialog_name, choice == 1 ? "popupCredits" : "popupVersionInfo");
+  main_menu_make_string_view(dialog_body, body);
+  exhibition_make_short_string(dialog_button, "OK");
+  void *dialog = main_menu_dialog_create(dialog_name, &modal);
+  if (!dialog)
+    return main_menu_selected_resume;
+
+  main_menu_dialog_set_text(dialog, dialog_body);
+  main_menu_dialog_set_button(dialog, dialog_button);
+  exhibition_task_add_unit(window, dialog);
+  debugPrintf("UE4 menu: choice=%u opened info dialog=%p\n", choice, dialog);
+  return 0;
 }
 
 static void *exhibition_find_holder_node(void *holder, const char *name) {
@@ -1693,6 +1899,7 @@ extern void pes_exhibition_search_user_name_hook(void);
 extern void pes_exhibition_filter_teams_hook(void);
 extern void pes_exhibition_string_get_hook(void);
 extern void pes_main_menu_simplify_hook(void);
+extern void pes_main_menu_selected_hook(void);
 extern void ue4_tickrate_clamp_hook(void);
 extern void pes_virtual_pad_update_original(void *virtual_pad);
 
@@ -1845,25 +2052,26 @@ int32_t ue4_object_initializer_resize_hook_c(Ue4Array *array,
 extern void ue4_object_initializer_resize_hook(void);
 
 void install_ue4_hooks(so_module *module) {
-  // The offline bundle already seeds a complete UserInfoData identity and a
-  // complete MyClub entry.  Even with UtilityCommon::IsNewUser() returning
-  // false, ModeEntry can receive a stale season-update action list and route
-  // state 5 through SubMainInputUserInfo (the User Profile screen), followed
-  // by the old coach/squad onboarding.  Ignore only that pending-list branch.
-  // The existing state-6 code still validates the seeded squad and falls back
-  // to the game's normal CreateSquad path when it is actually empty, so login
-  // and ParameterMyClub initialization are not bypassed.
+  // The offline bundle already seeds the profile, club, coach, and squad.
+  // Retain ModeEntry's command handshake (states 0..2), then send its completed
+  // state 5 directly to the normal "proceed" exit. This removes the obsolete
+  // season/profile and onboarding screens from start-up without bypassing the
+  // login response that populates ParameterMyClub.
   const char *mode_entry_symbol =
       "_ZN4menu19MyClubFlowModeEntry4MainEv";
   const uintptr_t mode_entry_main =
       so_find_addr(module, mode_entry_symbol);
-  patch_checked_u32(mode_entry_main + 0x248,
-                    0x540002a1, // b.ne state 9 (SubMainInputUserInfo)
-                    0xd503201f, // nop; continue to state 6 squad validation
-                    "MyClub ModeEntry seeded-profile gate");
-  debugPrintf("UE4 patch: seeded MyClub profile skips legacy onboarding "
+  patch_checked_u32(mode_entry_main + 0x23c,
+                    0xf9411a68, // ldr x8, [x19, #560]
+                    0x52800268, // mov w8, #19 (proceed)
+                    "MyClub ModeEntry direct-menu state");
+  patch_checked_u32(mode_entry_main + 0x240,
+                    0xf9411669, // ldr x9, [x19, #552]
+                    0x14000067, // b state store/return
+                    "MyClub ModeEntry direct-menu branch");
+  debugPrintf("UE4 patch: completed MyClub ModeEntry goes directly to menu "
               "backing=%p\n",
-              (void *)(mode_entry_main + 0x248));
+              (void *)(mode_entry_main + 0x23c));
 
   // UE4's mobile quality path can return a 5-FPS effective max tick rate on
   // Horizon. Rendering itself is fast, but
@@ -2166,13 +2374,15 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(filter_teams,
              (uintptr_t)&pes_exhibition_filter_teams_hook);
   debugPrintf("UE4 hook: Exhibition matchup UI touch=%p list=%p child=%p "
-              "footer=%p filter=%p setTeamId=%p valid=100..110\n",
+              "footer=%p filter=%p setTeamId=%p valid=%u clubs\n",
               (void *)training_touch_runtime,
               (void *)training_list_runtime,
               (void *)training_child_runtime,
               (void *)training_footer_runtime,
               (void *)filter_teams_runtime,
-              exhibition_set_test_match_team_id);
+              exhibition_set_test_match_team_id,
+              (unsigned int)(sizeof(exhibition_master_rosters) /
+                             sizeof(exhibition_master_rosters[0])));
 
   // Convert the stock Match Searching window into the single Exhibition hub.
   // Its native footer already supports four slots; only the Training game mode
@@ -2258,13 +2468,30 @@ void install_ue4_hooks(so_module *module) {
   const uintptr_t main_setup_runtime =
       so_find_addr_rx(module, main_setup_symbol);
   const uintptr_t main_swipe = so_find_addr(module, main_swipe_symbol);
+  const uintptr_t main_init = so_find_addr(
+      module, "_ZN4menu10MyClubMain10InitMobileEv");
+  const uintptr_t main_selected = so_find_addr(
+      module,
+      "_ZN4menu10MyClubMain15OnSelectedMatchERKN10menusystem14TouchEventInfoE");
+  const uintptr_t main_selected_runtime = so_find_addr_rx(
+      module,
+      "_ZN4menu10MyClubMain15OnSelectedMatchERKN10menusystem14TouchEventInfoE");
+  const uintptr_t header_four_visible = so_find_addr(
+      module, "_ZN4menu12HeaderWindow26setDefautFourButtonVisibleEb");
   static const uint32_t expected_main_tail[4] = {
       0xa9427bf3, 0xa94153f5, 0xf84307f6, 0xd65f03c0,
+  };
+  static const uint32_t expected_main_selected[4] = {
+      0xf81e0ff4, 0xa9017bf3, 0xb9400834, 0xaa0003f3,
   };
   if (memcmp((void *)(main_setup + 0x11c), expected_main_tail,
              sizeof(expected_main_tail)) != 0)
     fatal_error("Unexpected MyClubMain::SetupWindow tail at %p",
                 (void *)(main_setup + 0x11c));
+  if (memcmp((void *)main_selected, expected_main_selected,
+             sizeof(expected_main_selected)) != 0)
+    fatal_error("Unexpected MyClubMain::OnSelectedMatch entry at %p",
+                (void *)main_selected);
   patch_checked_u32(main_setup + 0x20, 0x973cd496, 0xd503201f,
                     "MyClubMain Club House setup");
   patch_checked_u32(main_setup + 0x28, 0x973e458c, 0xd503201f,
@@ -2277,13 +2504,33 @@ void install_ue4_hooks(so_module *module) {
                     "MyClubMain swipe page");
   patch_checked_u32(main_swipe, 0xf81e0ff4, 0xd65f03c0,
                     "MyClubMain page swipe disable");
+  patch_checked_u32(main_init + 0xe8,
+                    0x973e77f0, // bl MyClubMain::DispTutorial
+                    0x2a1f03e0, // mov w0, wzr
+                    "MyClubMain tutorial popup disable");
+  patch_checked_u32(main_init + 0xf0,
+                    0x37000060, // tbnz w0, #0, skip first-access
+                    0x14000003, // b skip first-access
+                    "MyClubMain first-access popup disable");
+  patch_checked_u32(header_four_visible + 0x8,
+                    0x2a0103f3, // mov w19, w1
+                    0x2a1f03f3, // mov w19, wzr
+                    "MyClub header four-button visibility");
+  main_menu_selected_resume = main_selected_runtime + 0x10;
+  hook_arm64(main_selected, (uintptr_t)&pes_main_menu_selected_hook);
   hook_arm64(main_setup + 0x11c,
              (uintptr_t)&pes_main_menu_simplify_hook);
-  debugPrintf("UE4 menu: installed compact Exhibition + Training main menu "
-              "setup=%p tail=%p swipe=%p\n",
+  debugPrintf("UE4 menu: installed direct compact menu setup=%p tail=%p "
+              "swipe=%p init=%p selected=%p header=%p\n",
               (void *)main_setup_runtime,
               (void *)(main_setup_runtime + 0x11c),
-              (void *)so_find_addr_rx(module, main_swipe_symbol));
+              (void *)so_find_addr_rx(module, main_swipe_symbol),
+              (void *)so_find_addr_rx(
+                  module, "_ZN4menu10MyClubMain10InitMobileEv"),
+              (void *)main_selected_runtime,
+              (void *)so_find_addr_rx(
+                  module,
+                  "_ZN4menu12HeaderWindow26setDefautFourButtonVisibleEb"));
   exhibition_text_set_string =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem12NodeRectText6SetStrERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
@@ -2305,6 +2552,18 @@ void install_ue4_hooks(so_module *module) {
   exhibition_task_add_unit =
       (void *)so_find_addr_rx(module,
           "_ZN3sys8TaskUnit7AddUnitEPS0_");
+  main_menu_dialog_create =
+      (void *)so_find_addr_rx(module,
+          "_ZN10menusystem13DialogConfirm12CreateObjectERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEERKb");
+  main_menu_dialog_set_text =
+      (void *)so_find_addr_rx(module,
+          "_ZN10menusystem10DialogBase7SetTextERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
+  main_menu_dialog_set_button =
+      (void *)so_find_addr_rx(module,
+          "_ZN10menusystem13DialogConfirm13SetButtonTextERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
+  main_menu_choice_set_active =
+      (void *)so_find_addr_rx(module,
+          "_ZN10menusystem4Node9SetActiveEbbj");
   exhibition_setup_usable_teams =
       (void *)so_find_addr_rx(module,
           "_ZN10onlinemode13UtilityMyClub20SetupUseableTeamListEv");

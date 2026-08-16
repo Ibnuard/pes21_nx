@@ -414,3 +414,32 @@ pes_main_menu_simplify_hook:
     ret
 
     .size pes_main_menu_simplify_hook, .-pes_main_menu_simplify_hook
+
+    .align 2
+    .global pes_main_menu_selected_hook
+    .type pes_main_menu_selected_hook, %function
+
+// Keep Exhibition and Training on the stock path, but swallow the two local
+// utility choices after their information dialog is attached to MyClubMain.
+pes_main_menu_selected_hook:
+    sub sp, sp, #0x30
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x29, x30, [sp, #0x20]
+    bl pes_main_menu_selected_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x30
+    cbz x17, 1f
+
+    str x20, [sp, #-32]!
+    stp x19, x30, [sp, #16]
+    ldr w20, [x1, #8]
+    mov x19, x0
+    br x17
+1:
+    ret
+
+    .size pes_main_menu_selected_hook, .-pes_main_menu_selected_hook
