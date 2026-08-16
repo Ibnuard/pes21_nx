@@ -331,6 +331,31 @@ pes_exhibition_search_user_name_hook:
     .size pes_exhibition_search_user_name_hook, .-pes_exhibition_search_user_name_hook
 
     .align 2
+    .global pes_exhibition_search_task_ready_hook
+    .type pes_exhibition_search_task_ready_hook, %function
+
+// Seed both MatchSearching records before ActInit returns, so the first
+// rendered frame already contains the selected Exhibition clubs.
+pes_exhibition_search_task_ready_hook:
+    sub sp, sp, #0x20
+    stp x0, x1, [sp, #0x00]
+    stp x29, x30, [sp, #0x10]
+    mov x0, x19
+    bl pes_exhibition_search_task_ready_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x20
+
+    add sp, sp, #0x6, lsl #12
+    add sp, sp, #0x790
+    ldp x19, x30, [sp, #48]
+    ldp x21, x20, [sp, #32]
+    br x17
+
+    .size pes_exhibition_search_task_ready_hook, .-pes_exhibition_search_task_ready_hook
+
+    .align 2
     .global pes_exhibition_filter_teams_hook
     .type pes_exhibition_filter_teams_hook, %function
 

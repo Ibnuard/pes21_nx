@@ -43,6 +43,7 @@ static uintptr_t exhibition_filter_teams_resume;
 static uintptr_t exhibition_string_get_resume;
 static uintptr_t exhibition_search_post_resume;
 static uintptr_t exhibition_search_user_name_resume;
+static uintptr_t exhibition_search_task_ready_resume;
 static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
 static void **exhibition_flow_listener_instance;
@@ -155,10 +156,14 @@ static _Alignas(4) uint32_t exhibition_plan_ready;
 static _Alignas(4) uint32_t exhibition_return_to_selector;
 static _Alignas(4) uint32_t exhibition_searching_active;
 static _Alignas(4) uint32_t exhibition_search_refresh_pending;
+static _Alignas(4) uint32_t exhibition_search_initial_refresh_ticks;
 static _Alignas(4) uint32_t exhibition_search_touch_pending;
 static _Alignas(4) uint32_t exhibition_team_picker_open;
-static _Alignas(4) uint32_t exhibition_home_team_id = 108;
-static _Alignas(4) uint32_t exhibition_away_team_id = 109;
+#define EXHIBITION_INITIAL_REFRESH_TICKS 180u
+#define EXHIBITION_FALLBACK_HOME_TEAM 100u
+#define EXHIBITION_FALLBACK_AWAY_TEAM 101u
+static _Alignas(4) uint32_t exhibition_home_team_id;
+static _Alignas(4) uint32_t exhibition_away_team_id;
 
 enum {
   EXHIBITION_STRATEGY_NONE = 0,
@@ -233,6 +238,22 @@ EXHIBITION_ASSERT_ROSTER(roma);
 EXHIBITION_ASSERT_ROSTER(bayern);
 EXHIBITION_ASSERT_ROSTER(river);
 EXHIBITION_ASSERT_ROSTER(boca);
+EXHIBITION_ASSERT_ROSTER(la_coruna);
+EXHIBITION_ASSERT_ROSTER(monaco);
+EXHIBITION_ASSERT_ROSTER(marseille);
+EXHIBITION_ASSERT_ROSTER(bordeaux);
+EXHIBITION_ASSERT_ROSTER(feyenoord);
+EXHIBITION_ASSERT_ROSTER(parma);
+EXHIBITION_ASSERT_ROSTER(fiorentina);
+EXHIBITION_ASSERT_ROSTER(leverkusen);
+EXHIBITION_ASSERT_ROSTER(galatasaray);
+EXHIBITION_ASSERT_ROSTER(celtic);
+EXHIBITION_ASSERT_ROSTER(rangers);
+EXHIBITION_ASSERT_ROSTER(olympiakos);
+EXHIBITION_ASSERT_ROSTER(dynamo_kyiv);
+EXHIBITION_ASSERT_ROSTER(spartak);
+EXHIBITION_ASSERT_ROSTER(vasco);
+EXHIBITION_ASSERT_ROSTER(barra_funda);
 #undef EXHIBITION_ASSERT_ROSTER
 #undef EXHIBITION_ARRAY_COUNT
 
@@ -382,6 +403,118 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
         exhibition_boca_shirts,
         sizeof(exhibition_boca_players) / sizeof(exhibition_boca_players[0]),
     },
+    {
+        111,
+        exhibition_la_coruna_players,
+        exhibition_la_coruna_shirts,
+        sizeof(exhibition_la_coruna_players) /
+            sizeof(exhibition_la_coruna_players[0]),
+    },
+    {
+        112,
+        exhibition_monaco_players,
+        exhibition_monaco_shirts,
+        sizeof(exhibition_monaco_players) /
+            sizeof(exhibition_monaco_players[0]),
+    },
+    {
+        113,
+        exhibition_marseille_players,
+        exhibition_marseille_shirts,
+        sizeof(exhibition_marseille_players) /
+            sizeof(exhibition_marseille_players[0]),
+    },
+    {
+        115,
+        exhibition_bordeaux_players,
+        exhibition_bordeaux_shirts,
+        sizeof(exhibition_bordeaux_players) /
+            sizeof(exhibition_bordeaux_players[0]),
+    },
+    {
+        117,
+        exhibition_feyenoord_players,
+        exhibition_feyenoord_shirts,
+        sizeof(exhibition_feyenoord_players) /
+            sizeof(exhibition_feyenoord_players[0]),
+    },
+    {
+        123,
+        exhibition_parma_players,
+        exhibition_parma_shirts,
+        sizeof(exhibition_parma_players) /
+            sizeof(exhibition_parma_players[0]),
+    },
+    {
+        124,
+        exhibition_fiorentina_players,
+        exhibition_fiorentina_shirts,
+        sizeof(exhibition_fiorentina_players) /
+            sizeof(exhibition_fiorentina_players[0]),
+    },
+    {
+        128,
+        exhibition_leverkusen_players,
+        exhibition_leverkusen_shirts,
+        sizeof(exhibition_leverkusen_players) /
+            sizeof(exhibition_leverkusen_players[0]),
+    },
+    {
+        130,
+        exhibition_galatasaray_players,
+        exhibition_galatasaray_shirts,
+        sizeof(exhibition_galatasaray_players) /
+            sizeof(exhibition_galatasaray_players[0]),
+    },
+    {
+        131,
+        exhibition_celtic_players,
+        exhibition_celtic_shirts,
+        sizeof(exhibition_celtic_players) /
+            sizeof(exhibition_celtic_players[0]),
+    },
+    {
+        132,
+        exhibition_rangers_players,
+        exhibition_rangers_shirts,
+        sizeof(exhibition_rangers_players) /
+            sizeof(exhibition_rangers_players[0]),
+    },
+    {
+        133,
+        exhibition_olympiakos_players,
+        exhibition_olympiakos_shirts,
+        sizeof(exhibition_olympiakos_players) /
+            sizeof(exhibition_olympiakos_players[0]),
+    },
+    {
+        134,
+        exhibition_dynamo_kyiv_players,
+        exhibition_dynamo_kyiv_shirts,
+        sizeof(exhibition_dynamo_kyiv_players) /
+            sizeof(exhibition_dynamo_kyiv_players[0]),
+    },
+    {
+        135,
+        exhibition_spartak_players,
+        exhibition_spartak_shirts,
+        sizeof(exhibition_spartak_players) /
+            sizeof(exhibition_spartak_players[0]),
+    },
+    {
+        136,
+        exhibition_vasco_players,
+        exhibition_vasco_shirts,
+        sizeof(exhibition_vasco_players) /
+            sizeof(exhibition_vasco_players[0]),
+    },
+    {
+        137,
+        exhibition_barra_funda_players,
+        exhibition_barra_funda_shirts,
+        sizeof(exhibition_barra_funda_players) /
+            sizeof(exhibition_barra_funda_players[0]),
+    },
 };
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
@@ -398,6 +531,19 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
 
 static int exhibition_is_valid_team(uint32_t team_id) {
   return exhibition_find_roster(team_id) != NULL;
+}
+
+static int exhibition_matchup_ready(void) {
+  return exhibition_is_valid_team(
+             __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE)) &&
+         exhibition_is_valid_team(
+             __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+}
+
+static uint32_t exhibition_picker_seed_team(uint32_t team_id) {
+  return exhibition_is_valid_team(team_id)
+             ? team_id
+             : exhibition_master_rosters[0].team_id;
 }
 
 static uint32_t exhibition_first_other_team(uint32_t team_id) {
@@ -474,6 +620,38 @@ static const char *exhibition_team_name(uint32_t team_id) {
     return "RIVER PLATE";
   if (team_id == 139)
     return "BOCA JUNIORS";
+  if (team_id == 111)
+    return "LA CORUNA AB";
+  if (team_id == 112)
+    return "MONACO";
+  if (team_id == 113)
+    return "OLYMPIQUE MARSEILLE";
+  if (team_id == 115)
+    return "BORDEAUX";
+  if (team_id == 117)
+    return "FEYENOORD";
+  if (team_id == 123)
+    return "PARMA";
+  if (team_id == 124)
+    return "FIORENTINA";
+  if (team_id == 128)
+    return "BAYER LEVERKUSEN";
+  if (team_id == 130)
+    return "GALATASARAY";
+  if (team_id == 131)
+    return "CELTIC";
+  if (team_id == 132)
+    return "RANGERS";
+  if (team_id == 133)
+    return "OLYMPIAKOS PIRAEUS";
+  if (team_id == 134)
+    return "DYNAMO KYIV";
+  if (team_id == 135)
+    return "SPARTAK MOSKVA";
+  if (team_id == 136)
+    return "VASCO DA GAMA";
+  if (team_id == 137)
+    return "BARRA FUNDA V";
   return "";
 }
 
@@ -489,12 +667,12 @@ static void exhibition_select_team(uint32_t side, uint32_t team_id) {
   uint32_t away = old_away;
   if (side == 0) {
     home = team_id;
-    if (home == away)
+    if (home == away && exhibition_is_valid_team(away))
       away = old_home != team_id ? old_home
                                  : exhibition_first_other_team(team_id);
   } else {
     away = team_id;
-    if (away == home)
+    if (away == home && exhibition_is_valid_team(home))
       home = old_away != team_id ? old_away
                                  : exhibition_first_other_team(team_id);
   }
@@ -768,6 +946,8 @@ uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
       __atomic_store_n(&exhibition_searching_active, 1, __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_search_refresh_pending, 1,
                        __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_search_initial_refresh_ticks,
+                       EXHIBITION_INITIAL_REFRESH_TICKS, __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_team_select_active, 1,
                        __ATOMIC_RELEASE);
       debugPrintf("exhibition: Matchmaking hub opened: %s\n",
@@ -799,6 +979,8 @@ uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
                        __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_search_refresh_pending, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_search_initial_refresh_ticks, 0,
                        __ATOMIC_RELEASE);
     }
     debugPrintf("exhibition: redirected %s -> %s\n", matched_target,
@@ -840,6 +1022,8 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
                        __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_search_refresh_pending, 1,
                        __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_search_initial_refresh_ticks,
+                       EXHIBITION_INITIAL_REFRESH_TICKS, __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_team_select_active, 1,
                        __ATOMIC_RELEASE);
       debugPrintf("exhibition: Game Plan closed; trampoline -> %s\n",
@@ -863,8 +1047,8 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
       if (listener && exhibition_flow_direct_set) {
         static const char searching_flow[] =
             "MyClub/Match/Training/MenuMatchSearching";
-        __atomic_store_n(&exhibition_home_team_id, 108, __ATOMIC_RELEASE);
-        __atomic_store_n(&exhibition_away_team_id, 109, __ATOMIC_RELEASE);
+        __atomic_store_n(&exhibition_home_team_id, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&exhibition_away_team_id, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_select_side, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_strategy_action,
                          EXHIBITION_STRATEGY_NONE, __ATOMIC_RELEASE);
@@ -875,6 +1059,8 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
                          __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_search_refresh_pending, 1,
                          __ATOMIC_RELEASE);
+        __atomic_store_n(&exhibition_search_initial_refresh_ticks,
+                         EXHIBITION_INITIAL_REFRESH_TICKS, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_team_select_active, 1,
                          __ATOMIC_RELEASE);
         if (exhibition_status_get_instance && exhibition_status_set_game_mode)
@@ -911,16 +1097,16 @@ uintptr_t pes_exhibition_training_touch_entry(void *window,
     uint32_t side = UINT32_MAX;
     memcpy(&side, (const unsigned char *)touch_info + 8, sizeof(side));
     if (side < 2) {
-      const uint32_t team_id = side == 0
-                                   ? __atomic_load_n(&exhibition_home_team_id,
-                                                     __ATOMIC_ACQUIRE)
-                                   : __atomic_load_n(&exhibition_away_team_id,
-                                                     __ATOMIC_ACQUIRE);
+      const uint32_t selected_team =
+          side == 0
+              ? __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE)
+              : __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE);
+      const uint32_t team_id = exhibition_picker_seed_team(selected_team);
       __atomic_store_n(&exhibition_select_side, side, __ATOMIC_RELEASE);
       if (exhibition_set_test_match_team_id)
         exhibition_set_test_match_team_id(team_id);
-      debugPrintf("exhibition: team picker open side=%u team=%u\n", side,
-                  team_id);
+      debugPrintf("exhibition: team picker open side=%u current=%u seed=%u\n",
+                  side, selected_team, team_id);
     }
   }
   return exhibition_training_touch_resume;
@@ -934,11 +1120,11 @@ uintptr_t pes_exhibition_training_list_entry(void *window, void *page,
       __atomic_load_n(&exhibition_team_select_active, __ATOMIC_ACQUIRE)) {
     const uint32_t side = *side_ptr;
     if (side < 2 && exhibition_set_test_match_team_id) {
-      const uint32_t team_id = side == 0
-                                   ? __atomic_load_n(&exhibition_home_team_id,
-                                                     __ATOMIC_ACQUIRE)
-                                   : __atomic_load_n(&exhibition_away_team_id,
-                                                     __ATOMIC_ACQUIRE);
+      const uint32_t selected_team =
+          side == 0
+              ? __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE)
+              : __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE);
+      const uint32_t team_id = exhibition_picker_seed_team(selected_team);
       exhibition_set_test_match_team_id(team_id);
     }
   }
@@ -1039,10 +1225,11 @@ static void exhibition_open_team_picker(void *window, uint32_t side) {
                           __ATOMIC_ACQ_REL))
     return;
 
-  const uint32_t team_id =
+  const uint32_t selected_team =
       side == 0
           ? __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE)
           : __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE);
+  const uint32_t team_id = exhibition_picker_seed_team(selected_team);
   __atomic_store_n(&exhibition_select_side, side, __ATOMIC_RELEASE);
   if (exhibition_set_test_match_team_id)
     exhibition_set_test_match_team_id(team_id);
@@ -1061,8 +1248,8 @@ static void exhibition_open_team_picker(void *window, uint32_t side) {
   exhibition_setup_usable_teams();
   exhibition_team_select_set_usable(child, 1);
   debugPrintf("exhibition: Matchmaking Change Team side=%u current=%u "
-              "child=%p\n",
-              side, team_id, child);
+              "seed=%u child=%p\n",
+              side, selected_team, team_id, child);
 }
 
 void pes_exhibition_search_touch(void *window, const void *touch_info) {
@@ -1127,6 +1314,14 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
     return;
   }
 
+  if ((footer_key == 0 || footer_key == 3) &&
+      !exhibition_matchup_ready()) {
+    debugPrintf("exhibition: ignored footer key=%u until both teams are "
+                "selected\n",
+                footer_key);
+    return;
+  }
+
   if (footer_key == 2) {
     if (exhibition_training_footer_original)
       exhibition_training_footer_original(window, footer_key);
@@ -1186,26 +1381,53 @@ static void exhibition_make_short_string(unsigned char object[24],
     memcpy(object + 1, text, length);
 }
 
-static void exhibition_update_matching_record(void *window, uint32_t side,
-                                               uint32_t team_raw) {
-  if (!window || side >= 2 || !exhibition_is_valid_team(team_raw))
+static void exhibition_update_search_task_record(void *task, uint32_t side,
+                                                  uint32_t team_raw) {
+  if (!task || side >= 2)
     return;
+
+  unsigned char *record =
+      (unsigned char *)task + 0x78 + side * 0x70;
+  const int selected = exhibition_is_valid_team(team_raw);
+  const uint32_t team_id = selected ? team_raw << 14 : 0;
+  memcpy(record, &side, sizeof(side));
+  memcpy(record + 8, &team_id, sizeof(team_id));
+  exhibition_make_short_string(record + 16,
+                               selected ? exhibition_team_name(team_raw) : "");
+  exhibition_make_short_string(record + 40, side == 0 ? "HOME" : "COM");
+}
+
+static int exhibition_update_matching_record(void *window, uint32_t side,
+                                              uint32_t team_raw) {
+  if (!window || side >= 2)
+    return 0;
   void *task = NULL;
   memcpy(&task, (unsigned char *)window + 544, sizeof(task));
   if (!task)
-    return;
+    return 0;
 
-  // TaskMatchSearching owns two 0x70-byte MatchingInfo records at +0x78.
-  // UpdateTeamInfo consumes TeamId at +8 and two cobra strings at +16/+40.
-  // Feed it the Exhibition selections so the stock emblem loader and text
-  // renderer, including their texture lifetime rules, do the actual redraw.
-  unsigned char *record =
-      (unsigned char *)task + 0x78 + side * 0x70;
-  const uint32_t team_id = team_raw << 14;
-  memcpy(record, &side, sizeof(side));
-  memcpy(record + 8, &team_id, sizeof(team_id));
-  exhibition_make_short_string(record + 16, exhibition_team_name(team_raw));
-  exhibition_make_short_string(record + 40, side == 0 ? "HOME" : "COM");
+  exhibition_update_search_task_record(task, side, team_raw);
+  return 1;
+}
+
+uintptr_t pes_exhibition_search_task_ready_entry(void *task) {
+  if (task &&
+      __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE)) {
+    exhibition_update_search_task_record(
+        task, 0,
+        __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE));
+    exhibition_update_search_task_record(
+        task, 1,
+        __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+    __atomic_store_n(&exhibition_search_refresh_pending, 1,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_search_initial_refresh_ticks,
+                     EXHIBITION_INITIAL_REFRESH_TICKS, __ATOMIC_RELEASE);
+    debugPrintf("exhibition: preseeded Matchmaking task HOME=%u COM=%u\n",
+                __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE),
+                __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+  }
+  return exhibition_search_task_ready_resume;
 }
 
 static void *exhibition_find_root_node(void *root, const char *name) {
@@ -1328,7 +1550,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       "Game: PES 2021 Mobile v5.3.0\n\n"
       "Latest changes:\n"
       "- Direct Start > Menu flow\n"
-      "- 22 Exhibition clubs\n"
+      "- 38 Exhibition clubs\n"
       "- Credits and version popups\n"
       "- Hidden unused header icons";
   const char *body = choice == 1 ? credits_body : version_body;
@@ -1386,14 +1608,22 @@ static void exhibition_update_matchmaking_card(void *window, uint32_t side,
   void *sub_name = exhibition_find_holder_node(holder, "userName");
   void *points = exhibition_find_holder_node(holder, "numInfo_value");
   if (emblem) {
-    const uint32_t team_id = team_raw << 14;
-    exhibition_emblem_set_team(emblem, &team_id, 0, 5, 0, 0);
+    const int selected = exhibition_is_valid_team(team_raw);
+    exhibition_node_set_visible(emblem, selected, 2);
+    if (selected) {
+      const uint32_t team_id = team_raw << 14;
+      exhibition_emblem_set_team(emblem, &team_id, 0, 5, 0, 0);
+    }
   }
 
   unsigned char text[24];
   if (team_name) {
-    exhibition_make_short_string(text, exhibition_team_name(team_raw));
-    exhibition_text_set_string(team_name, text);
+    const int selected = exhibition_is_valid_team(team_raw);
+    exhibition_node_set_visible(team_name, selected, 2);
+    if (selected) {
+      exhibition_make_short_string(text, exhibition_team_name(team_raw));
+      exhibition_text_set_string(team_name, text);
+    }
   }
   if (sub_name) {
     exhibition_make_short_string(text, side == 0 ? "HOME" : "COM");
@@ -1404,29 +1634,49 @@ static void exhibition_update_matchmaking_card(void *window, uint32_t side,
 }
 
 uintptr_t pes_exhibition_search_post_entry(void *window) {
+  int matching_records_ready = 0;
   if (window &&
       __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE)) {
-    exhibition_update_matching_record(
+    const int home_record_ready = exhibition_update_matching_record(
         window, 0,
         __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE));
-    exhibition_update_matching_record(
+    const int away_record_ready = exhibition_update_matching_record(
         window, 1,
         __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+    matching_records_ready = home_record_ready && away_record_ready;
   }
   if (exhibition_search_update_disp)
     exhibition_search_update_disp(window);
 
   if (window &&
       __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE)) {
+    const uint32_t matchup_ready = exhibition_matchup_ready();
     const uint32_t touch_request =
         __atomic_exchange_n(&exhibition_search_touch_pending, 0,
                             __ATOMIC_ACQ_REL);
     if (touch_request >= 1 && touch_request <= 2)
       exhibition_open_team_picker(window, touch_request - 1);
 
-    if (__atomic_exchange_n(&exhibition_search_refresh_pending, 0,
-                            __ATOMIC_ACQ_REL)) {
-      exhibition_refresh_selected_tmpdb();
+    const int explicit_refresh =
+        matching_records_ready &&
+        __atomic_exchange_n(&exhibition_search_refresh_pending, 0,
+                            __ATOMIC_ACQ_REL);
+    int initial_refresh = 0;
+    if (matching_records_ready && !matchup_ready) {
+      const uint32_t ticks = __atomic_load_n(
+          &exhibition_search_initial_refresh_ticks, __ATOMIC_ACQUIRE);
+      if (ticks) {
+        initial_refresh = ticks % 15u == 0;
+        __atomic_store_n(&exhibition_search_initial_refresh_ticks, ticks - 1,
+                         __ATOMIC_RELEASE);
+      }
+    } else if (matchup_ready) {
+      __atomic_store_n(&exhibition_search_initial_refresh_ticks, 0,
+                       __ATOMIC_RELEASE);
+    }
+    if (explicit_refresh || initial_refresh) {
+      if (explicit_refresh)
+        exhibition_refresh_selected_tmpdb();
       if (exhibition_search_update_team_info) {
         const uint32_t home = 0;
         const uint32_t away = 1;
@@ -1438,7 +1688,9 @@ uintptr_t pes_exhibition_search_post_entry(void *window) {
       if (exhibition_set_pad_key_kind)
         exhibition_set_pad_key_kind(window, key, 1);
       if (exhibition_set_pad_key_active)
-        exhibition_set_pad_key_active(window, key, 1);
+        exhibition_set_pad_key_active(
+            window, key,
+            (key == 0 || key == 3) ? matchup_ready : 1);
     }
     if (exhibition_set_pad_key_string) {
       // Wrapper-private sentinel resolved by pes_exhibition_string_get_target.
@@ -1538,10 +1790,11 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
             exhibition_find_roster(away_raw);
         if (!home_roster || !away_roster) {
           debugPrintf("exhibition: invalid selected matchup home=%u away=%u; "
-                      "falling back to 108v109\n",
-                      home_raw, away_raw);
-          home_raw = 108;
-          away_raw = 109;
+                      "falling back to %uv%u\n",
+                      home_raw, away_raw, EXHIBITION_FALLBACK_HOME_TEAM,
+                      EXHIBITION_FALLBACK_AWAY_TEAM);
+          home_raw = EXHIBITION_FALLBACK_HOME_TEAM;
+          away_raw = EXHIBITION_FALLBACK_AWAY_TEAM;
           home_roster = exhibition_find_roster(home_raw);
           away_roster = exhibition_find_roster(away_raw);
         }
@@ -1896,6 +2149,7 @@ extern void pes_exhibition_training_child_hook(void);
 extern void pes_exhibition_training_footer_hook(void);
 extern void pes_exhibition_search_post_hook(void);
 extern void pes_exhibition_search_user_name_hook(void);
+extern void pes_exhibition_search_task_ready_hook(void);
 extern void pes_exhibition_filter_teams_hook(void);
 extern void pes_exhibition_string_get_hook(void);
 extern void pes_main_menu_simplify_hook(void);
@@ -2597,6 +2851,7 @@ void install_ue4_hooks(so_module *module) {
   const uintptr_t search_task_init_runtime =
       so_find_addr_rx(module, search_task_init_symbol);
   const uintptr_t search_user_name_site = search_task_init + 0xf0;
+  const uintptr_t search_task_ready_site = search_task_init + 0x18c;
   static const uint32_t expected_search_user_name[4] = {
       0xaa1403e0, // mov x0, x20
       0x97361b96, // bl ParameterMyClubUserInfo::GetUserName
@@ -2607,12 +2862,25 @@ void install_ue4_hooks(so_module *module) {
              sizeof(expected_search_user_name)) != 0)
     fatal_error("Unexpected Training search username bytes at %p",
                 (void *)search_user_name_site);
+  static const uint32_t expected_search_task_ready[4] = {
+      0x91401bff, // add sp, sp, #0x6, lsl #12
+      0x911e43ff, // add sp, sp, #0x790
+      0xa9437bf3, // ldp x19, x30, [sp, #48]
+      0xa94253f5, // ldp x21, x20, [sp, #32]
+  };
+  if (memcmp((void *)search_task_ready_site, expected_search_task_ready,
+             sizeof(expected_search_task_ready)) != 0)
+    fatal_error("Unexpected Training search task tail at %p",
+                (void *)search_task_ready_site);
   exhibition_user_info_get_name =
       (void *)so_find_addr_rx(module,
           "_ZNK10onlinemode23ParameterMyClubUserInfo11GetUserNameEv");
   exhibition_search_user_name_resume = search_task_init_runtime + 0x100;
+  exhibition_search_task_ready_resume = search_task_init_runtime + 0x19c;
   hook_arm64(search_user_name_site,
              (uintptr_t)&pes_exhibition_search_user_name_hook);
+  hook_arm64(search_task_ready_site,
+             (uintptr_t)&pes_exhibition_search_task_ready_hook);
   hook_arm64(search_post_site,
              (uintptr_t)&pes_exhibition_search_post_hook);
   debugPrintf("UE4 hook: Exhibition Matchmaking hub post=%p resume=%p "
