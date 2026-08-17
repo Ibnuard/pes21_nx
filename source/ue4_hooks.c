@@ -110,7 +110,6 @@ static void *(*exhibition_holder_get_duplicate)(void *holder,
                                                  uint32_t index);
 static void (*exhibition_node_set_visible)(void *node, uint32_t visible,
                                             uint32_t flags);
-static void **exhibition_header_manager_instance;
 static void (*exhibition_text_set_string)(void *text, const void *string);
 static void (*exhibition_emblem_set_team)(void *emblem,
                                           const uint32_t *team_id,
@@ -395,7 +394,8 @@ enum {
 };
 
 static void exhibition_open_match_settings(void *window);
-static void exhibition_set_header_visible(uint32_t visible);
+static void exhibition_set_matchmaking_visible(void *window,
+                                                uint32_t visible);
 
 static uint32_t pes_exhibition_is_test_match(void) {
   if (__atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
@@ -1672,7 +1672,7 @@ void pes_exhibition_search_child(void *window, const void *child_name,
              sizeof(match_setting_name) - 1) == 0) {
     __atomic_store_n(&exhibition_settings_popup_open, 0,
                      __ATOMIC_RELEASE);
-    exhibition_set_header_visible(1);
+    exhibition_set_matchmaking_visible(window, 1);
     debugPrintf("exhibition: Match Settings closed\n");
   }
 }
@@ -1756,25 +1756,17 @@ static void exhibition_make_short_string(unsigned char object[24],
     memcpy(object + 1, text, length);
 }
 
-static void exhibition_set_header_visible(uint32_t visible) {
-  void *manager = exhibition_header_manager_instance
-                      ? *exhibition_header_manager_instance
-                      : NULL;
-  if (!manager || !exhibition_window_get_window ||
+static void exhibition_set_matchmaking_visible(void *window,
+                                                uint32_t visible) {
+  if (!window || !exhibition_window_get_window ||
       !exhibition_node_set_visible)
     return;
 
-  // menumanager::Header owns its HeaderWindow child at offset 536. The stock
-  // Match Settings child draws a full-page title but does not hide this shared
-  // parent header, so hide only that node until the child closes.
-  void *header_window = NULL;
-  memcpy(&header_window, (unsigned char *)manager + 536,
-         sizeof(header_window));
-  void *header_root = header_window
-                          ? exhibition_window_get_window(header_window)
-                          : NULL;
-  if (header_root)
-    exhibition_node_set_visible(header_root, visible, 2);
+  // Match Settings owns a separate fullscreen root. Hide the complete parent
+  // page so none of its title or team-card layers can bleed through.
+  void *root = exhibition_window_get_window(window);
+  if (root)
+    exhibition_node_set_visible(root, visible, 2);
 }
 
 static void exhibition_open_match_settings(void *window) {
@@ -1798,8 +1790,8 @@ static void exhibition_open_match_settings(void *window) {
     return;
   }
 
-  exhibition_set_header_visible(0);
   exhibition_task_add_unit(window, child);
+  exhibition_set_matchmaking_visible(window, 0);
   debugPrintf("exhibition: opened stock Match Settings child=%p\n", child);
 }
 
@@ -3183,9 +3175,6 @@ void install_ue4_hooks(so_module *module) {
   exhibition_node_set_visible =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node10SetVisibleEbj");
-  exhibition_header_manager_instance =
-      (void *)so_find_addr_rx(
-          module, "_ZN11menumanager6Header11s_pInstanceE");
 
   // Build only the Match page, force it selected, and retain just the native
   // Exhibition and Training choices. This is deliberately a UI/setup trim:
