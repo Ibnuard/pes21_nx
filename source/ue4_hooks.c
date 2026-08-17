@@ -64,8 +64,6 @@ static void (*exhibition_check_uniform)(const uint32_t *home_team_id,
                                         uint32_t unused);
 static uint32_t (*exhibition_match_get_uni_id)(const void *match,
                                                uint32_t home_away);
-static void (*exhibition_matchplan_save_squad)(void);
-static void (*exhibition_strategy_start_fade)(void *squad_edit);
 static void *(*exhibition_tmpdb_manager_get_instance)(void);
 static void *(*exhibition_tmpdb_match_get_team)(void *match,
                                                  const uint32_t *home_away);
@@ -93,6 +91,9 @@ static uint32_t (*exhibition_get_player_overall)(
     const void *player, const uint32_t *position, uint32_t condition);
 static void (*exhibition_set_test_match_team_id)(uint32_t team_id);
 static void (*exhibition_set_test_match_cpu_level)(uint32_t level);
+static void *(*exhibition_match_setting_create_child)(
+    const void *name, const uint8_t *enabled);
+static uint32_t (*exhibition_is_test_match_original)(void);
 static void *(*exhibition_status_get_instance)(void);
 static void (*exhibition_status_set_game_mode)(void *status, uint32_t mode);
 static void (*exhibition_set_pad_key_kind)(void *window, uint32_t key,
@@ -109,6 +110,7 @@ static void *(*exhibition_holder_get_duplicate)(void *holder,
                                                  uint32_t index);
 static void (*exhibition_node_set_visible)(void *node, uint32_t visible,
                                             uint32_t flags);
+static void **exhibition_header_manager_instance;
 static void (*exhibition_text_set_string)(void *text, const void *string);
 static void (*exhibition_emblem_set_team)(void *emblem,
                                           const uint32_t *team_id,
@@ -131,6 +133,10 @@ static void (*exhibition_setup_usable_teams)(void);
 static void (*exhibition_team_select_set_usable)(void *selector,
                                                   uint32_t enabled);
 static void (*exhibition_training_footer_original)(void *window,
+                                                    uint32_t key);
+static uint32_t (*exhibition_strategy_update_original)(void *window,
+                                                        uint32_t pad_status);
+static void (*exhibition_strategy_footer_original)(void *window,
                                                     uint32_t key);
 static const void *(*exhibition_user_info_get_name)(void *user_info);
 static void *(*exhibition_parameter_get_instance)(uint32_t create);
@@ -363,7 +369,6 @@ static int32_t pes_sound_cri_bind_cpk_diagnostic(
 #endif
 static _Alignas(4) uint32_t exhibition_requested;
 static _Alignas(4) uint32_t exhibition_strategy_pending;
-static _Alignas(4) uint32_t exhibition_strategy_auto_proceed;
 static _Alignas(4) uint32_t exhibition_session_active;
 static _Alignas(4) uint32_t exhibition_team_select_active;
 static _Alignas(4) uint32_t exhibition_select_side;
@@ -376,6 +381,7 @@ static _Alignas(4) uint32_t exhibition_search_initial_refresh_ticks;
 static _Alignas(4) uint32_t exhibition_search_touch_pending;
 static _Alignas(4) uint32_t exhibition_team_picker_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_popup_open;
+static _Alignas(4) uint32_t exhibition_settings_popup_open;
 #define EXHIBITION_INITIAL_REFRESH_TICKS 180u
 #define EXHIBITION_FALLBACK_HOME_TEAM 100u
 #define EXHIBITION_FALLBACK_AWAY_TEAM 101u
@@ -387,6 +393,18 @@ enum {
   EXHIBITION_STRATEGY_EDIT = 1,
   EXHIBITION_STRATEGY_START = 2,
 };
+
+static void exhibition_open_match_settings(void *window);
+static void exhibition_set_header_visible(uint32_t visible);
+
+static uint32_t pes_exhibition_is_test_match(void) {
+  if (__atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+    return 1;
+  return exhibition_is_test_match_original
+             ? exhibition_is_test_match_original()
+             : 0;
+}
 
 typedef struct {
   uint32_t team_id;
@@ -918,19 +936,20 @@ static void exhibition_select_team(uint32_t side, uint32_t team_id) {
 
 uintptr_t pes_exhibition_string_get_target(uint32_t string_id) {
   // Main-menu Match choice zero uses this title ID for "eFootball". Return a
-  // wrapper-owned literal. The Training matchup footer's stock HOME/AWAY
-  // dialog is repurposed as the Exhibition game-plan editor.
+  // wrapper-owned literal. The Exhibition hub reuses the stock footer slot
+  // for match settings, while Proceed opens the normal Strategy editor.
   static const char exhibition_label[] __attribute__((aligned(2))) =
       "Exhibition";
   static const char training_label[] __attribute__((aligned(2))) =
       "Training";
   static const char training_description[] __attribute__((aligned(2))) =
       "Practice matches and controls";
-  static const char game_plan_label[] __attribute__((aligned(2))) =
-      "Game Plan";
+  static const char settings_label[] __attribute__((aligned(2))) =
+      "Settings";
   static const char change_team_label[] __attribute__((aligned(2))) =
       "Tap to Change Team";
   static const char proceed_label[] __attribute__((aligned(2))) = "Proceed";
+  static const char play_label[] __attribute__((aligned(2))) = "Play";
   if (string_id == 0x0460005d)
     return (uintptr_t)exhibition_label | 1u;
   if (string_id == 0x0460005e)
@@ -939,13 +958,18 @@ uintptr_t pes_exhibition_string_get_target(uint32_t string_id) {
     return (uintptr_t)training_description | 1u;
   if (string_id == 0x01f9003d &&
       __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE))
-    return (uintptr_t)game_plan_label | 1u;
+    return (uintptr_t)settings_label | 1u;
   if (string_id == 0x045e0023 &&
       __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return (uintptr_t)change_team_label | 1u;
   if (string_id == 0x7fff0001 &&
       __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return (uintptr_t)proceed_label | 1u;
+  if (string_id == 0x7fff0002 &&
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
+          EXHIBITION_STRATEGY_START)
+    return (uintptr_t)play_label | 1u;
   return exhibition_string_get_resume;
 }
 
@@ -1266,8 +1290,6 @@ uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
                        __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_strategy_action,
                        EXHIBITION_STRATEGY_NONE, __ATOMIC_RELEASE);
-      __atomic_store_n(&exhibition_strategy_auto_proceed, 0,
-                       __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_team_select_active, 0,
                        __ATOMIC_RELEASE);
     } else if (__atomic_load_n(&exhibition_session_active,
@@ -1307,8 +1329,6 @@ uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
         (matched_target == online_target || matched_target == divisions_target)) {
       __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_session_active, 1, __ATOMIC_RELEASE);
-      __atomic_store_n(&exhibition_strategy_auto_proceed, 0,
-                       __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
       __atomic_store_n(&exhibition_search_refresh_pending, 0,
                        __ATOMIC_RELEASE);
@@ -1535,6 +1555,7 @@ void pes_exhibition_matchmaking_tap(float normalized_x, float normalized_y) {
   if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
       __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) ||
       __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE) ||
       normalized_y < 0.18f || normalized_y > 0.87f)
     return;
 
@@ -1616,6 +1637,7 @@ void pes_exhibition_search_child(void *window, const void *child_name,
 
   static const char team_select_name[] = "menuTeamSelect";
   static const char cpu_level_name[] = "popupSelectCpuLevel";
+  static const char match_setting_name[] = "menuMatchSetting";
   if (length == sizeof(team_select_name) - 1 &&
       memcmp(name, team_select_name, sizeof(team_select_name) - 1) == 0) {
     __atomic_store_n(&exhibition_team_picker_open, 0, __ATOMIC_RELEASE);
@@ -1642,6 +1664,16 @@ void pes_exhibition_search_child(void *window, const void *child_name,
       exhibition_set_test_match_cpu_level(selected_value);
       debugPrintf("exhibition: COM level=%u\n", selected_value);
     }
+    return;
+  }
+
+  if (length == sizeof(match_setting_name) - 1 &&
+      memcmp(name, match_setting_name,
+             sizeof(match_setting_name) - 1) == 0) {
+    __atomic_store_n(&exhibition_settings_popup_open, 0,
+                     __ATOMIC_RELEASE);
+    exhibition_set_header_visible(1);
+    debugPrintf("exhibition: Match Settings closed\n");
   }
 }
 
@@ -1652,11 +1684,18 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
     return;
   }
 
-  if ((footer_key == 0 || footer_key == 3) &&
-      !exhibition_matchup_ready()) {
+  if (__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+    return;
+
+  if (footer_key == 0 && !exhibition_matchup_ready()) {
     debugPrintf("exhibition: ignored footer key=%u until both teams are "
                 "selected\n",
                 footer_key);
+    return;
+  }
+
+  if (footer_key == 3) {
+    exhibition_open_match_settings(window);
     return;
   }
 
@@ -1683,27 +1722,22 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
     __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_session_active, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_strategy_auto_proceed, 0,
-                     __ATOMIC_RELEASE);
     exhibition_flow_direct_set((unsigned char *)listener + 0x118,
                                main_menu_flow);
     debugPrintf("exhibition: Matchmaking Back -> %s\n", main_menu_flow);
     return;
   }
 
-  if (footer_key == 0 || footer_key == 3) {
-    const uint32_t action = footer_key == 3 ? EXHIBITION_STRATEGY_EDIT
-                                            : EXHIBITION_STRATEGY_START;
-    __atomic_store_n(&exhibition_strategy_auto_proceed, 0,
-                     __ATOMIC_RELEASE);
+  if (footer_key == 0) {
+    const uint32_t action = EXHIBITION_STRATEGY_START;
     __atomic_store_n(&exhibition_strategy_action, action, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_strategy_pending, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
     exhibition_flow_direct_set((unsigned char *)listener + 0x118,
                                strategy_flow);
-    debugPrintf("exhibition: Matchmaking footer key=%u -> Strategy action=%u\n",
-                footer_key, action);
+    debugPrintf("exhibition: Proceed -> visible Strategy action=%u\n",
+                action);
     return;
   }
 
@@ -1720,6 +1754,53 @@ static void exhibition_make_short_string(unsigned char object[24],
   object[0] = (unsigned char)(length << 1);
   if (length)
     memcpy(object + 1, text, length);
+}
+
+static void exhibition_set_header_visible(uint32_t visible) {
+  void *manager = exhibition_header_manager_instance
+                      ? *exhibition_header_manager_instance
+                      : NULL;
+  if (!manager || !exhibition_window_get_window ||
+      !exhibition_node_set_visible)
+    return;
+
+  // menumanager::Header owns its HeaderWindow child at offset 536. The stock
+  // Match Settings child draws a full-page title but does not hide this shared
+  // parent header, so hide only that node until the child closes.
+  void *header_window = NULL;
+  memcpy(&header_window, (unsigned char *)manager + 536,
+         sizeof(header_window));
+  void *header_root = header_window
+                          ? exhibition_window_get_window(header_window)
+                          : NULL;
+  if (header_root)
+    exhibition_node_set_visible(header_root, visible, 2);
+}
+
+static void exhibition_open_match_settings(void *window) {
+  if (!window || !exhibition_match_setting_create_child ||
+      !exhibition_task_add_unit ||
+      !__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
+    return;
+
+  if (__atomic_exchange_n(&exhibition_settings_popup_open, 1,
+                          __ATOMIC_ACQ_REL))
+    return;
+
+  unsigned char child_name[24];
+  const uint8_t enabled = 1;
+  exhibition_make_short_string(child_name, "menuMatchSetting");
+  void *child =
+      exhibition_match_setting_create_child(child_name, &enabled);
+  if (!child) {
+    __atomic_store_n(&exhibition_settings_popup_open, 0,
+                     __ATOMIC_RELEASE);
+    return;
+  }
+
+  exhibition_set_header_visible(0);
+  exhibition_task_add_unit(window, child);
+  debugPrintf("exhibition: opened stock Match Settings child=%p\n", child);
 }
 
 static void exhibition_update_search_task_record(void *task, uint32_t side,
@@ -1884,7 +1965,9 @@ uintptr_t pes_main_menu_selected_entry(void *window,
 
   static const char credits_body[] =
       "Credits\n\n"
-      "Port & Mod by Ibnuard";
+      "Port & Mod by Ibnuard\n"
+      "https://saweria.co/ibnuard\n"
+      "Support for more update";
   static const char version_body[] =
       "Build & Game Version\n\n"
       "NRO: PES 2021 NX v0.1.96\n"
@@ -2030,8 +2113,7 @@ uintptr_t pes_exhibition_search_post_entry(void *window) {
         exhibition_set_pad_key_kind(window, key, 1);
       if (exhibition_set_pad_key_active)
         exhibition_set_pad_key_active(
-            window, key,
-            (key == 0 || key == 3) ? matchup_ready : 1);
+            window, key, key == 0 ? matchup_ready : 1);
     }
     if (exhibition_set_pad_key_string) {
       // Wrapper-private sentinel resolved by pes_exhibition_string_get_target.
@@ -2279,23 +2361,17 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
       }
 
       if (action == EXHIBITION_STRATEGY_START &&
-          __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE)) {
-        __atomic_store_n(&exhibition_strategy_auto_proceed, 1,
-                         __ATOMIC_RELEASE);
-        debugPrintf("exhibition: match plan ready; waiting for stock Strategy "
-                    "state 1 before auto Proceed\n");
-      }
+          __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
+        debugPrintf("exhibition: match plan ready; showing Strategy before "
+                    "Play\n");
     }
   }
   return exhibition_strategy_main_resume;
 }
 
-// Intercept the exact state-0 exit after MyClubSquadEdit::CreateObject. For a
-// direct Exhibition Proceed, reproduce the stock ready path before the new
-// Strategy child can render a full frame: register it, save the loaded squad,
-// start its native proceed fade, and advance the parent to state 3. The next
-// stock Main tick performs stadium/player setup and emits the normal proceed
-// event. Game Plan entries continue through the original state-1 UI unchanged.
+// Intercept the exact state-0 exit after MyClubSquadEdit::CreateObject. Register
+// the Strategy child normally, then leave it in state 1 so the player can edit
+// the plan and explicitly choose Play.
 uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
                                                 void *squad_edit) {
   uint32_t state = squad_edit ? 1u : 2u;
@@ -2309,23 +2385,48 @@ uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
       __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
     exhibition_refresh_squad_player_stats();
 
-  if (strategy_flow && squad_edit &&
-      __atomic_exchange_n(&exhibition_strategy_auto_proceed, 0,
-                          __ATOMIC_ACQ_REL)) {
-    if (exhibition_matchplan_save_squad)
-      exhibition_matchplan_save_squad();
-    if (exhibition_strategy_start_fade)
-      exhibition_strategy_start_fade(squad_edit);
-    state = 3;
-    memcpy((unsigned char *)strategy_flow + 540, &state, sizeof(state));
+  return exhibition_strategy_created_resume;
+}
+
+static uint32_t pes_exhibition_strategy_update(void *window,
+                                               uint32_t pad_status) {
+  const uint32_t result = exhibition_strategy_update_original
+                              ? exhibition_strategy_update_original(
+                                    window, pad_status)
+                              : 0;
+
+  if (window && exhibition_set_pad_key_string &&
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
+          EXHIBITION_STRATEGY_START)
+    exhibition_set_pad_key_string(window, 0, 0x7fff0002);
+
+  return result;
+}
+
+static void pes_exhibition_strategy_footer(void *window,
+                                           uint32_t footer_key) {
+  const int starting_match =
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
+          EXHIBITION_STRATEGY_START;
+
+  // Back reuses the proven editor-return trampoline; Play stays on the stock
+  // Strategy proceed path and enters MatchSetup normally.
+  if (starting_match && footer_key == 1)
+    __atomic_store_n(&exhibition_strategy_action,
+                     EXHIBITION_STRATEGY_EDIT, __ATOMIC_RELEASE);
+
+  if (exhibition_strategy_footer_original)
+    exhibition_strategy_footer_original(window, footer_key);
+
+  if (starting_match && footer_key == 0) {
     __atomic_store_n(&exhibition_strategy_action,
                      EXHIBITION_STRATEGY_NONE, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_strategy_pending, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_session_active, 0, __ATOMIC_RELEASE);
-    debugPrintf("exhibition: Strategy created and faded in same tick; "
-                "stock state=%u squad=%p\n",
-                state, squad_edit);
+    debugPrintf("exhibition: Strategy Play -> stock MatchSetup\n");
   }
-  return exhibition_strategy_created_resume;
 }
 
 static int32_t clamp_pad_value(int32_t value) {
@@ -2798,12 +2899,6 @@ void install_ue4_hooks(so_module *module) {
   exhibition_match_get_uni_id =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb5Match8GetUniIdE8HomeAway");
-  exhibition_matchplan_save_squad =
-      (void *)so_find_addr_rx(module,
-          "_ZN9matchPlan16SquadEditUtility28SaveSquadDataToMatchPlanDataEv");
-  exhibition_strategy_start_fade =
-      (void *)so_find_addr_rx(module,
-          "_ZN4menu15MyClubSquadEdit16StartFadeProceedEv");
   exhibition_tmpdb_manager_get_instance =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb7Manager11GetInstanceEv");
@@ -2863,20 +2958,50 @@ void install_ue4_hooks(so_module *module) {
   exhibition_strategy_created_resume = strategy_main_runtime + 0x16c;
   hook_arm64(strategy_created_site,
              (uintptr_t)&pes_exhibition_strategy_created_hook);
+
+  const char *strategy_update_symbol =
+      "_ZN4menu15MyClubSquadEdit23UpdatePostControlWindowEN10menusystem6Window10PAD_STATUSE";
+  const char *strategy_footer_symbol =
+      "_ZN4menu15MyClubSquadEdit19PadEventFooterTouchEN10menusystem17MOBILE_FOOTER_KEYE";
+  const char *strategy_vtable_symbol = "_ZTVN4menu15MyClubSquadEditE";
+  const uintptr_t strategy_update_runtime =
+      so_find_addr_rx(module, strategy_update_symbol);
+  const uintptr_t strategy_footer_runtime =
+      so_find_addr_rx(module, strategy_footer_symbol);
+  const uintptr_t strategy_vtable =
+      so_find_addr(module, strategy_vtable_symbol);
+  uintptr_t *strategy_update_slot =
+      (uintptr_t *)(strategy_vtable + 50 * sizeof(uintptr_t));
+  uintptr_t *strategy_footer_slot =
+      (uintptr_t *)(strategy_vtable + 98 * sizeof(uintptr_t));
+  if (*strategy_update_slot != strategy_update_runtime ||
+      *strategy_footer_slot != strategy_footer_runtime)
+    fatal_error("Unexpected MyClubSquadEdit vtable update=%p footer=%p",
+                (void *)*strategy_update_slot,
+                (void *)*strategy_footer_slot);
+
+  exhibition_strategy_update_original = (void *)strategy_update_runtime;
+  exhibition_strategy_footer_original = (void *)strategy_footer_runtime;
+  *strategy_update_slot = (uintptr_t)&pes_exhibition_strategy_update;
+  *strategy_footer_slot = (uintptr_t)&pes_exhibition_strategy_footer;
   debugPrintf("UE4 hook: Exhibition Strategy seed backing=%p runtime=%p "
-              "hook=%p resume=%p childSite=%p childHook=%p childResume=%p "
-              "get=%p setupTeam=%p setupTmpdb=%p setTeam=%p update=%p\n",
-              (void *)strategy_main, (void *)strategy_main_runtime,
-              pes_exhibition_strategy_main_hook,
-              (void *)exhibition_strategy_main_resume,
+               "hook=%p resume=%p childSite=%p childHook=%p childResume=%p "
+               "get=%p setupTeam=%p setupTmpdb=%p setTeam=%p update=%p "
+               "vtable=%p post=%p footer=%p\n",
+               (void *)strategy_main, (void *)strategy_main_runtime,
+               pes_exhibition_strategy_main_hook,
+               (void *)exhibition_strategy_main_resume,
               (void *)strategy_created_site,
               pes_exhibition_strategy_created_hook,
               (void *)exhibition_strategy_created_resume,
               exhibition_matchplan_get_instance,
-              exhibition_matchplan_setup_team,
-              exhibition_matchplan_setup_tmpdb,
-              exhibition_set_team,
-              exhibition_matchplan_update_tmpdb);
+               exhibition_matchplan_setup_team,
+               exhibition_matchplan_setup_tmpdb,
+               exhibition_set_team,
+               exhibition_matchplan_update_tmpdb,
+               (void *)strategy_vtable,
+               pes_exhibition_strategy_update,
+               pes_exhibition_strategy_footer);
   debugPrintf("UE4 hook: Exhibition master roster manager=%p updateTeam=%p "
               "updatePlayer=%p getPlayerId=%p getMatchTeam=%p "
               "setUser=%p getOnlineParam=%p getUser=%p getSide=%p\n",
@@ -2889,11 +3014,8 @@ void install_ue4_hooks(so_module *module) {
               exhibition_online_parameter_get_instance,
               exhibition_parameter_common_get_user_id,
               exhibition_get_match_my_side);
-  debugPrintf("UE4 hook: Exhibition uniforms check=%p getUni=%p "
-              "saveSquad=%p startFade=%p\n",
-              exhibition_check_uniform, exhibition_match_get_uni_id,
-              exhibition_matchplan_save_squad,
-              exhibition_strategy_start_fade);
+  debugPrintf("UE4 hook: Exhibition uniforms check=%p getUni=%p\n",
+              exhibition_check_uniform, exhibition_match_get_uni_id);
 
   // Turn the stock Training Team Select window into the Exhibition matchup
   // screen. Both rows launch the normal master-club browser; only wrapper
@@ -3061,6 +3183,9 @@ void install_ue4_hooks(so_module *module) {
   exhibition_node_set_visible =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node10SetVisibleEbj");
+  exhibition_header_manager_instance =
+      (void *)so_find_addr_rx(
+          module, "_ZN11menumanager6Header11s_pInstanceE");
 
   // Build only the Match page, force it selected, and retain just the native
   // Exhibition and Training choices. This is deliberately a UI/setup trim:
@@ -3192,6 +3317,13 @@ void install_ue4_hooks(so_module *module) {
   exhibition_set_test_match_cpu_level =
       (void *)so_find_addr_rx(module,
           "_ZN10onlinemode9DebugMode20SetTestMatchCpuLevelE8CpuLevel");
+  exhibition_match_setting_create_child =
+      (void *)so_find_addr_rx(
+          module,
+          "_ZN4menu18MyClubMatchSetting13CreateAsChildERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEERKb");
+  exhibition_is_test_match_original =
+      (void *)so_find_addr_rx(
+          module, "_ZN10onlinemode13UtilityMyClub11IsTestMatchEv");
   exhibition_status_get_instance =
       (void *)so_find_addr_rx(module,
           "_ZN3sys6Status11GetInstanceEv");
@@ -3204,6 +3336,26 @@ void install_ue4_hooks(so_module *module) {
   exhibition_parameter_myclub_create_work =
       (void *)so_find_addr_rx(module,
           "_ZN10onlinemode15ParameterMyClub16CreateMyClubWorkEv");
+
+  // The stock Match Settings window exposes its complete offline options only
+  // in Test Match. Scope that answer to this child so Exhibition stays in the
+  // generic offline game mode used by MatchSetup.
+  const uintptr_t is_test_match_plt =
+      (uintptr_t)module->load_base + 0x39357f0;
+  static const uint32_t expected_is_test_match_plt[4] = {
+      0xf002e110, 0xf9472a11, 0x91394210, 0xd61f0220,
+  };
+  if (memcmp((const void *)is_test_match_plt, expected_is_test_match_plt,
+             sizeof(expected_is_test_match_plt)) != 0)
+    fatal_error("Unexpected UtilityMyClub::IsTestMatch PLT at %p",
+                (void *)is_test_match_plt);
+  hook_arm64(is_test_match_plt,
+             (uintptr_t)&pes_exhibition_is_test_match);
+  debugPrintf("UE4 hook: Exhibition Settings create=%p IsTestMatch=%p "
+              "PLT=%p scoped=1\n",
+              exhibition_match_setting_create_child,
+              exhibition_is_test_match_original,
+              (void *)is_test_match_plt);
 
   // The Training search task dereferences ParameterMyClubUserInfo even for a
   // local match. Our offline bootstrap deliberately has no server profile,
