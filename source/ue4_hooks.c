@@ -2,6 +2,7 @@
 #include <string.h>
 #include <switch.h>
 
+#include "aaudio_shim.h"
 #include "error.h"
 #include "so_util.h"
 #include "ue4_hooks.h"
@@ -155,6 +156,120 @@ static unsigned int cursor_pad_log_count;
 static unsigned int real_pad_log_count;
 static unsigned int mobile_context_log_count;
 static unsigned int exhibition_flow_log_count;
+#ifdef DEBUG_LOG
+static int32_t (*sound_cinf_play_original)(const void *play_info,
+                                           uint64_t *handle);
+static int32_t (*sound_music_set_event_original)(int32_t event_id);
+static int32_t (*sound_mount_data_original)(void *acb_data, uint32_t acb_size,
+                                            void *binder,
+                                            const char *awb_path,
+                                            uint16_t mount_flags,
+                                            uint16_t search_flags,
+                                            int16_t *mount_id);
+static int32_t (*sound_file_is_exist_original)(const char *path);
+static int32_t (*sound_set_game_option_volume_original)(uint32_t type,
+                                                        float volume);
+static int32_t (*sound_set_category_volume_original)(const char *category,
+                                                     float volume);
+static float (*sound_get_category_volume)(const char *category);
+static float (*sound_get_category_total_volume)(const char *category);
+static unsigned int sound_play_log_count;
+static unsigned int sound_mount_log_count;
+
+static int32_t pes_sound_cinf_play_diagnostic(const void *play_info,
+                                              uint64_t *handle) {
+  uint64_t words[4] = {0, 0, 0, 0};
+  if (play_info)
+    memcpy(words, play_info, sizeof(words));
+  const int32_t result = sound_cinf_play_original(play_info, handle);
+  if (sound_play_log_count++ < 128) {
+    debugPrintf("sound: CInfBase::Play result=%d handle=%p/0x%llx "
+                "info=%p words=%016llx,%016llx,%016llx,%016llx\n",
+                result, handle,
+                (unsigned long long)(handle ? *handle : 0), play_info,
+                (unsigned long long)words[0],
+                (unsigned long long)words[1],
+                (unsigned long long)words[2],
+                (unsigned long long)words[3]);
+  }
+  return result;
+}
+
+static int32_t pes_sound_music_set_event_diagnostic(int32_t event_id) {
+  const int32_t result = sound_music_set_event_original(event_id);
+  debugPrintf("sound: MusicManager::SetEventId id=%d result=%d\n",
+              event_id, result);
+  return result;
+}
+
+static int32_t pes_sound_mount_data_diagnostic(
+    void *acb_data, uint32_t acb_size, void *binder, const char *awb_path,
+    uint16_t mount_flags, uint16_t search_flags, int16_t *mount_id) {
+  const int32_t result = sound_mount_data_original(
+      acb_data, acb_size, binder, awb_path, mount_flags, search_flags,
+      mount_id);
+  if (sound_mount_log_count++ < 128) {
+    debugPrintf("sound: CInfBase::MountData result=%d mount=%d acb=%p/%u "
+                "binder=%p awb=%s flags=%u/%u\n",
+                result, mount_id ? *mount_id : -1, acb_data, acb_size, binder,
+                awb_path ? awb_path : "(null)", mount_flags, search_flags);
+  }
+  return result;
+}
+
+static int32_t pes_sound_file_is_exist_diagnostic(const char *path) {
+  const int32_t result = sound_file_is_exist_original(path);
+  if (path && (strstr(path, ".acf") || strstr(path, ".acb") ||
+               strstr(path, ".awb") || strstr(path, "sound/"))) {
+    debugPrintf("sound: File::IsExist path=%s result=%d\n", path, result);
+  }
+  return result;
+}
+
+static int32_t pes_sound_set_game_option_volume_diagnostic(uint32_t type,
+                                                           float volume) {
+  const int32_t result =
+      sound_set_game_option_volume_original(type, volume);
+  debugPrintf("sound: SetGameOptionVolume type=%u volume=%f result=%d\n",
+              type, volume, result);
+  if (type == 2) {
+    static const char *const default_categories[] = {
+        "DefVol_Menu_SFX", "DefVol_Menu_Music", "DefVol_Commentary",
+        "DefVol_Chant",
+    };
+    for (unsigned int index = 0;
+         index < sizeof(default_categories) / sizeof(default_categories[0]);
+         index++) {
+      float category_volume = -1.0f;
+      float total_volume = -1.0f;
+      category_volume =
+          sound_get_category_volume(default_categories[index]);
+      total_volume =
+          sound_get_category_total_volume(default_categories[index]);
+      debugPrintf("sound: default category=%s volume=%f total=%f\n",
+                  default_categories[index], category_volume, total_volume);
+    }
+  }
+  return result;
+}
+
+static int32_t pes_sound_set_category_volume_diagnostic(
+    const char *category, float volume) {
+  const int32_t result =
+      sound_set_category_volume_original(category, volume);
+  float category_volume = -1.0f;
+  float total_volume = -1.0f;
+  if (category) {
+    category_volume = sound_get_category_volume(category);
+    total_volume = sound_get_category_total_volume(category);
+  }
+  debugPrintf("sound: SetCategoryVolume category=%s volume=%f result=%d "
+              "read=%f total=%f\n",
+              category ? category : "(null)", volume, result,
+              category_volume, total_volume);
+  return result;
+}
+#endif
 static _Alignas(4) uint32_t exhibition_requested;
 static _Alignas(4) uint32_t exhibition_strategy_pending;
 static _Alignas(4) uint32_t exhibition_strategy_auto_proceed;
@@ -2324,15 +2439,6 @@ void pes_virtual_pad_update_info(void *virtual_pad) {
   }
 }
 
-static void patch_arm64_branch(uintptr_t source, uintptr_t destination) {
-  const intptr_t delta = (intptr_t)destination - (intptr_t)source;
-  if ((delta & 3) != 0 || delta < -(1LL << 27) || delta >= (1LL << 27))
-    fatal_error("UE4 branch hook is out of range: %p -> %p", (void *)source,
-                (void *)destination);
-  *(uint32_t *)source =
-      0x14000000u | ((uint32_t)(delta >> 2) & 0x03ffffffu);
-}
-
 static void patch_checked_u32(uintptr_t address, uint32_t expected,
                               uint32_t replacement, const char *name) {
   const uint32_t found = *(const uint32_t *)address;
@@ -2921,6 +3027,16 @@ void install_ue4_hooks(so_module *module) {
                     0x37000060, // tbnz w0, #0, skip first-access
                     0x14000003, // b skip first-access
                     "MyClubMain first-access popup disable");
+  const uintptr_t tutorial_clear_dialog = so_find_addr(
+      module, "_ZN4menu18MyClubFlowTutorial17CreateClearDialogEv");
+  patch_checked_u32(tutorial_clear_dialog,
+                    0xf81d0ff6, // str x22, [sp, #-48]!
+                    0x2a1f03e0, // mov w0, wzr
+                    "MyClubFlowTutorial clear dialog return false");
+  patch_checked_u32(tutorial_clear_dialog + 0x4,
+                    0xa90153f5, // stp x21, x20, [sp, #16]
+                    0xd65f03c0, // ret
+                    "MyClubFlowTutorial clear dialog skip");
   patch_checked_u32(header_four_visible + 0x8,
                     0x2a0103f3, // mov w19, w1
                     0x2a1f03f3, // mov w19, wzr
@@ -2930,7 +3046,7 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(main_setup + 0x11c,
              (uintptr_t)&pes_main_menu_simplify_hook);
   debugPrintf("UE4 menu: installed direct compact menu setup=%p tail=%p "
-              "swipe=%p init=%p selected=%p header=%p\n",
+              "swipe=%p init=%p selected=%p header=%p tutorialDialog=%p\n",
               (void *)main_setup_runtime,
               (void *)(main_setup_runtime + 0x11c),
               (void *)so_find_addr_rx(module, main_swipe_symbol),
@@ -2939,7 +3055,10 @@ void install_ue4_hooks(so_module *module) {
               (void *)main_selected_runtime,
               (void *)so_find_addr_rx(
                   module,
-                  "_ZN4menu12HeaderWindow26setDefautFourButtonVisibleEb"));
+                  "_ZN4menu12HeaderWindow26setDefautFourButtonVisibleEb"),
+              (void *)so_find_addr_rx(
+                  module,
+                  "_ZN4menu18MyClubFlowTutorial17CreateClearDialogEv"));
   exhibition_text_set_string =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem12NodeRectText6SetStrERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
@@ -3275,14 +3394,119 @@ void install_ue4_hooks(so_module *module) {
               (void *)real_pad_enable_backing,
               (void *)real_pad_enable_runtime, pes_set_real_pad_is_enable);
 
-  // OpenSL ES is unavailable on Horizon. Route CRI's Android backend to its
-  // built-in pseudo voice backend so audio is silent instead of dereferencing
-  // the intentionally unsupported slCreateEngine result.
-  const uintptr_t sles_register =
-      so_find_addr(module, "criNcvAndroidSLES_RegisterInterface");
-  const uintptr_t pseudo_register =
-      so_find_addr(module, "criNcvPseudo_RegisterInterface");
-  patch_arm64_branch(sles_register, pseudo_register);
-  debugPrintf("UE4 hook: CRI Android SLES -> pseudo voice (%p -> %p)\n",
-              (void *)sles_register, (void *)pseudo_register);
+  // Let CRI's switcher select AAudio through its normal initialization path.
+  // Its success-only warning deadlocks inside this Android-free runtime, so
+  // skip that notification while leaving loader failures and SLES fallback
+  // untouched.
+  const uintptr_t aaudio_enable =
+      so_find_addr(module, "criNcv_EnableAAudio_ANDROID");
+  const uintptr_t aaudio_loader_open = so_find_addr(
+      module, "_ZN26criNcvAndroidAAudio_Loader4openEv");
+  patch_checked_u32(aaudio_loader_open + 0x42c, 0x96ea80ceu, 0xd503201fu,
+                    "AAudio loader success notification");
+  ((void (*)(uint32_t))aaudio_enable)(1);
+  aaudio_shim_set_game_state_diagnostics(
+      (const uint8_t *)so_find_addr_rx(
+          module, "_ZN5sound3sys9Interface10m_InitFlagE"),
+      (const void *const *)so_find_addr_rx(
+          module, "_ZN5sound3sys9Interface7m_pFileE"),
+      (const uint8_t *)so_find_addr_rx(
+          module, "_ZN5sound3sys4Load10m_InitFlagE"),
+      (const uint8_t *)so_find_addr_rx(
+          module, "_ZN5sound3sys4load7Manager10m_InitFlagE"),
+      (const uint8_t *)so_find_addr_rx(
+          module, "_ZN5sound3sys12MusicManager15m_IsInitializedE"),
+      (const uint64_t *)so_find_addr_rx(
+          module, "_ZN5sound3sys12MusicManager6m_hCueE"));
+#ifdef DEBUG_LOG
+  sound_cinf_play_original =
+      (void *)so_find_addr_rx(module,
+                              "_ZN2KS8CInfBase4PlayERK13_ks_play_infoPy");
+  sound_music_set_event_original =
+      (void *)so_find_addr_rx(
+          module, "_ZN5sound3sys12MusicManager10SetEventIdEi");
+  sound_mount_data_original =
+      (void *)so_find_addr_rx(
+          module, "_ZN2KS8CInfBase9MountDataEPvjS1_PKcttPs");
+  sound_file_is_exist_original =
+      (void *)so_find_addr_rx(module, "_ZN3sys4File7IsExistEPKc");
+  sound_set_game_option_volume_original =
+      (void *)so_find_addr_rx(
+          module,
+          "_ZN5sound3sys9Interface19SetGameOptionVolumeENS1_13E_OPTVOL_TYPEEf");
+  sound_set_category_volume_original =
+      (void *)so_find_addr_rx(
+          module, "_ZN2KS8CInfBase17SetCategoryVolumeEPKcf");
+  sound_get_category_volume =
+      (void *)so_find_addr_rx(module,
+                              "criAtomExCategory_GetVolumeByName");
+  sound_get_category_total_volume =
+      (void *)so_find_addr_rx(module,
+                              "criAtomExCategory_GetTotalVolumeByName");
+  const uintptr_t cinf_play_plt = (uintptr_t)module->load_base + 0x382c5c0;
+  const uintptr_t music_set_event_plt =
+      (uintptr_t)module->load_base + 0x38dac90;
+  const uintptr_t mount_data_plt =
+      (uintptr_t)module->load_base + 0x3890f90;
+  const uintptr_t file_is_exist_plt =
+      (uintptr_t)module->load_base + 0x390dc40;
+  const uintptr_t set_game_option_volume_plt =
+      (uintptr_t)module->load_base + 0x38c6dd0;
+  const uintptr_t set_category_volume_plt =
+      (uintptr_t)module->load_base + 0x37e3c10;
+  static const uint32_t expected_cinf_play_plt[4] = {
+      0x9002e550, 0xf9429e11, 0x9114e210, 0xd61f0220,
+  };
+  static const uint32_t expected_music_set_event_plt[4] = {
+      0xb002e290, 0xf9445211, 0x91228210, 0xd61f0220,
+  };
+  static const uint32_t expected_mount_data_plt[4] = {
+      0xd002e3b0, 0xf9451211, 0x91288210, 0xd61f0220,
+  };
+  static const uint32_t expected_file_is_exist_plt[4] = {
+      0x9002e1d0, 0xf9403e11, 0x9101e210, 0xd61f0220,
+  };
+  static const uint32_t expected_set_game_option_volume_plt[4] = {
+      0xf002e2d0, 0xf944a211, 0x91250210, 0xd61f0220,
+  };
+  static const uint32_t expected_set_category_volume_plt[4] = {
+      0xb002e670, 0xf9403211, 0x91018210, 0xd61f0220,
+  };
+  if (memcmp((const void *)cinf_play_plt, expected_cinf_play_plt,
+              sizeof(expected_cinf_play_plt)) != 0 ||
+      memcmp((const void *)music_set_event_plt,
+             expected_music_set_event_plt,
+             sizeof(expected_music_set_event_plt)) != 0 ||
+      memcmp((const void *)mount_data_plt, expected_mount_data_plt,
+             sizeof(expected_mount_data_plt)) != 0 ||
+      memcmp((const void *)file_is_exist_plt, expected_file_is_exist_plt,
+             sizeof(expected_file_is_exist_plt)) != 0 ||
+      memcmp((const void *)set_game_option_volume_plt,
+             expected_set_game_option_volume_plt,
+             sizeof(expected_set_game_option_volume_plt)) != 0 ||
+      memcmp((const void *)set_category_volume_plt,
+             expected_set_category_volume_plt,
+             sizeof(expected_set_category_volume_plt)) != 0)
+    fatal_error("Unexpected sound diagnostic PLT entries");
+  hook_arm64(cinf_play_plt, (uintptr_t)&pes_sound_cinf_play_diagnostic);
+  hook_arm64(music_set_event_plt,
+             (uintptr_t)&pes_sound_music_set_event_diagnostic);
+  hook_arm64(mount_data_plt,
+             (uintptr_t)&pes_sound_mount_data_diagnostic);
+  hook_arm64(file_is_exist_plt,
+             (uintptr_t)&pes_sound_file_is_exist_diagnostic);
+  hook_arm64(set_game_option_volume_plt,
+             (uintptr_t)&pes_sound_set_game_option_volume_diagnostic);
+  hook_arm64(set_category_volume_plt,
+             (uintptr_t)&pes_sound_set_category_volume_diagnostic);
+  debugPrintf("UE4 hook: sound diagnostics Play=%p SetEventId=%p "
+              "MountData=%p IsExist=%p OptionVolume=%p CategoryVolume=%p\n",
+              (void *)cinf_play_plt, (void *)music_set_event_plt,
+              (void *)mount_data_plt, (void *)file_is_exist_plt,
+              (void *)set_game_option_volume_plt,
+              (void *)set_category_volume_plt);
+#endif
+  debugPrintf("UE4 hook: CRI AAudio enabled=%p loader=%p "
+              "success-notify=nop\n",
+              (void *)aaudio_enable, (void *)aaudio_loader_open);
 }

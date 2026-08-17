@@ -1,5 +1,6 @@
 param(
   [string]$Distro = "Ubuntu",
+  [switch]$Diagnostics,
   [switch]$PerfTrace
 )
 
@@ -7,15 +8,17 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $oldProjectRoot = $env:PES21_NX_PROJECT_ROOT
 $oldWslEnv = $env:WSLENV
+$oldDiagnostics = $env:PES21_NX_DIAGNOSTICS
 $oldPerfTrace = $env:PES21_NX_PERF_TRACE
 
 try {
   $env:PES21_NX_PROJECT_ROOT = $projectRoot
+  $env:PES21_NX_DIAGNOSTICS = if ($Diagnostics) { "1" } else { "0" }
   $env:PES21_NX_PERF_TRACE = if ($PerfTrace) { "1" } else { "0" }
   $env:WSLENV = if ($oldWslEnv) {
-    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_PERF_TRACE"
+    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE"
   } else {
-    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_PERF_TRACE"
+    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE"
   }
 
   $buildScript = @'
@@ -43,7 +46,9 @@ export DEVKITA64=/opt/devkitpro/devkitA64
 export PATH=/opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/usr/bin:/bin
 
 make clean
-make -j"$(nproc)" PERF_TRACE="${PES21_NX_PERF_TRACE:-0}"
+make -j"$(nproc)" \
+  DIAGNOSTICS="${PES21_NX_DIAGNOSTICS:-0}" \
+  PERF_TRACE="${PES21_NX_PERF_TRACE:-0}"
 
 cp pes21_nx.nro "$PES21_NX_PROJECT_ROOT/"
 cp pes21_nx.elf "$PES21_NX_PROJECT_ROOT/"
@@ -90,6 +95,11 @@ cp pes21_nx.nacp "$PES21_NX_PROJECT_ROOT/"
     Remove-Item Env:WSLENV -ErrorAction SilentlyContinue
   } else {
     $env:WSLENV = $oldWslEnv
+  }
+  if ($null -eq $oldDiagnostics) {
+    Remove-Item Env:PES21_NX_DIAGNOSTICS -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_DIAGNOSTICS = $oldDiagnostics
   }
   if ($null -eq $oldPerfTrace) {
     Remove-Item Env:PES21_NX_PERF_TRACE -ErrorAction SilentlyContinue

@@ -17,6 +17,7 @@
 #include <AL/alc.h>
 #include <AL/alext.h>
 
+#include "aaudio_shim.h"
 #include "util.h"
 #include "hooks.h"
 
@@ -38,6 +39,7 @@ ALCdevice *alcOpenDeviceHook(const char *name) {
 // Idempotent: safe to call more than once (both the JNI-quit and menu-Exit paths
 // funnel through hard_exit, and we must never double-close the device).
 void deinit_openal(void) {
+  aaudio_shim_shutdown();
   if (al_dev) {
     if (al_ctx) {
       alcMakeContextCurrent(NULL);

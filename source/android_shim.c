@@ -1532,6 +1532,10 @@ void *dlopen_fake(const char *filename, int flags) {
     return &avs_mod;
   if (strstr(filename, "libafp-core.so"))
     return &afp_mod;
+  if (strstr(filename, "libaaudio.so")) {
+    debugPrintf("dlopen: exposing AAudio shim for %s\n", filename);
+    return (void *)-1;
+  }
   if (strstr(filename, "libc.so") || strstr(filename, "libm.so") ||
       strstr(filename, "libdl.so") || strstr(filename, "libandroid.so") ||
       strstr(filename, "libEGL.so") || strstr(filename, "libGLESv2.so") ||
@@ -1556,8 +1560,11 @@ void *dlsym_fake(void *handle, const char *symbol) {
 
   DynLibFunction *import =
       so_find_import(dynlib_functions, dynlib_numfunctions, symbol);
-  if (import)
+  if (import) {
+    if (strncmp(symbol, "AAudio", 6) == 0)
+      debugPrintf("dlsym: %s -> %p\n", symbol, (void *)import->func);
     return (void *)import->func;
+  }
 
   uintptr_t address = 0;
   if (handle == &ue4_mod)
