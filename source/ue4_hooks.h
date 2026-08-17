@@ -8,6 +8,7 @@
 #define PES_MOBILE_CONTROL_DEFENSE 2
 
 void install_ue4_hooks(so_module *module);
+void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                          int32_t left, int32_t right, int connected);
 uint32_t pes_mobile_control_context(int *mode);

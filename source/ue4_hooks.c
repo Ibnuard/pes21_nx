@@ -3630,47 +3630,54 @@ void install_ue4_hooks(so_module *module) {
   // Its success-only warning deadlocks inside this Android-free runtime, so
   // skip that notification while leaving loader failures and SLES fallback
   // untouched.
-  const uintptr_t aaudio_enable =
-      so_find_addr(module, "criNcv_EnableAAudio_ANDROID");
+  // NOTE: the actual criNcv_EnableAAudio_ANDROID(1) call is deferred to
+  // ue4_hooks_post_finalize() because the SO code memory is not yet
+  // executable at this point (load_base is RW heap; svcMapProcessCodeMemory
+  // runs later in so_finalize).  Calling through a heap pointer would crash
+  // on real Switch hardware even though Ryujinx tolerates it.
   const uintptr_t aaudio_loader_open = so_find_addr(
       module, "_ZN26criNcvAndroidAAudio_Loader4openEv");
   patch_checked_u32(aaudio_loader_open + 0x42c, 0x96ea80ceu, 0xd503201fu,
                     "AAudio loader success notification");
-  ((void (*)(uint32_t))aaudio_enable)(1);
   aaudio_shim_set_game_state_diagnostics(
-      (const uint8_t *)so_find_addr_rx(
+      (const uint8_t *)so_try_find_addr_rx(
           module, "_ZN5sound3sys9Interface10m_InitFlagE"),
-      (const void *const *)so_find_addr_rx(
+      (const void *const *)so_try_find_addr_rx(
           module, "_ZN5sound3sys9Interface7m_pFileE"),
-      (const uint8_t *)so_find_addr_rx(
+      (const uint8_t *)so_try_find_addr_rx(
           module, "_ZN5sound3sys4Load10m_InitFlagE"),
-      (const uint8_t *)so_find_addr_rx(
+      (const uint8_t *)so_try_find_addr_rx(
           module, "_ZN5sound3sys4load7Manager10m_InitFlagE"),
-      (const uint8_t *)so_find_addr_rx(
+      (const uint8_t *)so_try_find_addr_rx(
           module, "_ZN5sound3sys12MusicManager15m_IsInitializedE"),
-      (const uint64_t *)so_find_addr_rx(
+      (const uint64_t *)so_try_find_addr_rx(
           module, "_ZN5sound3sys12MusicManager6m_hCueE"));
   sound_file_binder_get_instance =
-      (void *)so_find_addr_rx(
+      (void *)so_try_find_addr_rx(
           module, "_ZN3sys10FileBinder11GetInstanceEv");
   sound_file_binder_attach_sound_cpk =
-      (void *)so_find_addr_rx(
+      (void *)so_try_find_addr_rx(
           module, "_ZN3sys10FileBinder14AttachSoundCpkEv");
   sound_file_binder_is_ready =
-      (void *)so_find_addr_rx(module,
+      (void *)so_try_find_addr_rx(module,
                              "_ZN3sys10FileBinder7IsReadyEv");
 
+  int commentary_hooks_ok = 1;
   const uintptr_t commentary_acb_root =
       (uintptr_t)module->load_base + 0x820f8b7;
   static const char expected_commentary_acb_root[] = "cpk_snd/xxx";
   static const char english_commentary_acb_root[] = "cpk_snd/eng";
   if (memcmp((const void *)commentary_acb_root,
              expected_commentary_acb_root,
-             sizeof(expected_commentary_acb_root)) != 0)
-    fatal_error("Unexpected commentary ACB root at %p",
+             sizeof(expected_commentary_acb_root)) != 0) {
+    debugPrintf("WARNING: unexpected commentary ACB root at %p, "
+                "skipping commentary hooks\n",
                 (void *)commentary_acb_root);
-  memcpy((void *)commentary_acb_root, english_commentary_acb_root,
-         sizeof(english_commentary_acb_root));
+    commentary_hooks_ok = 0;
+  } else {
+    memcpy((void *)commentary_acb_root, english_commentary_acb_root,
+           sizeof(english_commentary_acb_root));
+  }
 
   const uintptr_t sound_language_plt =
       (uintptr_t)module->load_base + 0x38083d0;
@@ -3692,7 +3699,8 @@ void install_ue4_hooks(so_module *module) {
   static const uint32_t expected_use_commentary_plt[4] = {
       0xf002e210, 0xf9422611, 0x91112210, 0xd61f0220,
   };
-  if (memcmp((const void *)sound_language_plt,
+  if (!commentary_hooks_ok ||
+      memcmp((const void *)sound_language_plt,
              expected_sound_language_plt,
              sizeof(expected_sound_language_plt)) != 0 ||
       memcmp((const void *)sound_language_name_plt,
@@ -3703,22 +3711,26 @@ void install_ue4_hooks(so_module *module) {
              sizeof(expected_sound_language_string3_plt)) != 0 ||
       memcmp((const void *)use_commentary_plt,
              expected_use_commentary_plt,
-             sizeof(expected_use_commentary_plt)) != 0)
-    fatal_error("Unexpected commentary language PLT entries");
-  hook_arm64(sound_language_plt,
-             (uintptr_t)&pes_sound_language_english);
-  hook_arm64(sound_language_name_plt,
-             (uintptr_t)&pes_sound_language_name_english);
-  hook_arm64(sound_language_string3_plt,
-             (uintptr_t)&pes_sound_language_string3_english);
-  hook_arm64(use_commentary_plt,
-             (uintptr_t)&pes_use_commentary_enabled);
-  debugPrintf("UE4 hook: commentary root=cpk_snd/eng language=eng enabled=1 "
-              "at %p/%p/%p/%p/%p\n",
-              (void *)commentary_acb_root, (void *)sound_language_plt,
-              (void *)sound_language_name_plt,
-              (void *)sound_language_string3_plt,
-              (void *)use_commentary_plt);
+             sizeof(expected_use_commentary_plt)) != 0) {
+    debugPrintf("WARNING: commentary language PLT mismatch, "
+                "skipping commentary hooks\n");
+    commentary_hooks_ok = 0;
+  } else {
+    hook_arm64(sound_language_plt,
+               (uintptr_t)&pes_sound_language_english);
+    hook_arm64(sound_language_name_plt,
+               (uintptr_t)&pes_sound_language_name_english);
+    hook_arm64(sound_language_string3_plt,
+               (uintptr_t)&pes_sound_language_string3_english);
+    hook_arm64(use_commentary_plt,
+               (uintptr_t)&pes_use_commentary_enabled);
+    debugPrintf("UE4 hook: commentary root=cpk_snd/eng language=eng enabled=1 "
+                "at %p/%p/%p/%p/%p\n",
+                (void *)commentary_acb_root, (void *)sound_language_plt,
+                (void *)sound_language_name_plt,
+                (void *)sound_language_string3_plt,
+                (void *)use_commentary_plt);
+  }
 #ifdef DEBUG_LOG
   sound_cinf_play_original =
       (void *)so_find_addr_rx(module,
@@ -3820,7 +3832,20 @@ void install_ue4_hooks(so_module *module) {
               (void *)set_game_option_volume_plt,
               (void *)set_category_volume_plt, (void *)cri_bind_cpk_plt);
 #endif
-  debugPrintf("UE4 hook: CRI AAudio enabled=%p loader=%p "
-              "success-notify=nop\n",
-              (void *)aaudio_enable, (void *)aaudio_loader_open);
+  debugPrintf("UE4 hook: CRI AAudio loader=%p success-notify=nop "
+              "(enable deferred to post-finalize)\n",
+              (void *)aaudio_loader_open);
+}
+
+void ue4_hooks_post_finalize(so_module *module) {
+  // Now that so_finalize has mapped the SO into executable code memory,
+  // it is safe to call functions inside the SO through load_virtbase (RX)
+  // addresses.  Calling through load_base (RW heap) would fault on real
+  // Switch hardware because the heap is marked No-eXecute.
+  const uintptr_t aaudio_enable_rx =
+      so_find_addr_rx(module, "criNcv_EnableAAudio_ANDROID");
+  debugPrintf("UE4 post-finalize: criNcv_EnableAAudio_ANDROID at %p\n",
+              (void *)aaudio_enable_rx);
+  ((void (*)(uint32_t))aaudio_enable_rx)(1);
+  debugPrintf("UE4 post-finalize: AAudio enabled\n");
 }

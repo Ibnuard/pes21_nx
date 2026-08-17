@@ -342,6 +342,10 @@ int main(void) {
   so_flush_caches(&ue4_mod);
   debugPrintf("stage: flush caches done\n");
 
+  debugPrintf("stage: post-finalize hooks begin\n");
+  ue4_hooks_post_finalize(&ue4_mod);
+  debugPrintf("stage: post-finalize hooks done\n");
+
   start_constructor_watchdog();
 
   // Android arm64 code reads stack guards and thread state through TPIDR_EL0.
