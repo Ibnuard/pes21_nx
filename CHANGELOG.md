@@ -4,18 +4,63 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
-## [0.1.96] - 2026-08-14
+## [0.1.97] - 2026-08-17
 
 ### Added
 
-- Added a compact main-menu mode that keeps only Exhibition and the native
-  Training entry. Unsupported Event, Campaign, Club House, Contract, and
-  Extras pages are no longer exposed; their page setup and tab-swiping paths
-  are disabled before the menu becomes interactive.
-- Expanded Exhibition from two clubs to eleven fully validated master-data
-  clubs: Manchester United, Arsenal, Chelsea B, Liverpool R, Leeds W, West
-  Ham RB, Newcastle WB, Aston RB, FC Barcelona, Madrid Chamartin B, and
-  Valencia BN.
+- Expanded Exhibition to 95 selectable master-data teams: 38 clubs and 57
+  national teams, each with validated squad membership and shirt numbers.
+- Added a libnx AudioOut-backed AAudio compatibility layer for menu and match
+  audio, plus mounting and attachment of compatible English commentary data.
+- Added a compact four-tile main menu for Exhibition, Credits, Training, and
+  Version Info. The Credits popup includes the port attribution and support
+  link, while Version Info reports the wrapper and game versions.
+- Added the stock General Match Settings screen for time of day, match length,
+  overtime, and penalty kicks.
+
+### Changed
+
+- Simplified startup to go from the title screen directly to the main tiles,
+  bypassing the obsolete profile and onboarding detour.
+- Changed Exhibition so Proceed opens the visible Game Plan and Play starts
+  the match; the former Game Plan footer action is now optional Settings.
+- Kept both team slots empty until selected and disabled Proceed until valid
+  HOME and COM teams are ready.
+- Hid the four unsupported header icons and removed unsupported myClub pages
+  and tab-swiping paths from the compact menu.
+
+### Fixed
+
+- Restored differentiated player overall ratings from master data instead of
+  showing every squad member as 70.
+- Prevented COM-level selection from opening the team picker and preserved
+  left-analog virtual-touch movement after the performance adjustments.
+- Fixed missing audio, commentary attachment, and the earlier audio-startup
+  crash while retaining menu, effects, music, and commentary playback.
+- Preserved the Strategy update return value so Proceed no longer treats Game
+  Plan as completed and falls back to the Konami splash screen.
+- Prevented the Matchmaking page title from bleeding through General Match
+  Settings by hiding the complete parent visual root until Back is selected.
+
+### Verified
+
+- Menu audio, match audio, and English commentary are audible in the patched
+  Ryujinx test environment.
+- The tested flow reaches Matchmaking, opens and closes Settings cleanly,
+  enters Game Plan through Proceed, and starts a playable match through Play
+  without returning to the splash screen.
+- The 95-team selector, player ratings, COM level, controller movement, and
+  HOME/COM match setup are functional in the tested runtime.
+- The v0.1.97 release NRO builds successfully, the public-tree audit passes,
+  and the GitHub release notes generate from this changelog section.
+
+### Known issues
+
+- Native Switch performance has not yet received broad hardware validation;
+  Ryujinx performance and slow-motion can differ from real hardware.
+- Compatibility remains limited to PES 2021 Mobile v5.3.0 Nyan Mod Offline.
+
+## [0.1.96] - 2026-08-14
 
 ### Fixed
 
@@ -31,20 +76,12 @@ of this changelog.
 - The Python preparer and standalone PyInstaller executable both completed a
   full preparation from the supported APK and two OBBs. The resulting runtime
   passed all file validation with a valid JPEG icon in its NRO asset section.
-- All 336 membership entries across the eleven exposed clubs resolve to
-  unique players present in the supported `Player.raw`; every club has a
-  complete match-capable squad and valid shirt-number data.
-- The release NRO builds successfully with the compact menu hook and expanded
-  roster table, and the generated binary is copied into the local runtime.
 
 ### Notes
 
 - The public release NRO intentionally contains no proprietary artwork. Run
   the supplied preparer to generate the personalized NRO before copying it to
   the SD card.
-- Removing unsupported menu pages reduces menu setup and prevents accidental
-  entry into incomplete myClub paths. It is not presented as an in-match FPS
-  optimization; renderer and match-simulation cost remain separate work.
 
 ## [0.1.95] - 2026-08-11
 

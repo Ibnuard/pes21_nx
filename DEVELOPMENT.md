@@ -15,7 +15,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.96
+## Wrapper version 0.1.97
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -31,19 +31,21 @@ Working in the currently tested revision:
 - EGL/GLES2 context creation and continuous swap/render loop
 - touchscreen input in emulator and on hardware
 - offline HTTP bootstrap, login, and registration flow
-- direct entry to the main myClub menu from a preconfigured offline account
+- direct title-screen entry to the compact four-tile main menu, bypassing the
+  obsolete profile and onboarding detour
 - title-specific software-keyboard JNI calls used by profile text input
 - main PAK and patch/locale CPK discovery and mounting
 - splash screens, menus, UI, HUD, and transition into gameplay
 - visible, correctly oriented 3D gameplay through the fallback compositor
 - custom Switch-HID-to-mobile-touch controls in the tested Ryujinx Classic
   layout, including simultaneous movement, Dash, and action input
-- an Exhibition matchup hub reached from the renamed main-menu tile, with
-  independent HOME/COM club selection, COM level, optional Game Plan, and
-  direct Proceed into a local CPU match
-- validated master-data FC Barcelona and Madrid squads, refreshed stock kit
-  selection, and a same-tick Strategy save/fade path that avoids an extra
-  visible Strategy screen when starting directly
+- an Exhibition matchup hub with independent HOME/COM selection, COM level,
+  General Match Settings, and a deliberate Proceed > Game Plan > Play flow
+- 95 validated master-data teams: 38 clubs and 57 national teams with squad
+  membership, shirt numbers, differentiated player ratings, and refreshed
+  stock kit selection
+- libnx AudioOut-backed AAudio compatibility for menu and match audio, plus
+  mounted English commentary data from the compatible user-supplied runtime
 - a validated gameplay tick-rate hook that replaces the erroneous 5 FPS
   request with a 30 FPS floor while leaving valid rates unchanged
 - native-TLS render-state tracking and a release GLES state cache that reduce

@@ -1962,13 +1962,13 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       "Support for more update";
   static const char version_body[] =
       "Build & Game Version\n\n"
-      "NRO: PES 2021 NX v0.1.96\n"
+      "NRO: PES 2021 NX v0.1.97\n"
       "Game: PES 2021 Mobile v5.3.0\n\n"
       "Latest changes:\n"
-      "- Direct Start > Menu flow\n"
-      "- 95 Exhibition teams\n"
-      "- Credits and version popups\n"
-      "- Hidden unused header icons";
+      "- 95 club and national teams\n"
+      "- Full audio and commentary\n"
+      "- Settings > Game Plan > Match\n"
+      "- Player ratings and input fixes";
   const char *body = choice == 1 ? credits_body : version_body;
 
   unsigned char dialog_name[24];

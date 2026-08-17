@@ -25,6 +25,30 @@ work without source changes.
 The Nyan Mod files are not included, maintained, or distributed here. Credit
 goes to **Nyan Mod** for the offline modification used during development.
 
+## Current release: v0.1.97
+
+This release expands the port from a small Exhibition proof of concept into a
+more complete offline match flow:
+
+- 95 selectable teams: 38 clubs and 57 national teams, with validated squads
+  and shirt numbers from the supported master data;
+- a compact four-tile menu for Exhibition, Credits, Training, and Version
+  Info, reached directly from the title screen;
+- independent HOME and COM selection, COM level, General Match Settings, and
+  a clear `Proceed > Game Plan > Play` route into a local match;
+- differentiated player ratings instead of the former uniform overall value;
+- menu and match audio through libnx AudioOut, including English commentary
+  when the compatible commentary data is present;
+- Switch controller support through the tested Classic mobile-control layout,
+  including movement, actions, Dash, defensive controls, and Pause.
+
+The current Exhibition flow is:
+
+```text
+Title Screen > Main Menu > Exhibition > Matchmaking
+             > Settings (optional) > Proceed > Game Plan > Play > Match
+```
+
 ## Screenshots
 
 <p align="center">
@@ -34,6 +58,17 @@ goes to **Nyan Mod** for the offline modification used during development.
   <img src="public/3.JPG" alt="Exhibition Game Plan screen with a valid Barcelona squad" width="49%">
   <img src="public/4.JPG" alt="Barcelona versus Madrid Exhibition kickoff" width="99%">
 </p>
+
+## Controls
+
+- Left analog: player movement
+- B: short pass / Press
+- X: through pass
+- Y: shoot or contextual clear
+- A: cross / Tackle
+- R1: Dash
+- L1: switch player while defending
+- Plus: Pause
 
 ## How to install
 
@@ -59,6 +94,15 @@ before preparing a clean installation.
 For release history and known limitations, see [CHANGELOG.md](CHANGELOG.md).
 For source builds and porting details, see
 [DEVELOPMENT.md](DEVELOPMENT.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Known limitations
+
+- Only the PES 2021 Mobile v5.3.0 Nyan Mod Offline target is supported.
+- The synthetic controller mapping targets the Classic mobile-control layout;
+  Advanced controls and custom button layouts are not supported.
+- Native Switch performance still needs broader hardware validation. Ryujinx
+  frame pacing and slow-motion are not representative of every Switch setup.
+- The wrapper and preparation tools do not include proprietary game files.
 
 ## License
 
