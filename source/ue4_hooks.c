@@ -156,6 +156,79 @@ static unsigned int cursor_pad_log_count;
 static unsigned int real_pad_log_count;
 static unsigned int mobile_context_log_count;
 static unsigned int exhibition_flow_log_count;
+static void *(*sound_file_binder_get_instance)(void);
+static int32_t (*sound_file_binder_attach_sound_cpk)(void *binder);
+static uint32_t (*sound_file_binder_is_ready)(void *binder);
+static _Alignas(4) uint32_t commentary_sound_cpk_state;
+
+// The mobile binary hardcodes the commentary ACB namespace as cpk_snd/xxx,
+// while its AWB path can inherit an unsupported sound-language sentinel. This
+// port currently ships the English dt510/dt530 pack, so keep loading and match
+// settings on English.
+static uint32_t pes_sound_language_english(void) {
+  return 0;
+}
+
+static const char *pes_sound_language_name_english(uint32_t language) {
+  (void)language;
+  return "eng";
+}
+
+static void pes_attach_commentary_sound_cpk(void) {
+  if (commentary_sound_cpk_state != 0)
+    return;
+
+  commentary_sound_cpk_state = 1;
+  void *binder = sound_file_binder_get_instance();
+  if (!binder) {
+    commentary_sound_cpk_state = 0;
+    return;
+  }
+
+  sound_file_binder_attach_sound_cpk(binder);
+  for (uint32_t attempt = 0; attempt < 5000; attempt++) {
+    if (sound_file_binder_is_ready(binder)) {
+      // Advance the game's attach state once more for its error/version checks.
+      sound_file_binder_attach_sound_cpk(binder);
+      commentary_sound_cpk_state = 2;
+#ifdef DEBUG_LOG
+      debugPrintf("sound: AttachSoundCpk binder ready after %u attempts\n",
+                  attempt + 1);
+#endif
+      return;
+    }
+    svcSleepThread(1000000LL);
+  }
+
+  commentary_sound_cpk_state = 0;
+#ifdef DEBUG_LOG
+  debugPrintf("sound: AttachSoundCpk timed out\n");
+#endif
+}
+
+static int32_t pes_sound_language_string3_english(char *language,
+                                                   uint32_t uppercase) {
+  if (!language)
+    return -1;
+
+  if (!uppercase)
+    pes_attach_commentary_sound_cpk();
+
+  language[0] = uppercase ? 'E' : 'e';
+  language[1] = uppercase ? 'N' : 'n';
+  language[2] = uppercase ? 'G' : 'g';
+  language[3] = '\0';
+#ifdef DEBUG_LOG
+  debugPrintf("sound: forced sound language=%s uppercase=%u\n", language,
+              uppercase);
+#endif
+  return 0;
+}
+
+static uint32_t pes_use_commentary_enabled(void) {
+  return 1;
+}
+
 #ifdef DEBUG_LOG
 static int32_t (*sound_cinf_play_original)(const void *play_info,
                                            uint64_t *handle);
@@ -171,6 +244,12 @@ static int32_t (*sound_set_game_option_volume_original)(uint32_t type,
                                                         float volume);
 static int32_t (*sound_set_category_volume_original)(const char *category,
                                                      float volume);
+static int32_t (*sound_cri_bind_cpk_original)(void *binder,
+                                              void *source_binder,
+                                              const char *path,
+                                              void *work,
+                                              int32_t work_size,
+                                              uint32_t *bind_id);
 static float (*sound_get_category_volume)(const char *category);
 static float (*sound_get_category_total_volume)(const char *category);
 static unsigned int sound_play_log_count;
@@ -267,6 +346,18 @@ static int32_t pes_sound_set_category_volume_diagnostic(
               "read=%f total=%f\n",
               category ? category : "(null)", volume, result,
               category_volume, total_volume);
+  return result;
+}
+
+static int32_t pes_sound_cri_bind_cpk_diagnostic(
+    void *binder, void *source_binder, const char *path, void *work,
+    int32_t work_size, uint32_t *bind_id) {
+  const int32_t result = sound_cri_bind_cpk_original(
+      binder, source_binder, path, work, work_size, bind_id);
+  debugPrintf("sound: criFsBinder_BindCpk path=%s result=%d bind=%u "
+              "binder=%p source=%p work=%p/%d\n",
+              path ? path : "(null)", result, bind_id ? *bind_id : 0,
+              binder, source_binder, work, work_size);
   return result;
 }
 #endif
@@ -3418,6 +3509,75 @@ void install_ue4_hooks(so_module *module) {
           module, "_ZN5sound3sys12MusicManager15m_IsInitializedE"),
       (const uint64_t *)so_find_addr_rx(
           module, "_ZN5sound3sys12MusicManager6m_hCueE"));
+  sound_file_binder_get_instance =
+      (void *)so_find_addr_rx(
+          module, "_ZN3sys10FileBinder11GetInstanceEv");
+  sound_file_binder_attach_sound_cpk =
+      (void *)so_find_addr_rx(
+          module, "_ZN3sys10FileBinder14AttachSoundCpkEv");
+  sound_file_binder_is_ready =
+      (void *)so_find_addr_rx(module,
+                             "_ZN3sys10FileBinder7IsReadyEv");
+
+  const uintptr_t commentary_acb_root =
+      (uintptr_t)module->load_base + 0x820f8b7;
+  static const char expected_commentary_acb_root[] = "cpk_snd/xxx";
+  static const char english_commentary_acb_root[] = "cpk_snd/eng";
+  if (memcmp((const void *)commentary_acb_root,
+             expected_commentary_acb_root,
+             sizeof(expected_commentary_acb_root)) != 0)
+    fatal_error("Unexpected commentary ACB root at %p",
+                (void *)commentary_acb_root);
+  memcpy((void *)commentary_acb_root, english_commentary_acb_root,
+         sizeof(english_commentary_acb_root));
+
+  const uintptr_t sound_language_plt =
+      (uintptr_t)module->load_base + 0x38083d0;
+  const uintptr_t sound_language_name_plt =
+      (uintptr_t)module->load_base + 0x390fd50;
+  const uintptr_t sound_language_string3_plt =
+      (uintptr_t)module->load_base + 0x37e7050;
+  const uintptr_t use_commentary_plt =
+      (uintptr_t)module->load_base + 0x38f63e0;
+  static const uint32_t expected_sound_language_plt[4] = {
+      0xd002e5d0, 0xf9422211, 0x91110210, 0xd61f0220,
+  };
+  static const uint32_t expected_sound_language_name_plt[4] = {
+      0xf002e1b0, 0xf9408211, 0x91040210, 0xd61f0220,
+  };
+  static const uint32_t expected_sound_language_string3_plt[4] = {
+      0xd002e650, 0xf9454211, 0x912a0210, 0xd61f0220,
+  };
+  static const uint32_t expected_use_commentary_plt[4] = {
+      0xf002e210, 0xf9422611, 0x91112210, 0xd61f0220,
+  };
+  if (memcmp((const void *)sound_language_plt,
+             expected_sound_language_plt,
+             sizeof(expected_sound_language_plt)) != 0 ||
+      memcmp((const void *)sound_language_name_plt,
+             expected_sound_language_name_plt,
+             sizeof(expected_sound_language_name_plt)) != 0 ||
+      memcmp((const void *)sound_language_string3_plt,
+             expected_sound_language_string3_plt,
+             sizeof(expected_sound_language_string3_plt)) != 0 ||
+      memcmp((const void *)use_commentary_plt,
+             expected_use_commentary_plt,
+             sizeof(expected_use_commentary_plt)) != 0)
+    fatal_error("Unexpected commentary language PLT entries");
+  hook_arm64(sound_language_plt,
+             (uintptr_t)&pes_sound_language_english);
+  hook_arm64(sound_language_name_plt,
+             (uintptr_t)&pes_sound_language_name_english);
+  hook_arm64(sound_language_string3_plt,
+             (uintptr_t)&pes_sound_language_string3_english);
+  hook_arm64(use_commentary_plt,
+             (uintptr_t)&pes_use_commentary_enabled);
+  debugPrintf("UE4 hook: commentary root=cpk_snd/eng language=eng enabled=1 "
+              "at %p/%p/%p/%p/%p\n",
+              (void *)commentary_acb_root, (void *)sound_language_plt,
+              (void *)sound_language_name_plt,
+              (void *)sound_language_string3_plt,
+              (void *)use_commentary_plt);
 #ifdef DEBUG_LOG
   sound_cinf_play_original =
       (void *)so_find_addr_rx(module,
@@ -3437,6 +3597,8 @@ void install_ue4_hooks(so_module *module) {
   sound_set_category_volume_original =
       (void *)so_find_addr_rx(
           module, "_ZN2KS8CInfBase17SetCategoryVolumeEPKcf");
+  sound_cri_bind_cpk_original =
+      (void *)so_find_addr_rx(module, "criFsBinder_BindCpk");
   sound_get_category_volume =
       (void *)so_find_addr_rx(module,
                               "criAtomExCategory_GetVolumeByName");
@@ -3454,6 +3616,8 @@ void install_ue4_hooks(so_module *module) {
       (uintptr_t)module->load_base + 0x38c6dd0;
   const uintptr_t set_category_volume_plt =
       (uintptr_t)module->load_base + 0x37e3c10;
+  const uintptr_t cri_bind_cpk_plt =
+      (uintptr_t)module->load_base + 0x3860390;
   static const uint32_t expected_cinf_play_plt[4] = {
       0x9002e550, 0xf9429e11, 0x9114e210, 0xd61f0220,
   };
@@ -3472,6 +3636,9 @@ void install_ue4_hooks(so_module *module) {
   static const uint32_t expected_set_category_volume_plt[4] = {
       0xb002e670, 0xf9403211, 0x91018210, 0xd61f0220,
   };
+  static const uint32_t expected_cri_bind_cpk_plt[4] = {
+      0xd002e470, 0xf9421211, 0x91108210, 0xd61f0220,
+  };
   if (memcmp((const void *)cinf_play_plt, expected_cinf_play_plt,
               sizeof(expected_cinf_play_plt)) != 0 ||
       memcmp((const void *)music_set_event_plt,
@@ -3486,7 +3653,10 @@ void install_ue4_hooks(so_module *module) {
              sizeof(expected_set_game_option_volume_plt)) != 0 ||
       memcmp((const void *)set_category_volume_plt,
              expected_set_category_volume_plt,
-             sizeof(expected_set_category_volume_plt)) != 0)
+             sizeof(expected_set_category_volume_plt)) != 0 ||
+      memcmp((const void *)cri_bind_cpk_plt,
+             expected_cri_bind_cpk_plt,
+             sizeof(expected_cri_bind_cpk_plt)) != 0)
     fatal_error("Unexpected sound diagnostic PLT entries");
   hook_arm64(cinf_play_plt, (uintptr_t)&pes_sound_cinf_play_diagnostic);
   hook_arm64(music_set_event_plt,
@@ -3499,12 +3669,15 @@ void install_ue4_hooks(so_module *module) {
              (uintptr_t)&pes_sound_set_game_option_volume_diagnostic);
   hook_arm64(set_category_volume_plt,
              (uintptr_t)&pes_sound_set_category_volume_diagnostic);
+  hook_arm64(cri_bind_cpk_plt,
+             (uintptr_t)&pes_sound_cri_bind_cpk_diagnostic);
   debugPrintf("UE4 hook: sound diagnostics Play=%p SetEventId=%p "
-              "MountData=%p IsExist=%p OptionVolume=%p CategoryVolume=%p\n",
+              "MountData=%p IsExist=%p OptionVolume=%p CategoryVolume=%p "
+              "BindCpk=%p\n",
               (void *)cinf_play_plt, (void *)music_set_event_plt,
               (void *)mount_data_plt, (void *)file_is_exist_plt,
               (void *)set_game_option_volume_plt,
-              (void *)set_category_volume_plt);
+              (void *)set_category_volume_plt, (void *)cri_bind_cpk_plt);
 #endif
   debugPrintf("UE4 hook: CRI AAudio enabled=%p loader=%p "
               "success-notify=nop\n",
