@@ -2353,7 +2353,9 @@ static EGLBoolean eglQuerySurface_compat(EGLDisplay dpy, EGLSurface surface,
 
 // mesa nouveau_mm slab-allocator replacement (-Wl,--wrap): mesa's small-buffer
 // sub-allocator corrupts its slab pool under the world load, so replace it with
-// a bump-slab pool of large bos, sub-allocated linearly and never freed.
+// a pool of large BOs sub-allocated into reusable ranges.  A bump-only pool
+// leaks every transient buffer after free and can exhaust GPU memory in a
+// long match on hardware.
 // nouveau_mman layout { dev@0; bucket[15]; uint32_t domain@848; config@852 };
 // handle is malloc(24) { next@0; priv@8; uint32_t offset@16 }.
 extern int nouveau_bo_new(void *dev, uint32_t flags, uint32_t align,
@@ -2369,10 +2371,59 @@ extern int nouveau_bo_ref(void *bo, void **pref);
 #define NMM_BIG_THRESH (512u * 1024)        // > this -> its own dedicated bo
 #define NMM_MAX_SLABS  1024
 
-struct nmm_slab { void *cache; void *bo; uint64_t size; uint64_t cur; };
+struct nmm_alloc;
+struct nmm_slab {
+  void *cache;
+  void *bo;
+  uint64_t size;
+  uint64_t cur;
+  struct nmm_alloc *free_list;
+};
+
+// Keep the first 24 bytes identical to nouveau_mm_allocation:
+// next@0, priv@8, offset@16.  The final uint32 stores the range capacity so a
+// freed handle can be returned to the slab and reused without side metadata.
+struct nmm_alloc {
+  struct nmm_alloc *next;
+  struct nmm_slab *slab;
+  uint32_t offset;
+  uint32_t size;
+};
+_Static_assert(sizeof(struct nmm_alloc) == 24,
+               "nouveau allocation handle layout must remain 24 bytes");
+
 static struct nmm_slab g_nmm_slabs[NMM_MAX_SLABS];
 static int g_nmm_nslabs = 0;
 static pthread_mutex_t g_nmm_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static void nmm_free_insert_locked(struct nmm_slab *slab,
+                                   struct nmm_alloc *allocation) {
+  struct nmm_alloc **link = &slab->free_list;
+  while (*link && (*link)->offset < allocation->offset)
+    link = &(*link)->next;
+  allocation->next = *link;
+  *link = allocation;
+
+  // Coalesce adjacent ranges to avoid fragmentation under varying buffer sizes.
+  struct nmm_alloc *current = allocation;
+  if (link != &slab->free_list) {
+    struct nmm_alloc *previous = slab->free_list;
+    while (previous->next != current)
+      previous = previous->next;
+    if ((uint64_t)previous->offset + previous->size == current->offset) {
+      previous->size += current->size;
+      previous->next = current->next;
+      free(current);
+      current = previous;
+    }
+  }
+  struct nmm_alloc *next = current->next;
+  if (next && (uint64_t)current->offset + current->size == next->offset) {
+    current->size += next->size;
+    current->next = next->next;
+    free(next);
+  }
+}
 
 // dedicated, right-sized bo (mirrors mesa's >2MB path: NULL handle, *bo set)
 static void *nmm_dedicated(void *cache, uint32_t sz, void **bo, uint32_t *offset) {
@@ -2390,25 +2441,74 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
   if (asz > NMM_BIG_THRESH)
     return nmm_dedicated(cache, asz, bo, offset);
 
+  // Do not advance allocator state until a handle is available.  Returning
+  // NULL is safer than leaking a range when CPU-side allocation fails.
+  struct nmm_alloc *allocation = malloc(sizeof(*allocation));
+  if (!allocation)
+    return NULL;
+
   pthread_mutex_lock(&g_nmm_mtx);
   struct nmm_slab *s = NULL;
-  for (int i = g_nmm_nslabs - 1; i >= 0; i--) {       // newest first (bump locality)
+  // Search reusable ranges across every slab first.  Looking only at the
+  // newest slab would leave freed ranges in older slabs stranded forever.
+  for (int i = g_nmm_nslabs - 1; i >= 0 && !s; i--) {
+    if (g_nmm_slabs[i].cache != cache)
+      continue;
+    for (struct nmm_alloc *free_range = g_nmm_slabs[i].free_list;
+         free_range; free_range = free_range->next) {
+      if (free_range->size >= asz) {
+        s = &g_nmm_slabs[i];
+        break;
+      }
+    }
+  }
+  // No reusable range: retain newest-first bump locality for a fresh range.
+  for (int i = g_nmm_nslabs - 1; i >= 0 && !s; i--) {
     if (g_nmm_slabs[i].cache == cache &&
-        (g_nmm_slabs[i].size - g_nmm_slabs[i].cur) >= asz) { s = &g_nmm_slabs[i]; break; }
+        (g_nmm_slabs[i].size - g_nmm_slabs[i].cur) >= asz)
+      s = &g_nmm_slabs[i];
+  }
+
+  // Reuse a released range before extending the slab high-water mark.
+  if (s && s->free_list) {
+    struct nmm_alloc **link = &s->free_list;
+    while (*link && (*link)->size < asz)
+      link = &(*link)->next;
+    if (*link) {
+      struct nmm_alloc *reused = *link;
+      *link = reused->next;
+      free(allocation);
+      allocation = reused;
+      allocation->next = NULL;
+      allocation->slab = s;
+      void *slab_bo = s->bo;
+      if (offset)
+        *offset = allocation->offset;
+      pthread_mutex_unlock(&g_nmm_mtx);
+      if (bo)
+        nouveau_bo_ref(slab_bo, bo);
+      return allocation;
+    }
   }
   if (!s) {
     if (g_nmm_nslabs >= NMM_MAX_SLABS) {              // table full -> dedicated bo
       pthread_mutex_unlock(&g_nmm_mtx);
+      free(allocation);
       return nmm_dedicated(cache, asz, bo, offset);
     }
     void *nb = NULL;
     if (nouveau_bo_new(NMM_DEV(cache), NMM_DOMAIN(cache), 0, NMM_SLAB_BYTES,
                        NMM_CONFIG(cache), &nb) || !nb) {
       pthread_mutex_unlock(&g_nmm_mtx);
+      free(allocation);
       return nmm_dedicated(cache, asz, bo, offset);  // slab alloc failed -> dedicated
     }
     s = &g_nmm_slabs[g_nmm_nslabs++];
-    s->cache = cache; s->bo = nb; s->size = NMM_SLAB_BYTES; s->cur = 0;
+    s->cache = cache;
+    s->bo = nb;
+    s->size = NMM_SLAB_BYTES;
+    s->cur = 0;
+    s->free_list = NULL;
   }
   uint64_t off = s->cur;
   s->cur += asz;
@@ -2418,20 +2518,31 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
   if (bo) nouveau_bo_ref(slab_bo, bo);   // *bo = slab_bo (refcount++), as stock does
   if (offset) *offset = (uint32_t)off;
 
-  void **h = (void **)malloc(24);        // layout = struct nouveau_mm_allocation
-  if (h) { h[0] = NULL; h[1] = s; *(uint32_t *)((char *)h + 16) = (uint32_t)off; }
-  return h;
+  allocation->next = NULL;
+  allocation->slab = s;
+  allocation->offset = (uint32_t)off;
+  allocation->size = asz;
+  return allocation;
 }
 
 void __wrap_nouveau_mm_free(void *handle) {
-  // slabs are never freed; just release the handle
-  if (handle) free(handle);
+  if (!handle)
+    return;
+  struct nmm_alloc *allocation = handle;
+  struct nmm_slab *slab = allocation->slab;
+  if (!slab) {
+    free(allocation);
+    return;
+  }
+  pthread_mutex_lock(&g_nmm_mtx);
+  nmm_free_insert_locked(slab, allocation);
+  pthread_mutex_unlock(&g_nmm_mtx);
 }
 
 // nouveau_mm_free_work is an intra-object alias that bypasses --wrap, so wrap it
 // too to keep deferred frees of our handles away from mesa's stock free.
 void __wrap_nouveau_mm_free_work(void *handle) {
-  if (handle) free(handle);
+  __wrap_nouveau_mm_free(handle);
 }
 
 // The world load creates thousands of buffers/textures without presenting, so
