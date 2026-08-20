@@ -14,6 +14,11 @@ void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
 int pes_controller_menu_active(void);
+int pes_controller_gameplan_cursor_active(void);
+int pes_controller_gameplan_cursor_position(float *normalized_x,
+                                            float *normalized_y);
+void pes_controller_gameplan_cursor_set(float normalized_x,
+                                        float normalized_y);
 int pes_main_menu_controller_active(void);
 uint32_t pes_main_menu_focus_index(void);
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons);

@@ -397,6 +397,9 @@ static _Alignas(4) uint32_t exhibition_select_side;
 static _Alignas(4) uint32_t exhibition_strategy_action;
 static _Alignas(4) uint32_t exhibition_plan_ready;
 static _Alignas(4) uint32_t exhibition_return_to_selector;
+static _Alignas(4) uint32_t exhibition_gameplan_cursor_active;
+static _Alignas(4) uint32_t exhibition_gameplan_cursor_x = 32768;
+static _Alignas(4) uint32_t exhibition_gameplan_cursor_y = 32768;
 static _Alignas(4) uint32_t exhibition_searching_active;
 static _Alignas(4) uint32_t exhibition_search_refresh_pending;
 static _Alignas(4) uint32_t exhibition_search_initial_refresh_ticks;
@@ -1792,6 +1795,8 @@ uintptr_t pes_exhibition_training_footer_entry(void *window,
                                           : EXHIBITION_STRATEGY_START;
   __atomic_store_n(&exhibition_strategy_action, action, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_strategy_pending, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
   exhibition_flow_direct_set((unsigned char *)listener + 0x118,
                              strategy_flow);
@@ -3470,6 +3475,8 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
     if (state == 0 &&
         __atomic_exchange_n(&exhibition_strategy_pending, 0,
                             __ATOMIC_ACQ_REL)) {
+      __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
+                       __ATOMIC_RELEASE);
       const uint32_t action = __atomic_load_n(
           &exhibition_strategy_action, __ATOMIC_ACQUIRE);
       const int reuse_plan =
@@ -3663,6 +3670,20 @@ uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
       __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
     exhibition_refresh_squad_player_stats();
 
+  const int cursor_active =
+      strategy_flow && squad_edit &&
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
+          EXHIBITION_STRATEGY_START;
+  if (cursor_active) {
+    __atomic_store_n(&exhibition_gameplan_cursor_x, 32768,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_gameplan_cursor_y, 29491,
+                     __ATOMIC_RELEASE);
+  }
+  __atomic_store_n(&exhibition_gameplan_cursor_active, cursor_active,
+                   __ATOMIC_RELEASE);
+
   return exhibition_strategy_created_resume;
 }
 
@@ -3694,6 +3715,9 @@ static void pes_exhibition_strategy_footer(void *window,
   if (starting_match && footer_key == 1)
     __atomic_store_n(&exhibition_strategy_action,
                      EXHIBITION_STRATEGY_EDIT, __ATOMIC_RELEASE);
+
+  __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
+                   __ATOMIC_RELEASE);
 
   if (exhibition_strategy_footer_original)
     exhibition_strategy_footer_original(window, footer_key);
@@ -3751,6 +3775,38 @@ int pes_controller_menu_active(void) {
          __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_team_select_active, __ATOMIC_ACQUIRE);
+}
+
+int pes_controller_gameplan_cursor_active(void) {
+  return __atomic_load_n(&exhibition_gameplan_cursor_active,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+int pes_controller_gameplan_cursor_position(float *normalized_x,
+                                            float *normalized_y) {
+  if (!pes_controller_gameplan_cursor_active())
+    return 0;
+  const uint32_t x = __atomic_load_n(&exhibition_gameplan_cursor_x,
+                                     __ATOMIC_ACQUIRE);
+  const uint32_t y = __atomic_load_n(&exhibition_gameplan_cursor_y,
+                                     __ATOMIC_ACQUIRE);
+  if (normalized_x)
+    *normalized_x = (float)x / 65535.0f;
+  if (normalized_y)
+    *normalized_y = (float)y / 65535.0f;
+  return 1;
+}
+
+void pes_controller_gameplan_cursor_set(float normalized_x,
+                                        float normalized_y) {
+  normalized_x = fmaxf(0.005f, fminf(normalized_x, 0.995f));
+  normalized_y = fmaxf(0.008f, fminf(normalized_y, 0.992f));
+  __atomic_store_n(&exhibition_gameplan_cursor_x,
+                   (uint32_t)(normalized_x * 65535.0f + 0.5f),
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_gameplan_cursor_y,
+                   (uint32_t)(normalized_y * 65535.0f + 0.5f),
+                   __ATOMIC_RELEASE);
 }
 
 int pes_main_menu_controller_active(void) {

@@ -171,6 +171,8 @@ enum {
   FAKE_POINTER_MENU = 7,
   FAKE_POINTER_MENU_SCROLL = 8,
   FAKE_POINTER_MENU_BACK = 9,
+  FAKE_POINTER_GAMEPLAN_CURSOR = FAKE_POINTER_MENU,
+  FAKE_POINTER_GAMEPLAN_PLAY = FAKE_POINTER_MENU_SCROLL,
 };
 
 #define FAKE_PIPE_BASE 0x70000000
@@ -718,6 +720,13 @@ static void emit_menu_pad_input(const HidAnalogStickState *left_stick,
   cobra_pad_set_input(mapped, up, down, left, right, connected);
 }
 
+static void emit_gameplan_pad_input(int connected, u64 buttons) {
+  const u64 reserved = HidNpadButton_A | HidNpadButton_ZL |
+                       HidNpadButton_ZR;
+  const uint32_t mapped = menu_pad_buttons(buttons & ~reserved, NULL, 0);
+  cobra_pad_set_input(mapped, 0, 0, 0, 0, connected);
+}
+
 static uint64_t monotonic_ms(void) {
   return armTicksToNs(armGetSystemTick()) / 1000000ULL;
 }
@@ -1001,6 +1010,51 @@ static void append_menu_controller_scroll(FakeTouchState *desired,
                      (float)screen_width * 0.50f, y);
 }
 
+static void append_gameplan_controller(FakeTouchState *desired, float axis_x,
+                                       float axis_y, int connected,
+                                       u64 buttons, uint64_t now_ms) {
+  static uint64_t cursor_previous_ms;
+  static uint64_t play_until_ms;
+  float cursor_x = 0.5f;
+  float cursor_y = 0.45f;
+  if (!pes_controller_gameplan_cursor_position(&cursor_x, &cursor_y)) {
+    cursor_previous_ms = 0;
+    play_until_ms = 0;
+    return;
+  }
+
+  uint64_t elapsed_ms = cursor_previous_ms ? now_ms - cursor_previous_ms : 0;
+  if (elapsed_ms > 40)
+    elapsed_ms = 40;
+  cursor_previous_ms = now_ms;
+  if (connected && elapsed_ms && screen_width > 0 && screen_height > 0) {
+    const float cursor_speed = 780.0f;
+    cursor_x += axis_x * cursor_speed * (float)elapsed_ms /
+                (1000.0f * (float)screen_width);
+    cursor_y += axis_y * cursor_speed * (float)elapsed_ms /
+                (1000.0f * (float)screen_height);
+    pes_controller_gameplan_cursor_set(cursor_x, cursor_y);
+    pes_controller_gameplan_cursor_position(&cursor_x, &cursor_y);
+  }
+
+  const int cursor_held = connected &&
+                          (buttons & (HidNpadButton_ZL |
+                                      HidNpadButton_ZR)) != 0;
+  if (cursor_held)
+    touch_state_append(desired, FAKE_POINTER_GAMEPLAN_CURSOR,
+                       cursor_x * (float)screen_width,
+                       cursor_y * (float)screen_height);
+
+  const int a_pressed = connected && (buttons & HidNpadButton_A) != 0 &&
+                        (previous_hid_buttons & HidNpadButton_A) == 0;
+  if (a_pressed && play_until_ms <= now_ms)
+    play_until_ms = now_ms + 90;
+  if (play_until_ms > now_ms)
+    touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
+                       0.865f * (float)screen_width,
+                       0.944f * (float)screen_height);
+}
+
 static void log_controller_input(const HidAnalogStickState *stick,
                                  int connected, u64 buttons, float x,
                                  float y, int gameplay_active,
@@ -1153,6 +1207,8 @@ void android_input_poll(void) {
   int control_mode = 0;
   const int gameplay_active =
       mobile_gameplay_context(now_ms, &control_mode);
+  const int gameplan_cursor_active =
+      !gameplay_active && pes_controller_gameplan_cursor_active();
 
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));
@@ -1198,7 +1254,11 @@ void android_input_poll(void) {
   append_virtual_gamepad_touches(
       &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
       control_mode, now_ms);
-  if (!gameplay_active && pes_controller_menu_active()) {
+  if (gameplan_cursor_active)
+    append_gameplan_controller(&desired, axis_x, axis_y, have_left_stick,
+                               buttons, now_ms);
+  if (!gameplay_active && !gameplan_cursor_active &&
+      pes_controller_menu_active()) {
     const int a_pressed = (buttons & HidNpadButton_A) != 0 &&
                           (previous_hid_buttons & HidNpadButton_A) == 0;
     const int b_pressed = (buttons & HidNpadButton_B) != 0 &&
@@ -1263,7 +1323,9 @@ void android_input_poll(void) {
 
   log_controller_input(&left_stick, have_left_stick, buttons, axis_x, axis_y,
                        gameplay_active, control_mode);
-  if (!gameplay_active && pes_controller_menu_active())
+  if (gameplan_cursor_active)
+    emit_gameplan_pad_input(have_left_stick, buttons);
+  else if (!gameplay_active && pes_controller_menu_active())
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,
                         have_left_stick);
   else

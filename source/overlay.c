@@ -33,6 +33,7 @@ static struct {
   GLint loc_pos, loc_uv, loc_tex, loc_off, loc_color, loc_solid, loc_image;
   GLint loc_circle, loc_circle_feather;
   GLint loc_round_rect, loc_round_size, loc_round_radius, loc_round_feather;
+  GLint loc_cursor, loc_cursor_border;
   int uploaded;
 } gl;
 
@@ -62,10 +63,37 @@ static const char fshader_src[] =
   "uniform vec2 uRoundSize;\n"
   "uniform float uRoundRadius;\n"
   "uniform float uRoundFeather;\n"
+  "uniform float uCursor;\n"
+  "uniform float uCursorBorder;\n"
   "varying vec2 vUV;\n"
+  "float sdBox(vec2 p, vec2 halfSize) {\n"
+  "  vec2 d = abs(p) - halfSize;\n"
+  "  return length(max(d, vec2(0.0))) +\n"
+  "         min(max(d.x, d.y), 0.0);\n"
+  "}\n"
+  "float cursorDistance(vec2 p) {\n"
+  "  vec2 q = p - vec2(3.0);\n"
+  "  float edge0 = -q.x;\n"
+  "  float edge1 = (q.x - q.y) * 0.70710678;\n"
+  "  float edge2 =\n"
+  "      (q.y - (30.0 - q.x * 0.36363636)) * 0.93979342;\n"
+  "  float head = max(max(edge0, edge1), edge2);\n"
+  "  vec2 direction = vec2(0.44721360, 0.89442719);\n"
+  "  vec2 normal = vec2(-direction.y, direction.x);\n"
+  "  vec2 stemPoint = q - vec2(15.0, 31.0);\n"
+  "  vec2 stemLocal = vec2(dot(stemPoint, normal),\n"
+  "                        dot(stemPoint, direction));\n"
+  "  float stem = sdBox(stemLocal, vec2(3.6, 11.18034));\n"
+  "  return min(head, stem);\n"
+  "}\n"
   "void main() {\n"
   "  vec4 sampled = texture2D(texFont, vUV);\n"
-  "  if (uRoundRect > 0.5) {\n"
+  "  if (uCursor > 0.5) {\n"
+  "    float sd = cursorDistance(vUV * vec2(36.0, 48.0));\n"
+  "    float a = 1.0 - smoothstep(uCursorBorder - 0.85,\n"
+  "                               uCursorBorder + 0.85, sd);\n"
+  "    gl_FragColor = vec4(uColor.rgb, uColor.a * a);\n"
+  "  } else if (uRoundRect > 0.5) {\n"
   "    vec2 halfSize = uRoundSize * 0.5;\n"
   "    float radius = min(uRoundRadius, min(halfSize.x, halfSize.y));\n"
   "    vec2 p = (vUV - vec2(0.5)) * uRoundSize;\n"
@@ -127,6 +155,8 @@ static int gl_init(void) {
   gl.loc_round_size = glGetUniformLocation(gl.prog, "uRoundSize");
   gl.loc_round_radius = glGetUniformLocation(gl.prog, "uRoundRadius");
   gl.loc_round_feather = glGetUniformLocation(gl.prog, "uRoundFeather");
+  gl.loc_cursor = glGetUniformLocation(gl.prog, "uCursor");
+  gl.loc_cursor_border = glGetUniformLocation(gl.prog, "uCursorBorder");
   glGenTextures(1, &gl.tex);
   glGenTextures(1, &gl.badge_tex);
   glGenBuffers(1, &gl.vbo);
@@ -478,9 +508,13 @@ static void overlay_render(void) {
   float prompt_y = 0.0f;
   const int start_prompt =
       pes_controller_start_prompt(&prompt_x, &prompt_y);
+  float gameplan_cursor_x = 0.0f;
+  float gameplan_cursor_y = 0.0f;
+  const int gameplan_cursor = pes_controller_gameplan_cursor_position(
+      &gameplan_cursor_x, &gameplan_cursor_y);
 
   if ((!config.show_fps || !fps.text[0]) && !controls && !selector &&
-      !start_prompt && !custom_popup)
+      !start_prompt && !custom_popup && !gameplan_cursor)
     return;
   if (!gl_init())
     return;
@@ -510,6 +544,12 @@ static void overlay_render(void) {
   int selector_fill_quads = 0;
   int selector_glow_quads = 0;
   int selector_color_quads = 0;
+  int gameplan_helper_circle_first_quad = 0;
+  int gameplan_helper_circle_quads = 0;
+  int gameplan_helper_text_first_quad = 0;
+  int gameplan_helper_text_quads = 0;
+  int gameplan_cursor_first_quad = 0;
+  int gameplan_cursor_quads = 0;
   RoundedRectStyle custom_panel_style = {0};
   RoundedRectStyle custom_header_style = {0};
   RoundedRectStyle custom_selected_style = {0};
@@ -1051,6 +1091,36 @@ static void overlay_render(void) {
                                         verts + quads * 24);
     quads += selector_color_quads;
   }
+  if (gameplan_cursor) {
+    const float helper_x = 0.835f * (float)screen_width;
+    const float helper_y = 0.944f * (float)screen_height;
+    const float helper_radius = 0.019f * (float)screen_height;
+    gameplan_helper_circle_first_quad = quads;
+    gameplan_helper_circle_quads = emit_circle_quad(
+        helper_x, helper_y, helper_radius, verts + quads * 24);
+    quads += gameplan_helper_circle_quads;
+
+    const float cursor_w = 0.050f * (float)screen_height;
+    const float cursor_h = 0.0666667f * (float)screen_height;
+    const float cursor_left =
+        gameplan_cursor_x * (float)screen_width - cursor_w / 12.0f;
+    const float cursor_top =
+        gameplan_cursor_y * (float)screen_height - cursor_h / 16.0f;
+    gameplan_cursor_first_quad = quads;
+    gameplan_cursor_quads = emit_round_rect_quad(
+        cursor_left, cursor_top, cursor_w, cursor_h, verts + quads * 24);
+    quads += gameplan_cursor_quads;
+
+    const float helper_gh = (float)screen_height / 43.0f;
+    const float helper_gw =
+        helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    gameplan_helper_text_first_quad = quads;
+    gameplan_helper_text_quads = emit_line(
+        "A", 1, helper_x - helper_gw * 0.5f,
+        helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
+        verts + quads * 24);
+    quads += gameplan_helper_text_quads;
+  }
   const int text_first_quad = quads;
   int prompt_quads = 0;
   int prompt_solid_quads = 0;
@@ -1144,6 +1214,8 @@ static void overlay_render(void) {
   glUniform1f(gl.loc_circle_feather, 0.02f);
   glUniform1f(gl.loc_round_rect, 0.0f);
   glUniform1f(gl.loc_round_feather, 1.15f);
+  glUniform1f(gl.loc_cursor, 0.0f);
+  glUniform1f(gl.loc_cursor_border, 0.0f);
   if (custom_popup) {
     int custom_offset = 0;
     glUniform1f(gl.loc_solid, 1.0f);
@@ -1242,6 +1314,39 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES,
                  (selector_fill_quads + selector_glow_quads) * 6,
                  selector_color_quads * 6);
+  }
+  if (gameplan_helper_circle_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_round_rect, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    glUniform1f(gl.loc_circle, 1.0f);
+    glUniform1f(gl.loc_circle_feather, 0.035f);
+    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, gameplan_helper_circle_first_quad * 6,
+                 gameplan_helper_circle_quads * 6);
+    glUniform1f(gl.loc_circle, 0.0f);
+  }
+  if (gameplan_helper_text_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, gameplan_helper_text_first_quad * 6,
+                 gameplan_helper_text_quads * 6);
+  }
+  if (gameplan_cursor_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform1f(gl.loc_round_rect, 0.0f);
+    glUniform1f(gl.loc_cursor, 1.0f);
+    glUniform1f(gl.loc_cursor_border, 2.2f);
+    glUniform4f(gl.loc_color, 0.01f, 0.03f, 0.04f, 0.90f);
+    glDrawArrays(GL_TRIANGLES, gameplan_cursor_first_quad * 6,
+                 gameplan_cursor_quads * 6);
+    glUniform1f(gl.loc_cursor_border, 0.0f);
+    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, gameplan_cursor_first_quad * 6,
+                 gameplan_cursor_quads * 6);
+    glUniform1f(gl.loc_cursor, 0.0f);
   }
   if (custom_dark_text_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
