@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <math.h>
 #include <string.h>
 #include <switch.h>
 
@@ -91,6 +92,17 @@ static uint32_t (*exhibition_get_player_overall)(
     const void *player, const uint32_t *position, uint32_t condition);
 static void (*exhibition_set_test_match_team_id)(uint32_t team_id);
 static void (*exhibition_set_test_match_cpu_level)(uint32_t level);
+static uint32_t (*exhibition_get_test_match_cpu_level)(void);
+static uint32_t (*exhibition_match_get_time_zone)(const void *match);
+static void (*exhibition_match_set_time_zone)(void *match,
+                                               uint32_t time_zone);
+static uint32_t (*exhibition_match_get_match_time)(const void *match);
+static void (*exhibition_match_set_match_time)(void *match,
+                                                uint32_t minutes);
+static uint32_t (*exhibition_match_is_ex)(const void *match);
+static void (*exhibition_match_set_ex)(void *match, uint32_t enabled);
+static uint32_t (*exhibition_match_is_pk)(const void *match);
+static void (*exhibition_match_set_pk)(void *match, uint32_t enabled);
 static void *(*exhibition_match_setting_create_child)(
     const void *name, const uint8_t *enabled);
 static uint32_t (*exhibition_is_test_match_original)(void);
@@ -148,6 +160,17 @@ static void (*main_menu_choice_set_active)(void *choice, uint32_t active,
                                            uint32_t reaction,
                                            uint32_t flags);
 static uintptr_t main_menu_selected_resume;
+static void *main_menu_tiles[4];
+static uint32_t main_menu_focus_index;
+static uint32_t main_menu_focus_direction;
+static uint64_t main_menu_focus_started_ms;
+static uint64_t main_menu_focus_repeat_ms;
+static int main_menu_focus_painted;
+static const char *main_menu_titles[4] = {
+    "Exhibition", "Credits", "Training", "Version Info"};
+static const char *main_menu_descriptions[4] = {
+    "Local match", "Credits and support", "Practice controls",
+    "Build and game version"};
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
 static void (*virtual_pad_set_color)(void *movie_clip, float red, float green,
@@ -381,6 +404,40 @@ static _Alignas(4) uint32_t exhibition_search_touch_pending;
 static _Alignas(4) uint32_t exhibition_team_picker_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_popup_open;
 static _Alignas(4) uint32_t exhibition_settings_popup_open;
+static _Alignas(4) uint32_t exhibition_cpu_level_value = 2;
+static _Alignas(4) uint32_t exhibition_settings_time_zone;
+static _Alignas(4) uint32_t exhibition_settings_match_time = 10;
+static _Alignas(4) uint32_t exhibition_settings_extra_time;
+static _Alignas(4) uint32_t exhibition_settings_penalties;
+static void *exhibition_settings_match;
+// A settings child can open another list without closing menuMatchSetting.
+// Keep that child separate so the controller focus follows the visible list.
+static _Alignas(4) uint32_t exhibition_nested_popup_open;
+static _Alignas(4) uint32_t exhibition_nested_popup_kind;
+// Keep the nested selector alive until the native child has processed B.
+// Clearing it on the synthetic touch release makes the overlay jump back to
+// Match Settings one frame too early.
+static _Alignas(4) uint32_t exhibition_nested_back_pending;
+static _Alignas(8) uint64_t exhibition_nested_back_started_ms;
+static _Alignas(4) uint32_t main_menu_controller_active;
+static _Alignas(4) uint32_t startup_prompt_active;
+static void *exhibition_search_window;
+static uint32_t exhibition_search_focus_index;
+static uint32_t exhibition_search_focus_direction;
+static uint64_t exhibition_search_focus_started_ms;
+static uint64_t exhibition_search_focus_repeat_ms;
+static uint32_t exhibition_popup_focus_index;
+static uint32_t exhibition_popup_focus_direction;
+static uint64_t exhibition_popup_focus_started_ms;
+static uint64_t exhibition_popup_focus_repeat_ms;
+static _Alignas(8) uint64_t exhibition_custom_popup_opened_ms;
+static _Alignas(4) int32_t exhibition_popup_scroll_request;
+// Switch-style team browser. Phase 1 selects a category; phase 2 selects a
+// team. Both use a paginated 2x4 grid and never depend on native list pixels.
+static _Alignas(4) uint32_t exhibition_custom_team_popup;
+static _Alignas(4) uint32_t exhibition_team_scroll_offset;
+static _Alignas(4) uint32_t exhibition_team_category_index;
+#define EXHIBITION_TEAM_GRID_PAGE_SIZE 8u
 #define EXHIBITION_INITIAL_REFRESH_TICKS 180u
 #define EXHIBITION_FALLBACK_HOME_TEAM 100u
 #define EXHIBITION_FALLBACK_AWAY_TEAM 101u
@@ -393,9 +450,221 @@ enum {
   EXHIBITION_STRATEGY_START = 2,
 };
 
+enum {
+  EXHIBITION_NESTED_NONE = 0,
+  EXHIBITION_NESTED_SHORT_LIST = 1,
+  EXHIBITION_NESTED_LONG_LIST = 2,
+};
+
+enum {
+  EXHIBITION_TEAM_POPUP_CLOSED = 0,
+  EXHIBITION_TEAM_POPUP_CATEGORY = 1,
+  EXHIBITION_TEAM_POPUP_TEAM = 2,
+};
+
 static void exhibition_open_match_settings(void *window);
+static void exhibition_open_cpu_level(void);
 static void exhibition_set_matchmaking_visible(void *window,
                                                 uint32_t visible);
+static uint64_t exhibition_search_focus_now_ms(void);
+static void exhibition_select_team(uint32_t side, uint32_t team_id);
+static void exhibition_adjust_match_setting(int direction);
+
+static void exhibition_nested_back_expire(void) {
+  if (!__atomic_load_n(&exhibition_nested_back_pending, __ATOMIC_ACQUIRE))
+    return;
+  const uint64_t started =
+      __atomic_load_n(&exhibition_nested_back_started_ms, __ATOMIC_ACQUIRE);
+  if (started && exhibition_search_focus_now_ms() - started >= 700) {
+    __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
+    exhibition_popup_focus_index = 0;
+    exhibition_popup_focus_direction = 0;
+  }
+}
+
+static const uint32_t exhibition_category_english[] = {
+    100, 101, 102, 103, 104, 105, 106, 107};
+static const uint32_t exhibition_category_spanish[] = {108, 109, 110, 111};
+static const uint32_t exhibition_category_french[] = {112, 113, 114, 115};
+static const uint32_t exhibition_category_italian[] = {
+    119, 120, 121, 122, 123, 124, 125};
+static const uint32_t exhibition_category_dutch[] = {116, 117, 118};
+static const uint32_t exhibition_category_german[] = {127, 128};
+static const uint32_t exhibition_category_other_europe[] = {
+    130, 131, 132, 133, 134, 135};
+static const uint32_t exhibition_category_south_america_clubs[] = {
+    136, 137, 138, 139};
+static const uint32_t exhibition_category_national_europe[] = {
+    1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30, 31};
+static const uint32_t exhibition_category_national_africa[] = {
+    32, 33, 34, 35, 36, 37, 38};
+static const uint32_t exhibition_category_national_north_america[] = {
+    39, 40, 41, 42, 43};
+static const uint32_t exhibition_category_national_south_america[] = {
+    44, 45, 46, 47, 48, 49, 50, 51};
+static const uint32_t exhibition_category_national_asia[] = {
+    52, 53, 54, 55, 56, 57, 59};
+
+typedef struct {
+  const char *label;
+  const char *icon;
+  const uint32_t *teams;
+  uint32_t team_count;
+} ExhibitionTeamCategory;
+
+#define EXHIBITION_CATEGORY(label_value, icon_value, array_value)          \
+  {                                                                        \
+      label_value, icon_value, array_value,                                \
+      (uint32_t)(sizeof(array_value) / sizeof((array_value)[0])),           \
+  }
+static const ExhibitionTeamCategory exhibition_team_categories[] = {
+    EXHIBITION_CATEGORY("ENGLISH LEAGUE", "ENG",
+                        exhibition_category_english),
+    EXHIBITION_CATEGORY("SPANISH LEAGUE", "ESP",
+                        exhibition_category_spanish),
+    EXHIBITION_CATEGORY("LIGUE 1", "FRA", exhibition_category_french),
+    EXHIBITION_CATEGORY("SERIE A", "ITA", exhibition_category_italian),
+    EXHIBITION_CATEGORY("EREDIVISIE", "NED", exhibition_category_dutch),
+    EXHIBITION_CATEGORY("GERMAN TEAMS", "GER", exhibition_category_german),
+    EXHIBITION_CATEGORY("OTHER EUROPE", "EUR",
+                        exhibition_category_other_europe),
+    EXHIBITION_CATEGORY("SOUTH AMERICA CLUBS", "SAM",
+                        exhibition_category_south_america_clubs),
+    EXHIBITION_CATEGORY("NATIONAL EUROPE", "EUR",
+                        exhibition_category_national_europe),
+    EXHIBITION_CATEGORY("NATIONAL AFRICA", "AFR",
+                        exhibition_category_national_africa),
+    EXHIBITION_CATEGORY("NATIONAL N AMERICA", "NAM",
+                        exhibition_category_national_north_america),
+    EXHIBITION_CATEGORY("NATIONAL S AMERICA", "SAM",
+                        exhibition_category_national_south_america),
+    EXHIBITION_CATEGORY("NATIONAL ASIA OCEANIA", "AOC",
+                        exhibition_category_national_asia),
+};
+#undef EXHIBITION_CATEGORY
+
+#define EXHIBITION_TEAM_CATEGORY_COUNT                                  \
+  ((uint32_t)(sizeof(exhibition_team_categories) /                       \
+              sizeof(exhibition_team_categories[0])))
+
+static const ExhibitionTeamCategory *exhibition_team_category(void) {
+  return exhibition_team_category_index < EXHIBITION_TEAM_CATEGORY_COUNT
+             ? &exhibition_team_categories[exhibition_team_category_index]
+             : NULL;
+}
+
+static uint32_t exhibition_custom_team_item_count(void) {
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
+      EXHIBITION_TEAM_POPUP_TEAM) {
+    const ExhibitionTeamCategory *category = exhibition_team_category();
+    return category ? category->team_count : 0;
+  }
+  return EXHIBITION_TEAM_CATEGORY_COUNT;
+}
+
+#define EXHIBITION_CPU_LEVEL_COUNT 7u
+
+static const char *const exhibition_cpu_level_labels[] = {
+    "BEGINNER", "AMATEUR", "REGULAR", "PROFESSIONAL", "TOP PLAYER",
+    "SUPERSTAR", "LEGEND",
+};
+
+static void *exhibition_get_tmpdb_match(void) {
+  void *manager = exhibition_tmpdb_manager_get_instance
+                      ? exhibition_tmpdb_manager_get_instance()
+                      : NULL;
+  void *tmpdb_data = NULL;
+  if (manager)
+    memcpy(&tmpdb_data, (unsigned char *)manager + 72,
+           sizeof(tmpdb_data));
+  return tmpdb_data ? (unsigned char *)tmpdb_data + 0x4b38 : NULL;
+}
+
+static int exhibition_refresh_match_settings(void) {
+  void *match = exhibition_get_tmpdb_match();
+  if (!match)
+    return 0;
+
+  uint32_t time_zone = exhibition_match_get_time_zone
+                           ? exhibition_match_get_time_zone(match)
+                           : 0;
+  uint32_t match_time = exhibition_match_get_match_time
+                            ? exhibition_match_get_match_time(match)
+                            : 10;
+  if (time_zone > 1)
+    time_zone = 0;
+  if (match_time < 5 || match_time > 10)
+    match_time = 10;
+
+  exhibition_settings_match = match;
+  __atomic_store_n(&exhibition_settings_time_zone, time_zone,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_match_time, match_time,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_extra_time,
+                   exhibition_match_is_ex
+                       ? (exhibition_match_is_ex(match) != 0)
+                       : 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_penalties,
+                   exhibition_match_is_pk
+                       ? (exhibition_match_is_pk(match) != 0)
+                       : 0,
+                   __ATOMIC_RELEASE);
+  return 1;
+}
+
+static void exhibition_adjust_match_setting(int direction) {
+  void *match = exhibition_settings_match;
+  if (!match || !direction ||
+      !__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+    return;
+
+  const uint32_t focus = exhibition_popup_focus_index;
+  uint32_t value = 0;
+  if (focus == 0) {
+    value = !__atomic_load_n(&exhibition_settings_time_zone,
+                             __ATOMIC_ACQUIRE);
+    if (exhibition_match_set_time_zone)
+      exhibition_match_set_time_zone(match, value);
+    __atomic_store_n(&exhibition_settings_time_zone, value,
+                     __ATOMIC_RELEASE);
+  } else if (focus == 1) {
+    value = __atomic_load_n(&exhibition_settings_match_time,
+                            __ATOMIC_ACQUIRE);
+    if (direction < 0)
+      value = value <= 5 ? 10 : value - 1;
+    else
+      value = value >= 10 ? 5 : value + 1;
+    if (exhibition_match_set_match_time)
+      exhibition_match_set_match_time(match, value);
+    __atomic_store_n(&exhibition_settings_match_time, value,
+                     __ATOMIC_RELEASE);
+  } else if (focus == 2) {
+    value = !__atomic_load_n(&exhibition_settings_extra_time,
+                             __ATOMIC_ACQUIRE);
+    if (exhibition_match_set_ex)
+      exhibition_match_set_ex(match, value);
+    __atomic_store_n(&exhibition_settings_extra_time, value,
+                     __ATOMIC_RELEASE);
+  } else if (focus == 3) {
+    value = !__atomic_load_n(&exhibition_settings_penalties,
+                             __ATOMIC_ACQUIRE);
+    if (exhibition_match_set_pk)
+      exhibition_match_set_pk(match, value);
+    __atomic_store_n(&exhibition_settings_penalties, value,
+                     __ATOMIC_RELEASE);
+  } else {
+    return;
+  }
+
+  debugPrintf("exhibition: custom Match Settings row=%u value=%u\n", focus,
+              value);
+}
 
 static uint32_t pes_exhibition_is_test_match(void) {
   if (__atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
@@ -1569,42 +1838,898 @@ void pes_exhibition_matchmaking_tap(float normalized_x, float normalized_y) {
                      __ATOMIC_RELEASE);
 }
 
+static uint64_t exhibition_search_focus_now_ms(void) {
+  return armTicksToNs(armGetSystemTick()) / 1000000ULL;
+}
+
+void pes_exhibition_search_footer(void *window, uint32_t footer_key);
+
+static void exhibition_search_focus_apply(void *window) {
+  if (!window || !exhibition_set_pad_key_active)
+    return;
+  const int footer_focus = exhibition_search_focus_index >= 2;
+  const uint32_t focused_key =
+      exhibition_search_focus_index == 2
+          ? 1
+          : exhibition_search_focus_index == 3
+                ? 2
+                : exhibition_search_focus_index == 4 ? 3 : 0;
+  const int matchup_ready = exhibition_matchup_ready();
+  for (uint32_t key = 0; key < 4; key++) {
+    const int available = key != 0 || matchup_ready;
+    const int active = footer_focus ? (available && key == focused_key)
+                                    : available;
+    exhibition_set_pad_key_active(window, key, active);
+  }
+}
+
+void pes_exhibition_search_pad_event(uint32_t buttons,
+                                     uint32_t previous_buttons) {
+  if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
+    return;
+
+  uint32_t direction = 0;
+  if (buttons & (1u << 10))
+    direction = 1; // up
+  else if (buttons & (1u << 11))
+    direction = 2; // down
+  else if (buttons & (1u << 12))
+    direction = 3; // left
+  else if (buttons & (1u << 13))
+    direction = 4; // right
+
+  const uint64_t now = exhibition_search_focus_now_ms();
+  const int team_popup =
+      __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE);
+  const int cpu_popup =
+      __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE);
+  const int settings_popup =
+      __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE);
+  const int nested_popup =
+      __atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE);
+  if (nested_popup) {
+    if (!direction) {
+      exhibition_popup_focus_direction = 0;
+      return;
+    }
+    const int pressed = (buttons & (1u << (direction + 9))) != 0 &&
+                        !(previous_buttons & (1u << (direction + 9)));
+    if (direction != exhibition_popup_focus_direction) {
+      exhibition_popup_focus_direction = direction;
+      exhibition_popup_focus_started_ms = now;
+      exhibition_popup_focus_repeat_ms = now;
+    } else if (!pressed && now - exhibition_popup_focus_started_ms < 300) {
+      return;
+    } else if (!pressed && now - exhibition_popup_focus_repeat_ms < 120) {
+      return;
+    }
+    exhibition_popup_focus_repeat_ms = now;
+    const uint32_t nested_kind = __atomic_load_n(
+        &exhibition_nested_popup_kind, __ATOMIC_ACQUIRE);
+    const uint32_t max_index =
+        nested_kind == EXHIBITION_NESTED_SHORT_LIST ? 1 : 5;
+    if (direction == 1) {
+      if (exhibition_popup_focus_index > 0)
+        exhibition_popup_focus_index--;
+      else if (nested_kind == EXHIBITION_NESTED_LONG_LIST)
+        __atomic_store_n(&exhibition_popup_scroll_request, -1,
+                         __ATOMIC_RELEASE);
+    } else if (direction == 2) {
+      if (exhibition_popup_focus_index < max_index)
+        exhibition_popup_focus_index++;
+      else if (nested_kind == EXHIBITION_NESTED_LONG_LIST)
+        __atomic_store_n(&exhibition_popup_scroll_request, 1,
+                         __ATOMIC_RELEASE);
+    }
+    return;
+  }
+  if (team_popup || cpu_popup || settings_popup) {
+    if (!direction) {
+      exhibition_popup_focus_direction = 0;
+      return;
+    }
+    const int pressed = (buttons & (1u << (direction + 9))) != 0 &&
+                        !(previous_buttons & (1u << (direction + 9)));
+    if (direction != exhibition_popup_focus_direction) {
+      exhibition_popup_focus_direction = direction;
+      exhibition_popup_focus_started_ms = now;
+      exhibition_popup_focus_repeat_ms = now;
+    } else if (!pressed && now - exhibition_popup_focus_started_ms < 300) {
+      return;
+    } else if (!pressed && now - exhibition_popup_focus_repeat_ms < 120) {
+      return;
+    }
+    exhibition_popup_focus_repeat_ms = now;
+    if (team_popup &&
+        __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE)) {
+      const uint32_t item_count = exhibition_custom_team_item_count();
+      const uint32_t old_focus = exhibition_popup_focus_index;
+      if (direction == 1) {
+        if (exhibition_popup_focus_index >= 2)
+          exhibition_popup_focus_index -= 2;
+      } else if (direction == 2) {
+        if (exhibition_popup_focus_index + 2 < item_count)
+          exhibition_popup_focus_index += 2;
+        else if ((exhibition_popup_focus_index & 1u) &&
+                 exhibition_popup_focus_index + 1 < item_count)
+          exhibition_popup_focus_index++;
+      } else if (direction == 3) {
+        if (exhibition_popup_focus_index & 1u)
+          exhibition_popup_focus_index--;
+      } else if (direction == 4) {
+        if (!(exhibition_popup_focus_index & 1u) &&
+            exhibition_popup_focus_index + 1 < item_count)
+          exhibition_popup_focus_index++;
+      }
+      if (old_focus != exhibition_popup_focus_index)
+        exhibition_team_scroll_offset =
+            (exhibition_popup_focus_index / EXHIBITION_TEAM_GRID_PAGE_SIZE) *
+            EXHIBITION_TEAM_GRID_PAGE_SIZE;
+      return;
+    }
+    if (settings_popup) {
+      if (direction == 1 && exhibition_popup_focus_index > 0)
+        exhibition_popup_focus_index--;
+      else if (direction == 2 && exhibition_popup_focus_index < 3)
+        exhibition_popup_focus_index++;
+      else if (direction == 3)
+        exhibition_adjust_match_setting(-1);
+      else if (direction == 4)
+        exhibition_adjust_match_setting(1);
+      return;
+    }
+    if (cpu_popup) {
+      if (direction == 1 && exhibition_popup_focus_index > 0)
+        exhibition_popup_focus_index--;
+      else if (direction == 2 &&
+               exhibition_popup_focus_index + 1 <
+                   EXHIBITION_CPU_LEVEL_COUNT)
+        exhibition_popup_focus_index++;
+      return;
+    }
+    // Bottom buttons are always reached with B. Directional focus stays in
+    // the content so a long team/nation list scrolls immediately at row six.
+    const uint32_t max_index = 5;
+    if (direction == 1) {
+      if (exhibition_popup_focus_index > 0)
+        exhibition_popup_focus_index--;
+      else if (team_popup || cpu_popup)
+        __atomic_store_n(&exhibition_popup_scroll_request, -1,
+                         __ATOMIC_RELEASE);
+    } else if (direction == 2) {
+      if (exhibition_popup_focus_index < max_index)
+        exhibition_popup_focus_index++;
+      else if (team_popup || cpu_popup)
+        __atomic_store_n(&exhibition_popup_scroll_request, 1,
+                         __ATOMIC_RELEASE);
+    }
+    return;
+  }
+
+  if (!direction) {
+    exhibition_search_focus_direction = 0;
+    return;
+  }
+  const int pressed = (buttons & (1u << (direction + 9))) != 0 &&
+                      !(previous_buttons & (1u << (direction + 9)));
+  if (direction != exhibition_search_focus_direction) {
+    exhibition_search_focus_direction = direction;
+    exhibition_search_focus_started_ms = now;
+    exhibition_search_focus_repeat_ms = now;
+  } else if (!pressed && now - exhibition_search_focus_started_ms < 300) {
+    return;
+  } else if (!pressed && now - exhibition_search_focus_repeat_ms < 120) {
+    return;
+  }
+  exhibition_search_focus_repeat_ms = now;
+
+  uint32_t next = exhibition_search_focus_index;
+  if (next < 2) {
+    if (direction == 3 || direction == 4)
+      next = next == 0 ? 1 : 0;
+    else if (direction == 2)
+      next = next == 0 ? 2 : 3;
+  } else {
+    if (direction == 1)
+      next = next == 2 ? 0 : 1;
+    else if (direction == 3 && next > 2)
+      next--;
+    else if (direction == 4 && next < 5)
+      next++;
+  }
+  if (next != exhibition_search_focus_index) {
+    exhibition_search_focus_index = next;
+    exhibition_search_focus_apply(exhibition_search_window);
+  }
+}
+
+int pes_controller_menu_touch_target(float *normalized_x,
+                                     float *normalized_y) {
+  float prompt_x = 0.0f;
+  float prompt_y = 0.0f;
+  if (pes_controller_start_prompt(&prompt_x, &prompt_y)) {
+    if (normalized_x)
+      *normalized_x = prompt_x;
+    if (normalized_y)
+      *normalized_y = prompt_y;
+    return 1;
+  }
+  if (pes_main_menu_controller_active()) {
+    const uint32_t index = pes_main_menu_focus_index();
+    if (index >= 4)
+      return 0;
+    if (normalized_x)
+      *normalized_x = (index & 1) ? 0.745f : 0.255f;
+    if (normalized_y)
+      *normalized_y = index >= 2 ? 0.825f : 0.465f;
+    return 1;
+  }
+  if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
+    return 0;
+  if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.194f + 0.111f * exhibition_popup_focus_index;
+    return 1;
+  }
+  if (__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE)) {
+    if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE)) {
+      // The custom browser handles A on touch release. Send the synthetic tap
+      // to the inert header so the native Matchmaking page cannot activate a
+      // card or footer underneath it.
+      if (normalized_x)
+        *normalized_x = 0.50f;
+      if (normalized_y)
+        *normalized_y = 0.08f;
+      return 1;
+    }
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.199f + 0.111f * exhibition_popup_focus_index;
+    return 1;
+  }
+  if (__atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE)) {
+    // Custom modals consume A after the synthetic touch is released. Aim the
+    // touch at the inert title band so the matchmaking page underneath cannot
+    // activate anything first.
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.10f;
+    return 1;
+  }
+  if (__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE)) {
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.10f;
+    return 1;
+  }
+  if (exhibition_search_focus_index < 2) {
+    if (normalized_x)
+      *normalized_x = exhibition_search_focus_index == 0 ? 0.255f : 0.745f;
+    if (normalized_y)
+      *normalized_y = 0.47f;
+    return 1;
+  }
+  if (normalized_x)
+    *normalized_x = (float[]){0.13f, 0.37f, 0.63f, 0.87f}
+                         [exhibition_search_focus_index - 2];
+  if (normalized_y)
+    *normalized_y = 0.91f;
+  return 1;
+}
+
+int pes_controller_menu_back_target(float *normalized_x,
+                                    float *normalized_y) {
+  if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
+    return 0;
+
+  if (normalized_x)
+    *normalized_x = 0.50f;
+  if (normalized_y)
+    *normalized_y = 0.905f;
+
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE)) {
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.08f;
+    return 1;
+  }
+
+  if (!__atomic_load_n(&exhibition_team_picker_open,
+                              __ATOMIC_ACQUIRE) &&
+             !__atomic_load_n(&exhibition_cpu_level_popup_open,
+                              __ATOMIC_ACQUIRE) &&
+             !__atomic_load_n(&exhibition_nested_popup_open,
+                              __ATOMIC_ACQUIRE)) {
+    if (normalized_x)
+      *normalized_x = 0.13f;
+    if (normalized_y)
+      *normalized_y = 0.91f;
+  }
+  return 1;
+}
+
+void pes_controller_menu_back_pressed(void) {
+  const uint32_t custom_team_phase =
+      __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE);
+  if (custom_team_phase) {
+    if (custom_team_phase == EXHIBITION_TEAM_POPUP_TEAM) {
+      __atomic_store_n(&exhibition_custom_team_popup,
+                       EXHIBITION_TEAM_POPUP_CATEGORY, __ATOMIC_RELEASE);
+    } else {
+      __atomic_store_n(&exhibition_custom_team_popup,
+                       EXHIBITION_TEAM_POPUP_CLOSED, __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_team_picker_open, 0, __ATOMIC_RELEASE);
+    }
+    exhibition_team_scroll_offset = 0;
+    exhibition_popup_focus_index = 0;
+    exhibition_popup_focus_direction = 0;
+    return;
+  }
+  if (__atomic_exchange_n(&exhibition_cpu_level_popup_open, 0,
+                          __ATOMIC_ACQ_REL)) {
+    exhibition_popup_focus_index = 0;
+    exhibition_popup_focus_direction = 0;
+    debugPrintf("exhibition: custom COM Level closed\n");
+    return;
+  }
+  if (__atomic_exchange_n(&exhibition_settings_popup_open, 0,
+                          __ATOMIC_ACQ_REL)) {
+    exhibition_settings_match = NULL;
+    exhibition_popup_focus_index = 0;
+    exhibition_popup_focus_direction = 0;
+    debugPrintf("exhibition: custom Match Settings closed\n");
+    return;
+  }
+  if (!__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE))
+    return;
+  // Let the native child consume the synthetic B/UP first. Its callback will
+  // clear this state; the timeout is only a safety net for a missing callback.
+  __atomic_store_n(&exhibition_nested_back_pending, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_back_started_ms,
+                   exhibition_search_focus_now_ms(), __ATOMIC_RELEASE);
+}
+
+void pes_controller_title_ready(void) {
+  __atomic_store_n(&startup_prompt_active, 1, __ATOMIC_RELEASE);
+}
+
+int pes_controller_start_prompt(float *normalized_x, float *normalized_y) {
+  if (!__atomic_load_n(&startup_prompt_active, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_team_select_active, __ATOMIC_ACQUIRE))
+    return 0;
+  if (normalized_x)
+    *normalized_x = 0.284f;
+  if (normalized_y)
+    *normalized_y = 0.704f;
+  return 1;
+}
+
+int pes_controller_selector_rect(float *x, float *y, float *width,
+                                 float *height) {
+  exhibition_nested_back_expire();
+  float rect_x = 0.0f;
+  float rect_y = 0.0f;
+  float rect_width = 0.0f;
+  float rect_height = 0.0f;
+  if (pes_main_menu_controller_active()) {
+    const uint32_t index = pes_main_menu_focus_index();
+    if (index >= 4)
+      return 0;
+    rect_x = (index & 1) ? 0.506f : 0.024f;
+    rect_y = index >= 2 ? 0.724f : 0.234f;
+    rect_width = 0.470f;
+    // The stock cards are not equal-height: the top pair are tall hero cards
+    // and the bottom pair are compact action cards. Keep the outline inside
+    // their rounded corners instead of bleeding into the gutters.
+    rect_height = index >= 2 ? 0.212f : 0.456f;
+  } else if (__atomic_load_n(&exhibition_searching_active,
+                             __ATOMIC_ACQUIRE)) {
+    if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+      return 0;
+    if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
+      rect_x = 0.225f;
+      rect_y = 0.148f + 0.111f * exhibition_popup_focus_index;
+      rect_width = 0.550f;
+      rect_height = 0.102f;
+    } else if (__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE)) {
+      rect_x = 0.225f;
+      // Team category rows sit a few pixels higher than COM's value rows.
+      rect_y = 0.138f + 0.111f * exhibition_popup_focus_index;
+      rect_width = 0.550f;
+      rect_height = 0.106f;
+    } else if (__atomic_load_n(&exhibition_cpu_level_popup_open,
+                               __ATOMIC_ACQUIRE)) {
+      rect_x = 0.225f;
+      rect_y = 0.148f + 0.111f * exhibition_popup_focus_index;
+      rect_width = 0.550f;
+      rect_height = 0.102f;
+    } else if (__atomic_load_n(&exhibition_settings_popup_open,
+                               __ATOMIC_ACQUIRE)) {
+      static const float settings_y[5] = {0.320f, 0.540f, 0.645f, 0.750f,
+                                          0.915f};
+      rect_x = exhibition_popup_focus_index >= 2 ? 0.875f : 0.050f;
+      rect_y = settings_y[exhibition_popup_focus_index];
+      rect_width = exhibition_popup_focus_index >= 2 ? 0.075f : 0.900f;
+      rect_height = 0.100f;
+    } else {
+    const uint32_t index = exhibition_search_focus_index;
+    if (index < 2) {
+      rect_x = index == 0 ? 0.035f : 0.520f;
+      rect_y = 0.205f;
+      rect_width = 0.445f;
+      rect_height = 0.615f;
+    } else if (index < 6) {
+      static const float footer_x[4] = {0.024f, 0.250f, 0.505f, 0.760f};
+      static const float footer_width[4] = {0.215f, 0.245f, 0.245f,
+                                            0.215f};
+      rect_x = footer_x[index - 2];
+      rect_y = 0.895f;
+      rect_width = footer_width[index - 2];
+      rect_height = 0.090f;
+    } else {
+      return 0;
+    }
+    }
+  } else {
+    return 0;
+  }
+  if (x)
+    *x = rect_x;
+  if (y)
+    *y = rect_y;
+  if (width)
+    *width = rect_width;
+  if (height)
+    *height = rect_height;
+  return 1;
+}
+
+int pes_controller_selector_custom_style(void) {
+  // Filled rows are most useful on the two long list pickers; the other
+  // screens keep the lighter outline-only treatment.
+  return __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) !=
+             0 ||
+         __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) != 0;
+}
+
+int pes_controller_custom_team_popup_active(void) {
+  return __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_custom_team_popup_scroll(void) {
+  return exhibition_team_scroll_offset;
+}
+
+uint32_t pes_controller_custom_team_popup_focus(void) {
+  return exhibition_popup_focus_index - exhibition_team_scroll_offset;
+}
+
+uint32_t pes_controller_custom_team_popup_visible_count(void) {
+  const uint32_t count = exhibition_custom_team_item_count();
+  if (exhibition_team_scroll_offset >= count)
+    return 0;
+  const uint32_t remaining = count - exhibition_team_scroll_offset;
+  return remaining < EXHIBITION_TEAM_GRID_PAGE_SIZE
+             ? remaining
+             : EXHIBITION_TEAM_GRID_PAGE_SIZE;
+}
+
+const char *pes_controller_custom_team_popup_label(uint32_t index) {
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
+      EXHIBITION_TEAM_POPUP_TEAM) {
+    const ExhibitionTeamCategory *category = exhibition_team_category();
+    return category && index < category->team_count
+               ? exhibition_team_name(category->teams[index])
+               : "";
+  }
+  return index < EXHIBITION_TEAM_CATEGORY_COUNT
+             ? exhibition_team_categories[index].label
+             : "";
+}
+
+const char *pes_controller_custom_team_popup_icon(uint32_t index) {
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
+      EXHIBITION_TEAM_POPUP_TEAM) {
+    const ExhibitionTeamCategory *category = exhibition_team_category();
+    return category ? category->icon : "FC";
+  }
+  return index < EXHIBITION_TEAM_CATEGORY_COUNT
+             ? exhibition_team_categories[index].icon
+             : "";
+}
+
+uint32_t pes_controller_custom_team_popup_badge(uint32_t index) {
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
+      EXHIBITION_TEAM_POPUP_TEAM) {
+    const ExhibitionTeamCategory *category = exhibition_team_category();
+    return category && index < category->team_count ? category->teams[index]
+                                                    : 0;
+  }
+  return index < EXHIBITION_TEAM_CATEGORY_COUNT ? 140u + index : 140u;
+}
+
+const char *pes_controller_custom_team_popup_title(void) {
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
+      EXHIBITION_TEAM_POPUP_TEAM) {
+    const ExhibitionTeamCategory *category = exhibition_team_category();
+    return category ? category->label : "SELECT TEAM";
+  }
+  return "SELECT CATEGORY";
+}
+
+uint32_t pes_controller_custom_team_popup_page(void) {
+  return exhibition_team_scroll_offset / EXHIBITION_TEAM_GRID_PAGE_SIZE;
+}
+
+uint32_t pes_controller_custom_team_popup_page_count(void) {
+  const uint32_t count = exhibition_custom_team_item_count();
+  return count ? (count + EXHIBITION_TEAM_GRID_PAGE_SIZE - 1) /
+                     EXHIBITION_TEAM_GRID_PAGE_SIZE
+               : 1;
+}
+
+int pes_controller_custom_cpu_popup_active(void) {
+  return __atomic_load_n(&exhibition_cpu_level_popup_open,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_custom_cpu_popup_focus(void) {
+  return exhibition_popup_focus_index < EXHIBITION_CPU_LEVEL_COUNT
+             ? exhibition_popup_focus_index
+             : 0;
+}
+
+uint32_t pes_controller_custom_cpu_popup_value(void) {
+  const uint32_t value = __atomic_load_n(&exhibition_cpu_level_value,
+                                         __ATOMIC_ACQUIRE);
+  return value < EXHIBITION_CPU_LEVEL_COUNT ? value : 2;
+}
+
+uint32_t pes_controller_custom_cpu_popup_count(void) {
+  return EXHIBITION_CPU_LEVEL_COUNT;
+}
+
+const char *pes_controller_custom_cpu_popup_label(uint32_t index) {
+  return index < EXHIBITION_CPU_LEVEL_COUNT
+             ? exhibition_cpu_level_labels[index]
+             : "";
+}
+
+int pes_controller_custom_match_settings_active(void) {
+  return __atomic_load_n(&exhibition_settings_popup_open,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_custom_match_settings_focus(void) {
+  return exhibition_popup_focus_index < 4 ? exhibition_popup_focus_index : 0;
+}
+
+const char *pes_controller_custom_match_settings_label(uint32_t index) {
+  static const char *const labels[] = {
+      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES"};
+  return index < 4 ? labels[index] : "";
+}
+
+const char *pes_controller_custom_match_settings_value(uint32_t index) {
+  static const char *const match_time_labels[] = {
+      "5 MIN", "6 MIN", "7 MIN", "8 MIN", "9 MIN", "10 MIN"};
+  if (index == 0)
+    return __atomic_load_n(&exhibition_settings_time_zone,
+                           __ATOMIC_ACQUIRE)
+               ? "NIGHT"
+               : "DAY";
+  if (index == 1) {
+    const uint32_t minutes = __atomic_load_n(&exhibition_settings_match_time,
+                                             __ATOMIC_ACQUIRE);
+    return minutes >= 5 && minutes <= 10 ? match_time_labels[minutes - 5]
+                                         : "10 MIN";
+  }
+  if (index == 2)
+    return __atomic_load_n(&exhibition_settings_extra_time,
+                           __ATOMIC_ACQUIRE)
+               ? "ON"
+               : "OFF";
+  if (index == 3)
+    return __atomic_load_n(&exhibition_settings_penalties,
+                           __ATOMIC_ACQUIRE)
+               ? "ON"
+               : "OFF";
+  return "";
+}
+
+int pes_controller_menu_scroll_request(void) {
+  return __atomic_exchange_n(&exhibition_popup_scroll_request, 0,
+                             __ATOMIC_ACQ_REL);
+}
+
+void pes_controller_menu_tap(float normalized_x, float normalized_y) {
+  if (pes_controller_start_prompt(NULL, NULL)) {
+    // The first A is the start-screen confirmation. Clear this one-shot
+    // state after the synthetic touch is delivered so later A presses can
+    // activate tiles and settings.
+    __atomic_store_n(&startup_prompt_active, 0, __ATOMIC_RELEASE);
+    debugPrintf("input: startup prompt accepted via controller A\n");
+    return;
+  }
+  if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
+    // Keep the child modal active after a value selection. B is the explicit
+    // close action, matching the Switch flow instead of jumping to the parent.
+    return;
+  }
+  const uint64_t popup_opened = __atomic_load_n(
+      &exhibition_custom_popup_opened_ms, __ATOMIC_ACQUIRE);
+  const uint64_t tap_now = exhibition_search_focus_now_ms();
+  if (popup_opened && tap_now >= popup_opened &&
+      tap_now - popup_opened < 140 &&
+      (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ||
+       __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+       __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE)))
+    return;
+  if (__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE)) {
+    const uint32_t phase =
+        __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE);
+    if (phase == EXHIBITION_TEAM_POPUP_CATEGORY &&
+        exhibition_popup_focus_index < EXHIBITION_TEAM_CATEGORY_COUNT) {
+      exhibition_team_category_index = exhibition_popup_focus_index;
+      __atomic_store_n(&exhibition_custom_team_popup,
+                       EXHIBITION_TEAM_POPUP_TEAM, __ATOMIC_RELEASE);
+      exhibition_popup_focus_index = 0;
+      exhibition_team_scroll_offset = 0;
+      exhibition_popup_focus_direction = 0;
+      debugPrintf("exhibition: custom category=%u %s\n",
+                  exhibition_team_category_index,
+                  exhibition_team_categories[exhibition_team_category_index]
+                      .label);
+      return;
+    }
+    const ExhibitionTeamCategory *category = exhibition_team_category();
+    if (phase == EXHIBITION_TEAM_POPUP_TEAM && category &&
+        exhibition_popup_focus_index < category->team_count) {
+      const uint32_t side =
+          __atomic_load_n(&exhibition_select_side, __ATOMIC_ACQUIRE);
+      const uint32_t team_id = category->teams[exhibition_popup_focus_index];
+      exhibition_select_team(side, team_id);
+      __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_search_refresh_pending, 1,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_custom_team_popup,
+                       EXHIBITION_TEAM_POPUP_CLOSED, __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_team_picker_open, 0, __ATOMIC_RELEASE);
+      debugPrintf("exhibition: custom selected side=%u team=%u\n", side,
+                  team_id);
+    }
+    exhibition_team_scroll_offset = 0;
+    exhibition_popup_focus_index = 0;
+    exhibition_popup_focus_direction = 0;
+    return;
+  }
+  if (__atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE)) {
+    uint32_t level = exhibition_popup_focus_index;
+    if (level >= EXHIBITION_CPU_LEVEL_COUNT)
+      level = 2;
+    if (exhibition_set_test_match_cpu_level)
+      exhibition_set_test_match_cpu_level(level);
+    __atomic_store_n(&exhibition_cpu_level_value, level, __ATOMIC_RELEASE);
+    debugPrintf("exhibition: custom COM level applied=%u\n", level);
+    return;
+  }
+  if (__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE)) {
+    exhibition_adjust_match_setting(1);
+    return;
+  }
+  if (__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) &&
+      !__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) &&
+      !__atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) &&
+      !__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE) &&
+      exhibition_search_focus_index < 2)
+    pes_exhibition_matchmaking_tap(normalized_x, normalized_y);
+}
+
+int pes_controller_menu_physical_tap(float normalized_x,
+                                     float normalized_y) {
+  if (pes_controller_start_prompt(NULL, NULL)) {
+    // A physical tap on the launch prompt follows the same one-shot path as
+    // controller A. The game's original touch stream still receives the tap.
+    __atomic_store_n(&startup_prompt_active, 0, __ATOMIC_RELEASE);
+    debugPrintf("input: startup prompt accepted via physical tap at %.3f,%.3f\n",
+                normalized_x, normalized_y);
+    return 0;
+  }
+  if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
+    // Keep the custom focus aligned with a physical row selection while the
+    // native child applies its value/checkmark.
+    if (normalized_y >= 0.130f && normalized_y < 0.860f) {
+      // The row centers are about .199, .310, ... in the 720p viewport.
+      int index = (int)floorf((normalized_y - 0.199f) / 0.111f + 0.5f);
+      const uint32_t nested_kind = __atomic_load_n(
+          &exhibition_nested_popup_kind, __ATOMIC_ACQUIRE);
+      const int max_index =
+          nested_kind == EXHIBITION_NESTED_SHORT_LIST ? 1 : 5;
+      if (index < 0)
+        index = 0;
+      if (index > max_index)
+        index = max_index;
+      exhibition_popup_focus_index = (uint32_t)index;
+      exhibition_popup_focus_direction = 0;
+      debugPrintf("exhibition: physical nested row focus=%d y=%.3f\n",
+                  index, normalized_y);
+    }
+    (void)normalized_x;
+    return 0;
+  }
+  if (__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE)) {
+    if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE)) {
+      if (normalized_x >= 0.17f && normalized_x <= 0.40f &&
+          normalized_y >= 0.83f && normalized_y <= 0.93f) {
+        pes_controller_menu_back_pressed();
+        return 1;
+      }
+      if (normalized_x >= 0.170f && normalized_x <= 0.830f &&
+          normalized_y >= 0.170f && normalized_y < 0.790f) {
+        int row = (int)floorf((normalized_y - 0.190f) / 0.145f);
+        int column = normalized_x >= 0.50f ? 1 : 0;
+        if (row < 0)
+          row = 0;
+        if (row > 3)
+          row = 3;
+        const uint32_t index = exhibition_team_scroll_offset +
+                               (uint32_t)(row * 2 + column);
+        if (index < exhibition_custom_team_item_count()) {
+          exhibition_popup_focus_index = index;
+          exhibition_popup_focus_direction = 0;
+          debugPrintf("exhibition: physical custom grid focus=%u y=%.3f\n",
+                      index, normalized_y);
+          pes_controller_menu_tap(normalized_x, normalized_y);
+        }
+      }
+      return 1;
+    }
+    // Keep native taps intact, but mirror the visible row for the overlay.
+    // Ignore the scrollbar strip so dragging it never jumps the selector.
+    if (normalized_x >= 0.225f && normalized_x <= 0.800f &&
+        normalized_y >= 0.130f && normalized_y < 0.860f) {
+      int index = (int)floorf((normalized_y - 0.199f) / 0.111f + 0.5f);
+      if (index < 0)
+        index = 0;
+      if (index > 5)
+        index = 5;
+      exhibition_popup_focus_index = (uint32_t)index;
+      exhibition_popup_focus_direction = 0;
+      debugPrintf("exhibition: physical team row focus=%d y=%.3f\n", index,
+                  normalized_y);
+    }
+    return 0;
+  }
+  if (__atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE)) {
+    if (normalized_y >= 0.81f && normalized_y <= 0.91f) {
+      if (normalized_x >= 0.53f && normalized_x <= 0.76f)
+        pes_controller_menu_back_pressed();
+      else if (normalized_x >= 0.24f && normalized_x <= 0.50f)
+        pes_controller_menu_tap(normalized_x, normalized_y);
+      return 1;
+    }
+    if (normalized_x >= 0.24f && normalized_x <= 0.76f &&
+        normalized_y >= 0.195f && normalized_y < 0.750f) {
+      int index = (int)floorf((normalized_y - 0.205f) / 0.077f);
+      if (index < 0)
+        index = 0;
+      if (index >= (int)EXHIBITION_CPU_LEVEL_COUNT)
+        index = (int)EXHIBITION_CPU_LEVEL_COUNT - 1;
+      exhibition_popup_focus_index = (uint32_t)index;
+      exhibition_popup_focus_direction = 0;
+      pes_controller_menu_tap(normalized_x, normalized_y);
+    }
+    return 1;
+  }
+  if (!__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+    return 0;
+
+  if (normalized_y >= 0.81f && normalized_y <= 0.91f) {
+    if (normalized_x >= 0.55f && normalized_x <= 0.80f)
+      pes_controller_menu_back_pressed();
+    else if (normalized_x >= 0.20f && normalized_x <= 0.49f)
+      pes_controller_menu_tap(normalized_x, normalized_y);
+    return 1;
+  }
+  if (normalized_x >= 0.18f && normalized_x <= 0.82f &&
+      normalized_y >= 0.215f && normalized_y < 0.725f) {
+    int index = (int)floorf((normalized_y - 0.225f) / 0.125f);
+    if (index < 0)
+      index = 0;
+    if (index > 3)
+      index = 3;
+    exhibition_popup_focus_index = (uint32_t)index;
+    exhibition_popup_focus_direction = 0;
+    pes_controller_menu_tap(normalized_x, normalized_y);
+  }
+  return 1;
+}
+
+void pes_controller_menu_physical_swipe(float start_x, float start_y,
+                                         float end_x, float end_y) {
+  if (!__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE))
+    return;
+  if (start_x < 0.225f || start_x > 0.800f || end_x < 0.225f ||
+      end_x > 0.800f)
+    return;
+  const float dy = end_y - start_y;
+  if (fabsf(dy) < 0.08f)
+    return;
+
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE)) {
+    const uint32_t count = exhibition_custom_team_item_count();
+    const uint32_t page_count =
+        count ? (count + EXHIBITION_TEAM_GRID_PAGE_SIZE - 1) /
+                    EXHIBITION_TEAM_GRID_PAGE_SIZE
+              : 1;
+    uint32_t page = exhibition_team_scroll_offset /
+                    EXHIBITION_TEAM_GRID_PAGE_SIZE;
+    if (dy < 0.0f && page + 1 < page_count)
+      page++;
+    else if (dy > 0.0f && page > 0)
+      page--;
+    else
+      return;
+    const uint32_t local = exhibition_popup_focus_index %
+                           EXHIBITION_TEAM_GRID_PAGE_SIZE;
+    exhibition_team_scroll_offset = page * EXHIBITION_TEAM_GRID_PAGE_SIZE;
+    exhibition_popup_focus_index = exhibition_team_scroll_offset + local;
+    if (exhibition_popup_focus_index >= count)
+      exhibition_popup_focus_index = count - 1;
+    exhibition_popup_focus_direction = 0;
+    return;
+  }
+
+  // Native scrolling owns the content offset. Pin the custom focus to the
+  // edge exposed by the gesture so it remains useful after large jumps.
+  exhibition_popup_focus_index = dy < 0.0f ? 5u : 0u;
+  exhibition_popup_focus_direction = 0;
+  debugPrintf("exhibition: team list swipe dy=%.3f focus=%u\n", dy,
+              exhibition_popup_focus_index);
+}
+
 static void exhibition_open_team_picker(void *window, uint32_t side) {
   if (!window || side >= 2 ||
-      !__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
-      !exhibition_team_select_create_child || !exhibition_task_add_unit ||
-      !exhibition_setup_usable_teams || !exhibition_team_select_set_usable)
+      !__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return;
 
   if (__atomic_exchange_n(&exhibition_team_picker_open, 1,
                           __ATOMIC_ACQ_REL))
     return;
+  __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
+  exhibition_popup_focus_index = 0;
+  exhibition_popup_focus_direction = 0;
+  exhibition_team_scroll_offset = 0;
+  exhibition_team_category_index = 0;
+  __atomic_store_n(&exhibition_custom_team_popup,
+                   EXHIBITION_TEAM_POPUP_CATEGORY, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_custom_popup_opened_ms,
+                   exhibition_search_focus_now_ms(), __ATOMIC_RELEASE);
 
   const uint32_t selected_team =
       side == 0
           ? __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE)
           : __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE);
-  const uint32_t team_id = exhibition_picker_seed_team(selected_team);
   __atomic_store_n(&exhibition_select_side, side, __ATOMIC_RELEASE);
-  if (exhibition_set_test_match_team_id)
-    exhibition_set_test_match_team_id(team_id);
-
-  unsigned char child_name[24] = {0};
-  static const char menu_team_select[] = "menuTeamSelect";
-  child_name[0] = (unsigned char)((sizeof(menu_team_select) - 1) << 1);
-  memcpy(child_name + 1, menu_team_select, sizeof(menu_team_select) - 1);
-  void *child = exhibition_team_select_create_child(
-      child_name, 0, window, team_id, 0, 0, 0);
-  if (!child) {
-    __atomic_store_n(&exhibition_team_picker_open, 0, __ATOMIC_RELEASE);
-    return;
-  }
-  exhibition_task_add_unit(window, child);
-  exhibition_setup_usable_teams();
-  exhibition_team_select_set_usable(child, 1);
-  debugPrintf("exhibition: Matchmaking Change Team side=%u current=%u "
-              "seed=%u child=%p\n",
-              side, selected_team, team_id, child);
+  debugPrintf("exhibition: custom team browser side=%u current=%u "
+              "categories=%u\n",
+              side, selected_team, EXHIBITION_TEAM_CATEGORY_COUNT);
 }
 
 void pes_exhibition_search_touch(void *window, const void *touch_info) {
@@ -1614,6 +2739,10 @@ void pes_exhibition_search_touch(void *window, const void *touch_info) {
       exhibition_search_touch_original(window, touch_info);
     return;
   }
+  if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+    return;
 
   uint32_t action = UINT32_MAX;
   uint32_t side = UINT32_MAX;
@@ -1635,12 +2764,41 @@ void pes_exhibition_search_child(void *window, const void *child_name,
   if (!name)
     return;
 
+  // A nested settings child is a visible Switch modal, not a completed
+  // selection. Keep its custom focus alive across the native child callback;
+  // the explicit B path clears it after the modal is dismissed.
+  const int nested_popup =
+      __atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE);
+
   static const char team_select_name[] = "menuTeamSelect";
   static const char cpu_level_name[] = "popupSelectCpuLevel";
   static const char match_setting_name[] = "menuMatchSetting";
+  const int nested_back =
+      __atomic_load_n(&exhibition_nested_back_pending, __ATOMIC_ACQUIRE);
+  if (nested_back) {
+    __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
+    exhibition_popup_focus_index = 0;
+    exhibition_popup_focus_direction = 0;
+    // Native implementations may report the parent callback for a child
+    // dismissal. Keep Match Settings open and release only nested focus.
+    if (length == sizeof(match_setting_name) - 1 &&
+        memcmp(name, match_setting_name, sizeof(match_setting_name) - 1) == 0) {
+      debugPrintf("exhibition: nested Match Settings child dismissed by B\n");
+      return;
+    }
+  }
   if (length == sizeof(team_select_name) - 1 &&
       memcmp(name, team_select_name, sizeof(team_select_name) - 1) == 0) {
+    __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_custom_team_popup, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_team_picker_open, 0, __ATOMIC_RELEASE);
+    exhibition_popup_focus_index = 0;
     if (selected_value != UINT32_MAX &&
         exhibition_is_valid_team(selected_value)) {
       const uint32_t side =
@@ -1657,8 +2815,13 @@ void pes_exhibition_search_child(void *window, const void *child_name,
 
   if (length == sizeof(cpu_level_name) - 1 &&
       memcmp(name, cpu_level_name, sizeof(cpu_level_name) - 1) == 0) {
+    __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_cpu_level_popup_open, 0,
                      __ATOMIC_RELEASE);
+    exhibition_popup_focus_index = 0;
     if (selected_value != UINT32_MAX &&
         exhibition_set_test_match_cpu_level) {
       exhibition_set_test_match_cpu_level(selected_value);
@@ -1670,8 +2833,15 @@ void pes_exhibition_search_child(void *window, const void *child_name,
   if (length == sizeof(match_setting_name) - 1 &&
       memcmp(name, match_setting_name,
              sizeof(match_setting_name) - 1) == 0) {
+    if (nested_popup) {
+      debugPrintf("exhibition: kept nested Match Settings focus after "
+                  "child callback value=%u\n",
+                  selected_value);
+      return;
+    }
     __atomic_store_n(&exhibition_settings_popup_open, 0,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
     exhibition_set_matchmaking_visible(window, 1);
     debugPrintf("exhibition: Match Settings closed\n");
   }
@@ -1684,7 +2854,9 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
     return;
   }
 
-  if (__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
+  if (__atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+      __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
     return;
 
   if (footer_key == 0 && !exhibition_matchup_ready()) {
@@ -1700,11 +2872,7 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
   }
 
   if (footer_key == 2) {
-    if (exhibition_training_footer_original) {
-      __atomic_store_n(&exhibition_cpu_level_popup_open, 1,
-                       __ATOMIC_RELEASE);
-      exhibition_training_footer_original(window, footer_key);
-    }
+    exhibition_open_cpu_level();
     return;
   }
 
@@ -1719,6 +2887,9 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
   // MatchSearching's native footer enum is RIGHT/Next=0 and LEFT/Back=1.
   // Keep that ordering even though the visual footer is laid out left-to-right.
   if (footer_key == 1) {
+    __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                     __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_session_active, 0, __ATOMIC_RELEASE);
@@ -1732,6 +2903,9 @@ void pes_exhibition_search_footer(void *window, uint32_t footer_key) {
     const uint32_t action = EXHIBITION_STRATEGY_START;
     __atomic_store_n(&exhibition_strategy_action, action, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_strategy_pending, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                     __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
     exhibition_flow_direct_set((unsigned char *)listener + 0x118,
@@ -1769,30 +2943,55 @@ static void exhibition_set_matchmaking_visible(void *window,
     exhibition_node_set_visible(root, visible, 2);
 }
 
+static void exhibition_open_cpu_level(void) {
+  if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
+      __atomic_exchange_n(&exhibition_cpu_level_popup_open, 1,
+                          __ATOMIC_ACQ_REL))
+    return;
+
+  uint32_t level = exhibition_get_test_match_cpu_level
+                       ? exhibition_get_test_match_cpu_level()
+                       : __atomic_load_n(&exhibition_cpu_level_value,
+                                         __ATOMIC_ACQUIRE);
+  if (level >= EXHIBITION_CPU_LEVEL_COUNT)
+    level = 2;
+  __atomic_store_n(&exhibition_cpu_level_value, level, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
+  exhibition_popup_focus_index = level;
+  exhibition_popup_focus_direction = 0;
+  __atomic_store_n(&exhibition_custom_popup_opened_ms,
+                   exhibition_search_focus_now_ms(), __ATOMIC_RELEASE);
+  debugPrintf("exhibition: opened custom COM Level current=%u\n", level);
+}
+
 static void exhibition_open_match_settings(void *window) {
-  if (!window || !exhibition_match_setting_create_child ||
-      !exhibition_task_add_unit ||
+  if (!window ||
       !__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return;
 
   if (__atomic_exchange_n(&exhibition_settings_popup_open, 1,
                           __ATOMIC_ACQ_REL))
     return;
-
-  unsigned char child_name[24];
-  const uint8_t enabled = 1;
-  exhibition_make_short_string(child_name, "menuMatchSetting");
-  void *child =
-      exhibition_match_setting_create_child(child_name, &enabled);
-  if (!child) {
+  __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
+  exhibition_popup_focus_index = 0;
+  exhibition_popup_focus_direction = 0;
+  __atomic_store_n(&exhibition_custom_popup_opened_ms,
+                   exhibition_search_focus_now_ms(), __ATOMIC_RELEASE);
+  if (!exhibition_refresh_match_settings()) {
     __atomic_store_n(&exhibition_settings_popup_open, 0,
                      __ATOMIC_RELEASE);
+    exhibition_settings_match = NULL;
+    debugPrintf("exhibition: custom Match Settings missing tmpdb match\n");
     return;
   }
-
-  exhibition_task_add_unit(window, child);
-  exhibition_set_matchmaking_visible(window, 0);
-  debugPrintf("exhibition: opened stock Match Settings child=%p\n", child);
+  debugPrintf("exhibition: opened custom Match Settings match=%p\n",
+              exhibition_settings_match);
 }
 
 static void exhibition_update_search_task_record(void *task, uint32_t side,
@@ -1896,11 +3095,92 @@ static void main_menu_set_tile_text(void *tile, const char *title,
   }
 }
 
+static void main_menu_apply_focus(uint32_t index) {
+  if (index >= 4)
+    return;
+  main_menu_focus_index = index;
+  int painted_any = 0;
+  for (uint32_t i = 0; i < 4; i++) {
+    void *tile = main_menu_tiles[i];
+    if (!tile)
+      continue;
+    painted_any = 1;
+    if (main_menu_choice_set_active)
+      main_menu_choice_set_active(tile, 1, i == index, 2);
+    const char *base_title = main_menu_titles[i];
+    const char *base_description = main_menu_descriptions[i];
+    // Keep the stock labels clean; focus is shown by the active tile tint.
+    main_menu_set_tile_text(tile, base_title, base_description);
+  }
+  main_menu_focus_painted = painted_any;
+}
+
+static uint64_t main_menu_focus_now_ms(void) {
+  return armTicksToNs(armGetSystemTick()) / 1000000ULL;
+}
+
+void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
+  if (!__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE))
+    return;
+
+  // Do not let the first start-screen A fall through to tile zero when the
+  // native main window is already constructed behind the launch prompt.
+  if (pes_controller_start_prompt(NULL, NULL) &&
+      (buttons & (1u << 1)) && !(previous_buttons & (1u << 1)))
+    return;
+
+  if (!main_menu_focus_painted)
+    main_menu_apply_focus(main_menu_focus_index);
+
+  uint32_t direction = 0;
+  if (buttons & (1u << 10))
+    direction = 1; // up
+  else if (buttons & (1u << 11))
+    direction = 2; // down
+  else if (buttons & (1u << 12))
+    direction = 3; // left
+  else if (buttons & (1u << 13))
+    direction = 4; // right
+
+  const uint64_t now = main_menu_focus_now_ms();
+  if (!direction) {
+    main_menu_focus_direction = 0;
+    return;
+  }
+
+  const int pressed = (buttons & (1u << (direction + 9))) != 0 &&
+                      !(previous_buttons & (1u << (direction + 9)));
+  if (direction != main_menu_focus_direction) {
+    main_menu_focus_direction = direction;
+    main_menu_focus_started_ms = now;
+    main_menu_focus_repeat_ms = now;
+  } else if (!pressed && now - main_menu_focus_started_ms < 300) {
+    return;
+  } else if (!pressed && now - main_menu_focus_repeat_ms < 120) {
+    return;
+  }
+
+  main_menu_focus_repeat_ms = now;
+  uint32_t next = main_menu_focus_index;
+  if (direction == 1 && next >= 2)
+    next -= 2;
+  else if (direction == 2 && next < 2)
+    next += 2;
+  else if (direction == 3 && (next & 1))
+    next--;
+  else if (direction == 4 && !(next & 1))
+    next++;
+  if (next != main_menu_focus_index)
+    main_menu_apply_focus(next);
+}
+
 void pes_main_menu_simplify(void *window) {
   static int logged;
   if (!window || !exhibition_window_get_window ||
       !exhibition_node_set_visible)
     return;
+
+  __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
 
   void *root = exhibition_window_get_window(window);
   if (!root)
@@ -1914,20 +3194,17 @@ void pes_main_menu_simplify(void *window) {
     exhibition_node_set_visible(tab_strip, 0, 2);
   if (match_page) {
     void *tiles[4] = {0};
+    main_menu_focus_painted = 0;
     for (uint32_t i = 0; i < 4; i++) {
       char choice_name[] = "choice_0";
       choice_name[7] = (char)('0' + i);
       tiles[i] = exhibition_find_root_node(match_page, choice_name);
+      main_menu_tiles[i] = tiles[i];
       if (tiles[i]) {
         exhibition_node_set_visible(tiles[i], 1, 2);
-        if (main_menu_choice_set_active)
-          main_menu_choice_set_active(tiles[i], 1, 1, 2);
       }
     }
-    main_menu_set_tile_text(tiles[0], "Exhibition", "Local match");
-    main_menu_set_tile_text(tiles[1], "Credits", "Credits and support");
-    main_menu_set_tile_text(tiles[2], "Training", "Practice controls");
-    main_menu_set_tile_text(tiles[3], "Version Info", "Build and game version");
+    main_menu_apply_focus(0);
   }
 
   // The unused pages are no longer constructed and swipe navigation is
@@ -1948,6 +3225,8 @@ uintptr_t pes_main_menu_selected_entry(void *window,
 
   uint32_t choice = UINT32_MAX;
   memcpy(&choice, (const unsigned char *)touch_info + 8, sizeof(choice));
+  if (choice == 0 || choice == 2)
+    __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
   if (choice != 1 && choice != 3)
     return main_menu_selected_resume;
 
@@ -2050,6 +3329,12 @@ static void exhibition_update_matchmaking_card(void *window, uint32_t side,
 }
 
 uintptr_t pes_exhibition_search_post_entry(void *window) {
+  if (window &&
+      __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE)) {
+    exhibition_search_window = window;
+    if (exhibition_search_focus_index >= 6)
+      exhibition_search_focus_index = 0;
+  }
   int matching_records_ready = 0;
   if (window &&
       __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE)) {
@@ -2120,6 +3405,7 @@ uintptr_t pes_exhibition_search_post_entry(void *window) {
     exhibition_update_matchmaking_card(
         window, 1,
         __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+    exhibition_search_focus_apply(window);
   }
   return exhibition_search_post_resume;
 }
@@ -2454,6 +3740,25 @@ uint32_t pes_mobile_control_context(int *mode) {
   return generation;
 }
 
+// Native pad input is useful for menu and matchmaking widgets. Live gameplay
+// remains on the calibrated multi-touch mapping in android_shim.c.
+int pes_controller_menu_active(void) {
+  return pes_controller_start_prompt(NULL, NULL) ||
+         __atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&exhibition_team_select_active, __ATOMIC_ACQUIRE);
+}
+
+int pes_main_menu_controller_active(void) {
+  return __atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_main_menu_focus_index(void) { return main_menu_focus_index; }
+
 int pes_mobile_control_active_mode(void) {
   const uint64_t seen =
       __atomic_load_n(&mobile_control_seen_tick, __ATOMIC_ACQUIRE);
@@ -2499,9 +3804,10 @@ uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
 static void pes_cursor_set_pad_no(void *cursor_ptr, uint32_t requested) {
   if (!cursor_ptr)
     return;
+  // Keep the primary cursor attached to port 0 even before the first HID poll;
+  // a disconnected Switch pad simply contributes no state to the game.
   const int connected = cobra_controller_is_connected();
-  const int32_t pad_no = connected && requested == 1 ? 0
-                                                     : (requested ? -1 : 0);
+  const int32_t pad_no = requested == 1 ? 0 : (requested ? -1 : 0);
   memcpy((unsigned char *)cursor_ptr + 16, &pad_no, sizeof(pad_no));
   if (cursor_pad_log_count < 16) {
     cursor_pad_log_count++;
@@ -2520,7 +3826,7 @@ static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
     return;
   const int connected = cobra_controller_is_connected();
   const uint8_t enabled =
-      (requested_enable != 0 || (connected && pad_no == 0)) ? 1 : 0;
+      (requested_enable != 0 || pad_no == 0) ? 1 : 0;
   *((unsigned char *)pad_input_ptr + 0x86ca0 + pad_no) = enabled;
   if ((pad_no == 0 || requested_enable) && real_pad_log_count < 24) {
     real_pad_log_count++;
@@ -2561,6 +3867,8 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
         x > 0 ? x : 0,
     };
     memcpy(pad + 140 + 16 * 4, directions, sizeof(directions));
+    pes_main_menu_pad_event(current, previous);
+    pes_exhibition_search_pad_event(current, previous);
     if (packed != cobra_pad_last_applied && cobra_pad_apply_log_count < 64) {
       cobra_pad_apply_log_count++;
       debugPrintf("input: cobra apply pad=%p id=%d packed=0x%llx "
@@ -2591,6 +3899,7 @@ extern void pes_exhibition_search_user_name_hook(void);
 extern void pes_exhibition_search_task_ready_hook(void);
 extern void pes_exhibition_filter_teams_hook(void);
 extern void pes_exhibition_string_get_hook(void);
+extern void pes_title_prompt_ready_hook(void);
 extern void pes_main_menu_simplify_hook(void);
 extern void pes_main_menu_selected_hook(void);
 extern void ue4_tickrate_clamp_hook(void);
@@ -3176,6 +4485,25 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node10SetVisibleEbj");
 
+  // Gate the custom A prompt to the real title-window lifecycle. Initializing
+  // it statically made the glyph visible during the long UE4 boot sequence.
+  const uintptr_t title_post_init = so_find_addr(
+      module, "_ZN4menu9TitleMenu14PostInitMobileEv");
+  const uintptr_t title_prompt_ready_site = title_post_init + 0x10;
+  static const uint32_t expected_title_prompt_ready[4] = {
+      0x320003e8, 0xb9022268, 0xa8c17bf3, 0xd65f03c0,
+  };
+  if (memcmp((void *)title_prompt_ready_site,
+             expected_title_prompt_ready,
+             sizeof(expected_title_prompt_ready)) != 0)
+    fatal_error("Unexpected TitleMenu::PostInitMobile tail at %p",
+                (void *)title_prompt_ready_site);
+  hook_arm64(title_prompt_ready_site,
+             (uintptr_t)&pes_title_prompt_ready_hook);
+  debugPrintf("UE4 menu: title prompt ready hook=%p\n",
+              (void *)so_find_addr_rx(
+                  module, "_ZN4menu9TitleMenu14PostInitMobileEv"));
+
   // Build only the Match page, force it selected, and retain just the native
   // Exhibition and Training choices. This is deliberately a UI/setup trim:
   // it avoids entering unsupported myClub pages without claiming to change
@@ -3306,6 +4634,29 @@ void install_ue4_hooks(so_module *module) {
   exhibition_set_test_match_cpu_level =
       (void *)so_find_addr_rx(module,
           "_ZN10onlinemode9DebugMode20SetTestMatchCpuLevelE8CpuLevel");
+  exhibition_get_test_match_cpu_level =
+      (void *)so_find_addr_rx(module,
+          "_ZN10onlinemode9DebugMode20GetTestMatchCpuLevelEv");
+  exhibition_match_get_time_zone =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb5Match11GetTimeZoneEv");
+  exhibition_match_set_time_zone =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb5Match11SetTimeZoneEN6common12TimeZoneTypeE");
+  exhibition_match_get_match_time =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb5Match12GetMatchTimeEv");
+  exhibition_match_set_match_time =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb5Match12SetMatchTimeEh");
+  exhibition_match_is_ex =
+      (void *)so_find_addr_rx(module, "_ZNK5tmpdb5Match4IsExEv");
+  exhibition_match_set_ex =
+      (void *)so_find_addr_rx(module, "_ZN5tmpdb5Match5SetExEb");
+  exhibition_match_is_pk =
+      (void *)so_find_addr_rx(module, "_ZNK5tmpdb5Match4IsPkEv");
+  exhibition_match_set_pk =
+      (void *)so_find_addr_rx(module, "_ZN5tmpdb5Match5SetPkEb");
   exhibition_match_setting_create_child =
       (void *)so_find_addr_rx(
           module,
@@ -3341,10 +4692,22 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(is_test_match_plt,
              (uintptr_t)&pes_exhibition_is_test_match);
   debugPrintf("UE4 hook: Exhibition Settings create=%p IsTestMatch=%p "
-              "PLT=%p scoped=1\n",
+              "PLT=%p cpu=%p/%p manager=%p timezone=%p/%p time=%p/%p "
+              "extra=%p/%p pk=%p/%p scoped=1\n",
               exhibition_match_setting_create_child,
               exhibition_is_test_match_original,
-              (void *)is_test_match_plt);
+              (void *)is_test_match_plt,
+              exhibition_get_test_match_cpu_level,
+              exhibition_set_test_match_cpu_level,
+              exhibition_tmpdb_manager_get_instance,
+              exhibition_match_get_time_zone,
+              exhibition_match_set_time_zone,
+              exhibition_match_get_match_time,
+              exhibition_match_set_match_time,
+              exhibition_match_is_ex,
+              exhibition_match_set_ex,
+              exhibition_match_is_pk,
+              exhibition_match_set_pk);
 
   // The Training search task dereferences ParameterMyClubUserInfo even for a
   // local match. Our offline bootstrap deliberately has no server profile,

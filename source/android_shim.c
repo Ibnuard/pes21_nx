@@ -168,6 +168,9 @@ enum {
   FAKE_POINTER_SHOOT = 4,
   FAKE_POINTER_DASH = 5,
   FAKE_POINTER_PAUSE = 6,
+  FAKE_POINTER_MENU = 7,
+  FAKE_POINTER_MENU_SCROLL = 8,
+  FAKE_POINTER_MENU_BACK = 9,
 };
 
 #define FAKE_PIPE_BASE 0x70000000
@@ -646,6 +649,75 @@ static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
   }
 }
 
+static void merge_npad_right_state(const HidNpadCommonState *state,
+                                   HidAnalogStickState *right_stick,
+                                   int *have_right_stick) {
+  const int64_t candidate_magnitude =
+      (int64_t)state->analog_stick_r.x * state->analog_stick_r.x +
+      (int64_t)state->analog_stick_r.y * state->analog_stick_r.y;
+  const int64_t current_magnitude =
+      (int64_t)right_stick->x * right_stick->x +
+      (int64_t)right_stick->y * right_stick->y;
+  if (!*have_right_stick || candidate_magnitude > current_magnitude) {
+    *right_stick = state->analog_stick_r;
+    *have_right_stick = 1;
+  }
+}
+
+static uint32_t menu_pad_buttons(u64 buttons,
+                                 const HidAnalogStickState *left_stick,
+                                 int have_left_stick) {
+  uint32_t mapped = 0;
+  // Matchmaking screens use the synthetic touch target below for a single,
+  // deterministic Back action; suppress the native B bit there to avoid a
+  // double-pop/double-footer activation. Other menu windows retain native B.
+  if ((buttons & HidNpadButton_B) &&
+      !pes_controller_menu_back_target(NULL, NULL))
+    mapped |= 1u << 0;
+  if (buttons & HidNpadButton_A) mapped |= 1u << 1;
+  if (buttons & HidNpadButton_Y) mapped |= 1u << 2;
+  if (buttons & HidNpadButton_X) mapped |= 1u << 3;
+  if (buttons & HidNpadButton_L) mapped |= 1u << 4;
+  if (buttons & HidNpadButton_ZL) mapped |= 1u << 5;
+  if (buttons & HidNpadButton_StickL) mapped |= 1u << 6;
+  if (buttons & HidNpadButton_R) mapped |= 1u << 7;
+  if (buttons & HidNpadButton_ZR) mapped |= 1u << 8;
+  if (buttons & HidNpadButton_StickR) mapped |= 1u << 9;
+  if (buttons & HidNpadButton_Up) mapped |= 1u << 10;
+  if (buttons & HidNpadButton_Down) mapped |= 1u << 11;
+  if (buttons & HidNpadButton_Left) mapped |= 1u << 12;
+  if (buttons & HidNpadButton_Right) mapped |= 1u << 13;
+  if (buttons & HidNpadButton_Plus) mapped |= 1u << 14;
+  if (buttons & HidNpadButton_Minus) mapped |= 1u << 15;
+
+  // The left stick is an alternate menu arrow pad. Gameplay keeps using the
+  // same stick through the virtual touch controls, so this is only emitted
+  // while the menu bridge is active.
+  if (have_left_stick) {
+    const int threshold = JOYSTICK_MAX / 3;
+    // Switch HID reports positive Y when the stick is pushed upward.
+    if (left_stick->y > threshold) mapped |= 1u << 10;
+    if (left_stick->y < -threshold) mapped |= 1u << 11;
+    if (left_stick->x < -threshold) mapped |= 1u << 12;
+    if (left_stick->x > threshold) mapped |= 1u << 13;
+  }
+  return mapped;
+}
+
+static void emit_menu_pad_input(const HidAnalogStickState *left_stick,
+                                int connected, u64 buttons,
+                                int have_left_stick) {
+  const uint32_t mapped = menu_pad_buttons(buttons, left_stick,
+                                           have_left_stick);
+  const int32_t x = connected ? left_stick->x : 0;
+  const int32_t y = connected ? left_stick->y : 0;
+  const int32_t up = y < 0 ? -y : 0;
+  const int32_t down = y > 0 ? y : 0;
+  const int32_t left = x < 0 ? -x : 0;
+  const int32_t right = x > 0 ? x : 0;
+  cobra_pad_set_input(mapped, up, down, left, right, connected);
+}
+
 static uint64_t monotonic_ms(void) {
   return armTicksToNs(armGetSystemTick()) / 1000000ULL;
 }
@@ -864,6 +936,71 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
     touch_state_append(desired, FAKE_POINTER_PAUSE, pause_x, pause_y);
 }
 
+static void append_menu_controller_tap(FakeTouchState *desired, int a_pressed,
+                                        uint64_t now_ms) {
+  static uint64_t tap_until_ms;
+  if (a_pressed && tap_until_ms <= now_ms)
+    tap_until_ms = now_ms + 90;
+  if (tap_until_ms <= now_ms)
+    return;
+
+  float normalized_x = 0.0f;
+  float normalized_y = 0.0f;
+  if (pes_controller_menu_touch_target(&normalized_x, &normalized_y))
+    touch_state_append(desired, FAKE_POINTER_MENU,
+                       normalized_x * (float)screen_width,
+                       normalized_y * (float)screen_height);
+}
+
+static void append_menu_controller_back(FakeTouchState *desired,
+                                         int b_pressed, uint64_t now_ms) {
+  static uint64_t back_until_ms;
+  if (b_pressed && back_until_ms <= now_ms) {
+    back_until_ms = now_ms + 90;
+  }
+  if (back_until_ms <= now_ms)
+    return;
+
+  float normalized_x = 0.0f;
+  float normalized_y = 0.0f;
+  if (pes_controller_menu_back_target(&normalized_x, &normalized_y))
+    touch_state_append(desired, FAKE_POINTER_MENU_BACK,
+                       normalized_x * (float)screen_width,
+                       normalized_y * (float)screen_height);
+}
+
+static void append_menu_controller_scroll(FakeTouchState *desired,
+                                           uint64_t now_ms) {
+  static uint64_t scroll_started_ms;
+  static int scroll_direction;
+  // A gesture lasts several poll frames. Ask the controller bridge for the
+  // next logical row only when the previous synthetic swipe has completed;
+  // otherwise a multi-step custom popup scroll would consume all requests in
+  // the first frame.
+  const int request = scroll_started_ms == 0
+                          ? pes_controller_menu_scroll_request()
+                          : 0;
+  if (request && scroll_started_ms == 0) {
+    scroll_started_ms = now_ms;
+    scroll_direction = request;
+  }
+  if (!scroll_started_ms)
+    return;
+  const uint64_t elapsed = now_ms - scroll_started_ms;
+  if (elapsed >= 180) {
+    scroll_started_ms = 0;
+    return;
+  }
+  const float t = (float)elapsed / 180.0f;
+  // Move roughly one visible row per D-pad press. The old .43 viewport
+  // sweep made the native list skip several leagues at a time.
+  const float start_y = scroll_direction > 0 ? 0.72f : 0.30f;
+  const float end_y = scroll_direction > 0 ? 0.61f : 0.41f;
+  const float y = (start_y + (end_y - start_y) * t) * (float)screen_height;
+  touch_state_append(desired, FAKE_POINTER_MENU_SCROLL,
+                     (float)screen_width * 0.50f, y);
+}
+
 static void log_controller_input(const HidAnalogStickState *stick,
                                  int connected, u64 buttons, float x,
                                  float y, int gameplay_active,
@@ -980,22 +1117,34 @@ void android_input_poll(void) {
   HidNpadCommonState state;
   u64 buttons = 0;
   HidAnalogStickState left_stick = {0};
+  HidAnalogStickState right_stick = {0};
   int have_left_stick = 0;
+  int have_right_stick = 0;
   if (hidGetNpadStatesFullKey(HidNpadIdType_No1, &state, 1) &&
-      (state.attributes & HidNpadAttribute_IsConnected))
+      (state.attributes & HidNpadAttribute_IsConnected)) {
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
+    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+  }
   if (hidGetNpadStatesJoyDual(HidNpadIdType_No1, &state, 1) &&
-      (state.attributes & HidNpadAttribute_IsConnected))
+      (state.attributes & HidNpadAttribute_IsConnected)) {
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
+    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+  }
   if (hidGetNpadStatesJoyLeft(HidNpadIdType_No1, &state, 1) &&
-      (state.attributes & HidNpadAttribute_IsConnected))
+      (state.attributes & HidNpadAttribute_IsConnected)) {
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
+    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+  }
   if (hidGetNpadStatesJoyRight(HidNpadIdType_No1, &state, 1) &&
-      (state.attributes & HidNpadAttribute_IsConnected))
+      (state.attributes & HidNpadAttribute_IsConnected)) {
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
+    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+  }
   if (hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) &&
-      (state.attributes & HidNpadAttribute_IsConnected))
+      (state.attributes & HidNpadAttribute_IsConnected)) {
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
+    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+  }
 
   float axis_x = 0.0f;
   float axis_y = 0.0f;
@@ -1049,7 +1198,34 @@ void android_input_poll(void) {
   append_virtual_gamepad_touches(
       &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
       control_mode, now_ms);
+  if (!gameplay_active && pes_controller_menu_active()) {
+    const int a_pressed = (buttons & HidNpadButton_A) != 0 &&
+                          (previous_hid_buttons & HidNpadButton_A) == 0;
+    const int b_pressed = (buttons & HidNpadButton_B) != 0 &&
+                          (previous_hid_buttons & HidNpadButton_B) == 0;
+    append_menu_controller_tap(&desired, a_pressed, now_ms);
+    append_menu_controller_back(&desired, b_pressed, now_ms);
+    append_menu_controller_scroll(&desired, now_ms);
+  }
+  const int menu_back_was_active =
+      touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK);
+  const int menu_was_active =
+      touch_state_find(&active_touch_state, FAKE_POINTER_MENU);
+  float menu_x = 0.0f;
+  float menu_y = 0.0f;
+  if (menu_was_active >= 0) {
+    menu_x = active_touch_state.pointers[menu_was_active].x;
+    menu_y = active_touch_state.pointers[menu_was_active].y;
+  }
   reconcile_touch_state(&desired);
+  if (menu_was_active >= 0 &&
+      touch_state_find(&active_touch_state, FAKE_POINTER_MENU) < 0 &&
+      screen_width > 0 && screen_height > 0)
+    pes_controller_menu_tap(menu_x / (float)screen_width,
+                            menu_y / (float)screen_height);
+  if (menu_back_was_active >= 0 &&
+      touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK) < 0)
+    pes_controller_menu_back_pressed();
 
   const int physical_is_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
@@ -1061,7 +1237,19 @@ void android_input_poll(void) {
     // continue exclusively through Android's original touch stream.
     if (fabsf(dx) <= (float)screen_width * 0.06f &&
         fabsf(dy) <= (float)screen_height * 0.08f) {
-      pes_exhibition_matchmaking_tap(
+      const int menu_consumed = pes_controller_menu_physical_tap(
+          physical_touch_last_x / (float)screen_width,
+          physical_touch_last_y / (float)screen_height);
+      if (!menu_consumed)
+        pes_exhibition_matchmaking_tap(
+            physical_touch_last_x / (float)screen_width,
+            physical_touch_last_y / (float)screen_height);
+    } else if (!gameplay_active && pes_controller_menu_active()) {
+      // Let the team picker move its custom focus to the visible edge after
+      // a native list swipe. The Android stream still performs the scrolling.
+      pes_controller_menu_physical_swipe(
+          physical_touch_start_x / (float)screen_width,
+          physical_touch_start_y / (float)screen_height,
           physical_touch_last_x / (float)screen_width,
           physical_touch_last_y / (float)screen_height);
     }
@@ -1075,7 +1263,11 @@ void android_input_poll(void) {
 
   log_controller_input(&left_stick, have_left_stick, buttons, axis_x, axis_y,
                        gameplay_active, control_mode);
-  disable_native_pad_bridge();
+  if (!gameplay_active && pes_controller_menu_active())
+    emit_menu_pad_input(&left_stick, have_left_stick, buttons,
+                        have_left_stick);
+  else
+    disable_native_pad_bridge();
   previous_hid_buttons = have_left_stick ? buttons : 0;
 }
 

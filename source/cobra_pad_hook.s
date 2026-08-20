@@ -419,6 +419,26 @@ pes_exhibition_string_get_hook:
     .size pes_exhibition_string_get_hook, .-pes_exhibition_string_get_hook
 
     .align 2
+    .global pes_title_prompt_ready_hook
+    .type pes_title_prompt_ready_hook, %function
+
+// Tail hook for TitleMenu::PostInitMobile. The title prompt becomes visible
+// only after its native window is initialized, never during NRO/UE4 loading.
+pes_title_prompt_ready_hook:
+    mov w8, #1
+    str w8, [x19, #544]
+
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    bl pes_controller_title_ready
+    ldp x29, x30, [sp], #16
+
+    ldp x19, x30, [sp], #16
+    ret
+
+    .size pes_title_prompt_ready_hook, .-pes_title_prompt_ready_hook
+
+    .align 2
     .global pes_main_menu_simplify_hook
     .type pes_main_menu_simplify_hook, %function
 
