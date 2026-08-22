@@ -265,25 +265,6 @@ static int emit_badge(uint32_t slot, float x, float y, float width,
   return 1;
 }
 
-// The launch prompt sits on top of a native ring. Render its A as solid
-// geometry as well as atlas text; this keeps the glyph visible on GLES paths
-// where the tiny LUMINANCE atlas can be sampled inconsistently.
-static int emit_solid_a(float x, float y, float size, GLfloat *verts) {
-  static const uint8_t rows[7] = {14, 17, 17, 31, 17, 17, 17};
-  const float cell = size / 7.0f;
-  int quads = 0;
-  for (int row = 0; row < 7; row++) {
-    for (int col = 0; col < 5; col++) {
-      if (!(rows[row] & (1u << (4 - col))))
-        continue;
-      quads += emit_rect(x + (float)col * cell,
-                         y + (float)row * cell, cell + 0.5f, cell + 0.5f,
-                         verts + quads * 24);
-    }
-  }
-  return quads;
-}
-
 static int emit_rect(float x, float y, float width, float height,
                      GLfloat *verts) {
   const float x0 = x * 2.0f / (float)screen_width - 1.0f;
@@ -487,6 +468,16 @@ static void overlay_render(void) {
   // without bringing back the full controller help text.
   const int control_mode = pes_mobile_control_active_mode();
   const int replay_active = pes_controller_replay_active();
+  const uint32_t replay_feedback = pes_controller_replay_feedback();
+  const char *replay_feedback_text = "";
+  if (replay_feedback == PES_REPLAY_FEEDBACK_GOAL_CELEBRATION)
+    replay_feedback_text = "A GOAL CELEBRATION";
+  else if (replay_feedback == PES_REPLAY_FEEDBACK_B_SKIP)
+    replay_feedback_text = "B SKIP";
+  else if (replay_feedback == PES_REPLAY_FEEDBACK_A_SKIP)
+    replay_feedback_text = "A SKIP";
+  else if (replay_feedback == PES_REPLAY_FEEDBACK_SKIP)
+    replay_feedback_text = "SKIP";
   char difficulty_text[32];
   difficulty_text[0] = '\0';
   if (control_mode != PES_MOBILE_CONTROL_UNKNOWN || replay_active) {
@@ -508,19 +499,24 @@ static void overlay_render(void) {
   const int custom_cpu_popup = pes_controller_custom_cpu_popup_active();
   const int custom_settings_popup =
       pes_controller_custom_match_settings_active();
+  const int custom_video_settings_popup =
+      pes_controller_custom_video_settings_active();
   const int custom_popup =
-      custom_team_popup || custom_cpu_popup || custom_settings_popup;
+      custom_team_popup || custom_cpu_popup || custom_settings_popup ||
+      custom_video_settings_popup;
   float prompt_x = 0.0f;
   float prompt_y = 0.0f;
   const int start_prompt =
       pes_controller_start_prompt(&prompt_x, &prompt_y);
   float gameplan_cursor_x = 0.0f;
   float gameplan_cursor_y = 0.0f;
+  const int virtual_cursor_context = pes_controller_virtual_cursor_context();
   const int gameplan_cursor = pes_controller_gameplan_cursor_position(
       &gameplan_cursor_x, &gameplan_cursor_y);
 
   if ((!config.show_fps || !fps.text[0]) && !difficulty_text[0] && !selector &&
-      !start_prompt && !custom_popup && !gameplan_cursor)
+      !start_prompt && !custom_popup && !gameplan_cursor &&
+      !replay_feedback_text[0])
     return;
   if (!gl_init())
     return;
@@ -884,27 +880,44 @@ static void overlay_render(void) {
         text_gw, text_gh, verts + quads * 24);
     custom_key_text_quads += line_quads;
     quads += line_quads;
-  } else if (custom_settings_popup) {
-    const float panel_x = 0.17f * (float)screen_width;
-    const float panel_y = 0.08f * (float)screen_height;
-    const float panel_w = 0.66f * (float)screen_width;
-    const float panel_h = 0.84f * (float)screen_height;
+  } else if (custom_settings_popup || custom_video_settings_popup) {
+    const uint32_t item_count = custom_video_settings_popup ? 2u : 4u;
+    const float panel_x = (custom_video_settings_popup ? 0.20f : 0.17f) *
+                          (float)screen_width;
+    const float panel_y = (custom_video_settings_popup ? 0.16f : 0.08f) *
+                          (float)screen_height;
+    const float panel_w = (custom_video_settings_popup ? 0.60f : 0.66f) *
+                          (float)screen_width;
+    const float panel_h = (custom_video_settings_popup ? 0.68f : 0.84f) *
+                          (float)screen_height;
     const float panel_radius = 0.025f * (float)screen_height;
     const float header_h = 0.115f * (float)screen_height;
-    const float footer_y = 0.785f * (float)screen_height;
+    const float footer_y =
+        (custom_video_settings_popup ? 0.64f : 0.785f) *
+        (float)screen_height;
     const float row_x = panel_x + 0.030f * (float)screen_width;
     const float row_w = panel_w - 0.060f * (float)screen_width;
-    const float row_y0 = 0.225f * (float)screen_height;
-    const float row_h = 0.105f * (float)screen_height;
-    const float row_step = 0.125f * (float)screen_height;
+    const float row_y0 =
+        (custom_video_settings_popup ? 0.32f : 0.225f) *
+        (float)screen_height;
+    const float row_h =
+        (custom_video_settings_popup ? 0.12f : 0.105f) *
+        (float)screen_height;
+    const float row_step =
+        (custom_video_settings_popup ? 0.145f : 0.125f) *
+        (float)screen_height;
     const float selector_inset = 0.006f * (float)screen_height;
     const float value_w = 0.200f * (float)screen_width;
     const float value_h = 0.065f * (float)screen_height;
     const float value_x =
         panel_x + panel_w - 0.035f * (float)screen_width - value_w;
-    const uint32_t focus = pes_controller_custom_match_settings_focus();
+    const uint32_t focus = custom_video_settings_popup
+                               ? pes_controller_custom_video_settings_focus()
+                               : pes_controller_custom_match_settings_focus();
     const float action_button_x = panel_x + 0.035f * (float)screen_width;
-    const float action_button_y = 0.823f * (float)screen_height;
+    const float action_button_y =
+        (custom_video_settings_popup ? 0.69f : 0.823f) *
+        (float)screen_height;
     const float action_button_w = 0.250f * (float)screen_width;
     const float back_button_x =
         panel_x + panel_w - 0.035f * (float)screen_width -
@@ -944,7 +957,7 @@ static void overlay_render(void) {
         row_w - selector_inset * 2.0f, row_h - selector_inset * 2.0f,
         verts + quads * 24);
     quads += custom_selected_quads;
-    for (int row = 0; row < 3; row++) {
+    for (uint32_t row = 0; row + 1 < item_count; row++) {
       const float rule_y = row_y0 + row_step * (float)(row + 1) -
                            (row_step - row_h) * 0.5f;
       custom_rule_quads += emit_rect(
@@ -957,7 +970,7 @@ static void overlay_render(void) {
         panel_w - 0.08f * (float)screen_width,
         (float)screen_height / 600.0f, verts + quads * 24);
     quads++;
-    for (uint32_t item = 0; item < 4; item++) {
+    for (uint32_t item = 0; item < item_count; item++) {
       const float value_y = row_y0 + row_step * (float)item +
                             (row_h - value_h) * 0.5f;
       custom_value_plate_style =
@@ -969,7 +982,7 @@ static void overlay_render(void) {
     }
     const float arrow_half_w = 0.007f * (float)screen_width;
     const float arrow_half_h = 0.012f * (float)screen_height;
-    for (uint32_t item = 0; item < 4; item++) {
+    for (uint32_t item = 0; item < item_count; item++) {
       const float center_y =
           row_y0 + row_step * (float)item + row_h * 0.5f;
       const float left_x = value_x - 0.014f * (float)screen_width;
@@ -1014,7 +1027,8 @@ static void overlay_render(void) {
     const float text_gh = (float)screen_height / 36.0f;
     const float text_gw =
         text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    const char *title = "MATCH SETTINGS";
+    const char *title = custom_video_settings_popup ? "VIDEO SETTINGS"
+                                                     : "MATCH SETTINGS";
     int line_quads = emit_line(
         title, (int)strlen(title),
         (float)screen_width * 0.5f -
@@ -1023,8 +1037,10 @@ static void overlay_render(void) {
         verts + quads * 24);
     custom_dark_text_quads += line_quads;
     quads += line_quads;
-    for (uint32_t item = 0; item < 4; item++) {
-      const char *label = pes_controller_custom_match_settings_label(item);
+    for (uint32_t item = 0; item < item_count; item++) {
+      const char *label = custom_video_settings_popup
+                              ? pes_controller_custom_video_settings_label(item)
+                              : pes_controller_custom_match_settings_label(item);
       const float y = row_y0 + row_step * (float)item +
                       (row_h - text_gh) * 0.5f;
       line_quads = emit_line(
@@ -1035,8 +1051,10 @@ static void overlay_render(void) {
     }
 
     custom_white_text_first_quad = quads;
-    for (uint32_t item = 0; item < 4; item++) {
-      const char *value = pes_controller_custom_match_settings_value(item);
+    for (uint32_t item = 0; item < item_count; item++) {
+      const char *value = custom_video_settings_popup
+                              ? pes_controller_custom_video_settings_value(item)
+                              : pes_controller_custom_match_settings_value(item);
       const int value_len = (int)strlen(value);
       const float value_y = row_y0 + row_step * (float)item +
                             (row_h - text_gh) * 0.5f;
@@ -1098,7 +1116,10 @@ static void overlay_render(void) {
     quads += selector_color_quads;
   }
   if (gameplan_cursor) {
-    const float helper_x = 0.835f * (float)screen_width;
+    const int pause_cursor =
+        virtual_cursor_context == PES_VIRTUAL_CURSOR_PAUSE;
+    const float helper_x = (pause_cursor ? 0.055f : 0.835f) *
+                           (float)screen_width;
     const float helper_y = 0.944f * (float)screen_height;
     const float helper_radius = 0.019f * (float)screen_height;
     gameplan_helper_circle_first_quad = quads;
@@ -1122,27 +1143,27 @@ static void overlay_render(void) {
         helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     gameplan_helper_text_first_quad = quads;
     gameplan_helper_text_quads = emit_line(
-        "A", 1, helper_x - helper_gw * 0.5f,
+        pause_cursor ? "B" : "A", 1, helper_x - helper_gw * 0.5f,
         helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
         verts + quads * 24);
     quads += gameplan_helper_text_quads;
   }
   const int text_first_quad = quads;
-  int prompt_quads = 0;
-  int prompt_solid_quads = 0;
+  int prompt_label_quads = 0;
   if (start_prompt) {
     const float gh = (float)screen_height / 22.0f;
-    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    prompt_solid_quads = emit_solid_a(
-        prompt_x * (float)screen_width - gw * 0.5f,
-        prompt_y * (float)screen_height - gh * 0.5f, gh,
-        verts + quads * 24);
-    quads += prompt_solid_quads;
-    prompt_quads = emit_line(
-        "A", 1, prompt_x * (float)screen_width - gw * 0.5f,
-        prompt_y * (float)screen_height - gh * 0.5f, gw, gh,
-        verts + quads * 24);
-    quads += prompt_quads;
+    const char *prompt_label = "PRESS A TO START";
+    const int prompt_len = (int)strlen(prompt_label);
+    const float label_gh = (float)screen_height / 38.0f;
+    const float label_gw =
+        label_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float label_x = prompt_x * (float)screen_width -
+                          (float)prompt_len * label_gw * 0.5f;
+    // Leave a clear gap below the native pulse instead of touching its rim.
+    const float label_y = prompt_y * (float)screen_height + gh * 1.55f;
+    prompt_label_quads = emit_line(prompt_label, prompt_len, label_x, label_y,
+                                   label_gw, label_gh, verts + quads * 24);
+    quads += prompt_label_quads;
   }
   if (config.show_fps && fps.text[0]) {
     const float gh = (float)screen_height / 30.0f;
@@ -1160,6 +1181,18 @@ static void overlay_render(void) {
     const float y = (float)screen_height - gh - 12.0f;
     quads += emit_line(difficulty_text, len, x, y, gw, gh,
                        verts + quads * 24);
+  }
+  int replay_feedback_quads = 0;
+  if (replay_feedback_text[0]) {
+    const int len = (int)strlen(replay_feedback_text);
+    const float gh = (float)screen_height / 34.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float x = (float)screen_width * 0.50f -
+                    (float)len * gw * 0.5f;
+    const float y = (float)screen_height * 0.075f;
+    replay_feedback_quads = emit_line(replay_feedback_text, len, x, y, gw, gh,
+                                      verts + quads * 24);
+    quads += replay_feedback_quads;
   }
   if (!quads)
     return;
@@ -1376,12 +1409,6 @@ static void overlay_render(void) {
   }
   const int text_quads = quads - text_first_quad;
   if (text_quads) {
-    if (prompt_solid_quads) {
-      glUniform1f(gl.loc_solid, 1.0f);
-      glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
-      glDrawArrays(GL_TRIANGLES, text_first_quad * 6,
-                   prompt_solid_quads * 6);
-    }
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 3.0f / (float)screen_width,
                 -3.0f / (float)screen_height);
@@ -1390,10 +1417,6 @@ static void overlay_render(void) {
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, text_first_quad * 6, text_quads * 6);
-    if (prompt_quads) {
-      glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
-      glDrawArrays(GL_TRIANGLES, text_first_quad * 6, prompt_quads * 6);
-    }
   }
 
   // restore the two attrib arrays to whatever the engine had (it uses the same

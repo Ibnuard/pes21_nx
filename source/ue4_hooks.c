@@ -46,9 +46,19 @@ static uintptr_t exhibition_string_get_resume;
 static uintptr_t exhibition_search_post_resume;
 static uintptr_t exhibition_search_user_name_resume;
 static uintptr_t exhibition_search_task_ready_resume;
-static uintptr_t match_replay_update_resume;
+static uintptr_t match_replay_check_skip_resume;
+static uintptr_t match_pause_update_resume;
+static uintptr_t match_pause_d1_resume;
+static uintptr_t match_pause_d0_resume;
+uintptr_t pes_match_pause_destructor_slot;
+static uintptr_t match_result_full_resume;
+static uintptr_t match_result_half_resume;
 static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
+uintptr_t pes_main_menu_graphics_d1_resume;
+uintptr_t pes_main_menu_graphics_d0_resume;
+uintptr_t pes_main_menu_graphics_destructor_page;
+uintptr_t pes_main_menu_graphics_d0_page;
 static void **exhibition_flow_listener_instance;
 static void (*exhibition_flow_direct_set)(void *transition,
                                            const char *flow_name);
@@ -162,18 +172,27 @@ static void (*main_menu_dialog_set_button)(void *dialog, const void *text);
 static void (*main_menu_choice_set_active)(void *choice, uint32_t active,
                                            uint32_t reaction,
                                            uint32_t flags);
+static void *(*main_menu_graphics_create)(const void *name,
+                                          const uint8_t *modal);
+static uint32_t (*main_menu_save_graphics_quality)(uint32_t quality);
+static uint32_t (*main_menu_get_graphics_quality)(void);
+static uint32_t (*main_menu_save_frame_rate)(uint32_t mode);
+static void (*main_menu_set_frame_rate_mode)(uint32_t mode);
+static uint32_t (*main_menu_get_frame_rate_mode)(void);
+static void *(*main_menu_get_ue_bridge)(void);
 static uintptr_t main_menu_selected_resume;
 static void *main_menu_tiles[4];
+static void *main_menu_match_page;
 static uint32_t main_menu_focus_index;
 static uint32_t main_menu_focus_direction;
 static uint64_t main_menu_focus_started_ms;
 static uint64_t main_menu_focus_repeat_ms;
 static int main_menu_focus_painted;
 static const char *main_menu_titles[4] = {
-    "Exhibition", "Credits", "Training", "Version Info"};
+    "Exhibition", "Credits", "Training", "Settings"};
 static const char *main_menu_descriptions[4] = {
     "Local match", "Credits and support", "Practice controls",
-    "Build and game version"};
+    "Graphics and FPS"};
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
 static void (*virtual_pad_set_color)(void *movie_clip, float red, float green,
@@ -400,7 +419,7 @@ static _Alignas(4) uint32_t exhibition_select_side;
 static _Alignas(4) uint32_t exhibition_strategy_action;
 static _Alignas(4) uint32_t exhibition_plan_ready;
 static _Alignas(4) uint32_t exhibition_return_to_selector;
-static _Alignas(4) uint32_t exhibition_gameplan_cursor_active;
+static _Alignas(4) uint32_t virtual_cursor_context;
 static _Alignas(4) uint32_t exhibition_gameplan_cursor_x = 32768;
 static _Alignas(4) uint32_t exhibition_gameplan_cursor_y = 32768;
 static _Alignas(4) uint32_t exhibition_searching_active;
@@ -426,6 +445,15 @@ static _Alignas(4) uint32_t exhibition_nested_popup_kind;
 static _Alignas(4) uint32_t exhibition_nested_back_pending;
 static _Alignas(8) uint64_t exhibition_nested_back_started_ms;
 static _Alignas(4) uint32_t main_menu_controller_active;
+static _Alignas(4) uint32_t main_menu_graphics_active;
+static _Alignas(4) uint32_t main_menu_video_settings_open;
+static _Alignas(4) uint32_t main_menu_video_graphics = 1;
+static _Alignas(4) uint32_t main_menu_video_frame_rate = 1;
+static uint32_t main_menu_video_focus_index;
+static uint32_t main_menu_video_focus_direction;
+static uint64_t main_menu_video_focus_started_ms;
+static uint64_t main_menu_video_focus_repeat_ms;
+static _Alignas(8) uint64_t main_menu_video_opened_ms;
 static _Alignas(4) uint32_t startup_prompt_active;
 static void *exhibition_search_window;
 static uint32_t exhibition_search_focus_index;
@@ -450,6 +478,10 @@ static _Alignas(4) uint32_t exhibition_team_category_index;
 static _Alignas(4) uint32_t exhibition_home_team_id;
 static _Alignas(4) uint32_t exhibition_away_team_id;
 static _Alignas(8) uint64_t match_replay_seen_tick;
+static _Alignas(4) uint32_t match_replay_goal_active;
+static _Alignas(4) uint32_t match_replay_feedback_value;
+static _Alignas(8) uint64_t match_replay_feedback_tick;
+static _Alignas(8) uint64_t match_pause_seen_tick;
 
 enum {
   EXHIBITION_STRATEGY_NONE = 0,
@@ -476,6 +508,13 @@ static void exhibition_set_matchmaking_visible(void *window,
 static uint64_t exhibition_search_focus_now_ms(void);
 static void exhibition_select_team(uint32_t side, uint32_t team_id);
 static void exhibition_adjust_match_setting(int direction);
+static uint64_t main_menu_focus_now_ms(void);
+static void main_menu_video_adjust(int direction);
+static void main_menu_video_close(void);
+static void main_menu_apply_focus(uint32_t index);
+static void *exhibition_find_root_node(void *root, const char *name);
+static void pes_virtual_cursor_activate(uint32_t context, uint32_t x,
+                                        uint32_t y);
 
 static void exhibition_nested_back_expire(void) {
   if (!__atomic_load_n(&exhibition_nested_back_pending, __ATOMIC_ACQUIRE))
@@ -1819,7 +1858,7 @@ uintptr_t pes_exhibition_training_footer_entry(void *window,
                                           : EXHIBITION_STRATEGY_START;
   __atomic_store_n(&exhibition_strategy_action, action, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_strategy_pending, 1, __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
   exhibition_flow_direct_set((unsigned char *)listener + 0x118,
@@ -2083,6 +2122,16 @@ int pes_controller_menu_touch_target(float *normalized_x,
       *normalized_y = prompt_y;
     return 1;
   }
+  if (__atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE))
+    return 0;
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    // A is consumed by the custom overlay after this inert synthetic touch.
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.18f;
+    return 1;
+  }
   if (pes_main_menu_controller_active()) {
     const uint32_t index = pes_main_menu_focus_index();
     if (index >= 4)
@@ -2153,6 +2202,13 @@ int pes_controller_menu_touch_target(float *normalized_x,
 
 int pes_controller_menu_back_target(float *normalized_x,
                                     float *normalized_y) {
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.18f;
+    return 1;
+  }
   if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return 0;
 
@@ -2186,6 +2242,10 @@ int pes_controller_menu_back_target(float *normalized_x,
 }
 
 void pes_controller_menu_back_pressed(void) {
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    main_menu_video_close();
+    return;
+  }
   const uint32_t custom_team_phase =
       __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE);
   if (custom_team_phase) {
@@ -2226,8 +2286,22 @@ void pes_controller_menu_back_pressed(void) {
                    exhibition_search_focus_now_ms(), __ATOMIC_RELEASE);
 }
 
-void pes_controller_title_ready(void) {
+void pes_controller_title_ready(void *window) {
   __atomic_store_n(&startup_prompt_active, 1, __ATOMIC_RELEASE);
+
+  // The Android title layout exposes its graphics/settings shortcut as the
+  // c_menu choice in the lower-right corner. Settings is now available from
+  // the compact four-tile page, so keep this duplicate entry out of the title
+  // screen. PostInitMobile runs after the choice has been constructed.
+  void *root = window && exhibition_window_get_window
+                   ? exhibition_window_get_window(window)
+                   : NULL;
+  void *settings_choice = root ? exhibition_find_root_node(root, "c_menu")
+                               : NULL;
+  if (settings_choice && exhibition_node_set_visible)
+    exhibition_node_set_visible(settings_choice, 0, 2);
+  debugPrintf("UE4 menu: title ready root=%p c_menu=%p hidden=%u\n", root,
+              settings_choice, settings_choice != NULL);
 }
 
 int pes_controller_start_prompt(float *normalized_x, float *normalized_y) {
@@ -2250,7 +2324,9 @@ int pes_controller_selector_rect(float *x, float *y, float *width,
   float rect_y = 0.0f;
   float rect_width = 0.0f;
   float rect_height = 0.0f;
-  if (pes_main_menu_controller_active()) {
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    return 0;
+  } else if (pes_main_menu_controller_active()) {
     const uint32_t index = pes_main_menu_focus_index();
     if (index >= 4)
       return 0;
@@ -2478,6 +2554,32 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
   return "";
 }
 
+int pes_controller_custom_video_settings_active(void) {
+  return __atomic_load_n(&main_menu_video_settings_open,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_custom_video_settings_focus(void) {
+  return main_menu_video_focus_index < 2 ? main_menu_video_focus_index : 0;
+}
+
+const char *pes_controller_custom_video_settings_label(uint32_t index) {
+  static const char *const labels[] = {"GRAPHICS", "FRAME RATE"};
+  return index < 2 ? labels[index] : "";
+}
+
+const char *pes_controller_custom_video_settings_value(uint32_t index) {
+  if (index == 0)
+    return __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE)
+               ? "STANDARD"
+               : "LOW";
+  if (index == 1)
+    return __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE)
+               ? "60 FPS"
+               : "30 FPS";
+  return "";
+}
+
 int pes_controller_menu_scroll_request(void) {
   return __atomic_exchange_n(&exhibition_popup_scroll_request, 0,
                              __ATOMIC_ACQ_REL);
@@ -2490,6 +2592,15 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
     // activate tiles and settings.
     __atomic_store_n(&startup_prompt_active, 0, __ATOMIC_RELEASE);
     debugPrintf("input: startup prompt accepted via controller A\n");
+    return;
+  }
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    const uint64_t opened = __atomic_load_n(&main_menu_video_opened_ms,
+                                             __ATOMIC_ACQUIRE);
+    const uint64_t now = main_menu_focus_now_ms();
+    // The A release that opened Settings must not immediately flip Graphics.
+    if (!opened || now < opened || now - opened >= 140)
+      main_menu_video_adjust(2);
     return;
   }
   if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
@@ -2574,6 +2685,36 @@ int pes_controller_menu_physical_tap(float normalized_x,
     debugPrintf("input: startup prompt accepted via physical tap at %.3f,%.3f\n",
                 normalized_x, normalized_y);
     return 0;
+  }
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    if (normalized_y >= 0.68f && normalized_y <= 0.78f) {
+      if (normalized_x >= 0.50f && normalized_x <= 0.78f)
+        main_menu_video_close();
+      else if (normalized_x >= 0.22f && normalized_x < 0.50f)
+        main_menu_video_adjust(2);
+      return 0;
+    }
+    if (normalized_x >= 0.22f && normalized_x <= 0.78f &&
+        normalized_y >= 0.30f && normalized_y < 0.61f) {
+      int index = (int)floorf((normalized_y - 0.32f) / 0.145f);
+      if (index < 0)
+        index = 0;
+      if (index > 1)
+        index = 1;
+      main_menu_video_focus_index = (uint32_t)index;
+      main_menu_video_focus_direction = 0;
+      main_menu_video_adjust(2);
+    }
+    return 0;
+  }
+  if (pes_main_menu_controller_active()) {
+    if (normalized_x >= 0.02f && normalized_x <= 0.98f &&
+        normalized_y >= 0.20f && normalized_y <= 0.95f) {
+      const uint32_t column = normalized_x >= 0.50f ? 1u : 0u;
+      const uint32_t row = normalized_y >= 0.70f ? 1u : 0u;
+      main_menu_apply_focus(row * 2u + column);
+    }
+    return 1;
   }
   if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
     // Keep the custom focus aligned with a physical row selection while the
@@ -3111,13 +3252,17 @@ static void main_menu_set_tile_text(void *tile, const char *title,
     exhibition_text_set_string(title_node, text);
   }
 
-  const char *description_nodes[] = {"textSmall_item", "textLarge_sub"};
-  for (uint32_t i = 0; i < 2; i++) {
-    void *node = exhibition_find_root_node(tile, description_nodes[i]);
-    if (!node)
-      continue;
-    exhibition_make_short_string(text, description);
-    exhibition_text_set_string(node, text);
+  void *small_node = exhibition_find_root_node(tile, "textSmall_item");
+  const int compact_tile = tile == main_menu_tiles[2] ||
+                           tile == main_menu_tiles[3];
+  if (small_node) {
+    exhibition_make_short_string(text, compact_tile ? title : description);
+    exhibition_text_set_string(small_node, text);
+  }
+  void *compact_title_node = exhibition_find_root_node(tile, "textLarge_sub");
+  if (compact_title_node) {
+    exhibition_make_short_string(text, compact_tile ? title : description);
+    exhibition_text_set_string(compact_title_node, text);
   }
 }
 
@@ -3145,6 +3290,98 @@ static uint64_t main_menu_focus_now_ms(void) {
   return armTicksToNs(armGetSystemTick()) / 1000000ULL;
 }
 
+static void main_menu_video_apply(uint32_t index, uint32_t value) {
+  value = value ? 1u : 0u;
+  if (index == 0) {
+    if (!main_menu_save_graphics_quality ||
+        !main_menu_save_graphics_quality(value)) {
+      debugPrintf("UE4 menu: failed to save graphics quality=%u\n", value);
+      return;
+    }
+    __atomic_store_n(&main_menu_video_graphics, value, __ATOMIC_RELEASE);
+
+    // This is the same runtime apply path used by the stock graphics page.
+    // SaveData persists the choice, while UEBridge updates the live renderer.
+    void *bridge = main_menu_get_ue_bridge ? main_menu_get_ue_bridge() : NULL;
+    if (bridge) {
+      void **vtable = *(void ***)bridge;
+      if (vtable && vtable[47])
+        ((void (*)(void *, uint32_t))vtable[47])(bridge, value);
+    }
+    debugPrintf("UE4 menu: custom video Graphics=%s saved\n",
+                value ? "Standard" : "Low");
+    return;
+  }
+
+  if (index == 1) {
+    if (!main_menu_save_frame_rate || !main_menu_save_frame_rate(value)) {
+      debugPrintf("UE4 menu: failed to save frame rate=%u\n", value);
+      return;
+    }
+    if (main_menu_set_frame_rate_mode)
+      main_menu_set_frame_rate_mode(value);
+    __atomic_store_n(&main_menu_video_frame_rate, value, __ATOMIC_RELEASE);
+    debugPrintf("UE4 menu: custom video Frame Rate=%s saved\n",
+                value ? "60 FPS" : "30 FPS");
+  }
+}
+
+static void main_menu_video_adjust(int direction) {
+  if (!direction ||
+      !__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE))
+    return;
+  const uint32_t focus = main_menu_video_focus_index < 2
+                             ? main_menu_video_focus_index
+                             : 0;
+  const uint32_t current =
+      focus == 0
+          ? __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE)
+          : __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE);
+  // Left/right select an absolute value, so holding an arrow can never make a
+  // two-value row flicker. Direction 2 is the explicit A/tap toggle action.
+  const uint32_t value = direction == 2 ? (current ? 0u : 1u)
+                                        : (direction > 0 ? 1u : 0u);
+  if (value != current)
+    main_menu_video_apply(focus, value);
+}
+
+static void main_menu_video_open(void) {
+  uint32_t graphics = main_menu_get_graphics_quality
+                          ? main_menu_get_graphics_quality()
+                          : 1u;
+  if (graphics > 1)
+    graphics = 1;
+
+  // The active Status mode mirrors the persisted frame-rate selection. The
+  // stock enum is 0 = 30 fps and 1 = 60 fps.
+  uint32_t frame_rate = main_menu_get_frame_rate_mode
+                            ? main_menu_get_frame_rate_mode()
+                            : 1u;
+  if (frame_rate > 1)
+    frame_rate = 1;
+  __atomic_store_n(&main_menu_video_graphics, graphics, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_video_frame_rate, frame_rate,
+                   __ATOMIC_RELEASE);
+  main_menu_video_focus_index = 0;
+  main_menu_video_focus_direction = 0;
+  __atomic_store_n(&main_menu_video_opened_ms, main_menu_focus_now_ms(),
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_video_settings_open, 1, __ATOMIC_RELEASE);
+  debugPrintf("UE4 menu: custom Video Settings opened graphics=%u fps=%u\n",
+              graphics, frame_rate);
+}
+
+static void main_menu_video_close(void) {
+  if (!__atomic_exchange_n(&main_menu_video_settings_open, 0,
+                           __ATOMIC_ACQ_REL))
+    return;
+  main_menu_video_focus_index = 0;
+  main_menu_video_focus_direction = 0;
+  __atomic_store_n(&main_menu_video_opened_ms, 0, __ATOMIC_RELEASE);
+  main_menu_apply_focus(3);
+  debugPrintf("UE4 menu: custom Video Settings closed\n");
+}
+
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
   if (!__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE))
     return;
@@ -3154,6 +3391,43 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
   if (pes_controller_start_prompt(NULL, NULL) &&
       (buttons & (1u << 1)) && !(previous_buttons & (1u << 1)))
     return;
+
+  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    uint32_t direction = 0;
+    if (buttons & (1u << 10))
+      direction = 1;
+    else if (buttons & (1u << 11))
+      direction = 2;
+    else if (buttons & (1u << 12))
+      direction = 3;
+    else if (buttons & (1u << 13))
+      direction = 4;
+    const uint64_t now = main_menu_focus_now_ms();
+    if (!direction) {
+      main_menu_video_focus_direction = 0;
+      return;
+    }
+    // Custom-overlay buttons are deliberately removed from native pad state,
+    // so the game's previous_buttons cannot be used for edge detection here.
+    const int pressed = direction != main_menu_video_focus_direction;
+    if (direction != main_menu_video_focus_direction) {
+      main_menu_video_focus_direction = direction;
+      main_menu_video_focus_started_ms = now;
+      main_menu_video_focus_repeat_ms = now;
+    } else if (!pressed && now - main_menu_video_focus_started_ms < 300) {
+      return;
+    } else if (!pressed && now - main_menu_video_focus_repeat_ms < 120) {
+      return;
+    }
+    main_menu_video_focus_repeat_ms = now;
+    if (direction == 1 && main_menu_video_focus_index > 0)
+      main_menu_video_focus_index--;
+    else if (direction == 2 && main_menu_video_focus_index < 1)
+      main_menu_video_focus_index++;
+    else if (direction == 3 || direction == 4)
+      main_menu_video_adjust(direction == 3 ? -1 : 1);
+    return;
+  }
 
   if (!main_menu_focus_painted)
     main_menu_apply_focus(main_menu_focus_index);
@@ -3202,11 +3476,15 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
 
 void pes_main_menu_simplify(void *window) {
   static int logged;
+  main_menu_match_page = NULL;
   if (!window || !exhibition_window_get_window ||
       !exhibition_node_set_visible)
     return;
 
+  __atomic_store_n(&main_menu_graphics_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                   __ATOMIC_RELEASE);
 
   void *root = exhibition_window_get_window(window);
   if (!root)
@@ -3216,6 +3494,7 @@ void pes_main_menu_simplify(void *window) {
   // Training retain their proven handlers; the other two open local windows.
   void *tab_strip = exhibition_find_root_node(root, "p_tab");
   void *match_page = exhibition_find_root_node(root, "page_0");
+  main_menu_match_page = match_page;
   if (tab_strip)
     exhibition_node_set_visible(tab_strip, 0, 2);
   if (match_page) {
@@ -3231,6 +3510,14 @@ void pes_main_menu_simplify(void *window) {
       }
     }
     main_menu_apply_focus(0);
+  }
+
+  for (uint32_t i = 1; i < 4; i++) {
+    char page_name[] = "page_0";
+    page_name[5] = (char)('0' + i);
+    void *page = exhibition_find_root_node(root, page_name);
+    if (page)
+      exhibition_node_set_visible(page, 0, 2);
   }
 
   // The unused pages are no longer constructed and swipe navigation is
@@ -3256,6 +3543,14 @@ uintptr_t pes_main_menu_selected_entry(void *window,
   if (choice != 1 && choice != 3)
     return main_menu_selected_resume;
 
+  if (choice == 3) {
+    main_menu_video_open();
+    __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                     __ATOMIC_RELEASE);
+    return 0;
+  }
+
   if (!main_menu_dialog_create || !main_menu_dialog_set_text ||
       !main_menu_dialog_set_button || !exhibition_task_add_unit)
     return main_menu_selected_resume;
@@ -3265,23 +3560,13 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       "Port & Mod by Ibnuard\n"
       "https://saweria.co/ibnuard\n"
       "Support for more update";
-  static const char version_body[] =
-      "Build & Game Version\n\n"
-      "NRO: PES 2021 NX v0.1.97\n"
-      "Game: PES 2021 Mobile v5.3.0\n\n"
-      "Latest changes:\n"
-      "- 95 club and national teams\n"
-      "- Full audio and commentary\n"
-      "- Settings > Game Plan > Match\n"
-      "- Player ratings and input fixes";
-  const char *body = choice == 1 ? credits_body : version_body;
+  const char *body = credits_body;
 
   unsigned char dialog_name[24];
   unsigned char dialog_body[24];
   unsigned char dialog_button[24];
   unsigned char modal = 0;
-  exhibition_make_short_string(
-      dialog_name, choice == 1 ? "popupCredits" : "popupVersionInfo");
+  exhibition_make_short_string(dialog_name, "popupCredits");
   main_menu_make_string_view(dialog_body, body);
   exhibition_make_short_string(dialog_button, "OK");
   void *dialog = main_menu_dialog_create(dialog_name, &modal);
@@ -3496,7 +3781,7 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
     if (state == 0 &&
         __atomic_exchange_n(&exhibition_strategy_pending, 0,
                             __ATOMIC_ACQ_REL)) {
-      __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
+      __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                        __ATOMIC_RELEASE);
       const uint32_t action = __atomic_load_n(
           &exhibition_strategy_action, __ATOMIC_ACQUIRE);
@@ -3707,14 +3992,11 @@ uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
       __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
       __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
           EXHIBITION_STRATEGY_START;
-  if (cursor_active) {
-    __atomic_store_n(&exhibition_gameplan_cursor_x, 32768,
+  if (cursor_active)
+    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_GAMEPLAN, 32768, 29491);
+  else
+    __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                      __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_gameplan_cursor_y, 29491,
-                     __ATOMIC_RELEASE);
-  }
-  __atomic_store_n(&exhibition_gameplan_cursor_active, cursor_active,
-                   __ATOMIC_RELEASE);
 
   return exhibition_strategy_created_resume;
 }
@@ -3752,7 +4034,7 @@ static void pes_exhibition_strategy_footer(void *window,
     exhibition_apply_cpu_level(
         __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
 
-  __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
 
   if (exhibition_strategy_footer_original)
@@ -3781,7 +4063,7 @@ void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                               clamp_pad_value(left));
   const int16_t y = (int16_t)(clamp_pad_value(down) -
                               clamp_pad_value(up));
-  const uint64_t packed = (uint64_t)(buttons & 0x0000ffffu) |
+  const uint64_t packed = (uint64_t)buttons |
                           ((uint64_t)(uint16_t)x << 32) |
                           ((uint64_t)(uint16_t)y << 48);
   __atomic_store_n(&cobra_pad_input, packed, __ATOMIC_RELEASE);
@@ -3804,6 +4086,8 @@ uint32_t pes_mobile_control_context(int *mode) {
 // remains on the calibrated multi-touch mapping in android_shim.c.
 int pes_controller_menu_active(void) {
   return pes_controller_start_prompt(NULL, NULL) ||
+         __atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) ||
@@ -3813,9 +4097,25 @@ int pes_controller_menu_active(void) {
          __atomic_load_n(&exhibition_team_select_active, __ATOMIC_ACQUIRE);
 }
 
+int pes_controller_virtual_cursor_context(void) {
+  const uint32_t context =
+      __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
+  if (context == PES_VIRTUAL_CURSOR_PAUSE) {
+    const uint64_t seen = __atomic_load_n(&match_pause_seen_tick,
+                                          __ATOMIC_ACQUIRE);
+    if (!seen || armTicksToNs(armGetSystemTick() - seen) > 500000000ULL) {
+      uint32_t expected = PES_VIRTUAL_CURSOR_PAUSE;
+      __atomic_compare_exchange_n(&virtual_cursor_context, &expected,
+                                  PES_VIRTUAL_CURSOR_NONE, 0,
+                                  __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+      return PES_VIRTUAL_CURSOR_NONE;
+    }
+  }
+  return (int)context;
+}
+
 int pes_controller_gameplan_cursor_active(void) {
-  return __atomic_load_n(&exhibition_gameplan_cursor_active,
-                         __ATOMIC_ACQUIRE) != 0;
+  return pes_controller_virtual_cursor_context() != PES_VIRTUAL_CURSOR_NONE;
 }
 
 int pes_controller_gameplan_cursor_position(float *normalized_x,
@@ -3845,6 +4145,17 @@ void pes_controller_gameplan_cursor_set(float normalized_x,
                    __ATOMIC_RELEASE);
 }
 
+static void pes_virtual_cursor_activate(uint32_t context, uint32_t x,
+                                        uint32_t y) {
+  const uint32_t previous =
+      __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
+  if (previous != context) {
+    __atomic_store_n(&exhibition_gameplan_cursor_x, x, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_gameplan_cursor_y, y, __ATOMIC_RELEASE);
+  }
+  __atomic_store_n(&virtual_cursor_context, context, __ATOMIC_RELEASE);
+}
+
 int pes_main_menu_controller_active(void) {
   return __atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE) != 0;
 }
@@ -3862,16 +4173,23 @@ int pes_mobile_control_active_mode(void) {
   return (int)__atomic_load_n(&mobile_control_mode, __ATOMIC_ACQUIRE);
 }
 
-// MatchReplayMain has a dedicated per-frame update callback. Its heartbeat is
-// more reliable than inferring replay from the general gameplay/menu state,
-// which can remain ambiguous during post-match transitions.
-uintptr_t pes_match_replay_update_entry(void *replay_main,
-                                        uint32_t pad_status) {
-  (void)pad_status;
-  if (replay_main)
+uintptr_t pes_match_replay_check_skip_entry(void *replay,
+                                            const void *context) {
+  (void)context;
+  if (replay) {
+    const uint8_t mode = *((const uint8_t *)replay + 10);
     __atomic_store_n(&match_replay_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
-  return match_replay_update_resume;
+    __atomic_store_n(&match_replay_goal_active,
+                     (mode == 1 || mode == 2 || mode == 3) ? 1u : 0u,
+                     __ATOMIC_RELEASE);
+    const uint32_t cursor =
+        __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
+    if (cursor != PES_VIRTUAL_CURSOR_GAMEPLAN)
+      __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                       __ATOMIC_RELEASE);
+  }
+  return match_replay_check_skip_resume;
 }
 
 int pes_controller_replay_active(void) {
@@ -3881,6 +4199,99 @@ int pes_controller_replay_active(void) {
     return 0;
   const uint64_t age_ns = armTicksToNs(armGetSystemTick() - seen);
   return age_ns <= 500000000ULL;
+}
+
+int pes_controller_replay_goal_active(void) {
+  return pes_controller_replay_active() &&
+         __atomic_load_n(&match_replay_goal_active, __ATOMIC_ACQUIRE);
+}
+
+void pes_controller_replay_feedback_set(uint32_t feedback) {
+  __atomic_store_n(&match_replay_feedback_value, feedback, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_replay_feedback_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+}
+
+uint32_t pes_controller_replay_feedback(void) {
+  const uint64_t tick = __atomic_load_n(&match_replay_feedback_tick,
+                                        __ATOMIC_ACQUIRE);
+  if (!tick || armTicksToNs(armGetSystemTick() - tick) > 750000000ULL)
+    return PES_REPLAY_FEEDBACK_NONE;
+  return __atomic_load_n(&match_replay_feedback_value, __ATOMIC_ACQUIRE);
+}
+
+uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
+  (void)pad_status;
+  if (window) {
+    __atomic_store_n(&match_pause_seen_tick, armGetSystemTick(),
+                     __ATOMIC_RELEASE);
+    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_PAUSE, 32768, 32768);
+  }
+  return match_pause_update_resume;
+}
+
+static void pes_match_pause_destroyed(void *window) {
+  __atomic_store_n(&match_pause_seen_tick, 0, __ATOMIC_RELEASE);
+  uint32_t expected = PES_VIRTUAL_CURSOR_PAUSE;
+  const int cleared = __atomic_compare_exchange_n(
+      &virtual_cursor_context, &expected, PES_VIRTUAL_CURSOR_NONE, 0,
+      __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+  debugPrintf("input: MatchPause destroyed window=%p cursor_cleared=%d\n",
+              window, cleared);
+}
+
+uintptr_t pes_match_pause_d1_entry(void *window) {
+  pes_match_pause_destroyed(window);
+  return match_pause_d1_resume;
+}
+
+uintptr_t pes_match_pause_d0_entry(void *window) {
+  pes_match_pause_destroyed(window);
+  return match_pause_d0_resume;
+}
+
+uintptr_t pes_match_result_full_entry(void *result, const char *name,
+                                       uint32_t modal) {
+  (void)name;
+  (void)modal;
+  if (result)
+    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 32768, 32768);
+  return match_result_full_resume;
+}
+
+uintptr_t pes_match_result_half_entry(void *result, const char *name,
+                                       uint32_t modal) {
+  (void)name;
+  (void)modal;
+  if (result)
+    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_TIME, 32768, 32768);
+  return match_result_half_resume;
+}
+
+void pes_main_menu_graphics_destroyed(void) {
+  if (!__atomic_exchange_n(&main_menu_graphics_active, 0,
+                           __ATOMIC_ACQ_REL))
+    return;
+  if (main_menu_match_page && exhibition_node_set_visible)
+    exhibition_node_set_visible(main_menu_match_page, 1, 2);
+  __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                   __ATOMIC_RELEASE);
+  main_menu_focus_painted = 0;
+  debugPrintf("UE4 menu: graphics settings closed parent_page=%p restored=%u\n",
+              main_menu_match_page, main_menu_match_page != NULL);
+}
+
+uintptr_t pes_main_menu_graphics_d1_entry(void *object) {
+  (void)object;
+  pes_main_menu_graphics_destroyed();
+  return pes_main_menu_graphics_d1_resume;
+}
+
+uintptr_t pes_main_menu_graphics_d0_entry(void *object) {
+  (void)object;
+  pes_main_menu_graphics_destroyed();
+  return pes_main_menu_graphics_d0_resume;
 }
 
 // Entry hook for ScreenTapManager::Update. ControlModeInfo is the original x2
@@ -3897,6 +4308,12 @@ uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
   __atomic_store_n(&mobile_control_mode, (uint32_t)mode, __ATOMIC_RELEASE);
   __atomic_store_n(&mobile_control_seen_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
+  const uint32_t cursor =
+      __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
+  if (cursor == PES_VIRTUAL_CURSOR_HALF_TIME ||
+      cursor == PES_VIRTUAL_CURSOR_FULL_TIME)
+    __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                     __ATOMIC_RELEASE);
   const uint32_t generation =
       __atomic_add_fetch(&mobile_control_generation, 1, __ATOMIC_RELEASE);
   static int previous_mode = -1;
@@ -3982,6 +4399,15 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
     memcpy(pad + 140 + 16 * 4, directions, sizeof(directions));
     pes_main_menu_pad_event(current, previous);
     pes_exhibition_search_pad_event(current, previous);
+    if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+      // Navigation was consumed by the custom overlay. Keep its buttons and
+      // axes away from the four native tiles underneath the modal.
+      current &= ~buttons;
+      memcpy(pad + 16, &current, sizeof(current));
+      const int32_t zero = 0;
+      for (int index = 0; index < 20; index++)
+        memcpy(pad + 140 + index * 4, &zero, sizeof(zero));
+    }
     if (packed != cobra_pad_last_applied && cobra_pad_apply_log_count < 64) {
       cobra_pad_apply_log_count++;
       debugPrintf("input: cobra apply pad=%p id=%d packed=0x%llx "
@@ -3998,7 +4424,14 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
 }
 
 extern void cobra_pad_update_hook(void);
-extern void pes_match_replay_update_hook(void);
+extern void pes_match_replay_check_skip_hook(void);
+extern void pes_match_pause_update_hook(void);
+extern void pes_match_pause_d1_hook(void);
+extern void pes_match_pause_d0_hook(void);
+extern void pes_match_result_full_hook(void);
+extern void pes_match_result_half_hook(void);
+extern void pes_main_menu_graphics_d1_hook(void);
+extern void pes_main_menu_graphics_d0_hook(void);
 extern void pes_mobile_screen_tap_entry_hook(void);
 extern void pes_exhibition_flow_create_hook(void);
 extern void pes_exhibition_tutorial_main_hook(void);
@@ -4739,6 +5172,69 @@ void install_ue4_hooks(so_module *module) {
   main_menu_choice_set_active =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node9SetActiveEbbj");
+  main_menu_graphics_create =
+      (void *)so_find_addr_rx(module,
+          "_ZN4menu26MyClubMatchGraphicsSetting12CreateObjectERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEERKb");
+  main_menu_save_graphics_quality =
+      (void *)so_find_addr_rx(module,
+          "_ZN3sys8SaveData19SaveGraphicsQualityEj");
+  main_menu_get_graphics_quality =
+      (void *)so_find_addr_rx(module,
+          "_ZN3sys8SaveData18GetGraphicsQualityEv");
+  main_menu_save_frame_rate =
+      (void *)so_find_addr_rx(module,
+          "_ZN3sys8SaveData13SaveFrameRateEN5basic6Status15FRAME_RATE_MODEE");
+  main_menu_set_frame_rate_mode =
+      (void *)so_find_addr_rx(module,
+          "_ZN5basic6Status16SetFrameRateModeENS0_15FRAME_RATE_MODEE");
+  main_menu_get_frame_rate_mode =
+      (void *)so_find_addr_rx(module,
+          "_ZN5basic6Status16GetFrameRateModeEv");
+  main_menu_get_ue_bridge =
+      (void *)so_find_addr_rx(module, "_Z19GetUEBridgeInstancev");
+
+  const char *graphics_d1_symbol =
+      "_ZN4menu26MyClubMatchGraphicsSettingD1Ev";
+  const char *graphics_d0_symbol =
+      "_ZN4menu26MyClubMatchGraphicsSettingD0Ev";
+  const uintptr_t graphics_d1 = so_find_addr(module, graphics_d1_symbol);
+  const uintptr_t graphics_d0 = so_find_addr(module, graphics_d0_symbol);
+  const uintptr_t graphics_d1_runtime =
+      so_find_addr_rx(module, graphics_d1_symbol);
+  const uintptr_t graphics_d0_runtime =
+      so_find_addr_rx(module, graphics_d0_symbol);
+  static const uint32_t expected_graphics_destructor[4] = {
+      0xf81d0ff6, 0xa90153f5, 0xa9027bf3, 0x900163a8,
+  };
+  if (memcmp((void *)graphics_d1, expected_graphics_destructor,
+             sizeof(expected_graphics_destructor)) != 0 ||
+      memcmp((void *)graphics_d0, expected_graphics_destructor,
+             sizeof(expected_graphics_destructor)) != 0)
+    fatal_error("Unexpected graphics settings destructor entry");
+  pes_main_menu_graphics_d1_resume = graphics_d1_runtime + 0x10;
+  pes_main_menu_graphics_d0_resume = graphics_d0_runtime + 0x10;
+  pes_main_menu_graphics_destructor_page =
+      (uintptr_t)module->load_virtbase + 0x959a000;
+  pes_main_menu_graphics_d0_page = pes_main_menu_graphics_destructor_page;
+  hook_arm64(graphics_d1, (uintptr_t)&pes_main_menu_graphics_d1_hook);
+  hook_arm64(graphics_d0, (uintptr_t)&pes_main_menu_graphics_d0_hook);
+
+  const uintptr_t graphics_prepare = so_find_addr(
+      module, "_ZN4menu26MyClubMatchGraphicsSetting11PrepareDataEv");
+  patch_checked_u32(graphics_prepare + 0xd0, 0xeb08013f, 0x1400003d,
+                    "graphics High option removal");
+  const uintptr_t save_graphics = so_find_addr(
+      module, "_ZN3sys8SaveData19SaveGraphicsQualityEj");
+  patch_checked_u32(save_graphics + 0x18, 0x71000a7f, 0x7100067f,
+                    "graphics quality High rejection");
+  patch_checked_u32((uintptr_t)module->load_base + 0x9438cf8, 2, 1,
+                    "saved High graphics clamp");
+  debugPrintf("UE4 menu: graphics settings factory=%p d1=%p d0=%p; "
+              "custom save=%p/%p status=%p/%p bridge=%p; High disabled\n",
+              main_menu_graphics_create, (void *)graphics_d1_runtime,
+              (void *)graphics_d0_runtime, main_menu_save_graphics_quality,
+              main_menu_save_frame_rate, main_menu_set_frame_rate_mode,
+              main_menu_get_frame_rate_mode, main_menu_get_ue_bridge);
   exhibition_setup_usable_teams =
       (void *)so_find_addr_rx(module,
           "_ZN10onlinemode13UtilityMyClub20SetupUseableTeamListEv");
@@ -4986,33 +5482,88 @@ void install_ue4_hooks(so_module *module) {
               (void *)mobile_screen_tap_entry_resume,
               mobile_is_mode_offense, mobile_is_mode_defense);
 
-  // MatchReplayMain::UpdatePostControlWindow runs once per replay frame. Use
-  // its heartbeat to route controller taps to the replay buttons without
-  // mistaking pause or post-match menu frames for an active replay.
-  const char *replay_update_symbol =
-      "_ZN4menu15MatchReplayMain23UpdatePostControlWindowEN10menusystem6Window10PAD_STATUSE";
-  const uintptr_t replay_update_backing =
-      so_find_addr(module, replay_update_symbol);
-  const uintptr_t replay_update_runtime =
-      so_find_addr_rx(module, replay_update_symbol);
-  static const uint32_t expected_replay_update_entry[4] = {
-      0xd10103ff, // sub sp, sp, #0x40
-      0xfd0013e8, // str d8, [sp, #32]
-      0xf90017f4, // str x20, [sp, #40]
-      0xa9037bf3, // stp x19, x30, [sp, #48]
+  const char *replay_skip_symbol =
+      "_ZN5match6Replay9CheckSkipEPKN5cobra4game7ContextE";
+  const uintptr_t replay_skip = so_find_addr(module, replay_skip_symbol);
+  const uintptr_t replay_skip_runtime =
+      so_find_addr_rx(module, replay_skip_symbol);
+  static const uint32_t expected_replay_skip_entry[4] = {
+      0xf81c0ff8, 0xa9015bf7, 0xa90253f5, 0xa9037bf3,
   };
-  if (memcmp((void *)replay_update_backing, expected_replay_update_entry,
-             sizeof(expected_replay_update_entry)) != 0)
-    fatal_error("Unexpected MatchReplayMain::UpdatePostControlWindow entry "
-                "at %p",
-                (void *)replay_update_backing);
-  match_replay_update_resume = replay_update_runtime + 0x10;
-  hook_arm64(replay_update_backing,
-             (uintptr_t)&pes_match_replay_update_hook);
-  debugPrintf("UE4 hook: MatchReplay heartbeat backing=%p runtime=%p hook=%p "
-              "resume=%p\n",
-              (void *)replay_update_backing, (void *)replay_update_runtime,
-              pes_match_replay_update_hook, (void *)match_replay_update_resume);
+  if (memcmp((void *)replay_skip, expected_replay_skip_entry,
+             sizeof(expected_replay_skip_entry)) != 0)
+    fatal_error("Unexpected match::Replay::CheckSkip entry at %p",
+                (void *)replay_skip);
+  match_replay_check_skip_resume = replay_skip_runtime + 0x10;
+  hook_arm64(replay_skip, (uintptr_t)&pes_match_replay_check_skip_hook);
+
+  const char *pause_update_symbol =
+      "_ZN4menu10MatchPause23UpdatePostControlWindowEN10menusystem6Window10PAD_STATUSE";
+  const uintptr_t pause_update = so_find_addr(module, pause_update_symbol);
+  const uintptr_t pause_update_runtime =
+      so_find_addr_rx(module, pause_update_symbol);
+  static const uint32_t expected_pause_update_entry[4] = {
+      0xd10143ff, 0xa9025bf7, 0xa90353f5, 0xa9047bf3,
+  };
+  if (memcmp((void *)pause_update, expected_pause_update_entry,
+             sizeof(expected_pause_update_entry)) != 0)
+    fatal_error("Unexpected MatchPause update entry at %p",
+                (void *)pause_update);
+  match_pause_update_resume = pause_update_runtime + 0x10;
+  hook_arm64(pause_update, (uintptr_t)&pes_match_pause_update_hook);
+
+  const char *pause_d1_symbol = "_ZN4menu10MatchPauseD1Ev";
+  const char *pause_d0_symbol = "_ZN4menu10MatchPauseD0Ev";
+  const uintptr_t pause_d1 = so_find_addr(module, pause_d1_symbol);
+  const uintptr_t pause_d0 = so_find_addr(module, pause_d0_symbol);
+  const uintptr_t pause_d1_runtime = so_find_addr_rx(module, pause_d1_symbol);
+  const uintptr_t pause_d0_runtime = so_find_addr_rx(module, pause_d0_symbol);
+  static const uint32_t expected_pause_destructor[4] = {
+      0xa9bf7bf3, 0xd000c828, 0xf9426d08, 0xaa0003f3,
+  };
+  if (memcmp((void *)pause_d1, expected_pause_destructor,
+             sizeof(expected_pause_destructor)) != 0 ||
+      memcmp((void *)pause_d0, expected_pause_destructor,
+             sizeof(expected_pause_destructor)) != 0)
+    fatal_error("Unexpected MatchPause destructor entry");
+  match_pause_d1_resume = pause_d1_runtime + 0x10;
+  match_pause_d0_resume = pause_d0_runtime + 0x10;
+  // Displaced ADRP/LDR resolves the MatchPause vtable pointer stored here.
+  pes_match_pause_destructor_slot =
+      (uintptr_t)module->load_virtbase + 0x95ca4d8;
+  hook_arm64(pause_d1, (uintptr_t)&pes_match_pause_d1_hook);
+  hook_arm64(pause_d0, (uintptr_t)&pes_match_pause_d0_hook);
+
+  const char *result_full_symbol =
+      "_ZN4menu19MatchResultMainMenuC1EPKcb";
+  const char *result_half_symbol =
+      "_ZN4menu27MatchResultMainMenuHalfTimeC1EPKcb";
+  const uintptr_t result_full = so_find_addr(module, result_full_symbol);
+  const uintptr_t result_half = so_find_addr(module, result_half_symbol);
+  const uintptr_t result_full_runtime =
+      so_find_addr_rx(module, result_full_symbol);
+  const uintptr_t result_half_runtime =
+      so_find_addr_rx(module, result_half_symbol);
+  static const uint32_t expected_result_full_entry[4] = {
+      0xf81d0ff6, 0xa90153f5, 0xa9027bf3, 0x2a0203f4,
+  };
+  static const uint32_t expected_result_half_entry[4] = {
+      0xa9be53f5, 0xa9017bf3, 0x2a0203f3, 0xaa0103f4,
+  };
+  if (memcmp((void *)result_full, expected_result_full_entry,
+             sizeof(expected_result_full_entry)) != 0 ||
+      memcmp((void *)result_half, expected_result_half_entry,
+             sizeof(expected_result_half_entry)) != 0)
+    fatal_error("Unexpected match result constructor entry");
+  match_result_full_resume = result_full_runtime + 0x10;
+  match_result_half_resume = result_half_runtime + 0x10;
+  hook_arm64(result_full, (uintptr_t)&pes_match_result_full_hook);
+  hook_arm64(result_half, (uintptr_t)&pes_match_result_half_hook);
+  debugPrintf("UE4 input: replay=%p pause=%p destructor=%p/%p "
+              "result=%p/%p\n",
+              (void *)replay_skip_runtime, (void *)pause_update_runtime,
+              (void *)pause_d1_runtime, (void *)pause_d0_runtime,
+              (void *)result_full_runtime, (void *)result_half_runtime);
 
   // VirtualPad::NeedDisp also gates ScreenTap updates in this mobile build.
   // Returning false hid the graphics but stopped the offense/defense heartbeat

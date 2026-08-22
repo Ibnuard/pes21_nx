@@ -57,29 +57,229 @@ pes_mobile_screen_tap_entry_hook:
     .size pes_mobile_screen_tap_entry_hook, .-pes_mobile_screen_tap_entry_hook
 
     .align 2
-    .global pes_match_replay_update_hook
-    .type pes_match_replay_update_hook, %function
+    .global pes_match_replay_check_skip_hook
+    .type pes_match_replay_check_skip_hook, %function
 
-// Entry hook for MatchReplayMain::UpdatePostControlWindow. Record the replay
-// heartbeat, restore the two ABI arguments, replay the displaced prologue, and
-// continue through the stock update body.
-pes_match_replay_update_hook:
-    sub sp, sp, #0x30
+// Entry hook for match::Replay::CheckSkip. The stock function is the
+// authoritative action-replay gate and checks Cobra button 25 itself.
+pes_match_replay_check_skip_hook:
+    sub sp, sp, #0x50
     stp x0, x1, [sp, #0x00]
-    stp x29, x30, [sp, #0x20]
-    bl pes_match_replay_update_entry
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_replay_check_skip_entry
     mov x17, x0
-    ldp x29, x30, [sp, #0x20]
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
     ldp x0, x1, [sp, #0x00]
-    add sp, sp, #0x30
+    add sp, sp, #0x50
 
-    sub sp, sp, #0x40
-    str d8, [sp, #0x20]
-    str x20, [sp, #0x28]
-    stp x19, x30, [sp, #0x30]
+    str x24, [sp, #-64]!
+    stp x23, x22, [sp, #16]
+    stp x21, x20, [sp, #32]
+    stp x19, x30, [sp, #48]
     br x17
 
-    .size pes_match_replay_update_hook, .-pes_match_replay_update_hook
+    .size pes_match_replay_check_skip_hook, .-pes_match_replay_check_skip_hook
+
+    .align 2
+    .global pes_match_pause_update_hook
+    .type pes_match_pause_update_hook, %function
+pes_match_pause_update_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_pause_update_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0x50
+    stp x23, x22, [sp, #32]
+    stp x21, x20, [sp, #48]
+    stp x19, x30, [sp, #64]
+    br x17
+
+    .size pes_match_pause_update_hook, .-pes_match_pause_update_hook
+
+    .align 2
+    .global pes_match_pause_d1_hook
+    .type pes_match_pause_d1_hook, %function
+pes_match_pause_d1_hook:
+    sub sp, sp, #0x60
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    str x8, [sp, #0x40]
+    stp x29, x30, [sp, #0x50]
+    bl pes_match_pause_d1_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x50]
+    ldr x8, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x60
+    stp x19, x30, [sp, #-16]!
+    adrp x8, pes_match_pause_destructor_slot
+    ldr x8, [x8, :lo12:pes_match_pause_destructor_slot]
+    ldr x8, [x8]
+    mov x19, x0
+    br x17
+    .size pes_match_pause_d1_hook, .-pes_match_pause_d1_hook
+
+    .align 2
+    .global pes_match_pause_d0_hook
+    .type pes_match_pause_d0_hook, %function
+pes_match_pause_d0_hook:
+    sub sp, sp, #0x60
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    str x8, [sp, #0x40]
+    stp x29, x30, [sp, #0x50]
+    bl pes_match_pause_d0_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x50]
+    ldr x8, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x60
+    stp x19, x30, [sp, #-16]!
+    adrp x8, pes_match_pause_destructor_slot
+    ldr x8, [x8, :lo12:pes_match_pause_destructor_slot]
+    ldr x8, [x8]
+    mov x19, x0
+    br x17
+    .size pes_match_pause_d0_hook, .-pes_match_pause_d0_hook
+
+    .align 2
+    .global pes_match_result_full_hook
+    .type pes_match_result_full_hook, %function
+pes_match_result_full_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_result_full_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    str x22, [sp, #-48]!
+    stp x21, x20, [sp, #16]
+    stp x19, x30, [sp, #32]
+    mov w20, w2
+    br x17
+
+    .size pes_match_result_full_hook, .-pes_match_result_full_hook
+
+    .align 2
+    .global pes_match_result_half_hook
+    .type pes_match_result_half_hook, %function
+pes_match_result_half_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_result_half_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    stp x21, x20, [sp, #-32]!
+    stp x19, x30, [sp, #16]
+    mov w19, w2
+    mov x20, x1
+    br x17
+
+    .size pes_match_result_half_hook, .-pes_match_result_half_hook
+
+    .align 2
+    .global pes_main_menu_graphics_d1_hook
+    .type pes_main_menu_graphics_d1_hook, %function
+pes_main_menu_graphics_d1_hook:
+    sub sp, sp, #0x60
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    str x8, [sp, #0x40]
+    stp x29, x30, [sp, #0x50]
+    bl pes_main_menu_graphics_d1_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x50]
+    ldr x8, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x60
+    str x22, [sp, #-48]!
+    stp x21, x20, [sp, #16]
+    stp x19, x30, [sp, #32]
+    adrp x8, pes_main_menu_graphics_destructor_page
+    ldr x8, [x8, :lo12:pes_main_menu_graphics_destructor_page]
+    ldr x8, [x8]
+    br x17
+    .size pes_main_menu_graphics_d1_hook, .-pes_main_menu_graphics_d1_hook
+
+    .align 2
+    .global pes_main_menu_graphics_d0_hook
+    .type pes_main_menu_graphics_d0_hook, %function
+pes_main_menu_graphics_d0_hook:
+    sub sp, sp, #0x60
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    str x8, [sp, #0x40]
+    stp x29, x30, [sp, #0x50]
+    bl pes_main_menu_graphics_d0_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x50]
+    ldr x8, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x60
+    str x22, [sp, #-48]!
+    stp x21, x20, [sp, #16]
+    stp x19, x30, [sp, #32]
+    adrp x8, pes_main_menu_graphics_d0_page
+    ldr x8, [x8, :lo12:pes_main_menu_graphics_d0_page]
+    ldr x8, [x8]
+    br x17
+    .size pes_main_menu_graphics_d0_hook, .-pes_main_menu_graphics_d0_hook
 
     .align 2
     .global pes_exhibition_flow_create_hook
@@ -455,6 +655,7 @@ pes_title_prompt_ready_hook:
 
     stp x29, x30, [sp, #-16]!
     mov x29, sp
+    mov x0, x19
     bl pes_controller_title_ready
     ldp x29, x30, [sp], #16
 

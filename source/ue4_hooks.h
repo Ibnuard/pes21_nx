@@ -7,6 +7,18 @@
 #define PES_MOBILE_CONTROL_OFFENSE 1
 #define PES_MOBILE_CONTROL_DEFENSE 2
 
+#define PES_VIRTUAL_CURSOR_NONE 0
+#define PES_VIRTUAL_CURSOR_GAMEPLAN 1
+#define PES_VIRTUAL_CURSOR_PAUSE 2
+#define PES_VIRTUAL_CURSOR_HALF_TIME 3
+#define PES_VIRTUAL_CURSOR_FULL_TIME 4
+
+#define PES_REPLAY_FEEDBACK_NONE 0
+#define PES_REPLAY_FEEDBACK_SKIP 1
+#define PES_REPLAY_FEEDBACK_GOAL_CELEBRATION 2
+#define PES_REPLAY_FEEDBACK_B_SKIP 3
+#define PES_REPLAY_FEEDBACK_A_SKIP 4
+
 void install_ue4_hooks(so_module *module);
 void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
@@ -14,12 +26,23 @@ void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
 int pes_controller_replay_active(void);
+int pes_controller_replay_goal_active(void);
+void pes_controller_replay_feedback_set(uint32_t feedback);
+uint32_t pes_controller_replay_feedback(void);
 int pes_controller_menu_active(void);
 int pes_controller_gameplan_cursor_active(void);
+int pes_controller_virtual_cursor_context(void);
 int pes_controller_gameplan_cursor_position(float *normalized_x,
-                                            float *normalized_y);
+                                             float *normalized_y);
 void pes_controller_gameplan_cursor_set(float normalized_x,
-                                        float normalized_y);
+                                         float normalized_y);
+uintptr_t pes_match_replay_check_skip_entry(void *replay,
+                                            const void *context);
+uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status);
+uintptr_t pes_match_result_full_entry(void *result, const char *name,
+                                      uint32_t modal);
+uintptr_t pes_match_result_half_entry(void *result, const char *name,
+                                      uint32_t modal);
 int pes_main_menu_controller_active(void);
 uint32_t pes_main_menu_focus_index(void);
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons);
@@ -30,7 +53,7 @@ int pes_controller_menu_touch_target(float *normalized_x,
 int pes_controller_menu_back_target(float *normalized_x,
                                     float *normalized_y);
 void pes_controller_menu_back_pressed(void);
-void pes_controller_title_ready(void);
+void pes_controller_title_ready(void *window);
 int pes_controller_selector_rect(float *x, float *y, float *width,
                                  float *height);
 int pes_controller_selector_custom_style(void);
@@ -53,6 +76,10 @@ int pes_controller_custom_match_settings_active(void);
 uint32_t pes_controller_custom_match_settings_focus(void);
 const char *pes_controller_custom_match_settings_label(uint32_t index);
 const char *pes_controller_custom_match_settings_value(uint32_t index);
+int pes_controller_custom_video_settings_active(void);
+uint32_t pes_controller_custom_video_settings_focus(void);
+const char *pes_controller_custom_video_settings_label(uint32_t index);
+const char *pes_controller_custom_video_settings_value(uint32_t index);
 int pes_controller_start_prompt(float *normalized_x, float *normalized_y);
 int pes_controller_menu_scroll_request(void);
 void pes_controller_menu_tap(float normalized_x, float normalized_y);

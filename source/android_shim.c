@@ -158,6 +158,19 @@ static float physical_touch_start_y;
 static float physical_touch_last_x;
 static float physical_touch_last_y;
 static int physical_touch_tracking;
+static uint32_t synthetic_input_generation = 1;
+static int previous_synthetic_input_context = -1;
+static uint64_t compact_menu_tap_until_ms;
+static float compact_menu_tap_x;
+static float compact_menu_tap_y;
+
+enum {
+  SYNTHETIC_INPUT_NONE = 0,
+  SYNTHETIC_INPUT_REPLAY = 1,
+  SYNTHETIC_INPUT_GAMEPLAY = 2,
+  SYNTHETIC_INPUT_MENU = 3,
+  SYNTHETIC_INPUT_CURSOR_BASE = 16,
+};
 
 enum {
   FAKE_POINTER_PHYSICAL = 0,
@@ -723,11 +736,15 @@ static void emit_menu_pad_input(const HidAnalogStickState *left_stick,
   cobra_pad_set_input(mapped, up, down, left, right, connected);
 }
 
-static void emit_gameplan_pad_input(int connected, u64 buttons) {
+static void emit_virtual_cursor_pad_input(int connected, u64 buttons) {
   const u64 reserved = HidNpadButton_A | HidNpadButton_ZL |
                        HidNpadButton_ZR;
   const uint32_t mapped = menu_pad_buttons(buttons & ~reserved, NULL, 0);
   cobra_pad_set_input(mapped, 0, 0, 0, 0, connected);
+}
+
+static void emit_replay_pad_input(int connected, uint32_t buttons) {
+  cobra_pad_set_input(buttons, 0, 0, 0, 0, connected);
 }
 
 static uint64_t monotonic_ms(void) {
@@ -796,6 +813,18 @@ static void reset_virtual_surfaces(void) {
   memset(&pause_surface, 0, sizeof(pause_surface));
 }
 
+static int synthetic_context_changed(int context) {
+  if (context == previous_synthetic_input_context)
+    return 0;
+  previous_synthetic_input_context = context;
+  synthetic_input_generation++;
+  reset_virtual_surfaces();
+  replay_touch_requested = 0;
+  previous_hid_buttons = 0;
+  compact_menu_tap_until_ms = 0;
+  return 1;
+}
+
 static void append_virtual_gamepad_touches(FakeTouchState *desired,
                                            float axis_x, float axis_y,
                                            int connected, u64 buttons,
@@ -842,6 +871,33 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   // 160-DPI gameplay threshold is about 44 px for Cross at 720p. Keep the
   // gesture safely above it while avoiding the neighboring Through surface.
   const float cross_distance = (float)screen_height * 0.10000f;
+
+  // Opening Pause changes the meaning and ownership of the complete mobile
+  // touch surface. Never send the pause icon together with a held stick,
+  // dash, or action button: release the gameplay fingers for one poll first,
+  // then emit the isolated pause tap on the next poll.
+  if (pause_surface.owner == VIRTUAL_SURFACE_NONE && plus_pressed) {
+    memset(&pass_surface, 0, sizeof(pass_surface));
+    memset(&through_surface, 0, sizeof(through_surface));
+    memset(&shoot_surface, 0, sizeof(shoot_surface));
+    pause_surface.owner = VIRTUAL_SURFACE_BUTTON;
+    pause_surface.started_ms = now_ms;
+    pause_surface.moved = 0;
+    return;
+  }
+  if (pause_surface.owner == VIRTUAL_SURFACE_BUTTON) {
+    if (!surface_should_remain(now_ms, pause_surface.started_ms, plus_held,
+                               80)) {
+      memset(&pause_surface, 0, sizeof(pause_surface));
+      return;
+    }
+    if (!pause_surface.moved) {
+      pause_surface.moved = 1;
+      return;
+    }
+    touch_state_append(desired, FAKE_POINTER_PAUSE, pause_x, pause_y);
+    return;
+  }
 
   static float stick_target_x;
   static float stick_target_y;
@@ -934,23 +990,16 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   if (r_held)
     touch_state_append(desired, FAKE_POINTER_DASH, dash_x, dash_y);
 
-  // PES Mobile has no native gamepad pause binding. Translate Plus to a short
-  // Android tap on the on-screen pause icon. When the pause screen takes over,
-  // the gameplay heartbeat stops and the reconciler emits the matching UP.
-  if (pause_surface.owner == VIRTUAL_SURFACE_NONE && plus_pressed) {
-    pause_surface.owner = VIRTUAL_SURFACE_BUTTON;
-    pause_surface.started_ms = now_ms;
-  }
-  if (pause_surface.owner == VIRTUAL_SURFACE_BUTTON &&
-      !surface_should_remain(now_ms, pause_surface.started_ms, plus_held, 80))
-    memset(&pause_surface, 0, sizeof(pause_surface));
-  if (pause_surface.owner != VIRTUAL_SURFACE_NONE)
-    touch_state_append(desired, FAKE_POINTER_PAUSE, pause_x, pause_y);
 }
 
 static void append_menu_controller_tap(FakeTouchState *desired, int a_pressed,
                                         uint64_t now_ms) {
   static uint64_t tap_until_ms;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    tap_until_ms = 0;
+  }
   if (a_pressed && tap_until_ms <= now_ms)
     tap_until_ms = now_ms + 90;
   if (tap_until_ms <= now_ms)
@@ -967,6 +1016,11 @@ static void append_menu_controller_tap(FakeTouchState *desired, int a_pressed,
 static void append_menu_controller_back(FakeTouchState *desired,
                                          int b_pressed, uint64_t now_ms) {
   static uint64_t back_until_ms;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    back_until_ms = 0;
+  }
   if (b_pressed && back_until_ms <= now_ms) {
     back_until_ms = now_ms + 90;
   }
@@ -985,6 +1039,12 @@ static void append_menu_controller_scroll(FakeTouchState *desired,
                                            uint64_t now_ms) {
   static uint64_t scroll_started_ms;
   static int scroll_direction;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    scroll_started_ms = 0;
+    scroll_direction = 0;
+  }
   // A gesture lasts several poll frames. Ask the controller bridge for the
   // next logical row only when the previous synthetic swipe has completed;
   // otherwise a multi-step custom popup scroll would consume all requests in
@@ -1013,11 +1073,18 @@ static void append_menu_controller_scroll(FakeTouchState *desired,
                      (float)screen_width * 0.50f, y);
 }
 
-static void append_gameplan_controller(FakeTouchState *desired, float axis_x,
-                                       float axis_y, int connected,
-                                       u64 buttons, uint64_t now_ms) {
+static void append_virtual_cursor_controller(FakeTouchState *desired,
+                                             float axis_x, float axis_y,
+                                             int connected, u64 buttons,
+                                             uint64_t now_ms, int cursor_context) {
   static uint64_t cursor_previous_ms;
   static uint64_t play_until_ms;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    cursor_previous_ms = 0;
+    play_until_ms = 0;
+  }
   float cursor_x = 0.5f;
   float cursor_y = 0.45f;
   if (!pes_controller_gameplan_cursor_position(&cursor_x, &cursor_y)) {
@@ -1050,7 +1117,8 @@ static void append_gameplan_controller(FakeTouchState *desired, float axis_x,
 
   const int a_pressed = connected && (buttons & HidNpadButton_A) != 0 &&
                         (previous_hid_buttons & HidNpadButton_A) == 0;
-  if (a_pressed && play_until_ms <= now_ms)
+  if (a_pressed && play_until_ms <= now_ms &&
+      cursor_context != PES_VIRTUAL_CURSOR_PAUSE)
     play_until_ms = now_ms + 90;
   if (play_until_ms > now_ms)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
@@ -1058,33 +1126,48 @@ static void append_gameplan_controller(FakeTouchState *desired, float axis_x,
                        0.944f * (float)screen_height);
 }
 
-static void append_replay_controller_tap(FakeTouchState *desired,
-                                          int connected, u64 buttons,
-                                          uint64_t now_ms) {
+static uint32_t append_replay_controller(FakeTouchState *desired,
+                                         int connected, u64 buttons,
+                                         uint64_t now_ms) {
   static uint64_t tap_until_ms;
-  static float tap_x;
-  static float tap_y;
+  static uint64_t skip_until_ms;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    tap_until_ms = 0;
+    skip_until_ms = 0;
+  }
 
   replay_touch_requested = 0;
   if (!pes_controller_replay_active() || !connected) {
     tap_until_ms = 0;
-    return;
+    skip_until_ms = 0;
+    return 0;
   }
 
   const u64 pressed = buttons & ~previous_hid_buttons;
-  if (pressed && tap_until_ms <= now_ms) {
-    // Goal replays expose Celebration above Skip. A selects Celebration;
-    // every other controller button follows the universal Skip action.
-    tap_x = 0.891f * (float)screen_width;
-    tap_y = (pressed & HidNpadButton_A) != 0
-                ? 0.344f * (float)screen_height
-                : 0.203f * (float)screen_height;
+  const int goal_replay = pes_controller_replay_goal_active();
+  if ((pressed & HidNpadButton_B) && skip_until_ms <= now_ms) {
+    skip_until_ms = now_ms + 90;
+    pes_controller_replay_feedback_set(PES_REPLAY_FEEDBACK_B_SKIP);
+  } else if (goal_replay && (pressed & HidNpadButton_A) &&
+             tap_until_ms <= now_ms) {
     tap_until_ms = now_ms + 90;
+    pes_controller_replay_feedback_set(
+        PES_REPLAY_FEEDBACK_GOAL_CELEBRATION);
+  } else if (pressed && skip_until_ms <= now_ms) {
+    skip_until_ms = now_ms + 90;
+    pes_controller_replay_feedback_set(
+        (pressed & HidNpadButton_A) ? PES_REPLAY_FEEDBACK_A_SKIP
+                                   : PES_REPLAY_FEEDBACK_SKIP);
   }
   if (tap_until_ms > now_ms) {
-    touch_state_append(desired, FAKE_POINTER_REPLAY, tap_x, tap_y);
+    touch_state_append(desired, FAKE_POINTER_REPLAY,
+                       0.891f * (float)screen_width,
+                       0.344f * (float)screen_height);
     replay_touch_requested = 1;
   }
+  return skip_until_ms > now_ms ? (1u << 25) : 0;
 }
 
 static void log_controller_input(const HidAnalogStickState *stick,
@@ -1241,12 +1324,22 @@ void android_input_poll(void) {
   const int gameplay_active =
       mobile_gameplay_context(now_ms, &control_mode);
   const int replay_active = pes_controller_replay_active();
+  const int cursor_context = pes_controller_virtual_cursor_context();
+  const int cursor_active = cursor_context != PES_VIRTUAL_CURSOR_NONE;
+  int synthetic_context = SYNTHETIC_INPUT_NONE;
+  if (replay_active)
+    synthetic_context = SYNTHETIC_INPUT_REPLAY;
+  else if (cursor_active)
+    synthetic_context = SYNTHETIC_INPUT_CURSOR_BASE + cursor_context;
+  else if (gameplay_active)
+    synthetic_context = SYNTHETIC_INPUT_GAMEPLAY;
+  else if (pes_controller_menu_active())
+    synthetic_context = SYNTHETIC_INPUT_MENU;
+  const int context_changed = synthetic_context_changed(synthetic_context);
   const int replay_pointer_was_active = replay_touch_requested;
   if (!replay_active)
     replay_touch_requested = 0;
-  const int gameplan_cursor_active =
-      !replay_active && !gameplay_active &&
-      pes_controller_gameplan_cursor_active();
+  const int gameplan_cursor_active = !replay_active && cursor_active;
 
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));
@@ -1261,11 +1354,12 @@ void android_input_poll(void) {
       touch ? (float)touch->y * (float)screen_height / 720.0f : 0.0f;
   const int physical_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
+  const int compact_main_menu_active = pes_main_menu_controller_active();
 
   if (physical_active) {
     physical_touch_last_x = touch_x;
     physical_touch_last_y = touch_y;
-    if (!physical_was_active) {
+    if (!physical_touch_tracking) {
       physical_touch_start_x = touch_x;
       physical_touch_start_y = touch_y;
       physical_touch_tracking = 1;
@@ -1273,6 +1367,25 @@ void android_input_poll(void) {
   } else if (ended) {
     physical_touch_last_x = touch_x;
     physical_touch_last_y = touch_y;
+  }
+
+  if (compact_main_menu_active && physical_touch_tracking &&
+      !physical_active && screen_width > 0 && screen_height > 0) {
+    const float dx = physical_touch_last_x - physical_touch_start_x;
+    const float dy = physical_touch_last_y - physical_touch_start_y;
+    if (fabsf(dx) <= (float)screen_width * 0.06f &&
+        fabsf(dy) <= (float)screen_height * 0.08f) {
+      const float normalized_x =
+          physical_touch_last_x / (float)screen_width;
+      const float normalized_y =
+          physical_touch_last_y / (float)screen_height;
+      if (pes_controller_menu_physical_tap(normalized_x, normalized_y)) {
+        compact_menu_tap_x = physical_touch_last_x;
+        compact_menu_tap_y = physical_touch_last_y;
+        compact_menu_tap_until_ms = now_ms + 90;
+      }
+    }
+    physical_touch_tracking = 0;
   }
 
   // An End sample carries the final coordinate. Put it in the UP snapshot even
@@ -1287,28 +1400,36 @@ void android_input_poll(void) {
   }
 
   FakeTouchState desired = {0};
-  if (physical_active)
+  if (physical_active && !compact_main_menu_active)
     touch_state_append(&desired, FAKE_POINTER_PHYSICAL, touch_x, touch_y);
-  if (replay_active) {
-    reset_virtual_surfaces();
-    append_replay_controller_tap(&desired, have_left_stick, buttons, now_ms);
-  } else {
-    append_virtual_gamepad_touches(
-        &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
-        control_mode, now_ms);
-    if (gameplan_cursor_active)
-      append_gameplan_controller(&desired, axis_x, axis_y, have_left_stick,
-                                 buttons, now_ms);
-  }
-  if (!replay_active && !gameplay_active && !gameplan_cursor_active &&
-      pes_controller_menu_active()) {
-    const int a_pressed = (buttons & HidNpadButton_A) != 0 &&
-                          (previous_hid_buttons & HidNpadButton_A) == 0;
-    const int b_pressed = (buttons & HidNpadButton_B) != 0 &&
-                          (previous_hid_buttons & HidNpadButton_B) == 0;
-    append_menu_controller_tap(&desired, a_pressed, now_ms);
-    append_menu_controller_back(&desired, b_pressed, now_ms);
-    append_menu_controller_scroll(&desired, now_ms);
+  uint32_t replay_pad_buttons = 0;
+  if (!context_changed) {
+    if (compact_main_menu_active && compact_menu_tap_until_ms > now_ms)
+      touch_state_append(&desired, FAKE_POINTER_MENU, compact_menu_tap_x,
+                         compact_menu_tap_y);
+    if (replay_active) {
+      reset_virtual_surfaces();
+      replay_pad_buttons =
+          append_replay_controller(&desired, have_left_stick, buttons, now_ms);
+    } else {
+      append_virtual_gamepad_touches(
+          &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
+          control_mode, now_ms);
+      if (gameplan_cursor_active)
+        append_virtual_cursor_controller(&desired, axis_x, axis_y,
+                                         have_left_stick, buttons, now_ms,
+                                         cursor_context);
+    }
+    if (!replay_active && !gameplay_active && !gameplan_cursor_active &&
+        pes_controller_menu_active()) {
+      const int a_pressed = (buttons & HidNpadButton_A) != 0 &&
+                            (previous_hid_buttons & HidNpadButton_A) == 0;
+      const int b_pressed = (buttons & HidNpadButton_B) != 0 &&
+                            (previous_hid_buttons & HidNpadButton_B) == 0;
+      append_menu_controller_tap(&desired, a_pressed, now_ms);
+      append_menu_controller_back(&desired, b_pressed, now_ms);
+      append_menu_controller_scroll(&desired, now_ms);
+    }
   }
   const int menu_back_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK);
@@ -1322,19 +1443,22 @@ void android_input_poll(void) {
   }
   reconcile_touch_state(&desired);
   if (menu_was_active >= 0 &&
+      !context_changed &&
       !replay_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU) < 0 &&
       screen_width > 0 && screen_height > 0)
     pes_controller_menu_tap(menu_x / (float)screen_width,
                             menu_y / (float)screen_height);
   if (menu_back_was_active >= 0 &&
+      !context_changed &&
       !replay_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK) < 0)
     pes_controller_menu_back_pressed();
 
   const int physical_is_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
-  if (physical_was_active && !physical_is_active &&
+  if (!compact_main_menu_active && physical_was_active &&
+      !physical_is_active &&
       physical_touch_tracking && screen_width > 0 && screen_height > 0) {
     const float dx = physical_touch_last_x - physical_touch_start_x;
     const float dy = physical_touch_last_y - physical_touch_start_y;
@@ -1370,16 +1494,18 @@ void android_input_poll(void) {
 
   log_controller_input(&left_stick, have_left_stick, buttons, axis_x, axis_y,
                        gameplay_active, control_mode);
-  if (replay_active)
+  if (context_changed)
     disable_native_pad_bridge();
+  else if (replay_active)
+    emit_replay_pad_input(have_left_stick, replay_pad_buttons);
   else if (gameplan_cursor_active)
-    emit_gameplan_pad_input(have_left_stick, buttons);
+    emit_virtual_cursor_pad_input(have_left_stick, buttons);
   else if (!gameplay_active && pes_controller_menu_active())
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,
                         have_left_stick);
   else
     disable_native_pad_bridge();
-  previous_hid_buttons = have_left_stick ? buttons : 0;
+  previous_hid_buttons = context_changed ? 0 : (have_left_stick ? buttons : 0);
 }
 
 void *ALooper_prepare_fake(int opts) {
