@@ -483,12 +483,18 @@ static void overlay_render(void) {
     fps.window_start = now;
   }
 
+  // Keep a compact match-only readout so the active COM level is visible
+  // without bringing back the full controller help text.
   const int control_mode = pes_mobile_control_active_mode();
-  const char *controls = NULL;
-  if (control_mode == PES_MOBILE_CONTROL_OFFENSE)
-    controls = "ATTACK: B PASS  X THROUGH  Y SHOOT  A CROSS  R DASH  + PAUSE";
-  else if (control_mode == PES_MOBILE_CONTROL_DEFENSE)
-    controls = "DEFEND: B PRESS  A TACKLE  L SWITCH  R DASH  + PAUSE";
+  const int replay_active = pes_controller_replay_active();
+  char difficulty_text[32];
+  difficulty_text[0] = '\0';
+  if (control_mode != PES_MOBILE_CONTROL_UNKNOWN || replay_active) {
+    const uint32_t level = pes_controller_custom_cpu_popup_value();
+    const char *label = pes_controller_custom_cpu_popup_label(level);
+    if (label && label[0])
+      snprintf(difficulty_text, sizeof(difficulty_text), "COM: %s", label);
+  }
 
   float selector_x = 0.0f;
   float selector_y = 0.0f;
@@ -513,7 +519,7 @@ static void overlay_render(void) {
   const int gameplan_cursor = pes_controller_gameplan_cursor_position(
       &gameplan_cursor_x, &gameplan_cursor_y);
 
-  if ((!config.show_fps || !fps.text[0]) && !controls && !selector &&
+  if ((!config.show_fps || !fps.text[0]) && !difficulty_text[0] && !selector &&
       !start_prompt && !custom_popup && !gameplan_cursor)
     return;
   if (!gl_init())
@@ -1144,15 +1150,15 @@ static void overlay_render(void) {
     quads += emit_line(fps.text, (int)strlen(fps.text), 10.0f, 8.0f,
                        gw, gh, verts + quads * 24);
   }
-  if (controls) {
-    const int len = (int)strlen(controls);
-    const float gh = (float)screen_height / 54.0f;
+  if (difficulty_text[0]) {
+    const int len = (int)strlen(difficulty_text);
+    const float gh = (float)screen_height / 48.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     float x = (float)screen_width - 12.0f - (float)len * gw;
     if (x < 12.0f)
       x = 12.0f;
     const float y = (float)screen_height - gh - 12.0f;
-    quads += emit_line(controls, len, x, y, gw, gh,
+    quads += emit_line(difficulty_text, len, x, y, gw, gh,
                        verts + quads * 24);
   }
   if (!quads)

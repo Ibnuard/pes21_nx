@@ -148,6 +148,7 @@ static VirtualSurfaceState pass_surface;
 static VirtualSurfaceState through_surface;
 static VirtualSurfaceState shoot_surface;
 static VirtualSurfaceState pause_surface;
+static int replay_touch_requested;
 static uint64_t previous_hid_buttons;
 static uint32_t previous_mobile_context_generation;
 static uint64_t mobile_context_seen_ms;
@@ -173,6 +174,8 @@ enum {
   FAKE_POINTER_MENU_BACK = 9,
   FAKE_POINTER_GAMEPLAN_CURSOR = FAKE_POINTER_MENU,
   FAKE_POINTER_GAMEPLAN_PLAY = FAKE_POINTER_MENU_SCROLL,
+  // Replay and menu/gameplan surfaces never coexist; reuse the final slot.
+  FAKE_POINTER_REPLAY = FAKE_POINTER_MENU_BACK,
 };
 
 #define FAKE_PIPE_BASE 0x70000000
@@ -1055,6 +1058,35 @@ static void append_gameplan_controller(FakeTouchState *desired, float axis_x,
                        0.944f * (float)screen_height);
 }
 
+static void append_replay_controller_tap(FakeTouchState *desired,
+                                          int connected, u64 buttons,
+                                          uint64_t now_ms) {
+  static uint64_t tap_until_ms;
+  static float tap_x;
+  static float tap_y;
+
+  replay_touch_requested = 0;
+  if (!pes_controller_replay_active() || !connected) {
+    tap_until_ms = 0;
+    return;
+  }
+
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  if (pressed && tap_until_ms <= now_ms) {
+    // Goal replays expose Celebration above Skip. A selects Celebration;
+    // every other controller button follows the universal Skip action.
+    tap_x = 0.891f * (float)screen_width;
+    tap_y = (pressed & HidNpadButton_A) != 0
+                ? 0.344f * (float)screen_height
+                : 0.203f * (float)screen_height;
+    tap_until_ms = now_ms + 90;
+  }
+  if (tap_until_ms > now_ms) {
+    touch_state_append(desired, FAKE_POINTER_REPLAY, tap_x, tap_y);
+    replay_touch_requested = 1;
+  }
+}
+
 static void log_controller_input(const HidAnalogStickState *stick,
                                  int connected, u64 buttons, float x,
                                  float y, int gameplay_active,
@@ -1154,6 +1186,7 @@ void android_input_poll(void) {
     previous_left_axis_valid = 0;
     previous_hid_buttons = 0;
     physical_touch_tracking = 0;
+    replay_touch_requested = 0;
     reset_virtual_surfaces();
     FakeTouchState empty = {0};
     reconcile_touch_state(&empty);
@@ -1207,8 +1240,13 @@ void android_input_poll(void) {
   int control_mode = 0;
   const int gameplay_active =
       mobile_gameplay_context(now_ms, &control_mode);
+  const int replay_active = pes_controller_replay_active();
+  const int replay_pointer_was_active = replay_touch_requested;
+  if (!replay_active)
+    replay_touch_requested = 0;
   const int gameplan_cursor_active =
-      !gameplay_active && pes_controller_gameplan_cursor_active();
+      !replay_active && !gameplay_active &&
+      pes_controller_gameplan_cursor_active();
 
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));
@@ -1251,13 +1289,18 @@ void android_input_poll(void) {
   FakeTouchState desired = {0};
   if (physical_active)
     touch_state_append(&desired, FAKE_POINTER_PHYSICAL, touch_x, touch_y);
-  append_virtual_gamepad_touches(
-      &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
-      control_mode, now_ms);
-  if (gameplan_cursor_active)
-    append_gameplan_controller(&desired, axis_x, axis_y, have_left_stick,
-                               buttons, now_ms);
-  if (!gameplay_active && !gameplan_cursor_active &&
+  if (replay_active) {
+    reset_virtual_surfaces();
+    append_replay_controller_tap(&desired, have_left_stick, buttons, now_ms);
+  } else {
+    append_virtual_gamepad_touches(
+        &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
+        control_mode, now_ms);
+    if (gameplan_cursor_active)
+      append_gameplan_controller(&desired, axis_x, axis_y, have_left_stick,
+                                 buttons, now_ms);
+  }
+  if (!replay_active && !gameplay_active && !gameplan_cursor_active &&
       pes_controller_menu_active()) {
     const int a_pressed = (buttons & HidNpadButton_A) != 0 &&
                           (previous_hid_buttons & HidNpadButton_A) == 0;
@@ -1279,11 +1322,13 @@ void android_input_poll(void) {
   }
   reconcile_touch_state(&desired);
   if (menu_was_active >= 0 &&
+      !replay_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU) < 0 &&
       screen_width > 0 && screen_height > 0)
     pes_controller_menu_tap(menu_x / (float)screen_width,
                             menu_y / (float)screen_height);
   if (menu_back_was_active >= 0 &&
+      !replay_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK) < 0)
     pes_controller_menu_back_pressed();
 
@@ -1295,7 +1340,8 @@ void android_input_poll(void) {
     const float dy = physical_touch_last_y - physical_touch_start_y;
     // Only a short click may activate the Matchmaking cards; normal swipes
     // continue exclusively through Android's original touch stream.
-    if (fabsf(dx) <= (float)screen_width * 0.06f &&
+    if (!replay_active && !replay_pointer_was_active &&
+        fabsf(dx) <= (float)screen_width * 0.06f &&
         fabsf(dy) <= (float)screen_height * 0.08f) {
       const int menu_consumed = pes_controller_menu_physical_tap(
           physical_touch_last_x / (float)screen_width,
@@ -1304,7 +1350,8 @@ void android_input_poll(void) {
         pes_exhibition_matchmaking_tap(
             physical_touch_last_x / (float)screen_width,
             physical_touch_last_y / (float)screen_height);
-    } else if (!gameplay_active && pes_controller_menu_active()) {
+    } else if (!replay_active && !replay_pointer_was_active &&
+               !gameplay_active && pes_controller_menu_active()) {
       // Let the team picker move its custom focus to the visible edge after
       // a native list swipe. The Android stream still performs the scrolling.
       pes_controller_menu_physical_swipe(
@@ -1323,7 +1370,9 @@ void android_input_poll(void) {
 
   log_controller_input(&left_stick, have_left_stick, buttons, axis_x, axis_y,
                        gameplay_active, control_mode);
-  if (gameplan_cursor_active)
+  if (replay_active)
+    disable_native_pad_bridge();
+  else if (gameplan_cursor_active)
     emit_gameplan_pad_input(have_left_stick, buttons);
   else if (!gameplay_active && pes_controller_menu_active())
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,

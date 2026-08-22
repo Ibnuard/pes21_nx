@@ -57,6 +57,31 @@ pes_mobile_screen_tap_entry_hook:
     .size pes_mobile_screen_tap_entry_hook, .-pes_mobile_screen_tap_entry_hook
 
     .align 2
+    .global pes_match_replay_update_hook
+    .type pes_match_replay_update_hook, %function
+
+// Entry hook for MatchReplayMain::UpdatePostControlWindow. Record the replay
+// heartbeat, restore the two ABI arguments, replay the displaced prologue, and
+// continue through the stock update body.
+pes_match_replay_update_hook:
+    sub sp, sp, #0x30
+    stp x0, x1, [sp, #0x00]
+    stp x29, x30, [sp, #0x20]
+    bl pes_match_replay_update_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x20]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x30
+
+    sub sp, sp, #0x40
+    str d8, [sp, #0x20]
+    str x20, [sp, #0x28]
+    stp x19, x30, [sp, #0x30]
+    br x17
+
+    .size pes_match_replay_update_hook, .-pes_match_replay_update_hook
+
+    .align 2
     .global pes_exhibition_flow_create_hook
     .type pes_exhibition_flow_create_hook, %function
 

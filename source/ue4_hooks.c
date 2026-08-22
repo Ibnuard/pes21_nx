@@ -46,6 +46,7 @@ static uintptr_t exhibition_string_get_resume;
 static uintptr_t exhibition_search_post_resume;
 static uintptr_t exhibition_search_user_name_resume;
 static uintptr_t exhibition_search_task_ready_resume;
+static uintptr_t match_replay_update_resume;
 static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
 static void **exhibition_flow_listener_instance;
@@ -93,6 +94,8 @@ static uint32_t (*exhibition_get_player_overall)(
 static void (*exhibition_set_test_match_team_id)(uint32_t team_id);
 static void (*exhibition_set_test_match_cpu_level)(uint32_t level);
 static uint32_t (*exhibition_get_test_match_cpu_level)(void);
+static uint32_t (*exhibition_match_get_match_level)(const void *match);
+static void (*exhibition_match_set_match_level)(void *match, uint32_t level);
 static uint32_t (*exhibition_match_get_time_zone)(const void *match);
 static void (*exhibition_match_set_time_zone)(void *match,
                                                uint32_t time_zone);
@@ -446,6 +449,7 @@ static _Alignas(4) uint32_t exhibition_team_category_index;
 #define EXHIBITION_FALLBACK_AWAY_TEAM 101u
 static _Alignas(4) uint32_t exhibition_home_team_id;
 static _Alignas(4) uint32_t exhibition_away_team_id;
+static _Alignas(8) uint64_t match_replay_seen_tick;
 
 enum {
   EXHIBITION_STRATEGY_NONE = 0,
@@ -587,6 +591,21 @@ static void *exhibition_get_tmpdb_match(void) {
   return tmpdb_data ? (unsigned char *)tmpdb_data + 0x4b38 : NULL;
 }
 
+// DebugMode owns the selector's global value, while MatchSetup reads the
+// per-match tmpdb field. Keep both copies synchronized whenever the player
+// changes COM difficulty and again after match-plan data is rebuilt.
+static void exhibition_apply_cpu_level(uint32_t level, void *match) {
+  if (level >= EXHIBITION_CPU_LEVEL_COUNT)
+    level = 2;
+  if (exhibition_set_test_match_cpu_level)
+    exhibition_set_test_match_cpu_level(level);
+  if (!match)
+    match = exhibition_get_tmpdb_match();
+  if (match && exhibition_match_set_match_level)
+    exhibition_match_set_match_level(match, level);
+  __atomic_store_n(&exhibition_cpu_level_value, level, __ATOMIC_RELEASE);
+}
+
 static int exhibition_refresh_match_settings(void) {
   void *match = exhibition_get_tmpdb_match();
   if (!match)
@@ -604,6 +623,11 @@ static int exhibition_refresh_match_settings(void) {
     match_time = 10;
 
   exhibition_settings_match = match;
+  if (exhibition_match_get_match_level) {
+    const uint32_t level = exhibition_match_get_match_level(match);
+    if (level < EXHIBITION_CPU_LEVEL_COUNT)
+      __atomic_store_n(&exhibition_cpu_level_value, level, __ATOMIC_RELEASE);
+  }
   __atomic_store_n(&exhibition_settings_time_zone, time_zone,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_match_time, match_time,
@@ -2525,9 +2549,7 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
     uint32_t level = exhibition_popup_focus_index;
     if (level >= EXHIBITION_CPU_LEVEL_COUNT)
       level = 2;
-    if (exhibition_set_test_match_cpu_level)
-      exhibition_set_test_match_cpu_level(level);
-    __atomic_store_n(&exhibition_cpu_level_value, level, __ATOMIC_RELEASE);
+    exhibition_apply_cpu_level(level, NULL);
     debugPrintf("exhibition: custom COM level applied=%u\n", level);
     return;
   }
@@ -2827,9 +2849,8 @@ void pes_exhibition_search_child(void *window, const void *child_name,
     __atomic_store_n(&exhibition_cpu_level_popup_open, 0,
                      __ATOMIC_RELEASE);
     exhibition_popup_focus_index = 0;
-    if (selected_value != UINT32_MAX &&
-        exhibition_set_test_match_cpu_level) {
-      exhibition_set_test_match_cpu_level(selected_value);
+    if (selected_value != UINT32_MAX) {
+      exhibition_apply_cpu_level(selected_value, NULL);
       debugPrintf("exhibition: COM level=%u\n", selected_value);
     }
     return;
@@ -3545,6 +3566,9 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
           if (tmpdb_data)
             tmpdb_match = (unsigned char *)tmpdb_data + 0x4b38;
         }
+        exhibition_apply_cpu_level(
+            __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE),
+            tmpdb_match);
         exhibition_refresh_uniforms(tmpdb_match, &home_team_id,
                                      &away_team_id);
 
@@ -3600,6 +3624,11 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
         memcpy((unsigned char *)data + 8, &strategy_mode,
                sizeof(strategy_mode));
         exhibition_matchplan_setup_tmpdb(data);
+        // SetupDataFromTmpdbMatch can copy the match record back over fields
+        // written above, so apply the selected level once more afterwards.
+        exhibition_apply_cpu_level(
+            __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE),
+            tmpdb_match);
 
         uint32_t plan_team_ids[2] = {0, 0};
         uint32_t plan_counts[2] = {0, 0};
@@ -3642,6 +3671,9 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
                       exhibition_matchplan_setup_tmpdb);
         }
       } else {
+        exhibition_apply_cpu_level(
+            __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE),
+            NULL);
         debugPrintf("exhibition: reusing edited match plan for start\n");
       }
 
@@ -3715,6 +3747,10 @@ static void pes_exhibition_strategy_footer(void *window,
   if (starting_match && footer_key == 1)
     __atomic_store_n(&exhibition_strategy_action,
                      EXHIBITION_STRATEGY_EDIT, __ATOMIC_RELEASE);
+
+  if (starting_match && footer_key == 0)
+    exhibition_apply_cpu_level(
+        __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
 
   __atomic_store_n(&exhibition_gameplan_cursor_active, 0,
                    __ATOMIC_RELEASE);
@@ -3824,6 +3860,27 @@ int pes_mobile_control_active_mode(void) {
   if (age_ns > 250000000ULL)
     return PES_MOBILE_CONTROL_UNKNOWN;
   return (int)__atomic_load_n(&mobile_control_mode, __ATOMIC_ACQUIRE);
+}
+
+// MatchReplayMain has a dedicated per-frame update callback. Its heartbeat is
+// more reliable than inferring replay from the general gameplay/menu state,
+// which can remain ambiguous during post-match transitions.
+uintptr_t pes_match_replay_update_entry(void *replay_main,
+                                        uint32_t pad_status) {
+  (void)pad_status;
+  if (replay_main)
+    __atomic_store_n(&match_replay_seen_tick, armGetSystemTick(),
+                     __ATOMIC_RELEASE);
+  return match_replay_update_resume;
+}
+
+int pes_controller_replay_active(void) {
+  const uint64_t seen =
+      __atomic_load_n(&match_replay_seen_tick, __ATOMIC_ACQUIRE);
+  if (!seen)
+    return 0;
+  const uint64_t age_ns = armTicksToNs(armGetSystemTick() - seen);
+  return age_ns <= 500000000ULL;
 }
 
 // Entry hook for ScreenTapManager::Update. ControlModeInfo is the original x2
@@ -3941,6 +3998,7 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
 }
 
 extern void cobra_pad_update_hook(void);
+extern void pes_match_replay_update_hook(void);
 extern void pes_mobile_screen_tap_entry_hook(void);
 extern void pes_exhibition_flow_create_hook(void);
 extern void pes_exhibition_tutorial_main_hook(void);
@@ -4693,6 +4751,10 @@ void install_ue4_hooks(so_module *module) {
   exhibition_get_test_match_cpu_level =
       (void *)so_find_addr_rx(module,
           "_ZN10onlinemode9DebugMode20GetTestMatchCpuLevelEv");
+  exhibition_match_get_match_level =
+      (void *)so_find_addr_rx(module, "_ZNK5tmpdb5Match13GetMatchLevelEv");
+  exhibition_match_set_match_level =
+      (void *)so_find_addr_rx(module, "_ZN5tmpdb5Match13SetMatchLevelE8CpuLevel");
   exhibition_match_get_time_zone =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb5Match11GetTimeZoneEv");
@@ -4748,13 +4810,15 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(is_test_match_plt,
              (uintptr_t)&pes_exhibition_is_test_match);
   debugPrintf("UE4 hook: Exhibition Settings create=%p IsTestMatch=%p "
-              "PLT=%p cpu=%p/%p manager=%p timezone=%p/%p time=%p/%p "
+              "PLT=%p cpu=%p/%p level=%p/%p manager=%p timezone=%p/%p time=%p/%p "
               "extra=%p/%p pk=%p/%p scoped=1\n",
               exhibition_match_setting_create_child,
               exhibition_is_test_match_original,
               (void *)is_test_match_plt,
               exhibition_get_test_match_cpu_level,
               exhibition_set_test_match_cpu_level,
+              exhibition_match_get_match_level,
+              exhibition_match_set_match_level,
               exhibition_tmpdb_manager_get_instance,
               exhibition_match_get_time_zone,
               exhibition_match_set_time_zone,
@@ -4921,6 +4985,34 @@ void install_ue4_hooks(so_module *module) {
               pes_mobile_screen_tap_entry_hook,
               (void *)mobile_screen_tap_entry_resume,
               mobile_is_mode_offense, mobile_is_mode_defense);
+
+  // MatchReplayMain::UpdatePostControlWindow runs once per replay frame. Use
+  // its heartbeat to route controller taps to the replay buttons without
+  // mistaking pause or post-match menu frames for an active replay.
+  const char *replay_update_symbol =
+      "_ZN4menu15MatchReplayMain23UpdatePostControlWindowEN10menusystem6Window10PAD_STATUSE";
+  const uintptr_t replay_update_backing =
+      so_find_addr(module, replay_update_symbol);
+  const uintptr_t replay_update_runtime =
+      so_find_addr_rx(module, replay_update_symbol);
+  static const uint32_t expected_replay_update_entry[4] = {
+      0xd10103ff, // sub sp, sp, #0x40
+      0xfd0013e8, // str d8, [sp, #32]
+      0xf90017f4, // str x20, [sp, #40]
+      0xa9037bf3, // stp x19, x30, [sp, #48]
+  };
+  if (memcmp((void *)replay_update_backing, expected_replay_update_entry,
+             sizeof(expected_replay_update_entry)) != 0)
+    fatal_error("Unexpected MatchReplayMain::UpdatePostControlWindow entry "
+                "at %p",
+                (void *)replay_update_backing);
+  match_replay_update_resume = replay_update_runtime + 0x10;
+  hook_arm64(replay_update_backing,
+             (uintptr_t)&pes_match_replay_update_hook);
+  debugPrintf("UE4 hook: MatchReplay heartbeat backing=%p runtime=%p hook=%p "
+              "resume=%p\n",
+              (void *)replay_update_backing, (void *)replay_update_runtime,
+              pes_match_replay_update_hook, (void *)match_replay_update_resume);
 
   // VirtualPad::NeedDisp also gates ScreenTap updates in this mobile build.
   // Returning false hid the graphics but stopped the offense/defense heartbeat

@@ -13,6 +13,7 @@ void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                          int32_t left, int32_t right, int connected);
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
+int pes_controller_replay_active(void);
 int pes_controller_menu_active(void);
 int pes_controller_gameplan_cursor_active(void);
 int pes_controller_gameplan_cursor_position(float *normalized_x,
