@@ -199,8 +199,9 @@ static void atlas_ready(void) {
 
 // two triangles per glyph into verts (x,y,u,v interleaved); spaces advance
 // the pen without emitting geometry
-static int emit_line(const char *text, int len, float x, float y,
-                     float gw, float gh, GLfloat *verts) {
+static int emit_line_advance(const char *text, int len, float x, float y,
+                             float gw, float gh, float advance,
+                             GLfloat *verts) {
   int quads = 0;
   for (int j = 0; j < len; j++) {
     const char c = text[j];
@@ -221,7 +222,7 @@ static int emit_line(const char *text, int len, float x, float y,
     const float v1 =
         ((float)(((idx / FONT_COLS) + 1) * FONT_CELL_H) - 0.5f) /
         (float)FONT_ATLAS_H;
-    const float gx = x + j * gw;
+    const float gx = x + j * advance;
     const float x0 = gx * 2.0f / (float)screen_width - 1.0f;
     const float x1 = (gx + gw) * 2.0f / (float)screen_width - 1.0f;
     const float y0 = 1.0f - y * 2.0f / (float)screen_height;
@@ -234,6 +235,11 @@ static int emit_line(const char *text, int len, float x, float y,
     quads++;
   }
   return quads;
+}
+
+static int emit_line(const char *text, int len, float x, float y,
+                     float gw, float gh, GLfloat *verts) {
+  return emit_line_advance(text, len, x, y, gw, gh, gw, verts);
 }
 
 static int emit_rect(float x, float y, float width, float height,
@@ -501,9 +507,10 @@ static void overlay_render(void) {
       pes_controller_custom_match_settings_active();
   const int custom_video_settings_popup =
       pes_controller_custom_video_settings_active();
+  const int custom_info_popup = pes_controller_custom_info_popup_active();
   const int custom_popup =
       custom_team_popup || custom_cpu_popup || custom_settings_popup ||
-      custom_video_settings_popup;
+      custom_video_settings_popup || custom_info_popup;
   float prompt_x = 0.0f;
   float prompt_y = 0.0f;
   const int start_prompt =
@@ -718,6 +725,112 @@ static void overlay_render(void) {
         back_key_y - text_gh * 0.5f, text_gw, text_gh,
         verts + quads * 24);
     quads += custom_key_text_quads;
+  } else if (custom_info_popup) {
+    const float panel_x = 0.22f * (float)screen_width;
+    const float panel_y = 0.18f * (float)screen_height;
+    const float panel_w = 0.56f * (float)screen_width;
+    const float panel_h = 0.64f * (float)screen_height;
+    const float panel_radius = 0.025f * (float)screen_height;
+    const float header_h = 0.12f * (float)screen_height;
+    const float footer_y = 0.65f * (float)screen_height;
+    const float back_button_w = 0.24f * (float)screen_width;
+    const float back_button_h = 0.065f * (float)screen_height;
+    const float back_button_x =
+        (float)screen_width * 0.5f - back_button_w * 0.5f;
+    const float back_button_y = 0.70f * (float)screen_height;
+    const float back_key_radius = 0.020f * (float)screen_height;
+    const float back_key_x =
+        back_button_x + 0.030f * (float)screen_width;
+    const float back_key_y = back_button_y + back_button_h * 0.5f;
+
+    custom_backdrop_quads = emit_rect(
+        0.0f, 0.0f, (float)screen_width, (float)screen_height,
+        verts + quads * 24);
+    quads += custom_backdrop_quads;
+    custom_panel_style =
+        (RoundedRectStyle){panel_w, panel_h, panel_radius};
+    custom_panel_quads = emit_round_rect_quad(
+        panel_x, panel_y, panel_w, panel_h, verts + quads * 24);
+    quads += custom_panel_quads;
+    custom_header_style =
+        (RoundedRectStyle){panel_w, header_h, panel_radius};
+    custom_header_round_quads = emit_round_rect_quad(
+        panel_x, panel_y, panel_w, header_h, verts + quads * 24);
+    quads += custom_header_round_quads;
+    custom_header_fill_quads = emit_rect(
+        panel_x, panel_y + header_h - panel_radius, panel_w, panel_radius,
+        verts + quads * 24);
+    quads += custom_header_fill_quads;
+    custom_rule_quads = emit_rect(
+        panel_x + 0.04f * (float)screen_width, footer_y,
+        panel_w - 0.08f * (float)screen_width,
+        (float)screen_height / 600.0f, verts + quads * 24);
+    quads += custom_rule_quads;
+    custom_back_button_style = (RoundedRectStyle){
+        back_button_w, back_button_h, 0.018f * (float)screen_height};
+    custom_back_button_quads = emit_round_rect_quad(
+        back_button_x, back_button_y, back_button_w, back_button_h,
+        verts + quads * 24);
+    quads += custom_back_button_quads;
+    custom_back_key_bg_quads = emit_circle_quad(
+        back_key_x, back_key_y, back_key_radius, verts + quads * 24);
+    quads += custom_back_key_bg_quads;
+
+    custom_dark_text_first_quad = quads;
+    const float title_gh = (float)screen_height / 30.0f;
+    const float title_gw =
+        title_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float text_gh = (float)screen_height / 30.0f;
+    const float text_gw =
+        text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float text_advance = text_gw * 0.84f;
+    const char *title = pes_controller_custom_info_popup_title();
+    int line_quads = emit_line(
+        title, (int)strlen(title),
+        (float)screen_width * 0.5f -
+            (float)strlen(title) * title_gw * 0.5f,
+        panel_y + (header_h - title_gh) * 0.5f, title_gw, title_gh,
+        verts + quads * 24);
+    custom_dark_text_quads += line_quads;
+    quads += line_quads;
+
+    const uint32_t line_count =
+        pes_controller_custom_info_popup_line_count();
+    const float line_step = 0.085f * (float)screen_height;
+    const float content_center_y = 0.48f * (float)screen_height;
+    const float line_y0 = content_center_y -
+                          ((float)line_count - 1.0f) * line_step * 0.5f -
+                          text_gh * 0.5f;
+    for (uint32_t item = 0; item < line_count; item++) {
+      const char *line = pes_controller_custom_info_popup_line(item);
+      const int line_len = (int)strlen(line);
+      const float line_width =
+          line_len > 0 ? text_gw + (float)(line_len - 1) * text_advance
+                       : 0.0f;
+      line_quads = emit_line_advance(
+          line, line_len,
+          (float)screen_width * 0.5f - line_width * 0.5f,
+          line_y0 + (float)item * line_step, text_gw, text_gh, text_advance,
+          verts + quads * 24);
+      custom_dark_text_quads += line_quads;
+      quads += line_quads;
+    }
+
+    const float button_gh = (float)screen_height / 38.0f;
+    const float button_gw =
+        button_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    custom_white_text_first_quad = quads;
+    custom_white_text_quads = emit_line(
+        "BACK", 4, back_key_x + 0.027f * (float)screen_width,
+        back_button_y + (back_button_h - button_gh) * 0.5f, button_gw,
+        button_gh, verts + quads * 24);
+    quads += custom_white_text_quads;
+    custom_key_text_first_quad = quads;
+    custom_key_text_quads = emit_line(
+        "B", 1, back_key_x - button_gw * 0.5f,
+        back_key_y - button_gh * 0.5f, button_gw, button_gh,
+        verts + quads * 24);
+    quads += custom_key_text_quads;
   } else if (custom_cpu_popup) {
     const float panel_x = 0.22f * (float)screen_width;
     const float panel_y = 0.08f * (float)screen_height;
@@ -914,19 +1027,27 @@ static void overlay_render(void) {
     const uint32_t focus = custom_video_settings_popup
                                ? pes_controller_custom_video_settings_focus()
                                : pes_controller_custom_match_settings_focus();
-    const float action_button_x = panel_x + 0.035f * (float)screen_width;
+    const float button_margin =
+        (custom_video_settings_popup ? 0.025f : 0.035f) *
+        (float)screen_width;
+    const float action_button_x = panel_x + button_margin;
     const float action_button_y =
         (custom_video_settings_popup ? 0.69f : 0.823f) *
         (float)screen_height;
-    const float action_button_w = 0.250f * (float)screen_width;
+    const float action_button_w =
+        (custom_video_settings_popup ? 0.160f : 0.250f) *
+        (float)screen_width;
+    const float apply_button_x =
+        (float)screen_width * 0.5f - action_button_w * 0.5f;
     const float back_button_x =
-        panel_x + panel_w - 0.035f * (float)screen_width -
-        0.250f * (float)screen_width;
-    const float back_button_w = 0.250f * (float)screen_width;
+        panel_x + panel_w - button_margin - action_button_w;
+    const float back_button_w = action_button_w;
     const float button_h = 0.060f * (float)screen_height;
     const float key_radius = 0.019f * (float)screen_height;
     const float action_key_x =
         action_button_x + 0.030f * (float)screen_width;
+    const float apply_key_x =
+        apply_button_x + 0.030f * (float)screen_width;
     const float back_key_x = back_button_x + 0.030f * (float)screen_width;
     const float key_y = action_button_y + button_h * 0.5f;
 
@@ -1007,6 +1128,13 @@ static void overlay_render(void) {
         action_button_x, action_button_y, action_button_w, button_h,
         verts + quads * 24);
     quads += custom_action_button_quads;
+    if (custom_video_settings_popup) {
+      const int apply_quads = emit_round_rect_quad(
+          apply_button_x, action_button_y, action_button_w, button_h,
+          verts + quads * 24);
+      custom_action_button_quads += apply_quads;
+      quads += apply_quads;
+    }
     custom_back_button_style = (RoundedRectStyle){
         back_button_w, button_h, 0.017f * (float)screen_height};
     custom_back_button_quads = emit_round_rect_quad(
@@ -1016,6 +1144,12 @@ static void overlay_render(void) {
     custom_action_key_bg_quads = emit_circle_quad(
         action_key_x, key_y, key_radius, verts + quads * 24);
     quads += custom_action_key_bg_quads;
+    if (custom_video_settings_popup) {
+      const int apply_key_quads = emit_circle_quad(
+          apply_key_x, key_y, key_radius, verts + quads * 24);
+      custom_action_key_bg_quads += apply_key_quads;
+      quads += apply_key_quads;
+    }
     custom_back_key_bg_quads = emit_circle_quad(
         back_key_x, key_y, key_radius, verts + quads * 24);
     quads += custom_back_key_bg_quads;
@@ -1071,6 +1205,14 @@ static void overlay_render(void) {
         verts + quads * 24);
     custom_white_text_quads += line_quads;
     quads += line_quads;
+    if (custom_video_settings_popup) {
+      line_quads = emit_line(
+          "APPLY", 5, apply_key_x + 0.026f * (float)screen_width,
+          action_button_y + (button_h - text_gh) * 0.5f, text_gw, text_gh,
+          verts + quads * 24);
+      custom_white_text_quads += line_quads;
+      quads += line_quads;
+    }
     line_quads = emit_line(
         "BACK", 4, back_key_x + 0.026f * (float)screen_width,
         action_button_y + (button_h - text_gh) * 0.5f, text_gw, text_gh,
@@ -1084,6 +1226,13 @@ static void overlay_render(void) {
         text_gw, text_gh, verts + quads * 24);
     custom_key_text_quads += line_quads;
     quads += line_quads;
+    if (custom_video_settings_popup) {
+      line_quads = emit_line(
+          "X", 1, apply_key_x - text_gw * 0.5f, key_y - text_gh * 0.5f,
+          text_gw, text_gh, verts + quads * 24);
+      custom_key_text_quads += line_quads;
+      quads += line_quads;
+    }
     line_quads = emit_line(
         "B", 1, back_key_x - text_gw * 0.5f, key_y - text_gh * 0.5f,
         text_gw, text_gh, verts + quads * 24);

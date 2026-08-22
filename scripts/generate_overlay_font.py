@@ -9,28 +9,36 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 FONT_PATH = ROOT / "assets" / "fonts" / "rajdhani" / "Rajdhani-SemiBold.ttf"
 OUTPUT_PATH = ROOT / "source" / "font_atlas.h"
-GLYPHS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-+:"
+GLYPHS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-+:&./"
 SCALE = 2
 CELL_W = 16 * SCALE
 CELL_H = 24 * SCALE
 FONT_SIZE = 22 * SCALE
+STROKE_WIDTH = 2
 
 
 def main() -> None:
     font = ImageFont.truetype(str(FONT_PATH), FONT_SIZE)
     atlas = Image.new("L", (CELL_W * len(GLYPHS), CELL_H), 0)
     draw = ImageDraw.Draw(atlas)
+    # Use one shared baseline for every glyph. Centering each glyph vertically
+    # made lowercase text uneven and placed dots in the middle of URLs.
+    _, reference_top, _, reference_bottom = draw.textbbox(
+        (0, 0), "Ag", font=font, stroke_width=STROKE_WIDTH
+    )
+    baseline_y = (
+        (CELL_H - (reference_bottom - reference_top)) // 2 - reference_top
+    )
 
     for index, glyph in enumerate(GLYPHS):
         left, top, right, bottom = draw.textbbox(
-            (0, 0), glyph, font=font, stroke_width=1
+            (0, 0), glyph, font=font, stroke_width=STROKE_WIDTH
         )
         width = right - left
-        height = bottom - top
         x = index * CELL_W + (CELL_W - width) // 2 - left
-        y = (CELL_H - height) // 2 - top
         draw.text(
-            (x, y), glyph, fill=255, font=font, stroke_width=1, stroke_fill=255
+            (x, baseline_y), glyph, fill=255, font=font,
+            stroke_width=STROKE_WIDTH, stroke_fill=255
         )
 
     pixels = list(atlas.getdata())

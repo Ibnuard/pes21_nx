@@ -59,7 +59,8 @@ PERF_TRACE ?= 0
 CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
 
-CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DNDEBUG
+CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DNDEBUG \
+			-DPES_NX_VERSION=\"$(APP_VERSION)\"
 
 ifeq ($(DIAGNOSTICS),1)
 CFLAGS	+=	-UNDEBUG -DDEBUG_LOG=1

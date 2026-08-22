@@ -12,6 +12,10 @@
 #define OBJECT_INITIALIZER_STATE_SLOTS 32
 #define OBJECT_INITIALIZER_MAX_ITEMS (1 << 20)
 
+#ifndef PES_NX_VERSION
+#define PES_NX_VERSION "0.0.0"
+#endif
+
 typedef struct {
   void *data;
   int32_t num;
@@ -165,10 +169,6 @@ static void (*exhibition_strategy_footer_original)(void *window,
 static const void *(*exhibition_user_info_get_name)(void *user_info);
 static void *(*exhibition_parameter_get_instance)(uint32_t create);
 static void (*exhibition_parameter_myclub_create_work)(void *myclub);
-static void *(*main_menu_dialog_create)(const void *name,
-                                        const unsigned char *modal);
-static void (*main_menu_dialog_set_text)(void *dialog, const void *text);
-static void (*main_menu_dialog_set_button)(void *dialog, const void *text);
 static void (*main_menu_choice_set_active)(void *choice, uint32_t active,
                                            uint32_t reaction,
                                            uint32_t flags);
@@ -189,9 +189,9 @@ static uint64_t main_menu_focus_started_ms;
 static uint64_t main_menu_focus_repeat_ms;
 static int main_menu_focus_painted;
 static const char *main_menu_titles[4] = {
-    "Exhibition", "Credits", "Training", "Settings"};
+    "Exhibition", "Credits", "2 Player", "Settings"};
 static const char *main_menu_descriptions[4] = {
-    "Local match", "Credits and support", "Practice controls",
+    "Local match", "Credits and support", "Coming Soon",
     "Graphics and FPS"};
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
@@ -447,8 +447,11 @@ static _Alignas(8) uint64_t exhibition_nested_back_started_ms;
 static _Alignas(4) uint32_t main_menu_controller_active;
 static _Alignas(4) uint32_t main_menu_graphics_active;
 static _Alignas(4) uint32_t main_menu_video_settings_open;
+static _Alignas(4) uint32_t main_menu_info_popup;
 static _Alignas(4) uint32_t main_menu_video_graphics = 1;
-static _Alignas(4) uint32_t main_menu_video_frame_rate = 1;
+// Native FRAME_RATE_MODE values are 0 = 60 fps and 1 = 30 fps.
+static _Alignas(4) uint32_t main_menu_video_frame_rate;
+static uint32_t main_menu_video_apply_held;
 static uint32_t main_menu_video_focus_index;
 static uint32_t main_menu_video_focus_direction;
 static uint64_t main_menu_video_focus_started_ms;
@@ -490,6 +493,12 @@ enum {
 };
 
 enum {
+  MAIN_MENU_INFO_CLOSED = 0,
+  MAIN_MENU_INFO_CREDITS = 1,
+  MAIN_MENU_INFO_TWO_PLAYER = 2,
+};
+
+enum {
   EXHIBITION_NESTED_NONE = 0,
   EXHIBITION_NESTED_SHORT_LIST = 1,
   EXHIBITION_NESTED_LONG_LIST = 2,
@@ -510,7 +519,9 @@ static void exhibition_select_team(uint32_t side, uint32_t team_id);
 static void exhibition_adjust_match_setting(int direction);
 static uint64_t main_menu_focus_now_ms(void);
 static void main_menu_video_adjust(int direction);
+static void main_menu_video_apply_current(void);
 static void main_menu_video_close(void);
+static void main_menu_info_close(void);
 static void main_menu_apply_focus(uint32_t index);
 static void *exhibition_find_root_node(void *root, const char *name);
 static void pes_virtual_cursor_activate(uint32_t context, uint32_t x,
@@ -2124,6 +2135,14 @@ int pes_controller_menu_touch_target(float *normalized_x,
   }
   if (__atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE))
     return 0;
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+      MAIN_MENU_INFO_CLOSED) {
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.18f;
+    return 1;
+  }
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     // A is consumed by the custom overlay after this inert synthetic touch.
     if (normalized_x)
@@ -2202,6 +2221,14 @@ int pes_controller_menu_touch_target(float *normalized_x,
 
 int pes_controller_menu_back_target(float *normalized_x,
                                     float *normalized_y) {
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+      MAIN_MENU_INFO_CLOSED) {
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.18f;
+    return 1;
+  }
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     if (normalized_x)
       *normalized_x = 0.50f;
@@ -2242,6 +2269,11 @@ int pes_controller_menu_back_target(float *normalized_x,
 }
 
 void pes_controller_menu_back_pressed(void) {
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+      MAIN_MENU_INFO_CLOSED) {
+    main_menu_info_close();
+    return;
+  }
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     main_menu_video_close();
     return;
@@ -2324,7 +2356,9 @@ int pes_controller_selector_rect(float *x, float *y, float *width,
   float rect_y = 0.0f;
   float rect_width = 0.0f;
   float rect_height = 0.0f;
-  if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+          MAIN_MENU_INFO_CLOSED ||
+      __atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     return 0;
   } else if (pes_main_menu_controller_active()) {
     const uint32_t index = pes_main_menu_focus_index();
@@ -2575,8 +2609,49 @@ const char *pes_controller_custom_video_settings_value(uint32_t index) {
                : "LOW";
   if (index == 1)
     return __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE)
-               ? "60 FPS"
-               : "30 FPS";
+               ? "30 FPS"
+               : "60 FPS";
+  return "";
+}
+
+int pes_controller_custom_info_popup_active(void) {
+  return __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+         MAIN_MENU_INFO_CLOSED;
+}
+
+const char *pes_controller_custom_info_popup_title(void) {
+  const uint32_t popup =
+      __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE);
+  if (popup == MAIN_MENU_INFO_CREDITS)
+    return "CREDITS";
+  if (popup == MAIN_MENU_INFO_TWO_PLAYER)
+    return "2 PLAYER";
+  return "";
+}
+
+uint32_t pes_controller_custom_info_popup_line_count(void) {
+  const uint32_t popup =
+      __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE);
+  if (popup == MAIN_MENU_INFO_CREDITS)
+    return 3;
+  if (popup == MAIN_MENU_INFO_TWO_PLAYER)
+    return 1;
+  return 0;
+}
+
+const char *pes_controller_custom_info_popup_line(uint32_t index) {
+  const uint32_t popup =
+      __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE);
+  if (popup == MAIN_MENU_INFO_CREDITS) {
+    static const char *const lines[] = {
+        "Port & Mod By Ibnuard",
+        "Support : androswitch.vercel.app",
+        "Version: " PES_NX_VERSION,
+    };
+    return index < 3 ? lines[index] : "";
+  }
+  if (popup == MAIN_MENU_INFO_TWO_PLAYER)
+    return index == 0 ? "Coming Soon" : "";
   return "";
 }
 
@@ -2594,6 +2669,9 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
     debugPrintf("input: startup prompt accepted via controller A\n");
     return;
   }
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+      MAIN_MENU_INFO_CLOSED)
+    return;
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     const uint64_t opened = __atomic_load_n(&main_menu_video_opened_ms,
                                              __ATOMIC_ACQUIRE);
@@ -2686,11 +2764,20 @@ int pes_controller_menu_physical_tap(float normalized_x,
                 normalized_x, normalized_y);
     return 0;
   }
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+      MAIN_MENU_INFO_CLOSED) {
+    if (normalized_y >= 0.68f && normalized_y <= 0.80f &&
+        normalized_x >= 0.36f && normalized_x <= 0.64f)
+      main_menu_info_close();
+    return 0;
+  }
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     if (normalized_y >= 0.68f && normalized_y <= 0.78f) {
-      if (normalized_x >= 0.50f && normalized_x <= 0.78f)
+      if (normalized_x >= 0.61f && normalized_x <= 0.78f)
         main_menu_video_close();
-      else if (normalized_x >= 0.22f && normalized_x < 0.50f)
+      else if (normalized_x >= 0.41f && normalized_x <= 0.59f)
+        main_menu_video_apply_current();
+      else if (normalized_x >= 0.22f && normalized_x <= 0.39f)
         main_menu_video_adjust(2);
       return 0;
     }
@@ -3223,23 +3310,6 @@ static void *exhibition_find_root_node(void *root, const char *name) {
 static void exhibition_make_short_string(unsigned char object[24],
                                           const char *text);
 
-static void main_menu_make_string_view(unsigned char object[24],
-                                       const char *text) {
-  const size_t length = text ? strlen(text) : 0;
-  if (length <= 23) {
-    exhibition_make_short_string(object, text);
-    return;
-  }
-
-  // Cobra uses libc++'s 24-byte string layout. A long read-only view is safe
-  // here because the dialog setters synchronously copy the supplied text.
-  const uint64_t long_marker = 1;
-  memset(object, 0, 24);
-  memcpy(object, &long_marker, sizeof(long_marker));
-  memcpy(object + 8, &length, sizeof(length));
-  memcpy(object + 16, &text, sizeof(text));
-}
-
 static void main_menu_set_tile_text(void *tile, const char *title,
                                     const char *description) {
   if (!tile || !exhibition_text_set_string)
@@ -3320,10 +3390,31 @@ static void main_menu_video_apply(uint32_t index, uint32_t value) {
     }
     if (main_menu_set_frame_rate_mode)
       main_menu_set_frame_rate_mode(value);
+
+    // FrameRateController eventually mirrors Status to this console variable,
+    // but issuing the same UE command here makes the selection effective in
+    // the current main-menu frame as well.
+    void *bridge = main_menu_get_ue_bridge ? main_menu_get_ue_bridge() : NULL;
+    if (bridge) {
+      void **vtable = *(void ***)bridge;
+      if (vtable && vtable[2])
+        ((void (*)(void *, const char *))vtable[2])(
+            bridge, value == 0 ? "t.MaxFPS 60" : "t.MaxFPS 30");
+    }
     __atomic_store_n(&main_menu_video_frame_rate, value, __ATOMIC_RELEASE);
     debugPrintf("UE4 menu: custom video Frame Rate=%s saved\n",
-                value ? "60 FPS" : "30 FPS");
+                value ? "30 FPS" : "60 FPS");
   }
+}
+
+static void main_menu_video_apply_current(void) {
+  if (!__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE))
+    return;
+  main_menu_video_apply(
+      0, __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE));
+  main_menu_video_apply(
+      1, __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE));
+  debugPrintf("UE4 menu: custom video settings explicitly applied\n");
 }
 
 static void main_menu_video_adjust(int direction) {
@@ -3339,8 +3430,15 @@ static void main_menu_video_adjust(int direction) {
           : __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE);
   // Left/right select an absolute value, so holding an arrow can never make a
   // two-value row flicker. Direction 2 is the explicit A/tap toggle action.
-  const uint32_t value = direction == 2 ? (current ? 0u : 1u)
-                                        : (direction > 0 ? 1u : 0u);
+  uint32_t value;
+  if (direction == 2) {
+    value = current ? 0u : 1u;
+  } else if (focus == 1) {
+    // FPS enum order is inverted: left=30 (1), right=60 (0).
+    value = direction > 0 ? 0u : 1u;
+  } else {
+    value = direction > 0 ? 1u : 0u;
+  }
   if (value != current)
     main_menu_video_apply(focus, value);
 }
@@ -3353,10 +3451,10 @@ static void main_menu_video_open(void) {
     graphics = 1;
 
   // The active Status mode mirrors the persisted frame-rate selection. The
-  // stock enum is 0 = 30 fps and 1 = 60 fps.
+  // stock enum is 0 = 60 fps and 1 = 30 fps (2 is the unused 120 fps mode).
   uint32_t frame_rate = main_menu_get_frame_rate_mode
                             ? main_menu_get_frame_rate_mode()
-                            : 1u;
+                            : 0u;
   if (frame_rate > 1)
     frame_rate = 1;
   __atomic_store_n(&main_menu_video_graphics, graphics, __ATOMIC_RELEASE);
@@ -3364,6 +3462,7 @@ static void main_menu_video_open(void) {
                    __ATOMIC_RELEASE);
   main_menu_video_focus_index = 0;
   main_menu_video_focus_direction = 0;
+  main_menu_video_apply_held = 0;
   __atomic_store_n(&main_menu_video_opened_ms, main_menu_focus_now_ms(),
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_video_settings_open, 1, __ATOMIC_RELEASE);
@@ -3377,9 +3476,30 @@ static void main_menu_video_close(void) {
     return;
   main_menu_video_focus_index = 0;
   main_menu_video_focus_direction = 0;
+  main_menu_video_apply_held = 0;
   __atomic_store_n(&main_menu_video_opened_ms, 0, __ATOMIC_RELEASE);
   main_menu_apply_focus(3);
   debugPrintf("UE4 menu: custom Video Settings closed\n");
+}
+
+static void main_menu_info_open(uint32_t popup) {
+  if (popup != MAIN_MENU_INFO_CREDITS &&
+      popup != MAIN_MENU_INFO_TWO_PLAYER)
+    return;
+  __atomic_store_n(&main_menu_info_popup, popup, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                   __ATOMIC_RELEASE);
+  debugPrintf("UE4 menu: custom info opened type=%u\n", popup);
+}
+
+static void main_menu_info_close(void) {
+  const uint32_t popup = __atomic_exchange_n(
+      &main_menu_info_popup, MAIN_MENU_INFO_CLOSED, __ATOMIC_ACQ_REL);
+  if (popup == MAIN_MENU_INFO_CLOSED)
+    return;
+  main_menu_apply_focus(popup == MAIN_MENU_INFO_CREDITS ? 1u : 2u);
+  debugPrintf("UE4 menu: custom info closed type=%u\n", popup);
 }
 
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
@@ -3392,7 +3512,21 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
       (buttons & (1u << 1)) && !(previous_buttons & (1u << 1)))
     return;
 
+  if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+      MAIN_MENU_INFO_CLOSED)
+    return;
+
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    const uint32_t apply_held = (buttons & (1u << 3)) != 0;
+    if (apply_held) {
+      if (!main_menu_video_apply_held)
+        main_menu_video_apply_current();
+      main_menu_video_apply_held = 1;
+      main_menu_video_focus_direction = 0;
+      return;
+    }
+    main_menu_video_apply_held = 0;
+
     uint32_t direction = 0;
     if (buttons & (1u << 10))
       direction = 1;
@@ -3482,6 +3616,8 @@ void pes_main_menu_simplify(void *window) {
     return;
 
   __atomic_store_n(&main_menu_graphics_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_info_popup, MAIN_MENU_INFO_CLOSED,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
@@ -3538,10 +3674,20 @@ uintptr_t pes_main_menu_selected_entry(void *window,
 
   uint32_t choice = UINT32_MAX;
   memcpy(&choice, (const unsigned char *)touch_info + 8, sizeof(choice));
-  if (choice == 0 || choice == 2)
+  if (choice == 0) {
     __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
-  if (choice != 1 && choice != 3)
     return main_menu_selected_resume;
+  }
+
+  if (choice == 1) {
+    main_menu_info_open(MAIN_MENU_INFO_CREDITS);
+    return 0;
+  }
+
+  if (choice == 2) {
+    main_menu_info_open(MAIN_MENU_INFO_TWO_PLAYER);
+    return 0;
+  }
 
   if (choice == 3) {
     main_menu_video_open();
@@ -3550,34 +3696,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
                      __ATOMIC_RELEASE);
     return 0;
   }
-
-  if (!main_menu_dialog_create || !main_menu_dialog_set_text ||
-      !main_menu_dialog_set_button || !exhibition_task_add_unit)
-    return main_menu_selected_resume;
-
-  static const char credits_body[] =
-      "Credits\n\n"
-      "Port & Mod by Ibnuard\n"
-      "https://saweria.co/ibnuard\n"
-      "Support for more update";
-  const char *body = credits_body;
-
-  unsigned char dialog_name[24];
-  unsigned char dialog_body[24];
-  unsigned char dialog_button[24];
-  unsigned char modal = 0;
-  exhibition_make_short_string(dialog_name, "popupCredits");
-  main_menu_make_string_view(dialog_body, body);
-  exhibition_make_short_string(dialog_button, "OK");
-  void *dialog = main_menu_dialog_create(dialog_name, &modal);
-  if (!dialog)
-    return main_menu_selected_resume;
-
-  main_menu_dialog_set_text(dialog, dialog_body);
-  main_menu_dialog_set_button(dialog, dialog_button);
-  exhibition_task_add_unit(window, dialog);
-  debugPrintf("UE4 menu: choice=%u opened info dialog=%p\n", choice, dialog);
-  return 0;
+  return main_menu_selected_resume;
 }
 
 static void *exhibition_find_holder_node(void *holder, const char *name) {
@@ -4087,6 +4206,8 @@ uint32_t pes_mobile_control_context(int *mode) {
 int pes_controller_menu_active(void) {
   return pes_controller_start_prompt(NULL, NULL) ||
          __atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+             MAIN_MENU_INFO_CLOSED ||
          __atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
@@ -4399,7 +4520,9 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
     memcpy(pad + 140 + 16 * 4, directions, sizeof(directions));
     pes_main_menu_pad_event(current, previous);
     pes_exhibition_search_pad_event(current, previous);
-    if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
+    if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+            MAIN_MENU_INFO_CLOSED ||
+        __atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
       // Navigation was consumed by the custom overlay. Keep its buttons and
       // axes away from the four native tiles underneath the modal.
       current &= ~buttons;
@@ -5160,15 +5283,6 @@ void install_ue4_hooks(so_module *module) {
   exhibition_task_add_unit =
       (void *)so_find_addr_rx(module,
           "_ZN3sys8TaskUnit7AddUnitEPS0_");
-  main_menu_dialog_create =
-      (void *)so_find_addr_rx(module,
-          "_ZN10menusystem13DialogConfirm12CreateObjectERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEERKb");
-  main_menu_dialog_set_text =
-      (void *)so_find_addr_rx(module,
-          "_ZN10menusystem10DialogBase7SetTextERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
-  main_menu_dialog_set_button =
-      (void *)so_find_addr_rx(module,
-          "_ZN10menusystem13DialogConfirm13SetButtonTextERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
   main_menu_choice_set_active =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node9SetActiveEbbj");

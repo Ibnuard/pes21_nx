@@ -736,9 +736,11 @@ static void emit_menu_pad_input(const HidAnalogStickState *left_stick,
   cobra_pad_set_input(mapped, up, down, left, right, connected);
 }
 
-static void emit_virtual_cursor_pad_input(int connected, u64 buttons) {
-  const u64 reserved = HidNpadButton_A | HidNpadButton_ZL |
-                       HidNpadButton_ZR;
+static void emit_virtual_cursor_pad_input(int connected, u64 buttons,
+                                          int cursor_context) {
+  u64 reserved = HidNpadButton_A | HidNpadButton_ZL | HidNpadButton_ZR;
+  if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE)
+    reserved |= HidNpadButton_B;
   const uint32_t mapped = menu_pad_buttons(buttons & ~reserved, NULL, 0);
   cobra_pad_set_input(mapped, 0, 0, 0, 0, connected);
 }
@@ -1079,17 +1081,20 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
                                              uint64_t now_ms, int cursor_context) {
   static uint64_t cursor_previous_ms;
   static uint64_t play_until_ms;
+  static uint64_t back_until_ms;
   static uint32_t generation_seen;
   if (generation_seen != synthetic_input_generation) {
     generation_seen = synthetic_input_generation;
     cursor_previous_ms = 0;
     play_until_ms = 0;
+    back_until_ms = 0;
   }
   float cursor_x = 0.5f;
   float cursor_y = 0.45f;
   if (!pes_controller_gameplan_cursor_position(&cursor_x, &cursor_y)) {
     cursor_previous_ms = 0;
     play_until_ms = 0;
+    back_until_ms = 0;
     return;
   }
 
@@ -1110,7 +1115,14 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   const int cursor_held = connected &&
                           (buttons & (HidNpadButton_ZL |
                                       HidNpadButton_ZR)) != 0;
-  if (cursor_held)
+  const int b_pressed = connected && (buttons & HidNpadButton_B) != 0 &&
+                        (previous_hid_buttons & HidNpadButton_B) == 0;
+  if (b_pressed && cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
+      back_until_ms <= now_ms)
+    back_until_ms = now_ms + 90;
+  const int back_active = back_until_ms > now_ms;
+
+  if (cursor_held && !back_active)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_CURSOR,
                        cursor_x * (float)screen_width,
                        cursor_y * (float)screen_height);
@@ -1120,7 +1132,11 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   if (a_pressed && play_until_ms <= now_ms &&
       cursor_context != PES_VIRTUAL_CURSOR_PAUSE)
     play_until_ms = now_ms + 90;
-  if (play_until_ms > now_ms)
+  if (back_active)
+    touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
+                       0.055f * (float)screen_width,
+                       0.944f * (float)screen_height);
+  else if (play_until_ms > now_ms)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
                        0.865f * (float)screen_width,
                        0.944f * (float)screen_height);
@@ -1499,7 +1515,7 @@ void android_input_poll(void) {
   else if (replay_active)
     emit_replay_pad_input(have_left_stick, replay_pad_buttons);
   else if (gameplan_cursor_active)
-    emit_virtual_cursor_pad_input(have_left_stick, buttons);
+    emit_virtual_cursor_pad_input(have_left_stick, buttons, cursor_context);
   else if (!gameplay_active && pes_controller_menu_active())
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,
                         have_left_stick);
