@@ -86,6 +86,10 @@ int pes_controller_inmatch_tutorial_active(void);
 void pes_controller_inmatch_tutorial_play_request(void);
 uint32_t pes_controller_penalty_role(void);
 void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot);
+// Read the controller surface last published by the 60 Hz input thread.
+// Render code must use this cached form so it does not repeat native lifecycle
+// expiry checks and atomic publication work on every eglSwap.
+void pes_controller_surface_cached_snapshot(PesControllerSnapshot *snapshot);
 void pes_controller_demo_skip_request(void);
 void pes_controller_setplay_request(uint32_t button_type,
                                     uint32_t generation);

@@ -748,6 +748,7 @@ static void emit_virtual_cursor_pad_input(int connected, u64 buttons,
                                           int cursor_context) {
   u64 reserved = HidNpadButton_A | HidNpadButton_ZL | HidNpadButton_ZR;
   if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
+      cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN ||
       cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER)
     reserved |= HidNpadButton_B;
   const uint32_t mapped = menu_pad_buttons(buttons & ~reserved, NULL, 0);

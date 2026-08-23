@@ -6134,6 +6134,21 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
         &match_replay_feedback_value, __ATOMIC_ACQUIRE);
 }
 
+void pes_controller_surface_cached_snapshot(PesControllerSnapshot *snapshot) {
+  if (!snapshot)
+    return;
+  memset(snapshot, 0, sizeof(*snapshot));
+  const uint64_t word = __atomic_load_n(&match_controller_surface_word,
+                                        __ATOMIC_ACQUIRE);
+  const uint32_t payload = (uint32_t)word;
+  snapshot->generation = (uint32_t)(word >> 32);
+  snapshot->surface = payload & 0x7u;
+  snapshot->setplay_context = (payload >> 3) & 0x7u;
+  snapshot->setplay_options = (payload >> 6) & 0xfu;
+  snapshot->setplay_button_mask = (payload >> 10) & 0xffu;
+  snapshot->goal_player = (payload >> 18) & 1u;
+}
+
 static uint32_t pes_match_goalkick_main(void *unit, const void *input,
                                         uint32_t kind) {
   const uint32_t result = match_goalkick_main_original
@@ -6521,7 +6536,18 @@ uint32_t pes_inplay_ball_position_broadcast(
                                     camera, blend, home_away, target_position,
                                     zoom, active)
                               : 0;
-  if (!camera || !target_position || !match_ball_info_get_trans)
+  if (!active || !camera || !target_position || !match_ball_info_get_trans)
+    return result;
+
+  const uint64_t now = armGetSystemTick();
+  const uint64_t sampled_tick = __atomic_load_n(
+      &match_camera_ball_seen_tick, __ATOMIC_ACQUIRE);
+  // Some camera paths evaluate the same target more than once inside one
+  // rendered frame. Sampling BallInfo again only adds game-thread work and can
+  // perturb the velocity estimate. One sample per ~8 ms preserves both 60 and
+  // 30 fps behaviour while eliminating those duplicate sub-frame calls.
+  if (sampled_tick &&
+      armTicksToNs(now - sampled_tick) < 8000000ULL)
     return result;
 
   void *ball_info = NULL;
@@ -6532,7 +6558,6 @@ uint32_t pes_inplay_ball_position_broadcast(
       !isfinite(ball[2]))
     return result;
 
-  const uint64_t now = armGetSystemTick();
   const uint64_t previous_tick = __atomic_exchange_n(
       &match_camera_ball_seen_tick, now, __ATOMIC_ACQ_REL);
   float travel_squared = 0.0f;
@@ -6556,9 +6581,18 @@ uint32_t pes_inplay_ball_position_broadcast(
   const float planar_lag_squared = lag_x * lag_x + lag_y * lag_y;
   if (travel_squared >= 0.22f * 0.22f &&
       planar_lag_squared >= 12.0f * 12.0f) {
-    target_position[0] = ball[0];
-    target_position[1] = ball[1];
-    target_position[2] = ball[2];
+    // A hard assignment made the whole pitch appear to drop frames even while
+    // the renderer reported a stable 60 fps. Preserve the fast-ball recovery,
+    // but blend progressively: modest lag gets a gentle correction while an
+    // escaped keeper throw converges much more aggressively.
+    float correction = 0.20f;
+    if (planar_lag_squared >= 24.0f * 24.0f)
+      correction = 0.40f;
+    if (planar_lag_squared >= 40.0f * 40.0f)
+      correction = 0.65f;
+    target_position[0] += (ball[0] - target_position[0]) * correction;
+    target_position[1] += (ball[1] - target_position[1]) * correction;
+    target_position[2] += (ball[2] - target_position[2]) * correction;
   }
   return result;
 }
@@ -6849,8 +6883,12 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
     const uint64_t gameplan_seen = __atomic_load_n(&match_gameplan_seen_tick,
                                                    __ATOMIC_ACQUIRE);
     if (!gameplan_seen ||
-        armTicksToNs(armGetSystemTick() - gameplan_seen) > 500000000ULL)
+        armTicksToNs(armGetSystemTick() - gameplan_seen) > 500000000ULL) {
+      // A live Pause root is not the Game Plan child. Clear any route left by
+      // the previous visit before drawing the native Back helper.
+      __atomic_store_n(&match_gameplan_pause_route, 0, __ATOMIC_RELEASE);
       pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_PAUSE, 32768, 32768);
+    }
     if (__atomic_exchange_n(&match_pause_back_requested, 0,
                             __ATOMIC_ACQ_REL) &&
         match_pause_pad_event_back)
@@ -6865,14 +6903,17 @@ void pes_controller_pause_back_request(void) {
 }
 
 static void pes_match_pause_destroyed(void *window) {
-  __atomic_store_n(&match_pause_seen_tick, 0, __ATOMIC_RELEASE);
+  // Keep the last Pause heartbeat briefly. The native Pause object is
+  // destroyed before its MyClubSquadEdit child receives the first Update, so
+  // clearing this here made that child look like the pre-match Game Plan and
+  // left an A helper at the bottom-right. The normal 5 s age check in the child
+  // safely expires this route after returning to gameplay.
   __atomic_store_n(&match_pause_back_requested, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_action, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_focus, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_page, MATCH_PAUSE_PAGE_ROOT,
                    __ATOMIC_RELEASE);
-  __atomic_store_n(&match_gameplan_pause_route, 0, __ATOMIC_RELEASE);
   match_gameplan_squad_data = NULL;
   match_gameplan_player_count = 0;
   uint32_t expected = PES_VIRTUAL_CURSOR_PAUSE;

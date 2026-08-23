@@ -497,7 +497,10 @@ static void overlay_render(void) {
   }
 
   PesControllerSnapshot controller_snapshot = {0};
-  pes_controller_surface_snapshot(&controller_snapshot);
+  // android_input_poll already resolves native replay/goal/set-play lifetimes
+  // at 60 Hz. Reuse that published word here instead of repeating all timeout
+  // checks and CAS work on the render thread for every eglSwap.
+  pes_controller_surface_cached_snapshot(&controller_snapshot);
   const int goal_demo_active =
       controller_snapshot.surface == PES_CONTROLLER_SURFACE_GOAL_DEMO;
   const int goal_demo_player =
@@ -1523,7 +1526,12 @@ static void overlay_render(void) {
     const int back_only_cursor =
         pause_cursor || gameplan_pause_route ||
         virtual_cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER;
-    const float helper_x = 0.835f * (float)screen_width;
+    // Pause and its Game Plan child both use the native Back footer at the
+    // bottom-left. Keep their B badge attached to that footer; only pre-match
+    // Game Plan owns the bottom-right A/Play action.
+    const float helper_x =
+        (pause_cursor || gameplan_pause_route ? 0.055f : 0.835f) *
+        (float)screen_width;
     const float helper_y = 0.944f * (float)screen_height;
     const float helper_radius = 0.019f * (float)screen_height;
     gameplan_helper_circle_first_quad = quads;
