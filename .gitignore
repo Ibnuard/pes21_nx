@@ -27,6 +27,7 @@
 *.odex
 *.vdex
 *.bin
+
 !data/silent.bin
 /assets/
 /Download/
@@ -71,9 +72,11 @@ shadercache/
 *.gz
 *.bz2
 *.xz
+*.xapk
 
 # Editor and OS files
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+.codex-*

@@ -391,6 +391,27 @@ static int emit_circle_quad(float center_x, float center_y, float radius,
   return 1;
 }
 
+static int emit_triangle(float x0, float y0, float x1, float y1, float x2,
+                         float y2, GLfloat *verts);
+
+// Geometry-backed helper circle. Some Switch GPU/driver combinations can
+// leave the fragment-mask circle uniform stale after the game's own pass; a
+// fan of solid triangles is deterministic and cannot fall back to a square.
+static int emit_filled_circle(float center_x, float center_y, float radius,
+                              GLfloat *verts) {
+  int triangles = 0;
+  const int segments = 24;
+  for (int i = 0; i < segments; i++) {
+    const float a0 = (float)i * 6.28318530718f / (float)segments;
+    const float a1 = (float)(i + 1) * 6.28318530718f / (float)segments;
+    triangles += emit_triangle(
+        center_x, center_y, center_x + cosf(a0) * radius,
+        center_y + sinf(a0) * radius, center_x + cosf(a1) * radius,
+        center_y + sinf(a1) * radius, verts + triangles * 24);
+  }
+  return triangles;
+}
+
 static int emit_outline(float x, float y, float width, float height,
                         float thickness, GLfloat *verts) {
   int quads = 0;
@@ -458,46 +479,57 @@ static struct {
 } fps;
 
 static void overlay_render(void) {
-  const u64 now = armGetSystemTick();
-  const u64 freq = armGetSystemTickFreq();
-  fps.frames++;
-  if (!fps.window_start)
-    fps.window_start = now;
-  if (now - fps.window_start >= freq / 2) {
-    const float rate = (float)fps.frames * (float)freq / (float)(now - fps.window_start);
-    snprintf(fps.text, sizeof(fps.text), "%.0f", rate);
-    fps.frames = 0;
-    fps.window_start = now;
+  if (config.show_fps) {
+    const u64 now = armGetSystemTick();
+    const u64 freq = armGetSystemTickFreq();
+    fps.frames++;
+    if (!fps.window_start)
+      fps.window_start = now;
+    if (now - fps.window_start >= freq / 2) {
+      const float rate = (float)fps.frames * (float)freq /
+                         (float)(now - fps.window_start);
+      snprintf(fps.text, sizeof(fps.text), "%.0f", rate);
+      fps.frames = 0;
+      fps.window_start = now;
+    }
+  } else if (fps.window_start || fps.frames || fps.text[0]) {
+    memset(&fps, 0, sizeof(fps));
   }
 
-  // Keep a compact match-only readout so the active COM level is visible
-  // without bringing back the full controller help text.
-  const int control_mode = pes_mobile_control_active_mode();
-  const int replay_active = pes_controller_replay_active();
-  const uint32_t replay_feedback = pes_controller_replay_feedback();
-  const char *replay_feedback_text = "";
-  if (replay_feedback == PES_REPLAY_FEEDBACK_GOAL_CELEBRATION)
-    replay_feedback_text = "A GOAL CELEBRATION";
-  else if (replay_feedback == PES_REPLAY_FEEDBACK_B_SKIP)
-    replay_feedback_text = "B SKIP";
-  else if (replay_feedback == PES_REPLAY_FEEDBACK_A_SKIP)
-    replay_feedback_text = "A SKIP";
-  else if (replay_feedback == PES_REPLAY_FEEDBACK_SKIP)
-    replay_feedback_text = "SKIP";
-  char difficulty_text[32];
-  difficulty_text[0] = '\0';
-  if (control_mode != PES_MOBILE_CONTROL_UNKNOWN || replay_active) {
-    const uint32_t level = pes_controller_custom_cpu_popup_value();
-    const char *label = pes_controller_custom_cpu_popup_label(level);
-    if (label && label[0])
-      snprintf(difficulty_text, sizeof(difficulty_text), "COM: %s", label);
-  }
-
+  PesControllerSnapshot controller_snapshot = {0};
+  pes_controller_surface_snapshot(&controller_snapshot);
+  const int goal_demo_active =
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_GOAL_DEMO;
+  const int goal_demo_player =
+      goal_demo_active && controller_snapshot.goal_player;
+  // Replay and generic demo input remains fully active, but does not need a
+  // controller legend. Those short-lived surfaces can alternate around every
+  // transition and made the old "ANY BUTTON - SKIP" text visibly blink. Keep
+  // a helper only for the interactive GoalDemo page where A/B have distinct
+  // meanings.
+  const int cinematic_helper_active = goal_demo_active;
+  const int cinematic_goal_actions = goal_demo_player;
+  const int cinematic_goal_skip_only =
+      goal_demo_active && !goal_demo_player;
+  uint32_t setplay_context =
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY
+          ? controller_snapshot.setplay_context
+          : PES_SETPLAY_NONE;
+  uint32_t setplay_options =
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY
+          ? controller_snapshot.setplay_options
+          : 0;
+  const int pause_camera_active = pes_controller_pause_camera_active();
+  const int tutorial_play_active =
+      pes_controller_inmatch_tutorial_active();
+  const uint32_t penalty_role = pes_controller_penalty_role();
+  const int set_piece_selector =
+      pes_controller_set_piece_selector_active();
   float selector_x = 0.0f;
   float selector_y = 0.0f;
   float selector_width = 0.0f;
   float selector_height = 0.0f;
-  const int selector = pes_controller_selector_rect(
+  const int selector = !set_piece_selector && pes_controller_selector_rect(
       &selector_x, &selector_y, &selector_width, &selector_height);
   const int selector_custom =
       selector && pes_controller_selector_custom_style();
@@ -510,7 +542,7 @@ static void overlay_render(void) {
   const int custom_info_popup = pes_controller_custom_info_popup_active();
   const int custom_popup =
       custom_team_popup || custom_cpu_popup || custom_settings_popup ||
-      custom_video_settings_popup || custom_info_popup;
+      custom_video_settings_popup || custom_info_popup || set_piece_selector;
   float prompt_x = 0.0f;
   float prompt_y = 0.0f;
   const int start_prompt =
@@ -518,12 +550,22 @@ static void overlay_render(void) {
   float gameplan_cursor_x = 0.0f;
   float gameplan_cursor_y = 0.0f;
   const int virtual_cursor_context = pes_controller_virtual_cursor_context();
-  const int gameplan_cursor = pes_controller_gameplan_cursor_position(
-      &gameplan_cursor_x, &gameplan_cursor_y);
+  const int gameplan_cursor =
+      !set_piece_selector && !tutorial_play_active &&
+      pes_controller_gameplan_cursor_position(&gameplan_cursor_x,
+                                              &gameplan_cursor_y);
 
-  if ((!config.show_fps || !fps.text[0]) && !difficulty_text[0] && !selector &&
+  // The full-screen custom selector owns the whole presentation. Do not let
+  // the underlying match set-play legend bleed through its footer.
+  if (set_piece_selector || tutorial_play_active) {
+    setplay_context = PES_SETPLAY_NONE;
+    setplay_options = 0;
+  }
+
+  if ((!config.show_fps || !fps.text[0]) && !selector &&
       !start_prompt && !custom_popup && !gameplan_cursor &&
-      !replay_feedback_text[0])
+      !setplay_options && !pause_camera_active && !tutorial_play_active &&
+      !cinematic_helper_active && penalty_role == PES_PENALTY_NONE)
     return;
   if (!gl_init())
     return;
@@ -557,6 +599,14 @@ static void overlay_render(void) {
   int gameplan_helper_circle_quads = 0;
   int gameplan_helper_text_first_quad = 0;
   int gameplan_helper_text_quads = 0;
+  int setplay_helper_circle_first_quad = 0;
+  int setplay_helper_circle_quads = 0;
+  int setplay_helper_text_first_quad = 0;
+  int setplay_helper_text_quads = 0;
+  int cinematic_helper_circle_first_quad = 0;
+  int cinematic_helper_circle_quads = 0;
+  int cinematic_helper_text_first_quad = 0;
+  int cinematic_helper_text_quads = 0;
   int gameplan_cursor_first_quad = 0;
   int gameplan_cursor_quads = 0;
   RoundedRectStyle custom_panel_style = {0};
@@ -831,6 +881,206 @@ static void overlay_render(void) {
         back_key_y - button_gh * 0.5f, button_gw, button_gh,
         verts + quads * 24);
     quads += custom_key_text_quads;
+  } else if (set_piece_selector) {
+    // Fully cover TouchKickerSelect. Its native scrolling list is not usable
+    // from a docked controller, so this surface presents a stable 2x4 page
+    // and keeps all navigation/actions in the Joy-Con footer.
+    const float panel_x = 0.0f;
+    const float panel_y = 0.0f;
+    const float panel_w = (float)screen_width;
+    const float panel_h = (float)screen_height;
+    const float header_h = 0.125f * (float)screen_height;
+    const float grid_x = 0.055f * (float)screen_width;
+    const float grid_y = 0.165f * (float)screen_height;
+    const float grid_w = 0.890f * (float)screen_width;
+    const float column_gap = 0.025f * (float)screen_width;
+    const float row_gap = 0.014f * (float)screen_height;
+    const float card_w = (grid_w - column_gap) * 0.5f;
+    const float card_h = 0.132f * (float)screen_height;
+    const float footer_y = 0.790f * (float)screen_height;
+    const float button_y = 0.865f * (float)screen_height;
+    const float button_h = 0.068f * (float)screen_height;
+    const float button_w = 0.175f * (float)screen_width;
+    const float button_gap = 0.018f * (float)screen_width;
+    const float back_x = 0.945f * (float)screen_width - button_w;
+    const float action_x = back_x - button_gap - button_w;
+    const float key_radius = 0.019f * (float)screen_height;
+    const float action_key_x = action_x + 0.030f * (float)screen_width;
+    const float back_key_x = back_x + 0.030f * (float)screen_width;
+    const float key_y = button_y + button_h * 0.5f;
+    const uint32_t count = pes_controller_set_piece_selector_count();
+    uint32_t focus = pes_controller_set_piece_selector_focus();
+    if (count && focus >= count)
+      focus = count - 1u;
+    const uint32_t page = focus / 8u;
+    const uint32_t page_start = page * 8u;
+    const uint32_t page_count = count ? (count + 7u) / 8u : 1u;
+    const uint32_t visible_count =
+        count > page_start
+            ? ((count - page_start) < 8u ? count - page_start : 8u)
+            : 0u;
+    const uint32_t local_focus = focus - page_start;
+    const float selected_x =
+        grid_x + (local_focus & 1u) * (card_w + column_gap);
+    const float selected_y =
+        grid_y + (local_focus / 2u) * (card_h + row_gap);
+
+    custom_backdrop_quads = emit_rect(
+        0.0f, 0.0f, (float)screen_width, (float)screen_height,
+        verts + quads * 24);
+    quads += custom_backdrop_quads;
+    custom_panel_style = (RoundedRectStyle){panel_w, panel_h, 0.0f};
+    custom_panel_quads = emit_round_rect_quad(
+        panel_x, panel_y, panel_w, panel_h, verts + quads * 24);
+    quads += custom_panel_quads;
+    custom_header_style = (RoundedRectStyle){panel_w, header_h, 0.0f};
+    custom_header_round_quads = emit_round_rect_quad(
+        panel_x, panel_y, panel_w, header_h, verts + quads * 24);
+    quads += custom_header_round_quads;
+    custom_selected_style = (RoundedRectStyle){
+        card_w, card_h, 0.014f * (float)screen_height};
+    if (count) {
+      custom_selected_quads = emit_round_rect_quad(
+          selected_x, selected_y, card_w, card_h, verts + quads * 24);
+      quads += custom_selected_quads;
+    }
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const float card_x =
+          grid_x + (slot & 1u) * (card_w + column_gap);
+      const float card_y =
+          grid_y + (slot / 2u) * (card_h + row_gap);
+      const int outline_quads = emit_outline(
+          card_x, card_y, card_w, card_h,
+          fmaxf(1.5f, (float)screen_height / 480.0f),
+          verts + quads * 24);
+      custom_rule_quads += outline_quads;
+      quads += outline_quads;
+    }
+    const int footer_rule_quads = emit_rect(
+        grid_x, footer_y, grid_w, (float)screen_height / 600.0f,
+        verts + quads * 24);
+    custom_rule_quads += footer_rule_quads;
+    quads += footer_rule_quads;
+    custom_action_button_style =
+        (RoundedRectStyle){button_w, button_h, 0.017f * (float)screen_height};
+    custom_action_button_quads = emit_round_rect_quad(
+        action_x, button_y, button_w, button_h, verts + quads * 24);
+    quads += custom_action_button_quads;
+    custom_back_button_style =
+        (RoundedRectStyle){button_w, button_h, 0.017f * (float)screen_height};
+    custom_back_button_quads = emit_round_rect_quad(
+        back_x, button_y, button_w, button_h, verts + quads * 24);
+    quads += custom_back_button_quads;
+    custom_action_key_bg_quads = emit_circle_quad(
+        action_key_x, key_y, key_radius, verts + quads * 24);
+    quads += custom_action_key_bg_quads;
+    custom_back_key_bg_quads = emit_circle_quad(
+        back_key_x, key_y, key_radius, verts + quads * 24);
+    quads += custom_back_key_bg_quads;
+
+    const float title_gh = (float)screen_height / 29.0f;
+    const float title_gw =
+        title_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float text_gh = (float)screen_height / 42.0f;
+    const float text_gw = text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const char *title = pes_controller_set_piece_selector_title();
+    int line_quads = emit_line(
+        title, (int)strlen(title),
+        (float)screen_width * 0.5f - (float)strlen(title) * title_gw * 0.5f,
+        (header_h - title_gh) * 0.5f, title_gw, title_gh,
+        verts + quads * 24);
+    custom_dark_text_first_quad = quads;
+    custom_dark_text_quads += line_quads;
+    quads += line_quads;
+    char page_label[24];
+    snprintf(page_label, sizeof(page_label), "PAGE %u / %u", page + 1u,
+             page_count);
+    line_quads = emit_line(
+        page_label, (int)strlen(page_label),
+        0.930f * (float)screen_width -
+            (float)strlen(page_label) * text_gw,
+        (header_h - text_gh) * 0.5f, text_gw, text_gh,
+        verts + quads * 24);
+    custom_dark_text_quads += line_quads;
+    quads += line_quads;
+    if (!count) {
+      const char *loading = "LOADING PLAYERS...";
+      line_quads = emit_line(
+          loading, (int)strlen(loading),
+          (float)screen_width * 0.5f -
+              (float)strlen(loading) * text_gw * 0.5f,
+          0.445f * (float)screen_height, text_gw, text_gh,
+          verts + quads * 24);
+      custom_dark_text_quads += line_quads;
+      quads += line_quads;
+    }
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const uint32_t player_index = page_start + slot;
+      const float card_x =
+          grid_x + (slot & 1u) * (card_w + column_gap);
+      const float card_y =
+          grid_y + (slot / 2u) * (card_h + row_gap);
+      const char *player_name =
+          pes_controller_set_piece_selector_name_at(player_index);
+      const char *player_foot =
+          pes_controller_set_piece_selector_foot_at(player_index);
+      const float number_gh = (float)screen_height / 48.0f;
+      const float number_gw =
+          number_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      char number_label[8];
+      snprintf(number_label, sizeof(number_label), "%02u",
+               player_index + 1u);
+      line_quads = emit_line(
+          number_label, (int)strlen(number_label),
+          card_x + 0.018f * (float)screen_width,
+          card_y + 0.020f * (float)screen_height, number_gw, number_gh,
+          verts + quads * 24);
+      custom_dark_text_quads += line_quads;
+      quads += line_quads;
+      char display_name[25];
+      snprintf(display_name, sizeof(display_name), "%.24s", player_name);
+      line_quads = emit_line(
+          display_name, (int)strlen(display_name),
+          card_x + 0.070f * (float)screen_width,
+          card_y + 0.024f * (float)screen_height, text_gw, text_gh,
+          verts + quads * 24);
+      custom_dark_text_quads += line_quads;
+      quads += line_quads;
+      char display_foot[25];
+      snprintf(display_foot, sizeof(display_foot), "%.24s", player_foot);
+      line_quads = emit_line(
+          display_foot, (int)strlen(display_foot),
+          card_x + 0.070f * (float)screen_width,
+          card_y + 0.077f * (float)screen_height, text_gw * 0.86f,
+          text_gh * 0.86f, verts + quads * 24);
+      custom_dark_text_quads += line_quads;
+      quads += line_quads;
+    }
+
+    custom_white_text_first_quad = quads;
+    line_quads = emit_line(
+        "SELECT", 6, action_key_x + 0.026f * (float)screen_width,
+        button_y + (button_h - text_gh) * 0.5f, text_gw, text_gh,
+        verts + quads * 24);
+    custom_white_text_quads += line_quads;
+    quads += line_quads;
+    line_quads = emit_line(
+        "BACK", 4, back_key_x + 0.026f * (float)screen_width,
+        button_y + (button_h - text_gh) * 0.5f, text_gw, text_gh,
+        verts + quads * 24);
+    custom_white_text_quads += line_quads;
+    quads += line_quads;
+    custom_key_text_first_quad = quads;
+    line_quads = emit_line(
+        "A", 1, action_key_x - text_gw * 0.5f, key_y - text_gh * 0.5f,
+        text_gw, text_gh, verts + quads * 24);
+    custom_key_text_quads += line_quads;
+    quads += line_quads;
+    line_quads = emit_line(
+        "B", 1, back_key_x - text_gw * 0.5f, key_y - text_gh * 0.5f,
+        text_gw, text_gh, verts + quads * 24);
+    custom_key_text_quads += line_quads;
+    quads += line_quads;
   } else if (custom_cpu_popup) {
     const float panel_x = 0.22f * (float)screen_width;
     const float panel_y = 0.08f * (float)screen_height;
@@ -1267,12 +1517,17 @@ static void overlay_render(void) {
   if (gameplan_cursor) {
     const int pause_cursor =
         virtual_cursor_context == PES_VIRTUAL_CURSOR_PAUSE;
-    const float helper_x = (pause_cursor ? 0.055f : 0.835f) *
-                           (float)screen_width;
+    const int gameplan_pause_route =
+        virtual_cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
+        pes_controller_gameplan_pause_route();
+    const int back_only_cursor =
+        pause_cursor || gameplan_pause_route ||
+        virtual_cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER;
+    const float helper_x = 0.835f * (float)screen_width;
     const float helper_y = 0.944f * (float)screen_height;
     const float helper_radius = 0.019f * (float)screen_height;
     gameplan_helper_circle_first_quad = quads;
-    gameplan_helper_circle_quads = emit_circle_quad(
+    gameplan_helper_circle_quads = emit_filled_circle(
         helper_x, helper_y, helper_radius, verts + quads * 24);
     quads += gameplan_helper_circle_quads;
 
@@ -1292,7 +1547,46 @@ static void overlay_render(void) {
         helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     gameplan_helper_text_first_quad = quads;
     gameplan_helper_text_quads = emit_line(
-        pause_cursor ? "B" : "A", 1, helper_x - helper_gw * 0.5f,
+        back_only_cursor ? "B" : "A", 1, helper_x - helper_gw * 0.5f,
+        helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
+        verts + quads * 24);
+    quads += gameplan_helper_text_quads;
+  } else if (pause_camera_active) {
+    // Camera selection uses the same compact helper style as Game Plan. The
+    // native camera dots remain visible; B is the only action on this page.
+    const float helper_x = 0.835f * (float)screen_width;
+    const float helper_y = 0.944f * (float)screen_height;
+    const float helper_radius = 0.019f * (float)screen_height;
+    gameplan_helper_circle_first_quad = quads;
+    gameplan_helper_circle_quads = emit_filled_circle(
+        helper_x, helper_y, helper_radius, verts + quads * 24);
+    quads += gameplan_helper_circle_quads;
+    const float helper_gh = (float)screen_height / 43.0f;
+    const float helper_gw =
+        helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    gameplan_helper_text_first_quad = quads;
+    gameplan_helper_text_quads = emit_line(
+        "B", 1, helper_x - helper_gw * 0.5f,
+        helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
+        verts + quads * 24);
+    quads += gameplan_helper_text_quads;
+  } else if (tutorial_play_active) {
+    // The stock tutorial already draws the blue Play footer. Add only its
+    // missing controller key; the action itself is dispatched natively on the
+    // tutorial UI thread.
+    const float helper_x = 0.835f * (float)screen_width;
+    const float helper_y = 0.944f * (float)screen_height;
+    const float helper_radius = 0.019f * (float)screen_height;
+    gameplan_helper_circle_first_quad = quads;
+    gameplan_helper_circle_quads = emit_filled_circle(
+        helper_x, helper_y, helper_radius, verts + quads * 24);
+    quads += gameplan_helper_circle_quads;
+    const float helper_gh = (float)screen_height / 43.0f;
+    const float helper_gw =
+        helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    gameplan_helper_text_first_quad = quads;
+    gameplan_helper_text_quads = emit_line(
+        "A", 1, helper_x - helper_gw * 0.5f,
         helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
         verts + quads * 24);
     quads += gameplan_helper_text_quads;
@@ -1320,28 +1614,245 @@ static void overlay_render(void) {
     quads += emit_line(fps.text, (int)strlen(fps.text), 10.0f, 8.0f,
                        gw, gh, verts + quads * 24);
   }
-  if (difficulty_text[0]) {
-    const int len = (int)strlen(difficulty_text);
+  if (cinematic_helper_active) {
+    const float helper_radius = 0.022f * (float)screen_height;
+    const float helper_x = 0.825f * (float)screen_width;
+    const float skip_y = 0.865f * (float)screen_height;
+    const float celebrate_y = 0.945f * (float)screen_height;
+    cinematic_helper_circle_first_quad = quads;
+    cinematic_helper_circle_quads = emit_filled_circle(
+        helper_x, cinematic_goal_actions ? skip_y : 0.925f *
+        (float)screen_height, helper_radius, verts + quads * 24);
+    quads += cinematic_helper_circle_quads;
+    if (cinematic_goal_actions) {
+      const int celebrate_circle_quads = emit_filled_circle(
+          helper_x, celebrate_y, helper_radius, verts + quads * 24);
+      cinematic_helper_circle_quads += celebrate_circle_quads;
+      quads += celebrate_circle_quads;
+    }
+
+    const float gh = (float)screen_height / 43.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    cinematic_helper_text_first_quad = quads;
+    const float generic_y = 0.925f * (float)screen_height;
+    const int key_quads = emit_line(
+        (cinematic_goal_actions || cinematic_goal_skip_only) ? "B" : "A", 1,
+        helper_x - gw * 0.5f,
+        (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f, gw, gh,
+        verts + quads * 24);
+    cinematic_helper_text_quads += key_quads;
+    quads += key_quads;
+    const float label_x = helper_x + helper_radius * 1.55f;
+    const int skip_label_quads = emit_line(
+        (cinematic_goal_actions || cinematic_goal_skip_only)
+            ? "SKIP"
+            : "ANY BUTTON - SKIP",
+        (cinematic_goal_actions || cinematic_goal_skip_only) ? 4 : 17,
+        label_x,
+        (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f,
+        gw * 0.78f, gh,
+        verts + quads * 24);
+    cinematic_helper_text_quads += skip_label_quads;
+    quads += skip_label_quads;
+    if (cinematic_goal_actions) {
+      const int celebrate_key_quads = emit_line(
+          "A", 1, helper_x - gw * 0.5f, celebrate_y - gh * 0.5f, gw, gh,
+          verts + quads * 24);
+      cinematic_helper_text_quads += celebrate_key_quads;
+      quads += celebrate_key_quads;
+      const int celebrate_label_quads = emit_line(
+          "CELEBRATE", 9, label_x, celebrate_y - gh * 0.5f, gw * 0.78f, gh,
+          verts + quads * 24);
+      cinematic_helper_text_quads += celebrate_label_quads;
+      quads += celebrate_label_quads;
+    }
+  }
+  if (setplay_context == PES_SETPLAY_GOAL_KICK) {
+    // Goal-kick actions are more readable as a compact text legend. The
+    // native white cards remain untouched, while the Switch helper stays out
+    // of the gameplay sightline at the lower-right.
+    const float gh = (float)screen_height / 43.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float x = 0.805f * (float)screen_width;
+    setplay_helper_text_first_quad = quads;
+    setplay_helper_text_quads = emit_line(
+        "Y - POSITION SHIFT", 18, x, 0.855f * (float)screen_height,
+        gw * 0.82f, gh, verts + quads * 24);
+    quads += setplay_helper_text_quads;
+    const int line_quads = emit_line(
+        "X - SWITCH VIEW", 15, x, 0.915f * (float)screen_height,
+        gw * 0.82f, gh, verts + quads * 24);
+    setplay_helper_text_quads += line_quads;
+    quads += line_quads;
+  } else if (setplay_context == PES_SETPLAY_CORNER) {
+    // Text-only helpers avoid the corrupted circle mask seen on some Vulkan
+    // drivers while keeping all three corner actions visible when docked.
     const float gh = (float)screen_height / 48.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    float x = (float)screen_width - 12.0f - (float)len * gw;
-    if (x < 12.0f)
-      x = 12.0f;
-    const float y = (float)screen_height - gh - 12.0f;
-    quads += emit_line(difficulty_text, len, x, y, gw, gh,
-                       verts + quads * 24);
-  }
-  int replay_feedback_quads = 0;
-  if (replay_feedback_text[0]) {
-    const int len = (int)strlen(replay_feedback_text);
-    const float gh = (float)screen_height / 34.0f;
+    const float x = 0.775f * (float)screen_width;
+    const char *legend[] = {"ZR - SET PIECE TAKER", "X - SHORT CORNER",
+                            "Y - SWITCH VIEW"};
+    const int lengths[] = {20, 16, 15};
+    setplay_helper_text_first_quad = quads;
+    for (unsigned int i = 0; i < 3; i++) {
+      const int line_quads = emit_line(
+          legend[i], lengths[i], x,
+          (0.790f + (float)i * 0.060f) * (float)screen_height,
+          gw * 0.82f, gh, verts + quads * 24);
+      setplay_helper_text_quads += line_quads;
+      quads += line_quads;
+    }
+  } else if (setplay_context == PES_SETPLAY_FREE_KICK) {
+    const float gh = (float)screen_height / 43.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    const float x = (float)screen_width * 0.50f -
-                    (float)len * gw * 0.5f;
-    const float y = (float)screen_height * 0.075f;
-    replay_feedback_quads = emit_line(replay_feedback_text, len, x, y, gw, gh,
-                                      verts + quads * 24);
-    quads += replay_feedback_quads;
+    const float x = 0.795f * (float)screen_width;
+    setplay_helper_text_first_quad = quads;
+    setplay_helper_text_quads = emit_line(
+        "X - SET PIECE TAKER", 19, x, 0.855f * (float)screen_height,
+        gw * 0.78f, gh, verts + quads * 24);
+    quads += setplay_helper_text_quads;
+    const int line_quads = emit_line(
+        "Y - SWITCH VIEW", 15, x, 0.915f * (float)screen_height,
+        gw * 0.78f, gh, verts + quads * 24);
+    setplay_helper_text_quads += line_quads;
+    quads += line_quads;
+  } else if (setplay_context == PES_SETPLAY_THROW_IN) {
+    const float gh = (float)screen_height / 43.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    setplay_helper_text_first_quad = quads;
+    setplay_helper_text_quads = emit_line(
+        "X - SELECT THROWER", 19, 0.820f * (float)screen_width,
+        0.885f * (float)screen_height, gw * 0.82f, gh,
+        verts + quads * 24);
+    quads += setplay_helper_text_quads;
+  } else if (setplay_options) {
+    const float helper_radius = 0.019f * (float)screen_height;
+    const float helper_x = 0.891f * (float)screen_width;
+    const float goal_y[] = {0.206f, 0.344f};
+    const float corner_y[] = {0.206f, 0.344f, 0.485f};
+    const float *ys = (setplay_options & PES_SETPLAY_OPTION_KICKER)
+                         ? corner_y
+                         : goal_y;
+    setplay_helper_circle_first_quad = quads;
+    if (setplay_options & PES_SETPLAY_OPTION_KICKER) {
+      const int circle_quads = emit_filled_circle(
+          helper_x, ys[0] * (float)screen_height, helper_radius,
+          verts + quads * 24);
+      setplay_helper_circle_quads += circle_quads;
+      quads += circle_quads;
+      const float gh = (float)screen_height / 43.0f;
+      const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      setplay_helper_text_first_quad = quads;
+      const int line_quads = emit_line(
+          "ZR", 2, helper_x - gw,
+          ys[0] * (float)screen_height - gh * 0.5f, gw, gh,
+          verts + quads * 24);
+      setplay_helper_text_quads += line_quads;
+      quads += line_quads;
+    }
+    if (setplay_options & PES_SETPLAY_OPTION_TEAM_UP) {
+      const int circle_quads = emit_filled_circle(
+          helper_x, ys[(setplay_options & PES_SETPLAY_OPTION_KICKER) ? 1 : 0] *
+                         (float)screen_height,
+          helper_radius, verts + quads * 24);
+      setplay_helper_circle_quads += circle_quads;
+      quads += circle_quads;
+      const float gh = (float)screen_height / 43.0f;
+      const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      if (!setplay_helper_text_quads)
+        setplay_helper_text_first_quad = quads;
+      const int line_quads = emit_line(
+          (setplay_options & PES_SETPLAY_OPTION_KICKER) ? "X" : "Y", 1,
+          helper_x - gw * 0.5f,
+          ys[(setplay_options & PES_SETPLAY_OPTION_KICKER) ? 1 : 0] *
+                  (float)screen_height - gh * 0.5f,
+          gw, gh, verts + quads * 24);
+      setplay_helper_text_quads += line_quads;
+      quads += line_quads;
+    }
+    if (setplay_options & PES_SETPLAY_OPTION_SHORT_CORNER) {
+      const int circle_quads = emit_filled_circle(
+          helper_x, ys[1] * (float)screen_height, helper_radius,
+          verts + quads * 24);
+      setplay_helper_circle_quads += circle_quads;
+      quads += circle_quads;
+      const float gh = (float)screen_height / 43.0f;
+      const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      if (!setplay_helper_text_quads)
+        setplay_helper_text_first_quad = quads;
+      const int line_quads = emit_line(
+          "X", 1, helper_x - gw * 0.5f,
+          ys[1] * (float)screen_height - gh * 0.5f, gw, gh,
+          verts + quads * 24);
+      setplay_helper_text_quads += line_quads;
+      quads += line_quads;
+    }
+    if (setplay_options & PES_SETPLAY_OPTION_CAMERA) {
+      const unsigned int index =
+          (setplay_options & PES_SETPLAY_OPTION_KICKER) ? 2u : 1u;
+      const int circle_quads = emit_filled_circle(
+          helper_x, ys[index] * (float)screen_height, helper_radius,
+          verts + quads * 24);
+      setplay_helper_circle_quads += circle_quads;
+      quads += circle_quads;
+      const float gh = (float)screen_height / 43.0f;
+      const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      if (!setplay_helper_text_quads)
+        setplay_helper_text_first_quad = quads;
+      const int line_quads = emit_line(
+          (setplay_options & PES_SETPLAY_OPTION_KICKER) ? "Y" : "X", 1,
+          helper_x - gw * 0.5f,
+          ys[index] * (float)screen_height - gh * 0.5f, gw, gh,
+          verts + quads * 24);
+      setplay_helper_text_quads += line_quads;
+      quads += line_quads;
+    }
+    if (setplay_options & PES_SETPLAY_OPTION_KICKER) {
+      // Keep a text fallback at the bottom edge as well. It remains readable
+      // when the native action cards cover the compact key circles or when a
+      // GPU drops the circle mask during a set-piece transition.
+      const float gh = (float)screen_height / 48.0f;
+      const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      const float x = 0.775f * (float)screen_width;
+      const char *legend[] = {"ZR - SET PIECE TAKER", "X - SHORT CORNER",
+                              "Y - SWITCH VIEW"};
+      const int lengths[] = {19, 15, 15};
+      for (unsigned int i = 0; i < 3; i++) {
+        if (!setplay_helper_text_quads)
+          setplay_helper_text_first_quad = quads;
+        const int line_quads = emit_line(
+            legend[i], lengths[i], x,
+            (0.790f + (float)i * 0.060f) * (float)screen_height,
+            gw * 0.82f, gh, verts + quads * 24);
+        setplay_helper_text_quads += line_quads;
+      quads += line_quads;
+    }
+  }
+  if (!set_piece_selector && !tutorial_play_active &&
+      !cinematic_helper_active &&
+      controller_snapshot.surface != PES_CONTROLLER_SURFACE_REPLAY &&
+      controller_snapshot.surface != PES_CONTROLLER_SURFACE_CINEMATIC &&
+      penalty_role != PES_PENALTY_NONE) {
+    // Penalty actions use native right-half swipe gestures. Keep the docked
+    // control reminder compact and text-only to avoid the circle-mask issue
+    // seen on some Vulkan drivers.
+    const char *legend = penalty_role == PES_PENALTY_KICKER
+                             ? "LS AIM   Y KICK"
+                             : "R STICK DIVE";
+    const int legend_len = penalty_role == PES_PENALTY_KICKER ? 15 : 12;
+    const float gh = (float)screen_height / 43.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float legend_w = (float)legend_len * gw * 0.82f;
+    if (!setplay_helper_text_quads)
+      setplay_helper_text_first_quad = quads;
+    const int line_quads = emit_line(
+        legend, legend_len,
+        0.975f * (float)screen_width - legend_w,
+        0.925f * (float)screen_height, gw * 0.82f, gh,
+        verts + quads * 24);
+    setplay_helper_text_quads += line_quads;
+    quads += line_quads;
+  }
   }
   if (!quads)
     return;
@@ -1504,11 +2015,11 @@ static void overlay_render(void) {
                  selector_color_quads * 6);
   }
   if (gameplan_helper_circle_quads) {
-    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
     glUniform1f(gl.loc_round_rect, 0.0f);
     glUniform1f(gl.loc_cursor, 0.0f);
-    glUniform1f(gl.loc_circle, 1.0f);
-    glUniform1f(gl.loc_circle_feather, 0.035f);
+    glUniform1f(gl.loc_circle, 0.0f);
     glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, gameplan_helper_circle_first_quad * 6,
                  gameplan_helper_circle_quads * 6);
@@ -1520,6 +2031,42 @@ static void overlay_render(void) {
     glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
     glDrawArrays(GL_TRIANGLES, gameplan_helper_text_first_quad * 6,
                  gameplan_helper_text_quads * 6);
+  }
+  if (setplay_helper_circle_quads) {
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_round_rect, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, setplay_helper_circle_first_quad * 6,
+                 setplay_helper_circle_quads * 6);
+    glUniform1f(gl.loc_circle, 0.0f);
+  }
+  if (setplay_helper_text_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, setplay_helper_text_first_quad * 6,
+                 setplay_helper_text_quads * 6);
+  }
+  if (cinematic_helper_circle_quads) {
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_round_rect, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, cinematic_helper_circle_first_quad * 6,
+                 cinematic_helper_circle_quads * 6);
+    glUniform1f(gl.loc_circle, 0.0f);
+  }
+  if (cinematic_helper_text_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, cinematic_helper_text_first_quad * 6,
+                 cinematic_helper_text_quads * 6);
   }
   if (gameplan_cursor_quads) {
     glUniform1f(gl.loc_solid, 0.0f);

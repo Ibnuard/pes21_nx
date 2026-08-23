@@ -150,8 +150,6 @@ static VirtualSurfaceState shoot_surface;
 static VirtualSurfaceState pause_surface;
 static int replay_touch_requested;
 static uint64_t previous_hid_buttons;
-static uint32_t previous_mobile_context_generation;
-static uint64_t mobile_context_seen_ms;
 static int previous_mobile_context_mode;
 static float physical_touch_start_x;
 static float physical_touch_start_y;
@@ -169,7 +167,12 @@ enum {
   SYNTHETIC_INPUT_REPLAY = 1,
   SYNTHETIC_INPUT_GAMEPLAY = 2,
   SYNTHETIC_INPUT_MENU = 3,
+  SYNTHETIC_INPUT_GOAL_DEMO = 4,
+  SYNTHETIC_INPUT_SET_PIECE_SELECTOR = 5,
+  SYNTHETIC_INPUT_TUTORIAL = 6,
+  SYNTHETIC_INPUT_SETPLAY_BASE = 8,
   SYNTHETIC_INPUT_CURSOR_BASE = 16,
+  SYNTHETIC_INPUT_PENALTY_BASE = 32,
 };
 
 enum {
@@ -185,10 +188,15 @@ enum {
   FAKE_POINTER_MENU = 7,
   FAKE_POINTER_MENU_SCROLL = 8,
   FAKE_POINTER_MENU_BACK = 9,
+  FAKE_POINTER_CAMERA = FAKE_POINTER_PAUSE,
   FAKE_POINTER_GAMEPLAN_CURSOR = FAKE_POINTER_MENU,
   FAKE_POINTER_GAMEPLAN_PLAY = FAKE_POINTER_MENU_SCROLL,
+  FAKE_POINTER_CONTEXT_ACTION = FAKE_POINTER_MENU,
   // Replay and menu/gameplan surfaces never coexist; reuse the final slot.
   FAKE_POINTER_REPLAY = FAKE_POINTER_MENU_BACK,
+  FAKE_POINTER_GOAL_DEMO = FAKE_POINTER_MENU_BACK,
+  FAKE_POINTER_CINEMATIC = FAKE_POINTER_MENU_BACK,
+  FAKE_POINTER_PENALTY = FAKE_POINTER_MENU_BACK,
 };
 
 #define FAKE_PIPE_BASE 0x70000000
@@ -539,6 +547,7 @@ static int push_motion_snapshot(int action, const FakeTouchState *state) {
          state->count * sizeof(state->pointers[0]));
   const int queued = input_queue_push(event);
 
+#ifdef DEBUG_LOG
   static unsigned int transition_log_count;
   static unsigned int move_log_count;
   const int is_move = (action & 0xff) == AMOTION_EVENT_ACTION_MOVE;
@@ -567,6 +576,7 @@ static int push_motion_snapshot(int action, const FakeTouchState *state) {
     }
     debugPrintf("%s\n", line);
   }
+#endif
   return queued;
 }
 
@@ -653,7 +663,9 @@ static void reconcile_touch_state(const FakeTouchState *desired) {
 
 static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
                              HidAnalogStickState *left_stick,
-                             int *have_left_stick) {
+                             int *have_left_stick,
+                             HidAnalogStickState *right_stick,
+                             int *have_right_stick) {
   *buttons |= state->buttons;
   const int64_t candidate_magnitude =
       (int64_t)state->analog_stick_l.x * state->analog_stick_l.x +
@@ -665,18 +677,14 @@ static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
     *left_stick = state->analog_stick_l;
     *have_left_stick = 1;
   }
-}
-
-static void merge_npad_right_state(const HidNpadCommonState *state,
-                                   HidAnalogStickState *right_stick,
-                                   int *have_right_stick) {
-  const int64_t candidate_magnitude =
+  const int64_t right_candidate_magnitude =
       (int64_t)state->analog_stick_r.x * state->analog_stick_r.x +
       (int64_t)state->analog_stick_r.y * state->analog_stick_r.y;
-  const int64_t current_magnitude =
+  const int64_t right_current_magnitude =
       (int64_t)right_stick->x * right_stick->x +
       (int64_t)right_stick->y * right_stick->y;
-  if (!*have_right_stick || candidate_magnitude > current_magnitude) {
+  if (!*have_right_stick ||
+      right_candidate_magnitude > right_current_magnitude) {
     *right_stick = state->analog_stick_r;
     *have_right_stick = 1;
   }
@@ -739,7 +747,8 @@ static void emit_menu_pad_input(const HidAnalogStickState *left_stick,
 static void emit_virtual_cursor_pad_input(int connected, u64 buttons,
                                           int cursor_context) {
   u64 reserved = HidNpadButton_A | HidNpadButton_ZL | HidNpadButton_ZR;
-  if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE)
+  if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
+      cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER)
     reserved |= HidNpadButton_B;
   const uint32_t mapped = menu_pad_buttons(buttons & ~reserved, NULL, 0);
   cobra_pad_set_input(mapped, 0, 0, 0, 0, connected);
@@ -753,8 +762,13 @@ static uint64_t monotonic_ms(void) {
   return armTicksToNs(armGetSystemTick()) / 1000000ULL;
 }
 
-static void normalize_left_stick(const HidAnalogStickState *stick,
-                                 int connected, float *out_x, float *out_y) {
+static void normalize_stick(const HidAnalogStickState *stick,
+                            int connected, float *out_x, float *out_y) {
+  if (!connected || (stick->x == 0 && stick->y == 0)) {
+    *out_x = 0.0f;
+    *out_y = 0.0f;
+    return;
+  }
   float x = connected ? (float)stick->x / (float)JOYSTICK_MAX : 0.0f;
   // Android's Y axis is positive downward; libnx is positive upward.
   float y = connected ? -(float)stick->y / (float)JOYSTICK_MAX : 0.0f;
@@ -779,24 +793,16 @@ static void normalize_left_stick(const HidAnalogStickState *stick,
   *out_y = y;
 }
 
-static int mobile_gameplay_context(uint64_t now_ms, int *out_mode) {
-  int mode = 0;
-  const uint32_t generation = pes_mobile_control_context(&mode);
-  if (generation != previous_mobile_context_generation) {
-    previous_mobile_context_generation = generation;
-    mobile_context_seen_ms = now_ms;
-  }
-  const int active = generation != 0 &&
-                     (mode == PES_MOBILE_CONTROL_OFFENSE ||
-                      mode == PES_MOBILE_CONTROL_DEFENSE) &&
-                     now_ms - mobile_context_seen_ms <= 1000;
+static int mobile_gameplay_context(int *out_mode) {
+  const int mode = pes_mobile_control_active_mode();
+  const int active = mode == PES_MOBILE_CONTROL_OFFENSE ||
+                     mode == PES_MOBILE_CONTROL_DEFENSE;
   if (mode != previous_mobile_context_mode) {
-    debugPrintf("input: mobile control context mode=%s generation=%u\n",
+    debugPrintf("input: mobile control context mode=%s\n",
                 mode == PES_MOBILE_CONTROL_OFFENSE
                     ? "offense"
                     : mode == PES_MOBILE_CONTROL_DEFENSE ? "defense"
-                                                         : "unknown",
-                generation);
+                                                         : "unknown");
     previous_mobile_context_mode = mode;
   }
   *out_mode = mode;
@@ -832,6 +838,7 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
                                            int connected, u64 buttons,
                                            int gameplay_active,
                                            int control_mode,
+                                           const PesControllerSnapshot *ui,
                                            uint64_t now_ms) {
   const int b_held = connected && (buttons & HidNpadButton_B) != 0;
   const int x_held = connected && (buttons & HidNpadButton_X) != 0;
@@ -847,6 +854,13 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   const int l_pressed = l_held && !(previous_hid_buttons & HidNpadButton_L);
   const int plus_pressed =
       plus_held && !(previous_hid_buttons & HidNpadButton_Plus);
+  const uint32_t setplay_options = ui ? ui->setplay_options : 0;
+  const int x_is_context =
+      (setplay_options & (PES_SETPLAY_OPTION_TEAM_UP |
+                          PES_SETPLAY_OPTION_KICKER |
+                          PES_SETPLAY_OPTION_SHORT_CORNER)) != 0;
+  const int y_is_camera =
+      (setplay_options & PES_SETPLAY_OPTION_CAMERA) != 0;
 
   if (!connected || !gameplay_active) {
     reset_virtual_surfaces();
@@ -955,14 +969,17 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   // The middle-left action slot is Through (X) on offense and Press (B) on
   // defense. Select its source button from the authoritative control mode.
   if (through_surface.owner == VIRTUAL_SURFACE_NONE) {
-    if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && x_pressed) ||
+    if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && x_pressed &&
+         !x_is_context) ||
         (control_mode == PES_MOBILE_CONTROL_DEFENSE && b_pressed)) {
       through_surface.owner = VIRTUAL_SURFACE_BUTTON;
       through_surface.started_ms = now_ms;
     }
   }
   const int through_button_held =
-      control_mode == PES_MOBILE_CONTROL_OFFENSE ? x_held : b_held;
+      control_mode == PES_MOBILE_CONTROL_OFFENSE
+          ? (x_held && !x_is_context)
+          : b_held;
   if (through_surface.owner == VIRTUAL_SURFACE_BUTTON &&
       !surface_should_remain(now_ms, through_surface.started_ms,
                              through_button_held, 80))
@@ -974,14 +991,17 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   // defense. Tackle is a normal press in this Classic-control layout; the old
   // forced swipe was the reason A could select the wrong defensive action.
   if (shoot_surface.owner == VIRTUAL_SURFACE_NONE) {
-    if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && y_pressed) ||
+    if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && y_pressed &&
+         !y_is_camera) ||
         (control_mode == PES_MOBILE_CONTROL_DEFENSE && a_pressed)) {
       shoot_surface.owner = VIRTUAL_SURFACE_BUTTON;
       shoot_surface.started_ms = now_ms;
     }
   }
   const int shoot_button_held =
-      control_mode == PES_MOBILE_CONTROL_OFFENSE ? y_held : a_held;
+      control_mode == PES_MOBILE_CONTROL_OFFENSE
+          ? (y_held && !y_is_camera)
+          : a_held;
   if (shoot_surface.owner == VIRTUAL_SURFACE_BUTTON &&
       !surface_should_remain(now_ms, shoot_surface.started_ms,
                              shoot_button_held, 80))
@@ -1112,80 +1132,381 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
     pes_controller_gameplan_cursor_position(&cursor_x, &cursor_y);
   }
 
+  const int a_pressed = connected && (buttons & HidNpadButton_A) != 0 &&
+                        (previous_hid_buttons & HidNpadButton_A) == 0;
+  const int pre_match_gameplan =
+      cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
+      !pes_controller_gameplan_pause_route();
   const int cursor_held = connected &&
-                          (buttons & (HidNpadButton_ZL |
-                                      HidNpadButton_ZR)) != 0;
+                          ((buttons & (HidNpadButton_ZL |
+                                       HidNpadButton_ZR)) != 0 ||
+                           ((cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
+                             (cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
+                              !pre_match_gameplan)) &&
+                            (buttons & HidNpadButton_A) != 0));
   const int b_pressed = connected && (buttons & HidNpadButton_B) != 0 &&
                         (previous_hid_buttons & HidNpadButton_B) == 0;
-  if (b_pressed && cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
-      back_until_ms <= now_ms)
-    back_until_ms = now_ms + 90;
+  if (b_pressed && back_until_ms <= now_ms) {
+    if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE)
+      pes_controller_pause_back_request();
+    if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
+        cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN ||
+        cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER)
+      back_until_ms = now_ms + 90;
+  }
   const int back_active = back_until_ms > now_ms;
+
+  if (b_pressed && (cursor_context == PES_VIRTUAL_CURSOR_HALF_TIME ||
+                    cursor_context == PES_VIRTUAL_CURSOR_HALF_PREVIEW ||
+                    cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME))
+    pes_controller_result_input(PES_PAUSE_INPUT_BACK);
 
   if (cursor_held && !back_active)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_CURSOR,
                        cursor_x * (float)screen_width,
                        cursor_y * (float)screen_height);
 
-  const int a_pressed = connected && (buttons & HidNpadButton_A) != 0 &&
-                        (previous_hid_buttons & HidNpadButton_A) == 0;
-  if (a_pressed && play_until_ms <= now_ms &&
-      cursor_context != PES_VIRTUAL_CURSOR_PAUSE)
+  // The native kicker list has no reliable full-JoyCon footer on every
+  // mobile build. A confirms the currently highlighted card directly under
+  // the virtual cursor; B remains the Back action and ZL/ZR keep drag mode.
+  if (a_pressed && cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER &&
+      !back_active && play_until_ms <= now_ms) {
     play_until_ms = now_ms + 90;
-  if (back_active)
+    touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
+                       cursor_x * (float)screen_width,
+                       cursor_y * (float)screen_height);
+  }
+
+  if (a_pressed && play_until_ms <= now_ms &&
+      cursor_context != PES_VIRTUAL_CURSOR_PAUSE &&
+      cursor_context != PES_VIRTUAL_CURSOR_SET_PIECE_TAKER &&
+      (cursor_context != PES_VIRTUAL_CURSOR_GAMEPLAN ||
+       pre_match_gameplan))
+    play_until_ms = now_ms + 90;
+  if (back_active && (cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN ||
+                      cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER))
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
                        0.055f * (float)screen_width,
                        0.944f * (float)screen_height);
-  else if (play_until_ms > now_ms)
+  else if (!back_active && play_until_ms > now_ms)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_PLAY,
                        0.865f * (float)screen_width,
                        0.944f * (float)screen_height);
 }
 
+static void append_pause_camera_swipe(FakeTouchState *desired,
+                                      int connected, u64 buttons,
+                                      uint64_t now_ms) {
+  static uint64_t until_ms;
+  static float start_x;
+  static float end_x;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    until_ms = 0;
+  }
+  if (!connected || !pes_controller_pause_camera_active()) {
+    until_ms = 0;
+    return;
+  }
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  if (pressed & (HidNpadButton_Left | HidNpadButton_Right)) {
+    // Keep the virtual gesture and the visible page indicator aligned with
+    // the D-pad direction.
+    const int right = (pressed & HidNpadButton_Right) != 0;
+    start_x = right ? 0.18f : 0.48f;
+    end_x = right ? 0.48f : 0.18f;
+    until_ms = now_ms + 220;
+  }
+  if (until_ms > now_ms) {
+    const float progress =
+        1.0f - (float)(until_ms - now_ms) / 220.0f;
+    const float x = start_x + (end_x - start_x) * progress;
+    touch_state_append(desired, FAKE_POINTER_CAMERA,
+                       x * (float)screen_width, 0.52f * (float)screen_height);
+  }
+}
+
+static void queue_native_setplay_action(const PesControllerSnapshot *ui,
+                                        int connected, u64 buttons) {
+  if (!ui || !connected ||
+      ui->surface != PES_CONTROLLER_SURFACE_SETPLAY)
+    return;
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  uint32_t action = 0;
+  switch (ui->setplay_context) {
+  case PES_SETPLAY_GOAL_KICK:
+    if (pressed & HidNpadButton_Y)
+      action = PES_SETPLAY_BUTTON_POSITION_SHIFT;
+    else if (pressed & HidNpadButton_X)
+      action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
+    break;
+  case PES_SETPLAY_CORNER:
+    if (pressed & HidNpadButton_ZR)
+      action = PES_SETPLAY_BUTTON_SET_PIECE_TAKER;
+    else if (pressed & HidNpadButton_X)
+      action = PES_SETPLAY_BUTTON_SHORT_CORNER;
+    else if (pressed & HidNpadButton_Y)
+      action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
+    break;
+  case PES_SETPLAY_FREE_KICK:
+    if (pressed & (HidNpadButton_X | HidNpadButton_ZR))
+      action = PES_SETPLAY_BUTTON_SET_PIECE_TAKER;
+    else if (pressed & HidNpadButton_Y)
+      action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
+    break;
+  case PES_SETPLAY_THROW_IN:
+    if (pressed & HidNpadButton_X)
+      action = PES_SETPLAY_BUTTON_SELECT_THROWER;
+    break;
+  default:
+    break;
+  }
+  if (action && (ui->setplay_button_mask & (1u << action)))
+    pes_controller_setplay_request(action, ui->generation);
+}
+
+static void queue_set_piece_selector_input(int connected, u64 buttons,
+                                           float axis_x, float axis_y,
+                                           uint64_t now_ms) {
+  static uint32_t generation_seen;
+  static uint32_t held_direction;
+  static uint64_t repeat_at_ms;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    held_direction = 0;
+    repeat_at_ms = 0;
+  }
+  if (!connected) {
+    held_direction = 0;
+    repeat_at_ms = 0;
+    return;
+  }
+
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  if (pressed & HidNpadButton_B) {
+    held_direction = 0;
+    repeat_at_ms = 0;
+    pes_controller_set_piece_selector_input(PES_PAUSE_INPUT_BACK);
+    return;
+  }
+  if (pressed & HidNpadButton_A) {
+    held_direction = 0;
+    repeat_at_ms = 0;
+    pes_controller_set_piece_selector_input(PES_PAUSE_INPUT_DECIDE);
+    return;
+  }
+
+  uint32_t direction = 0;
+  const u64 vertical = buttons & (HidNpadButton_Up | HidNpadButton_Down);
+  const u64 horizontal = buttons & (HidNpadButton_Left | HidNpadButton_Right);
+  if (vertical == HidNpadButton_Up)
+    direction = PES_PAUSE_INPUT_UP;
+  else if (vertical == HidNpadButton_Down)
+    direction = PES_PAUSE_INPUT_DOWN;
+  else if (horizontal == HidNpadButton_Left)
+    direction = PES_PAUSE_INPUT_LEFT;
+  else if (horizontal == HidNpadButton_Right)
+    direction = PES_PAUSE_INPUT_RIGHT;
+  else {
+    const float threshold = 0.55f;
+    if (fabsf(axis_y) >= fabsf(axis_x) && axis_y <= -threshold)
+      direction = PES_PAUSE_INPUT_UP;
+    else if (fabsf(axis_y) >= fabsf(axis_x) && axis_y >= threshold)
+      direction = PES_PAUSE_INPUT_DOWN;
+    else if (axis_x <= -threshold)
+      direction = PES_PAUSE_INPUT_LEFT;
+    else if (axis_x >= threshold)
+      direction = PES_PAUSE_INPUT_RIGHT;
+  }
+
+  if (!direction) {
+    held_direction = 0;
+    repeat_at_ms = 0;
+    return;
+  }
+  if (direction != held_direction) {
+    held_direction = direction;
+    repeat_at_ms = now_ms + 280;
+    pes_controller_set_piece_selector_input(direction);
+  } else if (now_ms >= repeat_at_ms) {
+    repeat_at_ms = now_ms + 110;
+    pes_controller_set_piece_selector_input(direction);
+  }
+}
+
 static uint32_t append_replay_controller(FakeTouchState *desired,
                                          int connected, u64 buttons,
                                          uint64_t now_ms) {
-  static uint64_t tap_until_ms;
+  (void)desired;
   static uint64_t skip_until_ms;
   static uint32_t generation_seen;
   if (generation_seen != synthetic_input_generation) {
     generation_seen = synthetic_input_generation;
-    tap_until_ms = 0;
     skip_until_ms = 0;
   }
 
   replay_touch_requested = 0;
-  if (!pes_controller_replay_active() || !connected) {
-    tap_until_ms = 0;
+  if (!connected) {
     skip_until_ms = 0;
     return 0;
   }
 
   const u64 pressed = buttons & ~previous_hid_buttons;
-  const int goal_replay = pes_controller_replay_goal_active();
-  if ((pressed & HidNpadButton_B) && skip_until_ms <= now_ms) {
-    skip_until_ms = now_ms + 90;
-    pes_controller_replay_feedback_set(PES_REPLAY_FEEDBACK_B_SKIP);
-  } else if (goal_replay && (pressed & HidNpadButton_A) &&
-             tap_until_ms <= now_ms) {
-    tap_until_ms = now_ms + 90;
-    pes_controller_replay_feedback_set(
-        PES_REPLAY_FEEDBACK_GOAL_CELEBRATION);
-  } else if (pressed && skip_until_ms <= now_ms) {
+  if (pressed && skip_until_ms <= now_ms) {
     skip_until_ms = now_ms + 90;
     pes_controller_replay_feedback_set(
         (pressed & HidNpadButton_A) ? PES_REPLAY_FEEDBACK_A_SKIP
                                    : PES_REPLAY_FEEDBACK_SKIP);
   }
-  if (tap_until_ms > now_ms) {
-    touch_state_append(desired, FAKE_POINTER_REPLAY,
-                       0.891f * (float)screen_width,
-                       0.344f * (float)screen_height);
+  return skip_until_ms > now_ms ? (1u << 25) : 0;
+}
+
+static uint32_t append_goal_demo_controller(FakeTouchState *desired,
+                                            int connected, u64 buttons,
+                                            int player_goal,
+                                            uint64_t now_ms) {
+  static uint64_t action_until_ms;
+  static uint64_t skip_until_ms;
+  static float action_x;
+  static float action_y;
+  static uint32_t generation_seen;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    action_until_ms = 0;
+    skip_until_ms = 0;
+  }
+  replay_touch_requested = 0;
+  if (!connected)
+    return 0;
+
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  if ((pressed & HidNpadButton_B) && skip_until_ms <= now_ms) {
+    // GoalDemo's left helper is Skip. Also publish Cobra button 25 because
+    // the native minimum-time gate consumes that path on some demo variants.
+    action_x = 0.891f;
+    action_y = 0.206f;
+    action_until_ms = now_ms + 90;
+    skip_until_ms = now_ms + 90;
+    // Opponent-goal and other skip-only variants are also backed by a native
+    // ThinkUnitSkip. Queue its exact command alongside the stock goal touch.
+    pes_controller_demo_skip_request();
+    pes_controller_replay_feedback_set(PES_REPLAY_FEEDBACK_B_SKIP);
+  } else if (player_goal && (pressed & HidNpadButton_A) &&
+             action_until_ms <= now_ms) {
+    action_x = 0.891f;
+    action_y = 0.344f;
+    action_until_ms = now_ms + 90;
+    pes_controller_replay_feedback_set(
+        PES_REPLAY_FEEDBACK_GOAL_CELEBRATION);
+  }
+  if (action_until_ms > now_ms) {
+    touch_state_append(desired, FAKE_POINTER_GOAL_DEMO,
+                       action_x * (float)screen_width,
+                        action_y * (float)screen_height);
     replay_touch_requested = 1;
   }
   return skip_until_ms > now_ms ? (1u << 25) : 0;
 }
 
+static uint32_t append_cinematic_skip_controller(FakeTouchState *desired,
+                                                 int connected, u64 buttons,
+                                                 uint64_t now_ms) {
+  (void)desired;
+  (void)now_ms;
+  replay_touch_requested = 0;
+  if (!connected)
+    return 0;
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  if (pressed) {
+    pes_controller_demo_skip_request();
+    pes_controller_replay_feedback_set(
+        (pressed & HidNpadButton_A) ? PES_REPLAY_FEEDBACK_A_SKIP
+                                   : PES_REPLAY_FEEDBACK_SKIP);
+  }
+  return 0;
+}
+
+static void append_penalty_controller(FakeTouchState *desired,
+                                      int connected, u64 buttons,
+                                      float left_x, float left_y,
+                                      float right_x, float right_y,
+                                      uint32_t role, uint64_t now_ms) {
+  static uint32_t generation_seen;
+  static uint64_t swipe_started_ms;
+  static uint64_t swipe_until_ms;
+  static float swipe_start_x;
+  static float swipe_start_y;
+  static float swipe_end_x;
+  static float swipe_end_y;
+  static int keeper_stick_armed = 1;
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    swipe_started_ms = 0;
+    swipe_until_ms = 0;
+    keeper_stick_armed = 1;
+  }
+  if (!connected || role == PES_PENALTY_NONE) {
+    swipe_started_ms = 0;
+    swipe_until_ms = 0;
+    keeper_stick_armed = 1;
+    return;
+  }
+
+  const u64 pressed = buttons & ~previous_hid_buttons;
+  float direction_x = 0.0f;
+  float direction_y = -1.0f;
+  int begin_swipe = 0;
+  if (role == PES_PENALTY_KICKER &&
+      (pressed & HidNpadButton_Y) && swipe_until_ms <= now_ms) {
+    const float magnitude = sqrtf(left_x * left_x + left_y * left_y);
+    if (magnitude >= 0.20f) {
+      direction_x = left_x / magnitude;
+      direction_y = left_y / magnitude;
+    }
+    begin_swipe = 1;
+  } else if (role == PES_PENALTY_GOALKEEPER) {
+    const float magnitude = sqrtf(right_x * right_x + right_y * right_y);
+    if (magnitude <= 0.24f)
+      keeper_stick_armed = 1;
+    if (keeper_stick_armed && magnitude >= 0.55f &&
+        swipe_until_ms <= now_ms) {
+      direction_x = right_x / magnitude;
+      direction_y = right_y / magnitude;
+      keeper_stick_armed = 0;
+      begin_swipe = 1;
+    }
+  }
+
+  if (begin_swipe) {
+    // MobilePenaltyKick consumes ScreenTapInfo ButtonKind 0x10 and derives
+    // both target height/side and goalkeeper saving angle from the gesture.
+    // Keep the whole flick on the right half, matching the stock tutorial.
+    swipe_start_x = 0.78f;
+    swipe_start_y = 0.72f;
+    swipe_end_x = fmaxf(0.56f, fminf(0.96f,
+                                    swipe_start_x + direction_x * 0.22f));
+    swipe_end_y = fmaxf(0.20f, fminf(0.90f,
+                                    swipe_start_y + direction_y * 0.34f));
+    swipe_started_ms = now_ms;
+    swipe_until_ms = now_ms + 170;
+  }
+
+  if (swipe_until_ms > now_ms) {
+    const uint64_t elapsed = now_ms - swipe_started_ms;
+    // A short stationary DOWN makes the subsequent MOVE a deterministic
+    // native swipe instead of a one-frame tap on slower hardware frames.
+    const float progress =
+        elapsed <= 24 ? 0.0f
+                      : fminf(1.0f, (float)(elapsed - 24) / 120.0f);
+    const float x = swipe_start_x + (swipe_end_x - swipe_start_x) * progress;
+    const float y = swipe_start_y + (swipe_end_y - swipe_start_y) * progress;
+    touch_state_append(desired, FAKE_POINTER_PENALTY,
+                       x * (float)screen_width, y * (float)screen_height);
+  }
+}
+
+#ifdef DEBUG_LOG
 static void log_controller_input(const HidAnalogStickState *stick,
                                  int connected, u64 buttons, float x,
                                  float y, int gameplay_active,
@@ -1209,6 +1530,7 @@ static void log_controller_input(const HidAnalogStickState *stick,
   previous_left_axis_valid = 1;
   previous_buttons = buttons;
 }
+#endif
 
 static void disable_native_pad_bridge(void) {
   // PES Mobile consumes Android/native-pad events before its touch ThinkUnits.
@@ -1308,54 +1630,122 @@ void android_input_poll(void) {
   int have_right_stick = 0;
   if (hidGetNpadStatesFullKey(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
-    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+                     &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyDual(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
-    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+                     &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyLeft(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
-    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+                     &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyRight(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
-    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+                     &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick);
-    merge_npad_right_state(&state, &right_stick, &have_right_stick);
+    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+                     &right_stick, &have_right_stick);
   }
 
   float axis_x = 0.0f;
   float axis_y = 0.0f;
-  normalize_left_stick(&left_stick, have_left_stick, &axis_x, &axis_y);
+  float right_axis_x = 0.0f;
+  float right_axis_y = 0.0f;
+  normalize_stick(&left_stick, have_left_stick, &axis_x, &axis_y);
+  normalize_stick(&right_stick, have_right_stick, &right_axis_x,
+                  &right_axis_y);
+  const int controller_connected = have_left_stick || have_right_stick;
   const uint64_t now_ms = monotonic_ms();
   int control_mode = 0;
-  const int gameplay_active =
-      mobile_gameplay_context(now_ms, &control_mode);
-  const int replay_active = pes_controller_replay_active();
+  const int gameplay_active = mobile_gameplay_context(&control_mode);
+  const int set_piece_selector_active =
+      pes_controller_set_piece_selector_active();
+  static int set_piece_selector_release_pending;
+  if (set_piece_selector_active) {
+    set_piece_selector_release_pending = 1;
+  } else if (set_piece_selector_release_pending) {
+    // Do not leak the button that opened/closed the picker into gameplay or
+    // ButtonSetplay after the synthetic context changes. Require a complete
+    // controller release, including X/Y/ZR and the shoulder buttons.
+    if (!buttons && fabsf(axis_x) < 0.55f &&
+        fabsf(axis_y) < 0.55f)
+      set_piece_selector_release_pending = 0;
+  }
+  const int set_piece_selector_isolated =
+      set_piece_selector_active || set_piece_selector_release_pending;
+  const int inmatch_tutorial_active =
+      pes_controller_inmatch_tutorial_active();
+  static int inmatch_tutorial_release_pending;
+  if (inmatch_tutorial_active) {
+    inmatch_tutorial_release_pending = 1;
+  } else if (inmatch_tutorial_release_pending && !buttons &&
+             fabsf(axis_x) < 0.30f && fabsf(axis_y) < 0.30f &&
+             fabsf(right_axis_x) < 0.30f &&
+             fabsf(right_axis_y) < 0.30f) {
+    inmatch_tutorial_release_pending = 0;
+  }
+  const int inmatch_tutorial_isolated =
+      inmatch_tutorial_active || inmatch_tutorial_release_pending;
+  const int pause_camera_active = pes_controller_pause_camera_active();
+  const int custom_prematch_gameplan_active =
+      pes_controller_custom_prematch_gameplan_active();
+  const int custom_postmatch_active =
+      pes_controller_custom_postmatch_active();
+  const int main_menu_controller_active = pes_main_menu_controller_active();
+  const int menu_controller_active = pes_controller_menu_active();
+  if (gameplay_active || main_menu_controller_active)
+    pes_controller_result_cursor_clear();
   const int cursor_context = pes_controller_virtual_cursor_context();
   const int cursor_active = cursor_context != PES_VIRTUAL_CURSOR_NONE;
+  const uint32_t penalty_role = pes_controller_penalty_role();
+  const int penalty_active = penalty_role != PES_PENALTY_NONE;
+  PesControllerSnapshot controller_snapshot;
+  pes_controller_surface_snapshot(&controller_snapshot);
+  const int replay_active =
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_REPLAY;
+  const int goal_demo_active =
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_GOAL_DEMO;
+  const int generic_cinematic_active =
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_CINEMATIC;
+  const uint32_t setplay_context = controller_snapshot.setplay_context;
+  const int cinematic_active = goal_demo_active || replay_active ||
+                               generic_cinematic_active;
   int synthetic_context = SYNTHETIC_INPUT_NONE;
-  if (replay_active)
+  if (set_piece_selector_isolated)
+    synthetic_context = SYNTHETIC_INPUT_SET_PIECE_SELECTOR;
+  else if (inmatch_tutorial_isolated)
+    synthetic_context = SYNTHETIC_INPUT_TUTORIAL;
+  else if (replay_active)
     synthetic_context = SYNTHETIC_INPUT_REPLAY;
+  else if (goal_demo_active)
+    synthetic_context = SYNTHETIC_INPUT_GOAL_DEMO;
+  else if (generic_cinematic_active)
+    synthetic_context = SYNTHETIC_INPUT_REPLAY;
+  else if (penalty_active)
+    synthetic_context = SYNTHETIC_INPUT_PENALTY_BASE + (int)penalty_role;
   else if (cursor_active)
     synthetic_context = SYNTHETIC_INPUT_CURSOR_BASE + cursor_context;
+  else if (controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY)
+    synthetic_context = SYNTHETIC_INPUT_SETPLAY_BASE + setplay_context;
   else if (gameplay_active)
     synthetic_context = SYNTHETIC_INPUT_GAMEPLAY;
-  else if (pes_controller_menu_active())
+  else if (menu_controller_active)
     synthetic_context = SYNTHETIC_INPUT_MENU;
   const int context_changed = synthetic_context_changed(synthetic_context);
   const int replay_pointer_was_active = replay_touch_requested;
-  if (!replay_active)
+  if (!cinematic_active)
     replay_touch_requested = 0;
-  const int gameplan_cursor_active = !replay_active && cursor_active;
+  const int gameplan_cursor_active = !set_piece_selector_isolated &&
+                                     !inmatch_tutorial_isolated &&
+                                     !penalty_active &&
+                                     !cinematic_active && cursor_active;
 
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));
@@ -1370,9 +1760,10 @@ void android_input_poll(void) {
       touch ? (float)touch->y * (float)screen_height / 720.0f : 0.0f;
   const int physical_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
-  const int compact_main_menu_active = pes_main_menu_controller_active();
-
-  if (physical_active) {
+  const int compact_main_menu_active = main_menu_controller_active;
+  if (set_piece_selector_isolated) {
+    physical_touch_tracking = 0;
+  } else if (physical_active) {
     physical_touch_last_x = touch_x;
     physical_touch_last_y = touch_y;
     if (!physical_touch_tracking) {
@@ -1385,7 +1776,8 @@ void android_input_poll(void) {
     physical_touch_last_y = touch_y;
   }
 
-  if (compact_main_menu_active && physical_touch_tracking &&
+  if (!set_piece_selector_isolated && compact_main_menu_active &&
+      physical_touch_tracking &&
       !physical_active && screen_width > 0 && screen_height > 0) {
     const float dx = physical_touch_last_x - physical_touch_start_x;
     const float dy = physical_touch_last_y - physical_touch_start_y;
@@ -1416,28 +1808,125 @@ void android_input_poll(void) {
   }
 
   FakeTouchState desired = {0};
-  if (physical_active && !compact_main_menu_active)
+  if (!set_piece_selector_isolated && physical_active &&
+      !compact_main_menu_active)
     touch_state_append(&desired, FAKE_POINTER_PHYSICAL, touch_x, touch_y);
   uint32_t replay_pad_buttons = 0;
   if (!context_changed) {
-    if (compact_main_menu_active && compact_menu_tap_until_ms > now_ms)
+    if (!set_piece_selector_isolated && compact_main_menu_active &&
+        compact_menu_tap_until_ms > now_ms)
       touch_state_append(&desired, FAKE_POINTER_MENU, compact_menu_tap_x,
                          compact_menu_tap_y);
-    if (replay_active) {
+    if (set_piece_selector_isolated) {
+      reset_virtual_surfaces();
+      if (set_piece_selector_active)
+        queue_set_piece_selector_input(have_left_stick, buttons, axis_x,
+                                       axis_y, now_ms);
+    } else if (inmatch_tutorial_isolated) {
+      reset_virtual_surfaces();
+      if (inmatch_tutorial_active &&
+          (buttons & HidNpadButton_A) &&
+          !(previous_hid_buttons & HidNpadButton_A))
+        pes_controller_inmatch_tutorial_play_request();
+    } else if (replay_active) {
       reset_virtual_surfaces();
       replay_pad_buttons =
-          append_replay_controller(&desired, have_left_stick, buttons, now_ms);
+          append_replay_controller(&desired, controller_connected, buttons,
+                                   now_ms);
+    } else if (goal_demo_active) {
+      reset_virtual_surfaces();
+      replay_pad_buttons = append_goal_demo_controller(
+          &desired, controller_connected, buttons,
+          controller_snapshot.goal_player, now_ms);
+    } else if (generic_cinematic_active) {
+      reset_virtual_surfaces();
+      replay_pad_buttons = append_cinematic_skip_controller(
+          &desired, controller_connected, buttons, now_ms);
+    } else if (penalty_active) {
+      reset_virtual_surfaces();
+      append_penalty_controller(&desired, controller_connected, buttons,
+                                axis_x, axis_y, right_axis_x, right_axis_y,
+                                penalty_role, now_ms);
     } else {
+      queue_native_setplay_action(&controller_snapshot, have_left_stick,
+                                  buttons);
       append_virtual_gamepad_touches(
           &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
-          control_mode, now_ms);
-      if (gameplan_cursor_active)
-        append_virtual_cursor_controller(&desired, axis_x, axis_y,
-                                         have_left_stick, buttons, now_ms,
-                                         cursor_context);
+          control_mode, &controller_snapshot, now_ms);
+      if (gameplan_cursor_active) {
+        if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
+            pes_controller_custom_pause_active()) {
+          const u64 pressed = buttons & ~previous_hid_buttons;
+          if (pressed & HidNpadButton_Up)
+            pes_controller_custom_pause_input(PES_PAUSE_INPUT_UP);
+          else if (pressed & HidNpadButton_Down)
+            pes_controller_custom_pause_input(PES_PAUSE_INPUT_DOWN);
+          else if (pressed & HidNpadButton_Left)
+            pes_controller_custom_pause_input(PES_PAUSE_INPUT_LEFT);
+          else if (pressed & HidNpadButton_Right)
+            pes_controller_custom_pause_input(PES_PAUSE_INPUT_RIGHT);
+          else if (pressed & HidNpadButton_A)
+            pes_controller_custom_pause_input(PES_PAUSE_INPUT_DECIDE);
+          else if (pressed & HidNpadButton_B)
+            pes_controller_custom_pause_input(PES_PAUSE_INPUT_BACK);
+        } else {
+          append_virtual_cursor_controller(&desired, axis_x, axis_y,
+                                           have_left_stick, buttons, now_ms,
+                                           cursor_context);
+        }
+      }
     }
-    if (!replay_active && !gameplay_active && !gameplan_cursor_active &&
-        pes_controller_menu_active()) {
+    if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
+        !penalty_active && pause_camera_active) {
+      append_pause_camera_swipe(&desired, have_left_stick, buttons, now_ms);
+      const u64 pressed = buttons & ~previous_hid_buttons;
+      if (pressed & HidNpadButton_Left)
+        pes_controller_pause_camera_input(PES_PAUSE_INPUT_LEFT);
+      else if (pressed & HidNpadButton_Right)
+        pes_controller_pause_camera_input(PES_PAUSE_INPUT_RIGHT);
+      else if (pressed & HidNpadButton_B)
+        pes_controller_pause_camera_input(PES_PAUSE_INPUT_BACK);
+    }
+    if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
+        !penalty_active && custom_postmatch_active) {
+      const u64 pressed = buttons & ~previous_hid_buttons;
+      if (pressed & HidNpadButton_Up)
+        pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_UP);
+      else if (pressed & HidNpadButton_Down)
+        pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_DOWN);
+      else if (pressed & HidNpadButton_Left)
+        pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_LEFT);
+      else if (pressed & HidNpadButton_Right)
+        pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_RIGHT);
+      else if (pressed & HidNpadButton_A)
+        pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_DECIDE);
+      else if (pressed & HidNpadButton_B)
+        pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_BACK);
+    }
+    if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
+        !penalty_active && custom_prematch_gameplan_active) {
+      const u64 pressed = buttons & ~previous_hid_buttons;
+      if (pressed & HidNpadButton_Up)
+        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_UP);
+      else if (pressed & HidNpadButton_Down)
+        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_DOWN);
+      else if (pressed & HidNpadButton_Left)
+        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_LEFT);
+      else if (pressed & HidNpadButton_Right)
+        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_RIGHT);
+      else if (pressed & HidNpadButton_A)
+        pes_controller_custom_prematch_gameplan_input(
+            PES_PAUSE_INPUT_DECIDE);
+      else if (pressed & HidNpadButton_B)
+        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_BACK);
+    }
+    if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
+        !penalty_active && !pause_camera_active &&
+        !custom_prematch_gameplan_active &&
+        !custom_postmatch_active &&
+        !cinematic_active && !gameplay_active &&
+        !gameplan_cursor_active &&
+        menu_controller_active) {
       const int a_pressed = (buttons & HidNpadButton_A) != 0 &&
                             (previous_hid_buttons & HidNpadButton_A) == 0;
       const int b_pressed = (buttons & HidNpadButton_B) != 0 &&
@@ -1460,27 +1949,30 @@ void android_input_poll(void) {
   reconcile_touch_state(&desired);
   if (menu_was_active >= 0 &&
       !context_changed &&
-      !replay_active && !replay_pointer_was_active &&
+      !set_piece_selector_isolated &&
+      !cinematic_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU) < 0 &&
       screen_width > 0 && screen_height > 0)
     pes_controller_menu_tap(menu_x / (float)screen_width,
                             menu_y / (float)screen_height);
   if (menu_back_was_active >= 0 &&
       !context_changed &&
-      !replay_active && !replay_pointer_was_active &&
+      !set_piece_selector_isolated &&
+      !cinematic_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK) < 0)
     pes_controller_menu_back_pressed();
 
   const int physical_is_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
-  if (!compact_main_menu_active && physical_was_active &&
+  if (!set_piece_selector_isolated && !compact_main_menu_active &&
+      physical_was_active &&
       !physical_is_active &&
       physical_touch_tracking && screen_width > 0 && screen_height > 0) {
     const float dx = physical_touch_last_x - physical_touch_start_x;
     const float dy = physical_touch_last_y - physical_touch_start_y;
     // Only a short click may activate the Matchmaking cards; normal swipes
     // continue exclusively through Android's original touch stream.
-    if (!replay_active && !replay_pointer_was_active &&
+    if (!cinematic_active && !replay_pointer_was_active &&
         fabsf(dx) <= (float)screen_width * 0.06f &&
         fabsf(dy) <= (float)screen_height * 0.08f) {
       const int menu_consumed = pes_controller_menu_physical_tap(
@@ -1490,8 +1982,8 @@ void android_input_poll(void) {
         pes_exhibition_matchmaking_tap(
             physical_touch_last_x / (float)screen_width,
             physical_touch_last_y / (float)screen_height);
-    } else if (!replay_active && !replay_pointer_was_active &&
-               !gameplay_active && pes_controller_menu_active()) {
+    } else if (!cinematic_active && !replay_pointer_was_active &&
+               !gameplay_active && menu_controller_active) {
       // Let the team picker move its custom focus to the visible edge after
       // a native list swipe. The Android stream still performs the scrolling.
       pes_controller_menu_physical_swipe(
@@ -1508,20 +2000,32 @@ void android_input_poll(void) {
   else if (physical_was_active && !physical_is_active)
     debugPrintf("input: touch up android=%.1f,%.1f\n", touch_x, touch_y);
 
+#ifdef DEBUG_LOG
   log_controller_input(&left_stick, have_left_stick, buttons, axis_x, axis_y,
                        gameplay_active, control_mode);
+#endif
   if (context_changed)
     disable_native_pad_bridge();
-  else if (replay_active)
-    emit_replay_pad_input(have_left_stick, replay_pad_buttons);
+  else if (set_piece_selector_isolated || inmatch_tutorial_isolated ||
+           penalty_active)
+    disable_native_pad_bridge();
+  else if (cinematic_active)
+    emit_replay_pad_input(controller_connected, replay_pad_buttons);
   else if (gameplan_cursor_active)
     emit_virtual_cursor_pad_input(have_left_stick, buttons, cursor_context);
-  else if (!gameplay_active && pes_controller_menu_active())
+  else if (pause_camera_active)
+    disable_native_pad_bridge();
+  else if (custom_prematch_gameplan_active)
+    disable_native_pad_bridge();
+  else if (custom_postmatch_active)
+    disable_native_pad_bridge();
+  else if (!gameplay_active && menu_controller_active)
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,
                         have_left_stick);
   else
     disable_native_pad_bridge();
-  previous_hid_buttons = context_changed ? 0 : (have_left_stick ? buttons : 0);
+  previous_hid_buttons =
+      context_changed ? 0 : (controller_connected ? buttons : 0);
 }
 
 void *ALooper_prepare_fake(int opts) {
