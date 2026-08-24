@@ -57,6 +57,24 @@ pes_mobile_screen_tap_entry_hook:
     .size pes_mobile_screen_tap_entry_hook, .-pes_mobile_screen_tap_entry_hook
 
     .align 2
+    .global pes_inplay_ball_position_broadcast_original
+    .type pes_inplay_ball_position_broadcast_original, %function
+
+// Callable trampoline for the hooked Broadcast target calculator. Recreate
+// its displaced prologue and let the original epilogue return to the C
+// wrapper, which can then correct only the fast-ball lag case.
+pes_inplay_ball_position_broadcast_original:
+    sub sp, sp, #0x1c0
+    stp d15, d14, [sp, #288]
+    stp d13, d12, [sp, #304]
+    stp d11, d10, [sp, #320]
+    adrp x17, inplay_ball_position_broadcast_resume
+    ldr x17, [x17, #:lo12:inplay_ball_position_broadcast_resume]
+    br x17
+
+    .size pes_inplay_ball_position_broadcast_original, .-pes_inplay_ball_position_broadcast_original
+
+    .align 2
     .global pes_match_replay_check_skip_hook
     .type pes_match_replay_check_skip_hook, %function
 
@@ -87,6 +105,68 @@ pes_match_replay_check_skip_hook:
     .size pes_match_replay_check_skip_hook, .-pes_match_replay_check_skip_hook
 
     .align 2
+    .global pes_match_goal_demo_init_hook
+    .type pes_match_goal_demo_init_hook, %function
+
+// Reset the one-shot goal helper only when the game starts a genuinely new
+// interactive GoalDemo. Replaying the displaced prologue keeps this hook
+// event-driven and completely outside the per-frame controller path.
+pes_match_goal_demo_init_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_goal_demo_init_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    stp x19, x30, [sp, #-16]!
+    ldr x9, [x0, #48]
+    ldr w10, [x0, #56]
+    mov w8, #1
+    br x17
+
+    .size pes_match_goal_demo_init_hook, .-pes_match_goal_demo_init_hook
+
+    .align 2
+    .global pes_match_goal_demo_update_hook
+    .type pes_match_goal_demo_update_hook, %function
+
+// GoalDemo runs before Replay and owns the celebration/skip buttons. Publish
+// its native registry-backed ownership state, then replay the displaced
+// UpdateGoalDemo2DInfo prologue verbatim.
+pes_match_goal_demo_update_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_goal_demo_update_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0x110
+    stp x28, x27, [sp, #176]
+    stp x26, x25, [sp, #192]
+    stp x24, x23, [sp, #208]
+    br x17
+
+    .size pes_match_goal_demo_update_hook, .-pes_match_goal_demo_update_hook
+
+    .align 2
     .global pes_match_pause_update_hook
     .type pes_match_pause_update_hook, %function
 pes_match_pause_update_hook:
@@ -112,6 +192,126 @@ pes_match_pause_update_hook:
     br x17
 
     .size pes_match_pause_update_hook, .-pes_match_pause_update_hook
+
+    .align 2
+    .global pes_match_squad_edit_update_hook
+    .type pes_match_squad_edit_update_hook, %function
+
+// MyClubSquadEdit's vtable entry is an adjustor thunk in this build, so hook
+// the concrete method entry and replay its four displaced prologue words.
+pes_match_squad_edit_update_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_squad_edit_update_entry
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0xa0
+    stp x28, x27, [sp, #64]
+    stp x26, x25, [sp, #80]
+    stp x24, x23, [sp, #96]
+    adrp x17, pes_match_squad_edit_update_resume
+    ldr x17, [x17, #:lo12:pes_match_squad_edit_update_resume]
+    br x17
+
+    .size pes_match_squad_edit_update_hook, .-pes_match_squad_edit_update_hook
+
+    .align 2
+    .global pes_match_team_stats_update_hook
+    .type pes_match_team_stats_update_hook, %function
+
+// The fourth displaced TeamStats instruction is a PC-relative BL. Call the
+// resolved target explicitly before returning to UpdatePreControlWindow+0x10.
+pes_match_team_stats_update_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_team_stats_update_entry
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    str x20, [sp, #-32]!
+    stp x19, x30, [sp, #16]
+    mov x19, x0
+    adrp x17, pes_match_team_stats_debug_aging_get_state
+    ldr x17, [x17, #:lo12:pes_match_team_stats_debug_aging_get_state]
+    blr x17
+    adrp x17, pes_match_team_stats_update_resume
+    ldr x17, [x17, #:lo12:pes_match_team_stats_update_resume]
+    br x17
+
+    .size pes_match_team_stats_update_hook, .-pes_match_team_stats_update_hook
+
+    .align 2
+    .global pes_match_tutorial_guide_update_hook
+    .type pes_match_tutorial_guide_update_hook, %function
+pes_match_tutorial_guide_update_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_tutorial_guide_update_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    sub sp, sp, #0x60
+    stp x21, x20, [sp, #64]
+    stp x19, x30, [sp, #80]
+    ldr w8, [x0, #584]
+    br x17
+
+    .size pes_match_tutorial_guide_update_hook, .-pes_match_tutorial_guide_update_hook
+
+    .align 2
+    .global pes_match_flow_check_skip_fix_demo_hook
+    .type pes_match_flow_check_skip_fix_demo_hook, %function
+pes_match_flow_check_skip_fix_demo_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_flow_check_skip_fix_demo_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    str x20, [sp, #-32]!
+    stp x19, x30, [sp, #16]
+    ldrb w8, [x0, #3408]
+    mov x19, x0
+    mov w20, w1
+    add x8, x0, x8, lsl #2
+    br x17
+
+    .size pes_match_flow_check_skip_fix_demo_hook, .-pes_match_flow_check_skip_fix_demo_hook
 
     .align 2
     .global pes_match_pause_d1_hook
@@ -222,6 +422,58 @@ pes_match_result_half_hook:
     br x17
 
     .size pes_match_result_half_hook, .-pes_match_result_half_hook
+
+    .align 2
+    .global pes_match_result_half_update_hook
+    .type pes_match_result_half_update_hook, %function
+pes_match_result_half_update_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_result_half_update_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+    sub sp, sp, #0x40
+    str x20, [sp, #0x20]
+    stp x19, x30, [sp, #0x30]
+    mov x19, x0
+    // Resume at the original fifth instruction; the complete four-word
+    // prologue above exactly recreates the displaced frame.
+    br x17
+    .size pes_match_result_half_update_hook, .-pes_match_result_half_update_hook
+
+    .align 2
+    .global pes_exhibition_match_setup_data_hook
+    .type pes_exhibition_match_setup_data_hook, %function
+pes_exhibition_match_setup_data_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_exhibition_match_setup_data_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+    str x22, [sp, #-48]!
+    stp x21, x20, [sp, #16]
+    stp x19, x30, [sp, #32]
+    mov x19, x0
+    br x17
+    .size pes_exhibition_match_setup_data_hook, .-pes_exhibition_match_setup_data_hook
 
     .align 2
     .global pes_main_menu_graphics_d1_hook

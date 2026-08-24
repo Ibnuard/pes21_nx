@@ -25,7 +25,7 @@ work without source changes.
 The Nyan Mod files are not included, maintained, or distributed here. Credit
 goes to **Nyan Mod** for the offline modification used during development.
 
-## Current release: v0.1.97
+## Current release: v0.1.98
 
 This release expands the port from a small Exhibition proof of concept into a
 more complete offline match flow:
@@ -39,8 +39,11 @@ more complete offline match flow:
 - differentiated player ratings instead of the former uniform overall value;
 - menu and match audio through libnx AudioOut, including English commentary
   when the compatible commentary data is present;
-- Switch controller support through the tested Classic mobile-control layout,
-  including movement, actions, Dash, defensive controls, and Pause.
+- full Switch controller coverage through the tested Classic mobile-control
+  layout, including gameplay, set pieces, replays, penalties, Pause, Game
+  Plan, and match-result navigation;
+- controller-first custom overlays for video settings, credits, and set-piece
+  taker selection, plus a stable seven-level COM difficulty route.
 
 The current Exhibition flow is:
 

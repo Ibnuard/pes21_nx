@@ -4,6 +4,57 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.98] - 2026-08-24
+
+### Added
+
+- Added controller-first custom overlays for Video Settings, Credits, the
+  reserved 2 Player entry, and Corner/Free Kick/Throw-in taker selection.
+- Added full Joy-Con routes for native Game Plan, Pause and camera settings,
+  half-time and full-time results, first-use tutorials, penalty aiming and
+  goalkeeper dives, replays, goal celebrations, and fixed set-play actions.
+- Added native semantic detection for replay, goal-demo, tutorial, penalty,
+  goal-kick, corner, free-kick, and throw-in states so controller actions no
+  longer depend on transient screen coordinates alone.
+
+### Changed
+
+- Reduced the main menu to Exhibition, Credits, 2 Player, and Settings, with
+  page swiping disabled and unsupported graphics High mode removed.
+- Standardized set-piece taker selection on ZR. Free Kick now uses X for
+  Switch View and preserves Y for Shoot.
+- Simplified the set-piece player picker into a vertical, paginated modal with
+  player name, preferred foot, and current-player indication.
+- Restored the native Game Plan frontend with a virtual cursor for both
+  pre-match and Pause entry, while keeping the result pages free of unused
+  statistic tiles.
+
+### Fixed
+
+- Synchronized all seven COM difficulty levels, including Legend, into the
+  authoritative match data instead of falling back to Beginner behavior.
+- Fixed controller-state leakage across gameplay, replay, goal, set-play,
+  Pause, Game Plan, and result transitions, including opponent and own goals.
+- Fixed the second/final match-result page so A activates its native Next
+  footer after the quick-stat preview.
+- Removed the hot-path polling regression introduced by the expanded mapping,
+  restoring the previously smooth release frame pacing.
+- Hardened synthetic-touch ownership during menu, replay, and match state
+  changes to prevent stuck pointers and transition crashes.
+
+### Verified
+
+- The complete match flow is controller-operable from the title screen through
+  Exhibition, gameplay, set pieces, penalties, and return from final results.
+- The release configuration builds with diagnostics and performance tracing
+  disabled, and the wrapper version is reported as 0.1.98.
+
+### Known issues
+
+- Native Switch performance and long-session stability still require broader
+  hardware validation; emulator behavior is not a substitute for that test.
+- Compatibility remains limited to PES 2021 Mobile v5.3.0 Nyan Mod Offline.
+
 ## [0.1.97] - 2026-08-17
 
 ### Added
