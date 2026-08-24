@@ -59,6 +59,7 @@ typedef struct {
   uint32_t setplay_options;
   uint32_t setplay_button_mask;
   uint32_t goal_player;
+  uint32_t goal_helper_visible;
   uint32_t replay_feedback;
 } PesControllerSnapshot;
 
@@ -79,6 +80,7 @@ int pes_controller_replay_active(void);
 int pes_controller_replay_goal_active(void);
 int pes_controller_goal_demo_active(void);
 int pes_controller_goal_demo_player_goal(void);
+void pes_controller_goal_demo_consume(void);
 void pes_controller_cinematic_update(int gameplay_active, int control_mode,
                                      int excluded, uint64_t now_ms);
 int pes_controller_cinematic_skip_active(void);
@@ -105,6 +107,7 @@ const char *pes_controller_set_piece_selector_name(void);
 const char *pes_controller_set_piece_selector_foot(void);
 const char *pes_controller_set_piece_selector_name_at(uint32_t index);
 const char *pes_controller_set_piece_selector_foot_at(uint32_t index);
+int pes_controller_set_piece_selector_current_at(uint32_t index);
 void pes_controller_set_piece_selector_move(int direction);
 void pes_controller_set_piece_selector_input(uint32_t action);
 void pes_controller_pause_back_request(void);

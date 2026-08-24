@@ -53,6 +53,7 @@ static uintptr_t exhibition_search_user_name_resume;
 static uintptr_t exhibition_search_task_ready_resume;
 static uintptr_t match_replay_check_skip_resume;
 static uintptr_t match_goal_demo_update_resume;
+uintptr_t match_goal_demo_init_resume;
 static uintptr_t match_pause_update_resume;
 static uintptr_t match_pause_d1_resume;
 static uintptr_t match_pause_d0_resume;
@@ -620,6 +621,7 @@ static _Alignas(8) uint64_t match_goal_demo_seen_tick;
 static _Alignas(8) uint64_t match_goal_demo_pad_seen_tick;
 static _Alignas(4) uint32_t match_goal_demo_player_goal;
 static _Alignas(4) uint32_t match_goal_demo_owner_known;
+static _Alignas(4) uint32_t match_goal_demo_helper_consumed;
 // Generic cinematic detector.  Replay/GoalDemo transition hooks are kept
 // disabled because their object layouts differ between mobile builds; this
 // state is inferred from the safe mobile-control heartbeat instead.
@@ -686,6 +688,7 @@ static _Alignas(8) uint64_t match_controller_surface_word;
 typedef struct {
   uint32_t order_no;
   uint32_t player_id;
+  uint32_t current;
   char name[48];
   char foot[16];
 } MatchKickerSelectorPlayer;
@@ -5346,6 +5349,7 @@ static void match_replay_publish(void *replay) {
   __atomic_store_n(&match_goal_demo_pad_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_owner_known, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&match_replay_feedback_value, PES_REPLAY_FEEDBACK_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_replay_feedback_tick, 0, __ATOMIC_RELEASE);
@@ -5496,6 +5500,7 @@ uintptr_t pes_match_replay_check_skip_entry(void *replay,
     __atomic_store_n(&match_goal_demo_pad_seen_tick, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_owner_known, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
     const uint32_t cursor =
         __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
     if (cursor != PES_VIRTUAL_CURSOR_GAMEPLAN)
@@ -5532,6 +5537,57 @@ static uint32_t match_goal_demo_resolve_owner(void *goal_demo,
     return 1;
   }
   return 0;
+}
+
+// GoalSide alone cannot identify an own goal: on this mobile build it can
+// still describe the side controlling the scorer while the own-goal demo is
+// being selected.  Replace the tiny native predicate with an equivalent
+// implementation and publish its result to the controller surface.  This is
+// event-driven by GoalDemo itself and adds no work to the gameplay hot path.
+static uint32_t pes_match_goal_demo_is_own_goal(void *goal_demo) {
+  uint32_t demo_kind = 0;
+  if (goal_demo)
+    memcpy(&demo_kind, (const uint8_t *)goal_demo + 8, sizeof(demo_kind));
+  const uint32_t own_goal = (uint32_t)(demo_kind - 0x000300d0u) < 3u;
+  if (own_goal) {
+    __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_goal_demo_owner_known, 1, __ATOMIC_RELEASE);
+  }
+  return own_goal;
+}
+
+// InteractiveGoalDemoInit is the authoritative beginning of a new A/B choice
+// page. Reset the one-shot latch here, rather than from a timeout heartbeat,
+// so a stale GoalDemo unit cannot resurrect the helper during the black
+// transition after replay.
+uintptr_t pes_match_goal_demo_init_entry(void *goal_demo) {
+  (void)goal_demo;
+  __atomic_store_n(&match_goal_demo_helper_consumed, 0, __ATOMIC_RELEASE);
+  return match_goal_demo_init_resume;
+}
+
+void pes_controller_goal_demo_consume(void) {
+  __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
+
+  // Hide only the cached presentation bit immediately. Keep the semantic
+  // GoalDemo surface alive so its synthetic A/B touch can complete the full
+  // 90 ms DOWN/MOVE/UP sequence instead of being released after one frame.
+  uint64_t word = __atomic_load_n(&match_controller_surface_word,
+                                  __ATOMIC_ACQUIRE);
+  for (;;) {
+    const uint32_t payload = (uint32_t)word;
+    if ((payload & 0x7u) != PES_CONTROLLER_SURFACE_GOAL_DEMO ||
+        !(payload & (1u << 19)))
+      break;
+    const uint32_t generation = (uint32_t)(word >> 32);
+    const uint64_t replacement =
+        ((uint64_t)(generation + 1u) << 32) |
+        (uint64_t)(payload & ~(1u << 19));
+    if (__atomic_compare_exchange_n(&match_controller_surface_word, &word,
+                                    replacement, 0, __ATOMIC_ACQ_REL,
+                                    __ATOMIC_ACQUIRE))
+      break;
+  }
 }
 
 uintptr_t pes_match_goal_demo_update_entry(void *goal_demo,
@@ -6059,6 +6115,7 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
   uint32_t setplay_options = 0;
   uint32_t setplay_mask = 0;
   uint32_t goal_player = 0;
+  uint32_t goal_helper_visible = 0;
 
   if (match_native_replay_active_at(now)) {
     surface = PES_CONTROLLER_SURFACE_REPLAY;
@@ -6076,6 +6133,9 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
       goal_player =
           __atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE) &&
           __atomic_load_n(&match_goal_demo_player_goal, __ATOMIC_ACQUIRE);
+      goal_helper_visible =
+          !__atomic_load_n(&match_goal_demo_helper_consumed,
+                           __ATOMIC_ACQUIRE);
     } else if (match_native_demo_active_at(now, NULL)) {
       surface = PES_CONTROLLER_SURFACE_CINEMATIC;
     } else {
@@ -6102,7 +6162,8 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
   const uint32_t payload =
       (surface & 0x7u) | ((setplay_context & 0x7u) << 3) |
       ((setplay_options & 0xfu) << 6) | ((setplay_mask & 0xffu) << 10) |
-      ((goal_player & 1u) << 18);
+      ((goal_player & 1u) << 18) |
+      ((goal_helper_visible & 1u) << 19);
   uint64_t word = __atomic_load_n(&match_controller_surface_word,
                                   __ATOMIC_ACQUIRE);
   for (;;) {
@@ -6126,6 +6187,7 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
   snapshot->setplay_options = setplay_options;
   snapshot->setplay_button_mask = setplay_mask;
   snapshot->goal_player = goal_player;
+  snapshot->goal_helper_visible = goal_helper_visible;
   const uint64_t feedback_tick = __atomic_load_n(
       &match_replay_feedback_tick, __ATOMIC_ACQUIRE);
   if (feedback_tick &&
@@ -6147,6 +6209,7 @@ void pes_controller_surface_cached_snapshot(PesControllerSnapshot *snapshot) {
   snapshot->setplay_options = (payload >> 6) & 0xfu;
   snapshot->setplay_button_mask = (payload >> 10) & 0xffu;
   snapshot->goal_player = (payload >> 18) & 1u;
+  snapshot->goal_helper_visible = (payload >> 19) & 1u;
 }
 
 static uint32_t pes_match_goalkick_main(void *unit, const void *input,
@@ -6242,6 +6305,7 @@ static int match_kicker_selector_build(const void *input) {
     MatchKickerSelectorPlayer *entry = &valid[valid_count];
     memset(entry, 0, sizeof(*entry));
     entry->order_no = order;
+    entry->current = order == current_order;
     memcpy(&entry->player_id, (const uint8_t *)player + 48,
            sizeof(entry->player_id));
     match_kicker_selector_copy_name(entry->name, sizeof(entry->name), name);
@@ -6268,14 +6332,21 @@ static int match_kicker_selector_build(const void *input) {
   memset(published, 0,
          sizeof(match_kicker_selector_players[next_bank]));
   uint32_t count = 0;
-  uint32_t focus = 0;
-  for (uint32_t index = 0; index < valid_count; index++) {
-    if (eligible_count && !eligible[index])
-      continue;
-    published[count] = valid[index];
-    if (published[count].order_no == current_order)
-      focus = count;
-    count++;
+  // Always open on page one. Following the currently assigned taker made the
+  // overlay appear to start on page two for common corner/free-kick takers.
+  const uint32_t focus = 0;
+  // Put the active taker in slot zero, then retain formation order for every
+  // other eligible player. Page one therefore opens consistently and always
+  // contains the visible CURRENT marker.
+  for (uint32_t pass = 0; pass < 2u; pass++) {
+    for (uint32_t index = 0; index < valid_count; index++) {
+      const uint32_t is_current = valid[index].current != 0;
+      if ((pass == 0u) != is_current)
+        continue;
+      if (eligible_count && !eligible[index] && !is_current)
+        continue;
+      published[count++] = valid[index];
+    }
   }
   if (!count)
     return 0;
@@ -6453,6 +6524,16 @@ const char *pes_controller_set_piece_selector_foot_at(uint32_t index) {
   const uint32_t bank =
       __atomic_load_n(&match_kicker_selector_bank, __ATOMIC_ACQUIRE) & 1u;
   return match_kicker_selector_players[bank][index].foot;
+}
+
+int pes_controller_set_piece_selector_current_at(uint32_t index) {
+  const uint32_t count = __atomic_load_n(&match_kicker_selector_count,
+                                          __ATOMIC_ACQUIRE);
+  if (index >= count)
+    return 0;
+  const uint32_t bank =
+      __atomic_load_n(&match_kicker_selector_bank, __ATOMIC_ACQUIRE) & 1u;
+  return match_kicker_selector_players[bank][index].current != 0;
 }
 
 const char *pes_controller_set_piece_selector_name(void) {
@@ -7155,6 +7236,7 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
 extern void cobra_pad_update_hook(void);
 extern void pes_match_replay_check_skip_hook(void);
 extern void pes_match_goal_demo_update_hook(void);
+extern void pes_match_goal_demo_init_hook(void);
 extern void pes_match_tutorial_guide_update_hook(void);
 extern void pes_match_flow_check_skip_fix_demo_hook(void);
 extern void pes_match_pause_update_hook(void);
@@ -7212,7 +7294,11 @@ void pes_virtual_pad_update_info(void *virtual_pad) {
     memcpy(&clip, (const uint8_t *)virtual_pad + clip_offsets[index],
            sizeof(clip));
     if (clip && clip != tinted_clips[index]) {
-      virtual_pad_set_color(clip, 1.0f, 1.0f, 1.0f, 0.02f);
+      // The first two clips are the virtual movement-stick layers.  Keep them
+      // interactive but completely transparent; 2% alpha is still visible on
+      // an OLED panel.  Preserve the established action-button tint.
+      const float alpha = index < 2u ? 0.0f : 0.02f;
+      virtual_pad_set_color(clip, 1.0f, 1.0f, 1.0f, alpha);
       tinted_clips[index] = clip;
     }
   }
@@ -8573,6 +8659,34 @@ void install_ue4_hooks(so_module *module) {
   match_goal_demo_is_cpu_goal =
       (void *)so_find_addr_rx(module,
           "_ZN5match8GoalDemo9IsCpuGoalEPKNS_8registry8RegistryE");
+  const uintptr_t own_goal_demo = so_find_addr(
+      module, "_ZN5match8GoalDemo13IsOwnGoalDemoEv");
+  static const uint32_t expected_own_goal_demo_entry[4] = {
+      0xb9400808, 0x529fe609, 0x72bfff89, 0x0b090108,
+  };
+  if (!own_goal_demo ||
+      memcmp((const void *)own_goal_demo, expected_own_goal_demo_entry,
+             sizeof(expected_own_goal_demo_entry)) != 0)
+    fatal_error("Unexpected GoalDemo::IsOwnGoalDemo entry at %p",
+                (void *)own_goal_demo);
+  hook_arm64(own_goal_demo,
+             (uintptr_t)&pes_match_goal_demo_is_own_goal);
+  const char *goal_demo_init_symbol =
+      "_ZN5match8GoalDemo23InteractiveGoalDemoInitEv";
+  const uintptr_t goal_demo_init =
+      so_find_addr(module, goal_demo_init_symbol);
+  const uintptr_t goal_demo_init_runtime =
+      so_find_addr_rx(module, goal_demo_init_symbol);
+  static const uint32_t expected_goal_demo_init_entry[4] = {
+      0xa9bf7bf3, 0xf9401809, 0xb940380a, 0x320003e8,
+  };
+  if (!goal_demo_init ||
+      memcmp((const void *)goal_demo_init, expected_goal_demo_init_entry,
+             sizeof(expected_goal_demo_init_entry)) != 0)
+    fatal_error("Unexpected GoalDemo::InteractiveGoalDemoInit entry at %p",
+                (void *)goal_demo_init);
+  match_goal_demo_init_resume = goal_demo_init_runtime + 0x10;
+  hook_arm64(goal_demo_init, (uintptr_t)&pes_match_goal_demo_init_hook);
   match_global_registry_get_instance =
       (void *)so_find_addr_rx(module,
           "_ZN5match8registry14GlobalRegistry19GetInstanceForRetryEv");

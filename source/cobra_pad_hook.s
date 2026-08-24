@@ -105,6 +105,37 @@ pes_match_replay_check_skip_hook:
     .size pes_match_replay_check_skip_hook, .-pes_match_replay_check_skip_hook
 
     .align 2
+    .global pes_match_goal_demo_init_hook
+    .type pes_match_goal_demo_init_hook, %function
+
+// Reset the one-shot goal helper only when the game starts a genuinely new
+// interactive GoalDemo. Replaying the displaced prologue keeps this hook
+// event-driven and completely outside the per-frame controller path.
+pes_match_goal_demo_init_hook:
+    sub sp, sp, #0x50
+    stp x0, x1, [sp, #0x00]
+    stp x2, x3, [sp, #0x10]
+    stp x4, x5, [sp, #0x20]
+    stp x6, x7, [sp, #0x30]
+    stp x29, x30, [sp, #0x40]
+    bl pes_match_goal_demo_init_entry
+    mov x17, x0
+    ldp x29, x30, [sp, #0x40]
+    ldp x6, x7, [sp, #0x30]
+    ldp x4, x5, [sp, #0x20]
+    ldp x2, x3, [sp, #0x10]
+    ldp x0, x1, [sp, #0x00]
+    add sp, sp, #0x50
+
+    stp x19, x30, [sp, #-16]!
+    ldr x9, [x0, #48]
+    ldr w10, [x0, #56]
+    mov w8, #1
+    br x17
+
+    .size pes_match_goal_demo_init_hook, .-pes_match_goal_demo_init_hook
+
+    .align 2
     .global pes_match_goal_demo_update_hook
     .type pes_match_goal_demo_update_hook, %function
 

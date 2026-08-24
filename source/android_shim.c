@@ -1392,12 +1392,14 @@ static uint32_t append_goal_demo_controller(FakeTouchState *desired,
     // Opponent-goal and other skip-only variants are also backed by a native
     // ThinkUnitSkip. Queue its exact command alongside the stock goal touch.
     pes_controller_demo_skip_request();
+    pes_controller_goal_demo_consume();
     pes_controller_replay_feedback_set(PES_REPLAY_FEEDBACK_B_SKIP);
   } else if (player_goal && (pressed & HidNpadButton_A) &&
              action_until_ms <= now_ms) {
     action_x = 0.891f;
     action_y = 0.344f;
     action_until_ms = now_ms + 90;
+    pes_controller_goal_demo_consume();
     pes_controller_replay_feedback_set(
         PES_REPLAY_FEEDBACK_GOAL_CELEBRATION);
   }
@@ -1433,6 +1435,8 @@ static void append_penalty_controller(FakeTouchState *desired,
                                       float left_x, float left_y,
                                       float right_x, float right_y,
                                       uint32_t role, uint64_t now_ms) {
+  (void)right_x;
+  (void)right_y;
   static uint32_t generation_seen;
   static uint64_t swipe_started_ms;
   static uint64_t swipe_until_ms;
@@ -1467,13 +1471,13 @@ static void append_penalty_controller(FakeTouchState *desired,
     }
     begin_swipe = 1;
   } else if (role == PES_PENALTY_GOALKEEPER) {
-    const float magnitude = sqrtf(right_x * right_x + right_y * right_y);
+    const float magnitude = sqrtf(left_x * left_x + left_y * left_y);
     if (magnitude <= 0.24f)
       keeper_stick_armed = 1;
     if (keeper_stick_armed && magnitude >= 0.55f &&
         swipe_until_ms <= now_ms) {
-      direction_x = right_x / magnitude;
-      direction_y = right_y / magnitude;
+      direction_x = left_x / magnitude;
+      direction_y = left_y / magnitude;
       keeper_stick_armed = 0;
       begin_swipe = 1;
     }
@@ -1482,13 +1486,24 @@ static void append_penalty_controller(FakeTouchState *desired,
   if (begin_swipe) {
     // MobilePenaltyKick consumes ScreenTapInfo ButtonKind 0x10 and derives
     // both target height/side and goalkeeper saving angle from the gesture.
-    // Keep the whole flick on the right half, matching the stock tutorial.
-    swipe_start_x = 0.78f;
-    swipe_start_y = 0.72f;
-    swipe_end_x = fmaxf(0.56f, fminf(0.96f,
-                                    swipe_start_x + direction_x * 0.22f));
-    swipe_end_y = fmaxf(0.20f, fminf(0.90f,
-                                    swipe_start_y + direction_y * 0.34f));
+    // The kicker listens on the tutorial's right-hand gesture area.  The
+    // goalkeeper variant is different: its native hit test requires DOWN to
+    // begin on the goalkeeper model before the directional flick.
+    if (role == PES_PENALTY_GOALKEEPER) {
+      swipe_start_x = 0.50f;
+      swipe_start_y = 0.40f;
+      swipe_end_x = fmaxf(0.20f, fminf(0.80f,
+                                      swipe_start_x + direction_x * 0.30f));
+      swipe_end_y = fmaxf(0.12f, fminf(0.76f,
+                                      swipe_start_y + direction_y * 0.32f));
+    } else {
+      swipe_start_x = 0.78f;
+      swipe_start_y = 0.72f;
+      swipe_end_x = fmaxf(0.56f, fminf(0.96f,
+                                      swipe_start_x + direction_x * 0.22f));
+      swipe_end_y = fmaxf(0.20f, fminf(0.90f,
+                                      swipe_start_y + direction_y * 0.34f));
+    }
     swipe_started_ms = now_ms;
     swipe_until_ms = now_ms + 170;
   }
