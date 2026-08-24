@@ -15,7 +15,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.97
+## Wrapper version 0.1.98
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
