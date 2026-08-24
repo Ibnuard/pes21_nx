@@ -566,8 +566,8 @@ static void overlay_render(void) {
       pes_controller_gameplan_cursor_position(&gameplan_cursor_x,
                                               &gameplan_cursor_y);
 
-  // The full-screen custom selector owns the whole presentation. Do not let
-  // the underlying match set-play legend bleed through its footer.
+  // The custom selector owns the modal presentation. Do not let the
+  // underlying match set-play legend bleed through its footer.
   if (set_piece_selector || tutorial_play_active) {
     setplay_context = PES_SETPLAY_NONE;
     setplay_options = 0;
@@ -893,82 +893,84 @@ static void overlay_render(void) {
         verts + quads * 24);
     quads += custom_key_text_quads;
   } else if (set_piece_selector) {
-    // Fully cover TouchKickerSelect. Its native scrolling list is not usable
-    // from a docked controller, so this surface presents a stable 2x4 page
-    // and keeps all navigation/actions in the Joy-Con footer.
-    const float panel_x = 0.0f;
-    const float panel_y = 0.0f;
-    const float panel_w = (float)screen_width;
-    const float panel_h = (float)screen_height;
-    const float header_h = 0.125f * (float)screen_height;
-    const float grid_x = 0.055f * (float)screen_width;
-    const float grid_y = 0.165f * (float)screen_height;
-    const float grid_w = 0.890f * (float)screen_width;
-    const float column_gap = 0.025f * (float)screen_width;
-    const float row_gap = 0.014f * (float)screen_height;
-    const float card_w = (grid_w - column_gap) * 0.5f;
-    const float card_h = 0.132f * (float)screen_height;
-    const float footer_y = 0.790f * (float)screen_height;
-    const float button_y = 0.865f * (float)screen_height;
+    // Keep TouchKickerSelect completely controller-owned, but present the
+    // roster as a compact modal instead of replacing the whole result view.
+    // Five one-column rows keep NAME and FOOT TYPE readable from docked mode.
+    const float panel_x = 0.205f * (float)screen_width;
+    const float panel_y = 0.055f * (float)screen_height;
+    const float panel_w = 0.590f * (float)screen_width;
+    const float panel_h = 0.890f * (float)screen_height;
+    const float panel_radius = 0.025f * (float)screen_height;
+    const float header_h = 0.110f * (float)screen_height;
+    const float row_x = panel_x + 0.030f * (float)screen_width;
+    const float row_y0 = panel_y + 0.145f * (float)screen_height;
+    const float row_w = panel_w - 0.060f * (float)screen_width;
+    const float row_gap = 0.012f * (float)screen_height;
+    const float row_h = 0.098f * (float)screen_height;
+    const float footer_y = panel_y + 0.735f * (float)screen_height;
+    const float button_y = panel_y + 0.785f * (float)screen_height;
     const float button_h = 0.068f * (float)screen_height;
-    const float button_w = 0.175f * (float)screen_width;
-    const float button_gap = 0.018f * (float)screen_width;
-    const float back_x = 0.945f * (float)screen_width - button_w;
+    const float button_w = 0.205f * (float)screen_width;
+    const float button_gap = 0.020f * (float)screen_width;
+    const float back_x = panel_x + panel_w -
+                         0.030f * (float)screen_width - button_w;
     const float action_x = back_x - button_gap - button_w;
     const float key_radius = 0.019f * (float)screen_height;
-    const float action_key_x = action_x + 0.030f * (float)screen_width;
-    const float back_key_x = back_x + 0.030f * (float)screen_width;
+    const float action_key_x = action_x + 0.028f * (float)screen_width;
+    const float back_key_x = back_x + 0.028f * (float)screen_width;
     const float key_y = button_y + button_h * 0.5f;
     const uint32_t count = pes_controller_set_piece_selector_count();
     uint32_t focus = pes_controller_set_piece_selector_focus();
     if (count && focus >= count)
       focus = count - 1u;
-    const uint32_t page = focus / 8u;
-    const uint32_t page_start = page * 8u;
-    const uint32_t page_count = count ? (count + 7u) / 8u : 1u;
+    const uint32_t page = focus / PES_SET_PIECE_SELECTOR_PAGE_SIZE;
+    const uint32_t page_start = page * PES_SET_PIECE_SELECTOR_PAGE_SIZE;
+    const uint32_t page_count =
+        count ? (count + PES_SET_PIECE_SELECTOR_PAGE_SIZE - 1u) /
+                    PES_SET_PIECE_SELECTOR_PAGE_SIZE
+              : 1u;
     const uint32_t visible_count =
         count > page_start
-            ? ((count - page_start) < 8u ? count - page_start : 8u)
+            ? ((count - page_start) < PES_SET_PIECE_SELECTOR_PAGE_SIZE
+                   ? count - page_start
+                   : PES_SET_PIECE_SELECTOR_PAGE_SIZE)
             : 0u;
     const uint32_t local_focus = focus - page_start;
-    const float selected_x =
-        grid_x + (local_focus & 1u) * (card_w + column_gap);
     const float selected_y =
-        grid_y + (local_focus / 2u) * (card_h + row_gap);
+        row_y0 + (float)local_focus * (row_h + row_gap);
 
     custom_backdrop_quads = emit_rect(
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
         verts + quads * 24);
     quads += custom_backdrop_quads;
-    custom_panel_style = (RoundedRectStyle){panel_w, panel_h, 0.0f};
+    custom_panel_style =
+        (RoundedRectStyle){panel_w, panel_h, panel_radius};
     custom_panel_quads = emit_round_rect_quad(
         panel_x, panel_y, panel_w, panel_h, verts + quads * 24);
     quads += custom_panel_quads;
-    custom_header_style = (RoundedRectStyle){panel_w, header_h, 0.0f};
+    custom_header_style =
+        (RoundedRectStyle){panel_w, header_h, panel_radius};
     custom_header_round_quads = emit_round_rect_quad(
         panel_x, panel_y, panel_w, header_h, verts + quads * 24);
     quads += custom_header_round_quads;
     custom_selected_style = (RoundedRectStyle){
-        card_w, card_h, 0.014f * (float)screen_height};
+        row_w, row_h, 0.014f * (float)screen_height};
     if (count) {
       custom_selected_quads = emit_round_rect_quad(
-          selected_x, selected_y, card_w, card_h, verts + quads * 24);
+          row_x, selected_y, row_w, row_h, verts + quads * 24);
       quads += custom_selected_quads;
     }
     for (uint32_t slot = 0; slot < visible_count; slot++) {
-      const float card_x =
-          grid_x + (slot & 1u) * (card_w + column_gap);
-      const float card_y =
-          grid_y + (slot / 2u) * (card_h + row_gap);
+      const float card_y = row_y0 + (float)slot * (row_h + row_gap);
       const int outline_quads = emit_outline(
-          card_x, card_y, card_w, card_h,
+          row_x, card_y, row_w, row_h,
           fmaxf(1.5f, (float)screen_height / 480.0f),
           verts + quads * 24);
       custom_rule_quads += outline_quads;
       quads += outline_quads;
     }
     const int footer_rule_quads = emit_rect(
-        grid_x, footer_y, grid_w, (float)screen_height / 600.0f,
+        row_x, footer_y, row_w, (float)screen_height / 600.0f,
         verts + quads * 24);
     custom_rule_quads += footer_rule_quads;
     quads += footer_rule_quads;
@@ -997,8 +999,9 @@ static void overlay_render(void) {
     const char *title = pes_controller_set_piece_selector_title();
     int line_quads = emit_line(
         title, (int)strlen(title),
-        (float)screen_width * 0.5f - (float)strlen(title) * title_gw * 0.5f,
-        (header_h - title_gh) * 0.5f, title_gw, title_gh,
+        panel_x + panel_w * 0.5f -
+            (float)strlen(title) * title_gw * 0.5f,
+        panel_y + (header_h - title_gh) * 0.5f, title_gw, title_gh,
         verts + quads * 24);
     custom_dark_text_first_quad = quads;
     custom_dark_text_quads += line_quads;
@@ -1008,9 +1011,9 @@ static void overlay_render(void) {
              page_count);
     line_quads = emit_line(
         page_label, (int)strlen(page_label),
-        0.930f * (float)screen_width -
+        panel_x + panel_w - 0.022f * (float)screen_width -
             (float)strlen(page_label) * text_gw,
-        (header_h - text_gh) * 0.5f, text_gw, text_gh,
+        panel_y + (header_h - text_gh) * 0.5f, text_gw, text_gh,
         verts + quads * 24);
     custom_dark_text_quads += line_quads;
     quads += line_quads;
@@ -1018,64 +1021,64 @@ static void overlay_render(void) {
       const char *loading = "LOADING PLAYERS...";
       line_quads = emit_line(
           loading, (int)strlen(loading),
-          (float)screen_width * 0.5f -
+          panel_x + panel_w * 0.5f -
               (float)strlen(loading) * text_gw * 0.5f,
-          0.445f * (float)screen_height, text_gw, text_gh,
+          panel_y + panel_h * 0.46f, text_gw, text_gh,
           verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
     }
     for (uint32_t slot = 0; slot < visible_count; slot++) {
       const uint32_t player_index = page_start + slot;
-      const float card_x =
-          grid_x + (slot & 1u) * (card_w + column_gap);
-      const float card_y =
-          grid_y + (slot / 2u) * (card_h + row_gap);
+      const float card_y = row_y0 + (float)slot * (row_h + row_gap);
       const char *player_name =
           pes_controller_set_piece_selector_name_at(player_index);
       const char *player_foot =
           pes_controller_set_piece_selector_foot_at(player_index);
       const int current_player =
           pes_controller_set_piece_selector_current_at(player_index);
-      const float name_gh = (float)screen_height / 35.0f;
+      const float name_gh = (float)screen_height / 32.0f;
       const float name_gw =
           name_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-      const float foot_gh = (float)screen_height / 48.0f;
+      const float foot_gh = (float)screen_height / 45.0f;
       const float foot_gw =
           foot_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
       char display_name[25];
       snprintf(display_name, sizeof(display_name), "%.24s", player_name);
       line_quads = emit_line(
           display_name, (int)strlen(display_name),
-          card_x + 0.028f * (float)screen_width,
-          card_y + 0.020f * (float)screen_height, name_gw, name_gh,
+          row_x + 0.022f * (float)screen_width,
+          card_y + (row_h - name_gh) * 0.5f, name_gw, name_gh,
+          verts + quads * 24);
+      custom_dark_text_quads += line_quads;
+      quads += line_quads;
+      char display_foot[25];
+      snprintf(display_foot, sizeof(display_foot), "%.24s", player_foot);
+      const int foot_len = (int)strlen(display_foot);
+      const float foot_x =
+          row_x + row_w - 0.022f * (float)screen_width -
+          (float)foot_len * foot_gw;
+      line_quads = emit_line(
+          display_foot, foot_len, foot_x,
+          card_y + (row_h - foot_gh) * 0.5f, foot_gw, foot_gh,
           verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
       if (current_player) {
         const char *current_label = "CURRENT";
         const int current_len = 7;
-        const float current_gh = (float)screen_height / 49.0f;
+        const float current_gh = (float)screen_height / 50.0f;
         const float current_gw =
             current_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
         line_quads = emit_line(
             current_label, current_len,
-            card_x + card_w - 0.022f * (float)screen_width -
+            foot_x - 0.020f * (float)screen_width -
                 (float)current_len * current_gw,
-            card_y + 0.026f * (float)screen_height, current_gw, current_gh,
+            card_y + (row_h - current_gh) * 0.5f, current_gw, current_gh,
             verts + quads * 24);
         custom_dark_text_quads += line_quads;
         quads += line_quads;
       }
-      char display_foot[25];
-      snprintf(display_foot, sizeof(display_foot), "%.24s", player_foot);
-      line_quads = emit_line(
-          display_foot, (int)strlen(display_foot),
-          card_x + 0.028f * (float)screen_width,
-          card_y + 0.078f * (float)screen_height, foot_gw, foot_gh,
-          verts + quads * 24);
-      custom_dark_text_quads += line_quads;
-      quads += line_quads;
     }
 
     custom_white_text_first_quad = quads;

@@ -170,6 +170,7 @@ static uint32_t (*match_pause_camera_update_original)(void *window,
                                                        uint32_t pad_status);
 static void (*match_result_exec_event_decide)(void *window,
                                                const void *event_name);
+static void (*match_result_footer_touch)(void *window, uint32_t footer_key);
 static void (*match_result_update_original)(void *window);
 static void **match_listener_instance;
 static uint32_t (*match_ball_position_broadcast_original)(
@@ -657,6 +658,7 @@ static _Alignas(4) uint32_t match_pause_camera_action;
 static void *match_pause_camera_window;
 static _Alignas(4) uint32_t match_gameplan_pause_route;
 static _Alignas(4) uint32_t match_result_input_action;
+static _Alignas(4) uint32_t match_result_exit_requested;
 static _Alignas(8) uint64_t match_fix_demo_skip_seen_tick;
 static _Alignas(8) uint64_t match_tutorial_guide_seen_tick;
 static _Alignas(8) uintptr_t match_inmatch_tutorial_owner;
@@ -5131,6 +5133,14 @@ void pes_controller_result_cursor_clear(void) {
       context != PES_VIRTUAL_CURSOR_HALF_PREVIEW &&
       context != PES_VIRTUAL_CURSOR_FULL_TIME)
     return;
+  // MobileControl can remain OFFENSE/DEFENSE while a result frontend owns the
+  // screen. The input thread therefore still reports gameplay_active during
+  // both result pages. Do not let that stale gameplay flag erase the result
+  // cursor while its native window is refreshing this heartbeat.
+  const uint64_t seen =
+      __atomic_load_n(&match_result_seen_tick, __ATOMIC_ACQUIRE);
+  if (seen && armTicksToNs(armGetSystemTick() - seen) <= 300000000ULL)
+    return;
   __atomic_store_n(&match_result_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_started_tick, 0, __ATOMIC_RELEASE);
   match_result_window = NULL;
@@ -6550,7 +6560,7 @@ void pes_controller_set_piece_selector_move(int direction) {
   if (!direction)
     return;
   pes_controller_set_piece_selector_input(
-      direction > 0 ? PES_PAUSE_INPUT_RIGHT : PES_PAUSE_INPUT_LEFT);
+      direction > 0 ? PES_PAUSE_INPUT_DOWN : PES_PAUSE_INPUT_UP);
 }
 
 void pes_controller_set_piece_selector_input(uint32_t action) {
@@ -6580,21 +6590,13 @@ void pes_controller_set_piece_selector_input(uint32_t action) {
   if (focus >= count)
     focus = count - 1u;
   switch (action) {
-  case PES_PAUSE_INPUT_LEFT:
-    if (focus & 1u)
+  case PES_PAUSE_INPUT_UP:
+    if (focus)
       focus--;
     break;
-  case PES_PAUSE_INPUT_RIGHT:
-    if (!(focus & 1u) && focus + 1u < count)
-      focus++;
-    break;
-  case PES_PAUSE_INPUT_UP:
-    if (focus >= 2u)
-      focus -= 2u;
-    break;
   case PES_PAUSE_INPUT_DOWN:
-    if (focus + 2u < count)
-      focus += 2u;
+    if (focus + 1u < count)
+      focus++;
     break;
   default:
     return;
@@ -6817,13 +6819,28 @@ void pes_controller_result_input(uint32_t action) {
 static void match_result_process_controller_input(void *window) {
   const uint32_t action = __atomic_exchange_n(
       &match_result_input_action, 0, __ATOMIC_ACQ_REL);
-  if (!window || action != PES_PAUSE_INPUT_BACK)
+  if (!window)
+    return;
+  const uint32_t context =
+      __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
+  // The final MatchResultMainMenu intentionally has no tiles. Its remaining
+  // native Next footer was unreliable through a coordinate-only synthetic
+  // tap after the tiles were removed. Dispatch footer key 0 on the result UI
+  // thread so the stock frontend selects next/onlineNext and enters its own
+  // control-wait state exactly as a real footer tap would.
+  const int final_next = action == PES_PAUSE_INPUT_DECIDE &&
+                         context == PES_VIRTUAL_CURSOR_FULL_TIME;
+  if (action != PES_PAUSE_INPUT_BACK && !final_next)
     return;
   __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_exit_requested, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   match_result_window = NULL;
-  match_result_dispatch_event(window, "match_topmenu");
+  if (final_next && match_result_footer_touch)
+    match_result_footer_touch(window, 0u);
+  else
+    match_result_dispatch_event(window, "match_topmenu");
 }
 
 int pes_controller_custom_postmatch_active(void) {
@@ -6942,15 +6959,16 @@ static void pes_match_result_update(void *window) {
     match_result_window = window;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
+    // MatchResultMainMenu is the second/final result page. Refresh FULL_TIME
+    // unconditionally here; checking the previous cursor context made a
+    // single stale gameplay poll permanently disable A and its helper.
+    if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE))
+      pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 56753, 61734);
   }
   match_result_process_controller_input(window);
   if (window && pes_controller_custom_postmatch_active()) {
     match_postmatch_window = window;
     match_postmatch_process_input(window);
-  } else if (window &&
-             __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE) ==
-                 PES_VIRTUAL_CURSOR_FULL_TIME) {
-    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 56753, 61734);
   }
 }
 
@@ -7020,6 +7038,7 @@ uintptr_t pes_match_result_full_entry(void *result, const char *name,
   (void)name;
   (void)modal;
   if (result) {
+    __atomic_store_n(&match_result_exit_requested, 0, __ATOMIC_RELEASE);
     match_result_window = result;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
@@ -8911,6 +8930,9 @@ void install_ue4_hooks(so_module *module) {
   match_result_exec_event_decide =
       (void *)so_find_addr_rx(module,
           "_ZN4menu19MatchResultMainMenu15ExecEventDecideERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
+  match_result_footer_touch =
+      (void *)so_find_addr_rx(module,
+          "_ZN4menu22MatchTouchIconMenuBase19PadEventFooterTouchEN10menusystem17MOBILE_FOOTER_KEYE");
   hook_arm64(result_full, (uintptr_t)&pes_match_result_full_hook);
   hook_arm64(result_half, (uintptr_t)&pes_match_result_half_hook);
 

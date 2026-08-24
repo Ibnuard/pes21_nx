@@ -1161,6 +1161,8 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
                     cursor_context == PES_VIRTUAL_CURSOR_HALF_PREVIEW ||
                     cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME))
     pes_controller_result_input(PES_PAUSE_INPUT_BACK);
+  if (a_pressed && cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME)
+    pes_controller_result_input(PES_PAUSE_INPUT_DECIDE);
 
   if (cursor_held && !back_active)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_CURSOR,
@@ -1181,6 +1183,7 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   if (a_pressed && play_until_ms <= now_ms &&
       cursor_context != PES_VIRTUAL_CURSOR_PAUSE &&
       cursor_context != PES_VIRTUAL_CURSOR_SET_PIECE_TAKER &&
+      cursor_context != PES_VIRTUAL_CURSOR_FULL_TIME &&
       (cursor_context != PES_VIRTUAL_CURSOR_GAMEPLAN ||
        pre_match_gameplan))
     play_until_ms = now_ms + 90;
@@ -1300,25 +1303,16 @@ static void queue_set_piece_selector_input(int connected, u64 buttons,
 
   uint32_t direction = 0;
   const u64 vertical = buttons & (HidNpadButton_Up | HidNpadButton_Down);
-  const u64 horizontal = buttons & (HidNpadButton_Left | HidNpadButton_Right);
   if (vertical == HidNpadButton_Up)
     direction = PES_PAUSE_INPUT_UP;
   else if (vertical == HidNpadButton_Down)
     direction = PES_PAUSE_INPUT_DOWN;
-  else if (horizontal == HidNpadButton_Left)
-    direction = PES_PAUSE_INPUT_LEFT;
-  else if (horizontal == HidNpadButton_Right)
-    direction = PES_PAUSE_INPUT_RIGHT;
   else {
     const float threshold = 0.55f;
     if (fabsf(axis_y) >= fabsf(axis_x) && axis_y <= -threshold)
       direction = PES_PAUSE_INPUT_UP;
     else if (fabsf(axis_y) >= fabsf(axis_x) && axis_y >= threshold)
       direction = PES_PAUSE_INPUT_DOWN;
-    else if (axis_x <= -threshold)
-      direction = PES_PAUSE_INPUT_LEFT;
-    else if (axis_x >= threshold)
-      direction = PES_PAUSE_INPUT_RIGHT;
   }
 
   if (!direction) {
