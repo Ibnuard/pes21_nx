@@ -1714,13 +1714,13 @@ static void overlay_render(void) {
     setplay_labels[2] = "SWITCH VIEW";
     setplay_helper_count = 3;
   } else if (setplay_context == PES_SETPLAY_FREE_KICK) {
-    setplay_keys[0] = "X";
+    setplay_keys[0] = "ZR";
     setplay_labels[0] = "SET PIECE TAKER";
-    setplay_keys[1] = "Y";
+    setplay_keys[1] = "X";
     setplay_labels[1] = "SWITCH VIEW";
     setplay_helper_count = 2;
   } else if (setplay_context == PES_SETPLAY_THROW_IN) {
-    setplay_keys[0] = "X";
+    setplay_keys[0] = "ZR";
     setplay_labels[0] = "SELECT THROWER";
     setplay_helper_count = 1;
   } else if (setplay_options) {

@@ -856,12 +856,34 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   const int plus_pressed =
       plus_held && !(previous_hid_buttons & HidNpadButton_Plus);
   const uint32_t setplay_options = ui ? ui->setplay_options : 0;
-  const int x_is_context =
-      (setplay_options & (PES_SETPLAY_OPTION_TEAM_UP |
-                          PES_SETPLAY_OPTION_KICKER |
-                          PES_SETPLAY_OPTION_SHORT_CORNER)) != 0;
-  const int y_is_camera =
-      (setplay_options & PES_SETPLAY_OPTION_CAMERA) != 0;
+  const uint32_t setplay_context = ui ? ui->setplay_context : PES_SETPLAY_NONE;
+  int x_is_context = 0;
+  int y_is_context = 0;
+  switch (setplay_context) {
+  case PES_SETPLAY_GOAL_KICK:
+  case PES_SETPLAY_CORNER:
+    x_is_context = 1;
+    y_is_context = 1;
+    break;
+  case PES_SETPLAY_FREE_KICK:
+    // ZR owns the taker picker and X owns Switch View. Y must remain a
+    // regular Shoot input so free kicks retain their normal kick control.
+    x_is_context = 1;
+    break;
+  case PES_SETPLAY_THROW_IN:
+    // Only ZR is reserved for Select Thrower.
+    break;
+  default:
+    // During short native transition frames the semantic context may not yet
+    // be published. Preserve the old option-based reservation as a fallback.
+    x_is_context =
+        (setplay_options & (PES_SETPLAY_OPTION_TEAM_UP |
+                            PES_SETPLAY_OPTION_KICKER |
+                            PES_SETPLAY_OPTION_SHORT_CORNER)) != 0;
+    y_is_context =
+        (setplay_options & PES_SETPLAY_OPTION_CAMERA) != 0;
+    break;
+  }
 
   if (!connected || !gameplay_active) {
     reset_virtual_surfaces();
@@ -993,7 +1015,7 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   // forced swipe was the reason A could select the wrong defensive action.
   if (shoot_surface.owner == VIRTUAL_SURFACE_NONE) {
     if ((control_mode == PES_MOBILE_CONTROL_OFFENSE && y_pressed &&
-         !y_is_camera) ||
+         !y_is_context) ||
         (control_mode == PES_MOBILE_CONTROL_DEFENSE && a_pressed)) {
       shoot_surface.owner = VIRTUAL_SURFACE_BUTTON;
       shoot_surface.started_ms = now_ms;
@@ -1001,7 +1023,7 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   }
   const int shoot_button_held =
       control_mode == PES_MOBILE_CONTROL_OFFENSE
-          ? (y_held && !y_is_camera)
+          ? (y_held && !y_is_context)
           : a_held;
   if (shoot_surface.owner == VIRTUAL_SURFACE_BUTTON &&
       !surface_should_remain(now_ms, shoot_surface.started_ms,
@@ -1254,13 +1276,13 @@ static void queue_native_setplay_action(const PesControllerSnapshot *ui,
       action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
     break;
   case PES_SETPLAY_FREE_KICK:
-    if (pressed & (HidNpadButton_X | HidNpadButton_ZR))
+    if (pressed & HidNpadButton_ZR)
       action = PES_SETPLAY_BUTTON_SET_PIECE_TAKER;
-    else if (pressed & HidNpadButton_Y)
+    else if (pressed & HidNpadButton_X)
       action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
     break;
   case PES_SETPLAY_THROW_IN:
-    if (pressed & HidNpadButton_X)
+    if (pressed & HidNpadButton_ZR)
       action = PES_SETPLAY_BUTTON_SELECT_THROWER;
     break;
   default:
