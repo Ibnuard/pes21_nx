@@ -1771,6 +1771,12 @@ void android_input_poll(void) {
   else if (menu_controller_active)
     synthetic_context = SYNTHETIC_INPUT_MENU;
   const int context_changed = synthetic_context_changed(synthetic_context);
+  pes_controller_friend_press_update(
+      controller_connected && !context_changed &&
+          synthetic_context == SYNTHETIC_INPUT_GAMEPLAY &&
+          control_mode == PES_MOBILE_CONTROL_DEFENSE &&
+          (buttons & HidNpadButton_Y) && !(buttons & HidNpadButton_Plus),
+      now_ms);
   const int replay_pointer_was_active = replay_touch_requested;
   if (!cinematic_active)
     replay_touch_requested = 0;
@@ -2302,114 +2308,6 @@ void ANativeActivity_setWindowFormat_fake(void *activity_ptr, int format) {
   (void)format;
 }
 void ANativeWindow_acquire_fake(void *window) { (void)window; }
-
-typedef struct MapAlloc {
-  struct MapAlloc *next;
-  void *ptr;
-  size_t size;
-  size_t page_count;
-  uint8_t *mapped_pages;
-} MapAlloc;
-
-static MapAlloc *map_allocs;
-static pthread_mutex_t map_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void *mmap_fake(void *addr, size_t length, int prot, int flags, int fd,
-                int64_t offset) {
-  debugPrintf("mmap(addr=%p, len=%zu, prot=%x, flags=%x, fd=%d, off=%lld)\n",
-              addr, length, prot, flags, fd, (long long)offset);
-  void *ptr = NULL;
-  const size_t aligned = (length + 0xfff) & ~0xfff;
-  if (posix_memalign_fake(&ptr, 0x1000, aligned) != 0) {
-    debugPrintf("mmap: allocation failed for %zu bytes\n", aligned);
-    return (void *)-1;
-  }
-  memset(ptr, 0, aligned);
-  if (fd >= 0)
-    (void)pread64_fake(fd, ptr, length, offset);
-  MapAlloc *item = malloc(sizeof(*item));
-  const size_t page_count = aligned / 0x1000;
-  uint8_t *mapped_pages = malloc(page_count);
-  if (!item || !mapped_pages) {
-    free(mapped_pages);
-    free(item);
-    free(ptr);
-    return (void *)-1;
-  }
-  memset(mapped_pages, 1, page_count);
-  item->ptr = ptr;
-  item->size = aligned;
-  item->page_count = page_count;
-  item->mapped_pages = mapped_pages;
-  pthread_mutex_lock(&map_mutex);
-  item->next = map_allocs;
-  map_allocs = item;
-  pthread_mutex_unlock(&map_mutex);
-  debugPrintf("mmap: -> %p (%zu bytes)\n", ptr, aligned);
-  return ptr;
-}
-
-int munmap_fake(void *addr, size_t length) {
-  const uintptr_t start = (uintptr_t)addr;
-  if (!length || (start & 0xfff) || length > SIZE_MAX - 0xfff) {
-    errno = EINVAL;
-    return -1;
-  }
-  const size_t aligned = (length + 0xfff) & ~0xfff;
-  if (start > UINTPTR_MAX - aligned) {
-    errno = EINVAL;
-    return -1;
-  }
-  const uintptr_t end = start + aligned;
-  size_t pages_unmapped = 0;
-  size_t backings_released = 0;
-
-  pthread_mutex_lock(&map_mutex);
-  MapAlloc **link = &map_allocs;
-  while (*link) {
-    MapAlloc *item = *link;
-    const uintptr_t item_start = (uintptr_t)item->ptr;
-    const uintptr_t item_end = item_start + item->size;
-    const uintptr_t overlap_start = start > item_start ? start : item_start;
-    const uintptr_t overlap_end = end < item_end ? end : item_end;
-
-    if (overlap_start < overlap_end) {
-      const size_t first_page = (overlap_start - item_start) / 0x1000;
-      const size_t last_page =
-          (overlap_end - item_start + 0xfff) / 0x1000;
-      for (size_t page = first_page;
-           page < last_page && page < item->page_count; page++) {
-        if (item->mapped_pages[page]) {
-          item->mapped_pages[page] = 0;
-          pages_unmapped++;
-        }
-      }
-    }
-
-    int has_mapped_pages = 0;
-    for (size_t page = 0; page < item->page_count; page++) {
-      if (item->mapped_pages[page]) {
-        has_mapped_pages = 1;
-        break;
-      }
-    }
-    if (has_mapped_pages) {
-      link = &item->next;
-      continue;
-    }
-
-    *link = item->next;
-    free(item->mapped_pages);
-    free(item->ptr);
-    free(item);
-    backings_released++;
-  }
-  pthread_mutex_unlock(&map_mutex);
-
-  debugPrintf("munmap(addr=%p, len=%zu) -> 0, pages=%zu released=%zu\n",
-              addr, length, pages_unmapped, backings_released);
-  return 0;
-}
 
 int mprotect_fake(void *addr, size_t length, int prot) {
   debugPrintf("mprotect(%p, %zu, %x)\n", addr, length, prot);

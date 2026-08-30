@@ -73,6 +73,7 @@ typedef struct {
 #define PES_PAUSE_INPUT_RIGHT 6u
 
 void install_ue4_hooks(so_module *module);
+void pes_controller_friend_press_update(int held, uint64_t now_ms);
 void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                          int32_t left, int32_t right, int connected);

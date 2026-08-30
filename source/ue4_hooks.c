@@ -7582,7 +7582,10 @@ int32_t ue4_object_initializer_resize_hook_c(Ue4Array *array,
 
 extern void ue4_object_initializer_resize_hook(void);
 
+#include "friend_press.inc"
+
 void install_ue4_hooks(so_module *module) {
+  install_friend_press_prototype(module);
   // The offline bundle already seeds the profile, club, coach, and squad.
   // Retain ModeEntry's command handshake (states 0..2), then send its completed
   // state 5 directly to the normal "proceed" exit. This removes the obsolete

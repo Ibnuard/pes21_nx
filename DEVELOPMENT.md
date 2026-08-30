@@ -1,5 +1,9 @@
 # Development progress
 
+For the separate v1.98-based memory/FriendPress/EF10 visual test candidate,
+see [the installation, verification and rollback notes](STABILITY_VISUAL_TEST.md).
+It is not yet hardware-validated and does not replace the deployed stable build.
+
 ## Architecture
 
 PES 2021 NX is a native compatibility wrapper, not an Android emulator. The
