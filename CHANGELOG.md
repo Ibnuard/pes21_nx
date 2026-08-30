@@ -4,6 +4,32 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [0.1.99] - 2026-08-26
+
+### Added
+
+- Added ten audited club mappings to Exhibition: Manchester B, Everton B,
+  Tottenham WB, Brighton WB, Benfica, Porto, Sporting CP, Atalanta, Napoli,
+  and Torino.
+- Added compact roster membership and shirt-number tables for the new clubs;
+  each entry is resolved through the existing PES21 CommonWork master records
+  at match setup.
+
+### Changed
+
+- Expanded the selector from 95 to 105 teams (48 clubs and 57 national teams).
+- Added a minimum 11-player guard so incomplete roster entries cannot be
+  selected as a playable side.
+- Kept the newer eFootball10 binary tables out of the runtime. This migration
+  updates compatible club membership only; player attributes and ratings still
+  come from the PES21 master data until a schema-aware converter is available.
+
+### Verified
+
+- The new IDs and assignment membership were cross-checked against the
+  legacy PESDB contained in the user-supplied eFootball10 audit before being
+  admitted to the selector.
+
 ## [0.1.98] - 2026-08-24
 
 ### Added

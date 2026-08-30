@@ -14,8 +14,8 @@
       "sha256": "70a1d6a25dfa186034d4903e01a926fef71911260b6fcc6b13be3cb9a7f2cdd7"
     },
     "patch_obb": {
-      "size": 1376863488,
-      "sha256": "675533cd0d056450897d19821e6009072a6a0f9ac60ea273f57b709c45f0a490"
+      "size": 1377019904,
+      "sha256": "652117fbd6ebc570a872f235bff6c847bb2de7e2c30b27cfc6b7e3287632163f"
     }
   },
   "required_root_files": [

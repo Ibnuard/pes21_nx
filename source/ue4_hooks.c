@@ -789,7 +789,7 @@ static void exhibition_nested_back_expire(void) {
 }
 
 static const uint32_t exhibition_category_english[] = {
-    100, 101, 102, 103, 104, 105, 106, 107};
+    100, 101, 102, 103, 104, 105, 106, 107, 173, 177, 179, 377};
 static const uint32_t exhibition_category_spanish[] = {108, 109, 110, 111};
 static const uint32_t exhibition_category_french[] = {112, 113, 114, 115};
 static const uint32_t exhibition_category_italian[] = {
@@ -797,7 +797,7 @@ static const uint32_t exhibition_category_italian[] = {
 static const uint32_t exhibition_category_dutch[] = {116, 117, 118};
 static const uint32_t exhibition_category_german[] = {127, 128};
 static const uint32_t exhibition_category_other_europe[] = {
-    130, 131, 132, 133, 134, 135};
+    130, 131, 132, 133, 134, 135, 191, 192, 193, 234, 327, 333};
 static const uint32_t exhibition_category_south_america_clubs[] = {
     136, 137, 138, 139};
 static const uint32_t exhibition_category_national_europe[] = {
@@ -1076,6 +1076,8 @@ static const uint8_t exhibition_madrid_shirts[] = {
 };
 
 #include "exhibition_rosters.inc"
+#include "exhibition_migration.inc"
+#include "exhibition_rosters_ef10.inc"
 
 #define EXHIBITION_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 #define EXHIBITION_ASSERT_ROSTER(name)                                      \
@@ -1120,6 +1122,16 @@ EXHIBITION_ASSERT_ROSTER(dynamo_kyiv);
 EXHIBITION_ASSERT_ROSTER(spartak);
 EXHIBITION_ASSERT_ROSTER(vasco);
 EXHIBITION_ASSERT_ROSTER(barra_funda);
+EXHIBITION_ASSERT_ROSTER(manchester_b);
+EXHIBITION_ASSERT_ROSTER(everton_b);
+EXHIBITION_ASSERT_ROSTER(tottenham_wb);
+EXHIBITION_ASSERT_ROSTER(benfica);
+EXHIBITION_ASSERT_ROSTER(porto);
+EXHIBITION_ASSERT_ROSTER(sporting_cp);
+EXHIBITION_ASSERT_ROSTER(atalanta);
+EXHIBITION_ASSERT_ROSTER(napoli);
+EXHIBITION_ASSERT_ROSTER(torino);
+EXHIBITION_ASSERT_ROSTER(brighton_wb);
 #define EXHIBITION_NATION(name, team_id, display_name) \
   EXHIBITION_ASSERT_ROSTER(name);
 #include "exhibition_nations.inc"
@@ -1385,6 +1397,76 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
         sizeof(exhibition_barra_funda_players) /
             sizeof(exhibition_barra_funda_players[0]),
     },
+    {
+        173,
+        exhibition_manchester_b_players,
+        exhibition_manchester_b_shirts,
+        sizeof(exhibition_manchester_b_players) /
+            sizeof(exhibition_manchester_b_players[0]),
+    },
+    {
+        177,
+        exhibition_everton_b_players,
+        exhibition_everton_b_shirts,
+        sizeof(exhibition_everton_b_players) /
+            sizeof(exhibition_everton_b_players[0]),
+    },
+    {
+        179,
+        exhibition_tottenham_wb_players,
+        exhibition_tottenham_wb_shirts,
+        sizeof(exhibition_tottenham_wb_players) /
+            sizeof(exhibition_tottenham_wb_players[0]),
+    },
+    {
+        191,
+        exhibition_benfica_players,
+        exhibition_benfica_shirts,
+        sizeof(exhibition_benfica_players) /
+            sizeof(exhibition_benfica_players[0]),
+    },
+    {
+        192,
+        exhibition_porto_players,
+        exhibition_porto_shirts,
+        sizeof(exhibition_porto_players) /
+            sizeof(exhibition_porto_players[0]),
+    },
+    {
+        193,
+        exhibition_sporting_cp_players,
+        exhibition_sporting_cp_shirts,
+        sizeof(exhibition_sporting_cp_players) /
+            sizeof(exhibition_sporting_cp_players[0]),
+    },
+    {
+        234,
+        exhibition_atalanta_players,
+        exhibition_atalanta_shirts,
+        sizeof(exhibition_atalanta_players) /
+            sizeof(exhibition_atalanta_players[0]),
+    },
+    {
+        327,
+        exhibition_napoli_players,
+        exhibition_napoli_shirts,
+        sizeof(exhibition_napoli_players) /
+            sizeof(exhibition_napoli_players[0]),
+    },
+    {
+        333,
+        exhibition_torino_players,
+        exhibition_torino_shirts,
+        sizeof(exhibition_torino_players) /
+            sizeof(exhibition_torino_players[0]),
+    },
+    {
+        377,
+        exhibition_brighton_wb_players,
+        exhibition_brighton_wb_shirts,
+        sizeof(exhibition_brighton_wb_players) /
+            sizeof(exhibition_brighton_wb_players[0]),
+    },
 #define EXHIBITION_NATION(name, team_id, display_name)                    \
   {                                                                      \
       team_id, exhibition_##name##_players, exhibition_##name##_shirts, \
@@ -1397,6 +1479,16 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
+  // Prefer the generated eFootball 10 compatibility roster. These entries
+  // contain only IDs that the PES21 CommonWork database can resolve, so this
+  // changes no player objects and adds no per-frame work.
+  for (uint32_t i = 0;
+       i < sizeof(exhibition_ef10_master_rosters) /
+               sizeof(exhibition_ef10_master_rosters[0]);
+       i++) {
+    if (exhibition_ef10_master_rosters[i].team_id == team_id)
+      return &exhibition_ef10_master_rosters[i];
+  }
   for (uint32_t i = 0;
        i < sizeof(exhibition_master_rosters) /
                sizeof(exhibition_master_rosters[0]);
@@ -1408,7 +1500,9 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
 }
 
 static int exhibition_is_valid_team(uint32_t team_id) {
-  return exhibition_find_roster(team_id) != NULL;
+  const ExhibitionMasterRoster *roster = exhibition_find_roster(team_id);
+  // A selector entry without a full starting squad can never reach kickoff.
+  return roster && roster->player_count >= 11u;
 }
 
 static int exhibition_matchup_ready(void) {
@@ -1604,6 +1698,26 @@ static const char *exhibition_team_name(uint32_t team_id) {
     return "VASCO DA GAMA";
   if (team_id == 137)
     return "BARRA FUNDA V";
+  if (team_id == 173)
+    return "MANCHESTER B";
+  if (team_id == 177)
+    return "EVERTON B";
+  if (team_id == 179)
+    return "TOTTENHAM WB";
+  if (team_id == 191)
+    return "BENFICA";
+  if (team_id == 192)
+    return "PORTO";
+  if (team_id == 193)
+    return "SPORTING CP";
+  if (team_id == 234)
+    return "ATALANTA";
+  if (team_id == 327)
+    return "NAPOLI";
+  if (team_id == 333)
+    return "TORINO";
+  if (team_id == 377)
+    return "BRIGHTON WB";
   return "";
 }
 
@@ -2847,8 +2961,26 @@ uint32_t pes_controller_custom_team_popup_badge(uint32_t index) {
   if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
       EXHIBITION_TEAM_POPUP_TEAM) {
     const ExhibitionTeamCategory *category = exhibition_team_category();
-    return category && index < category->team_count ? category->teams[index]
-                                                    : 0;
+    if (!category || index >= category->team_count)
+      return 0;
+    const uint32_t team_id = category->teams[index];
+    if (team_id < 140u)
+      return team_id;
+    // Slots 140..152 are category emblems. The migrated high-ID clubs use
+    // compact slots 153..162 populated from the same native badge PNGs.
+    switch (team_id) {
+    case 173u: return 153u;
+    case 177u: return 154u;
+    case 179u: return 155u;
+    case 191u: return 156u;
+    case 192u: return 157u;
+    case 193u: return 158u;
+    case 234u: return 159u;
+    case 327u: return 160u;
+    case 333u: return 161u;
+    case 377u: return 162u;
+    default: return 0;
+    }
   }
   return index < EXHIBITION_TEAM_CATEGORY_COUNT ? 140u + index : 140u;
 }

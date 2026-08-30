@@ -15,6 +15,7 @@
 *.a
 
 # Runtime and extracted game data
+/EFOOTBALL10_extracted/
 /local-inputs/
 /local-debug/
 /logs

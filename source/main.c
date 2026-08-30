@@ -89,7 +89,7 @@ static const RuntimeFile required_runtime_files[] = {
   { AFP_SO_NAME, 1401216 },
   { UE4_SO_NAME, 157571792 },
   { "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak", 459211124 },
-  { "patch.305030001.jp.nyan2021.pesam.obb", 1376863488 },
+  { "patch.305030001.jp.nyan2021.pesam.obb", 1391120384 },
   { "Download/dt530_mobile_bra_all.cpk", 173204 },
   { "Download/dt530_mobile_can_all.cpk", 165480 },
   { "Download/dt530_mobile_eng_all.cpk", 198701 },

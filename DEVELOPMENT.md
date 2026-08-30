@@ -15,7 +15,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.98
+## Wrapper version 0.1.99
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -41,9 +41,11 @@ Working in the currently tested revision:
   layout, including simultaneous movement, Dash, and action input
 - an Exhibition matchup hub with independent HOME/COM selection, COM level,
   General Match Settings, and a deliberate Proceed > Game Plan > Play flow
-- 95 validated master-data teams: 38 clubs and 57 national teams with squad
+- 105 validated master-data teams: 48 clubs and 57 national teams with squad
   membership, shirt numbers, differentiated player ratings, and refreshed
   stock kit selection
+- ten legacy eFootball10 PESDB club-membership migrations layered over the
+  PES21 master records; the newer binary schema is not loaded directly
 - libnx AudioOut-backed AAudio compatibility for menu and match audio, plus
   mounted English commentary data from the compatible user-supplied runtime
 - a validated gameplay tick-rate hook that replaces the erroneous 5 FPS

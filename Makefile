@@ -40,7 +40,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET		:=	pes21_nx
 APP_TITLE	:=	PES 2021 NX
 APP_AUTHOR	:=	PES21 NX project
-APP_VERSION	:=	0.1.98
+APP_VERSION	:=	0.1.99
 ICON		:=	icon.jpg
 BUILD		:=	build
 SOURCES		:=	source

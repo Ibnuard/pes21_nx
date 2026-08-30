@@ -25,13 +25,16 @@ work without source changes.
 The Nyan Mod files are not included, maintained, or distributed here. Credit
 goes to **Nyan Mod** for the offline modification used during development.
 
-## Current release: v0.1.98
+## Current release: v0.1.99
 
 This release expands the port from a small Exhibition proof of concept into a
 more complete offline match flow:
 
-- 95 selectable teams: 38 clubs and 57 national teams, with validated squads
+- 105 selectable teams: 48 clubs and 57 national teams, with validated squads
   and shirt numbers from the supported master data;
+- ten additional club membership mappings migrated from the audited legacy
+  eFootball10 PESDB: Manchester B, Everton B, Tottenham WB, Brighton WB,
+  Benfica, Porto, Sporting CP, Atalanta, Napoli, and Torino;
 - a compact four-tile menu for Exhibition, Credits, Training, and Version
   Info, reached directly from the title screen;
 - independent HOME and COM selection, COM level, General Match Settings, and
@@ -44,6 +47,11 @@ more complete offline match flow:
   Plan, and match-result navigation;
 - controller-first custom overlays for video settings, credits, and set-piece
   taker selection, plus a stable seven-level COM difficulty route.
+
+The eFootball10 migration is intentionally compatibility-only: the newer
+Player.bin schema is not copied into the runtime, and player attributes still
+come from the PES21 master records. Exact eFootball10 ratings require a
+separate field-by-field converter.
 
 The current Exhibition flow is:
 

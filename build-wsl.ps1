@@ -31,12 +31,14 @@ tar -C "$PES21_NX_PROJECT_ROOT" \
   --exclude=.git --exclude=dist --exclude=build \
   --exclude=local-inputs --exclude=local-debug \
   --exclude=.codex-dex --exclude=.codex-jadx --exclude=.codex-pak \
-  --exclude=clean-package-removed --exclude=logs \
+  --exclude=clean-package-removed --exclude=logs --exclude='$out' \
+  --exclude=prepared_assets --exclude=EFOOTBALL10_extracted \
   --exclude=offline-responses --exclude=runtime-unused-cpk \
   --exclude=assets --exclude=Download --exclude=PesMobile \
   --exclude=SaveData --exclude=UE4Game \
   --exclude='*.so' --exclude='*.obb' --exclude='*.pak' \
   --exclude='*.cpk' --exclude='*.cfg' --exclude='debug*.log' \
+  --exclude='*.xapk' \
   --exclude=pes21_nx.nro --exclude=pes21_nx.elf --exclude=pes21_nx.nacp \
   -cf - . | tar -C "$build_dir" -xf -
 cd "$build_dir"

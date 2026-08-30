@@ -16,8 +16,6 @@ DEFAULT_SYMBOL_ROOT = (
 )
 CELL = 64
 COLS = 16
-SLOTS = 153
-ROWS = (SLOTS + COLS - 1) // COLS
 CATEGORY_IMAGES = (
     "emblemLc/emb_0009.png",                  # English League
     "emblemLc/emb_0011.png",                  # Spanish League
@@ -33,6 +31,21 @@ CATEGORY_IMAGES = (
     "other/emblemOther-nationalLatinAmerica.png",
     "other/emblemOther-nationalAsia.png",
 )
+EXTRA_TEAM_IDS = (
+    173,  # Manchester B
+    177,  # Everton B
+    179,  # Tottenham WB
+    191,  # Benfica
+    192,  # Porto
+    193,  # Sporting CP
+    234,  # Atalanta
+    327,  # Napoli
+    333,  # Torino
+    377,  # Brighton WB
+)
+EXTRA_TEAM_SLOT_BASE = 140 + len(CATEGORY_IMAGES)
+SLOTS = EXTRA_TEAM_SLOT_BASE + len(EXTRA_TEAM_IDS)
+ROWS = (SLOTS + COLS - 1) // COLS
 
 
 def badge_tile() -> Image.Image:
@@ -75,6 +88,7 @@ def team_image(symbol_root: Path, team_id: int) -> Path | None:
         flag_root / f"e_{team_id:06d}_r_l.png",
         flag_root / f"e_{team_id:06d}_r.png",
         flag_root / f"e_{team_id:06d}_r_b.png",
+        flag_root / f"e_{team_id:06d}_f_l.png",
         flag_root / f"e_{team_id:06d}_f.png",
         flag_root / f"e_{team_id:06d}_r_w.png",
         flag_root / f"flag_{team_id}.png",
@@ -87,7 +101,7 @@ def large_variant(path: Path) -> Path:
     return candidate if candidate.is_file() else path
 
 
-def emit_header(atlas: Image.Image) -> None:
+def emit_header(atlas: Image.Image, output_path: Path) -> None:
     values = [channel for pixel in atlas.getdata() for channel in pixel]
     lines = []
     for offset in range(0, len(values), 24):
@@ -115,7 +129,8 @@ static const uint8_t badge_atlas_rgba8[BADGE_ATLAS_W * BADGE_ATLAS_H * 4] = {{
 
 #endif
 '''
-    OUTPUT_PATH.write_text(output, encoding="ascii")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(output, encoding="ascii")
 
 
 def main() -> None:
@@ -125,6 +140,12 @@ def main() -> None:
         type=Path,
         default=DEFAULT_SYMBOL_ROOT,
         help="Extracted common/render/symbol directory from dt240_mobile_all.cpk",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_PATH,
+        help="generated C header path",
     )
     args = parser.parse_args()
     symbol_root = args.symbol_root.resolve()
@@ -143,7 +164,15 @@ def main() -> None:
         badge = fit_image(source) if source.is_file() else fallback_badge(slot)
         atlas.paste(badge, ((slot % COLS) * CELL, (slot // COLS) * CELL))
 
-    emit_header(atlas)
+    # Custom selector rows keep their compact overlay slots while sourcing
+    # the exact PES21 native emblem images for the migrated high team IDs.
+    for index, team_id in enumerate(EXTRA_TEAM_IDS):
+        slot = EXTRA_TEAM_SLOT_BASE + index
+        source = team_image(symbol_root, team_id)
+        badge = fit_image(source) if source else fallback_badge(slot)
+        atlas.paste(badge, ((slot % COLS) * CELL, (slot // COLS) * CELL))
+
+    emit_header(atlas, args.output.resolve())
 
 
 if __name__ == "__main__":
