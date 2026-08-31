@@ -1572,8 +1572,7 @@ static void disable_native_pad_bridge(void) {
 }
 
 #if 0
-// Retained only as documentation of the rejected native-pad mapping. Gameplay
-// is driven by the multi-touch path above.
+// Retained as documentation of the rejected global native-pad mapping.
 static void emit_cobra_pad_input(const HidAnalogStickState *stick,
                                  int connected, u64 buttons) {
 
@@ -1625,6 +1624,38 @@ static void emit_cobra_pad_input(const HidAnalogStickState *stick,
   previous_cobra_buttons = cobra_buttons;
 }
 #endif
+
+// Only the dedicated single-player lab uses Cobra/PadInput for gameplay.
+// Normal Exhibition stays on the calibrated multi-touch mapper above.
+static void emit_native_lab_pad_input(const HidAnalogStickState *stick,
+                                      int connected, u64 buttons) {
+  uint32_t mapped = 0;
+  if (buttons & HidNpadButton_B) mapped |= 1u << 0;
+  if (buttons & HidNpadButton_A) mapped |= 1u << 1;
+  if (buttons & HidNpadButton_Y) mapped |= 1u << 2;
+  if (buttons & HidNpadButton_X) mapped |= 1u << 3;
+  if (buttons & HidNpadButton_L) mapped |= 1u << 4;
+  if (buttons & HidNpadButton_ZL) mapped |= 1u << 5;
+  if (buttons & HidNpadButton_StickL) mapped |= 1u << 6;
+  if (buttons & HidNpadButton_R) mapped |= 1u << 7;
+  if (buttons & HidNpadButton_ZR) mapped |= 1u << 8;
+  if (buttons & HidNpadButton_StickR) mapped |= 1u << 9;
+  if (buttons & HidNpadButton_Up) mapped |= 1u << 10;
+  if (buttons & HidNpadButton_Down) mapped |= 1u << 11;
+  if (buttons & HidNpadButton_Left) mapped |= 1u << 12;
+  if (buttons & HidNpadButton_Right) mapped |= 1u << 13;
+  if (buttons & HidNpadButton_Plus) mapped |= 1u << 14;
+  if (buttons & HidNpadButton_Minus) mapped |= 1u << 15;
+
+  const int32_t x = connected ? stick->x : 0;
+  const int32_t y = connected ? stick->y : 0;
+  // Switch raw +Y is up; Cobra stores up as a negative combined axis.
+  const int32_t up = y > 0 ? y : 0;
+  const int32_t down = y < 0 ? -y : 0;
+  const int32_t left = x < 0 ? -x : 0;
+  const int32_t right = x > 0 ? x : 0;
+  cobra_pad_set_input(mapped, up, down, left, right, connected);
+}
 
 void android_input_poll(void) {
   // libnx aborts inside padUpdate when HID has already been torn down by a
@@ -1697,6 +1728,8 @@ void android_input_poll(void) {
   const uint64_t now_ms = monotonic_ms();
   int control_mode = 0;
   const int gameplay_active = mobile_gameplay_context(&control_mode);
+  const int native_pad_lab_active =
+      pes_controller_native_pad_lab_active();
   const int set_piece_selector_active =
       pes_controller_set_piece_selector_active();
   static int set_piece_selector_release_pending;
@@ -1886,11 +1919,13 @@ void android_input_poll(void) {
                                 axis_x, axis_y, right_axis_x, right_axis_y,
                                 penalty_role, now_ms);
     } else {
-      queue_native_setplay_action(&controller_snapshot, have_left_stick,
-                                  buttons);
-      append_virtual_gamepad_touches(
-          &desired, axis_x, axis_y, have_left_stick, buttons, gameplay_active,
-          control_mode, &controller_snapshot, now_ms);
+      if (!(native_pad_lab_active && gameplay_active)) {
+        queue_native_setplay_action(&controller_snapshot, have_left_stick,
+                                    buttons);
+        append_virtual_gamepad_touches(
+            &desired, axis_x, axis_y, have_left_stick, buttons,
+            gameplay_active, control_mode, &controller_snapshot, now_ms);
+      }
       if (gameplan_cursor_active) {
         if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
             pes_controller_custom_pause_active()) {
@@ -2057,6 +2092,8 @@ void android_input_poll(void) {
     disable_native_pad_bridge();
   else if (custom_postmatch_active)
     disable_native_pad_bridge();
+  else if (native_pad_lab_active && gameplay_active)
+    emit_native_lab_pad_input(&left_stick, controller_connected, buttons);
   else if (!gameplay_active && menu_controller_active)
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,
                         have_left_stick);

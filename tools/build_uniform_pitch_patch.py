@@ -57,7 +57,18 @@ def validate(baseline, built, stock, style='clean-v9'):
         phase_edges = np.r_[start, np.flatnonzero(np.diff(shade[start:end]))+start+1, end]
         phase_centers = ((phase_edges[:-1]+phase_edges[1:])/2).astype(int)
         encoded = np.array(candidate.decode())
-        greens = [float(np.median(encoded[110:180,x-10:x+10,1])) for x in phase_centers]
+        # A phase-locked outer-box candidate can leave a short clipped band
+        # immediately before the LR midpoint. Keep the sample window inside
+        # its own band so the neighboring shade at the seam is not averaged
+        # into the assertion.
+        greens = []
+        for index, x in enumerate(phase_centers):
+            previous_edge, next_edge = phase_edges[index:index+2]
+            radius = min(10, (x-previous_edge-1)//2,
+                         (next_edge-x-1)//2)
+            radius = max(0, int(radius))
+            greens.append(float(np.median(encoded[110:180,
+                                                 x-radius:x+radius+1, 1])))
         assert np.array_equal(np.array(greens) > 61.5, shade[phase_centers]), name
         textures.append({'name': name, 'mips': len(candidate.mips),
                          'encoded_phase_verified': True, 'band_green_samples': greens,
@@ -72,29 +83,60 @@ def validate(baseline, built, stock, style='clean-v9'):
     # Sample EVERY visible band away from paint, including the edge-clipped
     # outer band in v10. It continues at unchanged width outside the goal.
     centers = ((edges[:-1]+edges[1:])/2).astype(int)
-    a = np.array([left[110:180,x-10:x+10,1].mean() for x in centers])
-    b = np.array([right[110:180,x-10:x+10,1].mean() for x in centers])
+    a_samples = []
+    b_samples = []
+    for index, x in enumerate(centers):
+        previous_edge, next_edge = edges[index:index+2]
+        radius = min(10, (x-previous_edge-1)//2,
+                     (next_edge-x-1)//2)
+        radius = max(0, int(radius))
+        a_samples.append(left[110:180,x-radius:x+radius+1,1].mean())
+        b_samples.append(right[110:180,x-radius:x+radius+1,1].mean())
+    a = np.array(a_samples)
+    b = np.array(b_samples)
     expected = blend[0,centers,0]
     assert np.array_equal(a > 61.5, expected)
     assert np.array_equal(b > 61.5, 1-expected)
     assert np.max(np.abs(a+b-123)) < 4
-    assert a[-1] > 61.5 and b[-1] < 61.5  # actual mirrored Low seam
+    if style in ('clean-v12', 'clean-v13'):
+        # v12 locks the penalty-box transition at x494; its final clipped
+        # outer stripe therefore ends in the opposite phase to v10/v11.
+        assert a[-1] < 61.5 and b[-1] > 61.5
+    else:
+        assert a[-1] > 61.5 and b[-1] < 61.5  # actual mirrored Low seam
     # At v10 the entire field is one constant pitch, not ten narrow bands
     # per half. Ignore only the two outer portions clipped by the goal lines.
-    if style == 'clean-v10':
+    if style in ('clean-v10', 'clean-v11', 'clean-v12', 'clean-v13', 'clean-v14'):
         full = np.r_[active, 1-active[::-1]]
         transitions = np.flatnonzero(np.diff(full))+1
         lengths = np.diff(transitions)
-        assert set(lengths).issubset({176,177})
+        expected_width = ({176,177} if style == 'clean-v10' else
+                          {173,174} if style == 'clean-v11' else
+                          {17,69,171} if style == 'clean-v12' else
+                          {14,168,174} if style == 'clean-v13' else
+                          {163,176,177})
+        assert set(lengths).issubset(expected_width)
         assert 770 in transitions
-        assert 494 in edges
-        assert len(centers) == 5
+        if style == 'clean-v10':
+            assert 494 in edges
+        elif style == 'clean-v11':
+            assert 331 in edges
+        elif style == 'clean-v13':
+            assert 494 in edges
+        elif style == 'clean-v14':
+            assert 331 in edges and 494 in edges
+        assert len(centers) == (6 if style in ('clean-v12','clean-v13') else 5)
     return {'recipe': style, 'pak_files': len(files), 'unchanged_files': len(files-changed),
             'all_materials_shaders_headers_identical_to_v8': True,
             'visible_bands_per_half': len(centers), 'full_pitch_visible_bands': 2*len(centers),
             'band_width_texture_px': band_width,
-            'all_band_widths_uniform': True,
-            'outer_band_continues_beyond_goal_line': style == 'clean-v10',
+            'all_band_widths_uniform': style not in ('clean-v13','clean-v14'),
+            'dark_band_width_texture_px': 168.0 if style == 'clean-v13' else None,
+            'light_band_width_texture_px': 174.0 if style == 'clean-v13' else None,
+            'light_to_dark_width_ratio': (174.0/168.0 if style == 'clean-v13' else None),
+            'goal_area_corrected_band_width_texture_px': 163.0 if style == 'clean-v14' else None,
+            'symmetric_goal_area_correction': style == 'clean-v14',
+            'outer_band_continues_beyond_goal_line': style in ('clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'),
             'left_band_boundaries_in_playable_area_px': edges.tolist(),
             'left_green_samples': a.tolist(), 'right_green_samples': b.tolist(),
             'native_lines': textures, 'device_tested': False}
@@ -108,7 +150,7 @@ def main():
     p.add_argument('--ef10', type=Path, default=Path('local-debug/stability-visuals/ef10'))
     p.add_argument('--etc1tool', type=Path, default=Path.home()/'AppData/Local/Android/Sdk/platform-tools/etc1tool.exe')
     p.add_argument('--verify-only', action='store_true')
-    p.add_argument('--style', choices=('clean-v9', 'clean-v10'), default='clean-v9')
+    p.add_argument('--style', choices=('clean-v9', 'clean-v10', 'clean-v11', 'clean-v12', 'clean-v13', 'clean-v14'), default='clean-v9')
     args = p.parse_args()
     stage = args.output/'pitch-stage'
     if not args.verify_only:

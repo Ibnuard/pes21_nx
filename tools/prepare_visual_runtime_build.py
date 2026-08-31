@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-MODIFIED = ('source/config.c', 'source/config.h', 'source/overlay.c',
+MODIFIED = ('source/android_shim.c', 'source/config.c', 'source/config.h', 'source/overlay.c',
             'source/ue4_hooks.c', 'source/ue4_hooks.h')
 ADDED = ('source/match_visual_policy.h',)
 

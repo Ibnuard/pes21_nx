@@ -58,7 +58,7 @@ def diffuse_grain_source(ef10):
 
 
 def pitch_colors(style):
-    if style in ('clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10'):
+    if style in ('clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'):
         # Same mean green (61.5), stronger separation (31 instead of 21).
         # Contrast is not achieved by scaling the fine-grain layer.
         return ([26,46,12], [49,77,23])
@@ -70,22 +70,106 @@ def mowing_blend(name, width, style):
     bands=16 if '_lr_' in name else 8
     band_width=width//bands
     x=np.arange(width,dtype=np.int32)
-    if style=='clean-v10':
-        # Retain v8's broad stripes: 176 2/3 px vs 170 2/3 px (+3.515625%).
-        # Three equal bands join the native penalty-box front x494 to the
-        # center x1024. Extend that same spacing over the entire texture;
-        # never shrink/stretch individual bands around the goal or seam.
-        # The small box and goal line are NOT claimed as aligned boundaries.
+    if style in ('clean-v10','clean-v11'):
+        # Retain v8's broad stripes. V10 aligns the penalty-box front (x494)
+        # with three bands to center. V11 is only 1.93% narrower than v10 and
+        # aligns the small keeper-box front (x331) with four bands to center.
+        # Extend one constant spacing over the entire texture; never locally
+        # shrink/stretch a band around either goal or the center seam.
         # L/Low_R keep v8's stock mirror + complementary texture binding.
+        anchor,bands_to_center=((494,3) if style=='clean-v10' else (331,4))
         scale=width/1024.0
         if '_lr_' in name:
             center=width/2
             scale*=0.5
         else:
             center=width if name.startswith('pitch_l_') else 0
-        band_width=(1024-494)*scale/3
-        # Multiply before dividing so the x494/x1024 anchors stay exact.
-        values=np.floor((x-center)*3/((1024-494)*scale)).astype(np.int32)&1
+        band_width=(1024-anchor)*scale/bands_to_center
+        # Multiply before dividing so the selected native line stays exact.
+        values=np.floor((x-center)*bands_to_center/
+                        ((1024-anchor)*scale)).astype(np.int32)&1
+    elif style=='clean-v12':
+        # Device feedback on v11 shows the broad band edge only a few pixels
+        # beyond the penalty-box front. Reduce every band uniformly to 171px
+        # and phase-lock the L texture to the native outer-box line x494. The
+        # LR atlas applies the same world spacing independently on each half,
+        # keeping a clean light/dark transition at the midfield seam.
+        scale=width/1024.0
+        if '_lr_' in name:
+            half=width/2
+            band_width=171.0*scale/2
+            left_origin=323.0*scale/2
+            right_origin=half+152.0*scale/2
+            left_values=np.floor((x-left_origin)/band_width).astype(np.int32)&1
+            right_values=np.floor((x-right_origin)/band_width).astype(np.int32)&1
+            values=np.where(x < half, left_values, right_values)
+            return values[None,:,None],band_width
+        elif name.startswith('pitch_l_'):
+            center=323.0*scale
+        else:
+            center=152.0*scale
+        band_width=171.0*scale
+        values=np.floor((x-center)/band_width).astype(np.int32)&1
+    elif style=='clean-v13':
+        # Keep the broad appearance while hiding the small phase mismatch at
+        # the penalty-box front: dark stripes are 168px and light stripes
+        # 174px (3.6% difference). The cycle is anchored at x326 so its next
+        # light edge lands exactly on the outer-box front x494. R is the
+        # complementary phase; LR applies the same rule independently per
+        # half so midfield remains a clean shade transition.
+        scale=width/1024.0
+        dark_width=168.0*scale
+        light_width=174.0*scale
+        cycle=dark_width+light_width
+        def pattern(position, origin, dark=dark_width, light=light_width):
+            phase=np.mod(position-origin, dark+light)
+            return (phase >= dark).astype(np.int32)
+        if '_lr_' in name:
+            half=width/2
+            left_values=pattern(x, 326.0*scale/2,
+                                dark_width/2, light_width/2)
+            right_values=1-pattern(x, half+326.0*scale/2,
+                                   dark_width/2, light_width/2)
+            values=np.where(x < half, left_values, right_values)
+            return values[None,:,None],(dark_width+light_width)/4
+        if name.startswith('pitch_l_'):
+            values=pattern(x, 326.0*scale)
+        else:
+            values=1-pattern(x, 326.0*scale)
+        band_width=(dark_width+light_width)/2
+    elif style=='clean-v14':
+        # Center-first symmetric layout. Keep v10's equal 530/3px cadence
+        # from midfield through the penalty-box front. Outside that line,
+        # re-anchor the same cadence at the keeper-box front. This changes
+        # only the single 331..494 (and mirrored 530..693) goal-area band to
+        # 163px; every other complete visible band stays 176/177px. Both
+        # teams therefore receive identical geometry and LR keeps a clean
+        # complementary transition at midfield.
+        scale=width/1024.0
+        standard_band=(530.0/3.0)*scale
+
+        def left_pattern(position):
+            penalty=494.0*scale
+            keeper=331.0*scale
+            centered=np.floor((position-width)/standard_band).astype(np.int32)&1
+            goal=np.floor((position-keeper)/standard_band).astype(np.int32)&1
+            return np.where(position < penalty, goal, centered)
+
+        def right_pattern(position):
+            penalty=530.0*scale
+            keeper=693.0*scale
+            centered=np.floor(position/standard_band).astype(np.int32)&1
+            goal=np.floor((position-keeper)/standard_band).astype(np.int32)&1
+            return np.where(position > penalty, goal, centered)
+
+        if '_lr_' in name:
+            half=width/2
+            left_values=left_pattern(x*2)
+            right_values=right_pattern((x-half)*2)
+            values=np.where(x < half, left_values, right_values)
+            return values[None,:,None],standard_band/2
+        values=left_pattern(x) if name.startswith('pitch_l_') else right_pattern(x)
+        band_width=standard_band
     elif style=='clean-v9':
         # Ten EQUAL bands per painted half, not per padded texture. Stock L:
         # goal line x254, small-box line x331/332, midpoint x1024. Width 77px
@@ -172,7 +256,7 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
     style=getattr(args,'pitch_style','baseline')
     names=('pitch_l_bsm_alp','pitch_r_bsm_alp','pitch_lr_bsm_exLow_alp',
            'pitch_l_bsm_exLow_alp','pitch_r_bsm_exLow_alp','pitch2_bsm_alp_copied')
-    if style in ('mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10'):
+    if style in ('mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'):
         names+=('pitch_specular_mask_l','pitch_specular_mask_r')
     if selected_names is not None:
         if not set(selected_names).issubset(names):
@@ -207,7 +291,7 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
             light=np.array(light_color,dtype=np.float32)
             rgb=np.repeat(dark*(1-blend)+light*blend,height,axis=0)
             rgb=np.asarray(Image.fromarray(np.uint8(rgb),'RGB').filter(ImageFilter.GaussianBlur(0.7)),dtype=np.float32)
-            if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10'):
+            if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'):
                 if diffuse_grain.shape != (height,width):
                     raise ValueError('unexpected diffuse texture dimensions for EF10 grain')
                 # Bake subtle grain into the diffuse itself. The separate
@@ -219,7 +303,11 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                              'clean-v6':[2.4,4.8,1.8],
                              'clean-v7':[2.8,5.6,2.1],
                              'clean-v9':[2.8,5.6,2.1],
-                             'clean-v10':[2.8,5.6,2.1]}
+                             'clean-v10':[2.8,5.6,2.1],
+                             'clean-v11':[2.8,5.6,2.1],
+                             'clean-v12':[2.8,5.6,2.1],
+                             'clean-v13':[2.8,5.6,2.1],
+                             'clean-v14':[2.8,5.6,2.1]}
                 gain=np.array(gain_values[style],dtype=np.float32)
                 rgb+=diffuse_grain[:,:,None]*gain
             image=Image.fromarray(np.uint8(np.clip(np.rint(rgb),0,255)),'RGB')
@@ -280,7 +368,11 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                                                   'clean-v6':[2.4,4.8,1.8],
                                                   'clean-v7':[2.8,5.6,2.1],
                                                   'clean-v9':[2.8,5.6,2.1],
-                                                  'clean-v10':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10') and not detail and not specular else None,
+                                                  'clean-v10':[2.8,5.6,2.1],
+                                                  'clean-v11':[2.8,5.6,2.1],
+                                                  'clean-v12':[2.8,5.6,2.1],
+                                                  'clean-v13':[2.8,5.6,2.1],
+                                                  'clean-v14':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') and not detail and not specular else None,
                        'right_half_phase_inverted':bool(style=='clean-v3' and name.startswith('pitch_r_')),
                        'stripe_half_band_offset':bool(style=='clean-v4' and not detail and not specular),
                        'native_seam_anchored':bool(style=='clean-v5' and not detail and not specular),
@@ -336,7 +428,7 @@ def main():
     p.add_argument('--ef10',type=Path,default=Path('local-debug/stability-visuals/ef10'))
     p.add_argument('--score-base',type=Path,default=Path('local-debug/stability-visuals/pes21-ui/game2dPes.bin'))
     p.add_argument('--output',type=Path,default=Path('local-debug/stability-visuals/built'))
-    p.add_argument('--pitch-style',choices=('baseline','mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7'),default='baseline')
+    p.add_argument('--pitch-style',choices=('baseline','mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'),default='baseline')
     p.add_argument('--only',choices=('pitch','scoreboard','all'),default='all')
     p.add_argument('--etc1tool',type=Path,default=Path.home()/'AppData/Local/Android/Sdk/platform-tools/etc1tool.exe')
     args=p.parse_args()

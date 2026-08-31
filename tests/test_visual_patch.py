@@ -70,6 +70,131 @@ class TextureTests(unittest.TestCase):
         self.assertNotEqual(int(combined[0,246,0]), int(combined[0,247,0]))
         self.assertNotEqual(int(combined[0,776,0]), int(combined[0,777,0]))
 
+    def test_broad_v11_slightly_narrower_and_aligns_keeper_box(self):
+        import numpy as np
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v11')
+        _, v10_band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v10')
+        self.assertAlmostEqual(band, 693/4)
+        self.assertAlmostEqual(band/v10_band, 0.9806603773584906)
+        self.assertEqual(int(left[0,330,0]), 1)
+        self.assertEqual(int(left[0,331,0]), 0)
+        self.assertEqual(331+4*band, 1024)
+        transitions = np.flatnonzero(np.diff(left[0,:,0]))+1
+        self.assertTrue(set(np.diff(transitions)).issubset({173,174}))
+        playable = left[0,254:1024,0]
+        joined = np.r_[playable, 1-playable[::-1]]
+        edges = np.flatnonzero(np.diff(joined))+1
+        self.assertIn(770, edges)
+        self.assertTrue(set(np.diff(edges)).issubset({173,174}))
+        self.assertEqual(pitch_colors('clean-v11'), pitch_colors('clean-v10'))
+
+    def test_broad_v11_l_r_and_lr_share_world_phase(self):
+        import numpy as np
+        for width in (1024,512,256,128):
+            left, band = mowing_blend('pitch_l_bsm_alp', width, 'clean-v11')
+            right, right_band = mowing_blend('pitch_r_bsm_alp', width, 'clean-v11')
+            combined, full_band = mowing_blend('pitch_lr_bsm_exLow_alp', width, 'clean-v11')
+            self.assertEqual(right_band, band)
+            self.assertEqual(full_band, band/2)
+            self.assertEqual(int(left[0,-1,0]), 1)
+            self.assertEqual(int((1-left)[0,-1,0]), 0)
+            self.assertEqual(int(right[0,0,0]), 0)
+            self.assertEqual(int(combined[0,width//2-1,0]), 1)
+            self.assertEqual(int(combined[0,width//2,0]), 0)
+            self.assertTrue(np.array_equal(left[0,::2,0], combined[0,:width//2,0]))
+            self.assertTrue(np.array_equal(right[0,::2,0], combined[0,width//2:,0]))
+
+    def test_broad_v12_is_one_small_uniform_step_below_v11(self):
+        import numpy as np
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v12')
+        _, v11_band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v11')
+        self.assertEqual(band, 171)
+        self.assertAlmostEqual(band/v11_band, 171/(693/4))
+        transitions = np.flatnonzero(np.diff(left[0,:,0]))+1
+        self.assertEqual(transitions.tolist(), [152, 323, 494, 665, 836, 1007])
+        self.assertEqual(int(left[0,493,0]), 0)
+        self.assertEqual(int(left[0,494,0]), 1)
+        self.assertEqual(int(left[0,-1,0]), 0)
+        self.assertEqual(pitch_colors('clean-v12'), pitch_colors('clean-v11'))
+
+    def test_broad_v12_l_r_and_lr_share_world_phase(self):
+        import numpy as np
+        for width in (1024,512,256,128):
+            left, band = mowing_blend('pitch_l_bsm_alp', width, 'clean-v12')
+            right, right_band = mowing_blend('pitch_r_bsm_alp', width, 'clean-v12')
+            combined, full_band = mowing_blend('pitch_lr_bsm_exLow_alp', width, 'clean-v12')
+            self.assertEqual(right_band, band)
+            self.assertEqual(full_band, band/2)
+            self.assertEqual(int(left[0,-1,0]), 0)
+            self.assertEqual(int((1-left)[0,-1,0]), 1)
+            self.assertEqual(int(right[0,0,0]), 1)
+            self.assertEqual(int(combined[0,width//2-1,0]), 0)
+            self.assertEqual(int(combined[0,width//2,0]), 1)
+            # LR uses the same world spacing independently on each half. Its
+            # left half is the L phase locked to x494; its right half starts
+            # at a fresh R phase at midfield.
+            self.assertTrue(np.array_equal(left[0,::2,0], combined[0,:width//2,0]))
+            self.assertTrue(np.array_equal(right[0,::2,0], combined[0,width//2:,0]))
+
+    def test_broad_v13_uses_subtle_dark_light_width_ratio(self):
+        import numpy as np
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v13')
+        right, _ = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v13')
+        self.assertEqual(band, 171)
+        self.assertEqual(np.flatnonzero(np.diff(left[0,:,0])).tolist(),
+                         [151, 325, 493, 667, 835, 1009])
+        self.assertEqual(np.flatnonzero(np.diff(right[0,:,0])).tolist(),
+                         [151, 325, 493, 667, 835, 1009])
+        self.assertEqual(int(left[0,493,0]), 0)
+        self.assertEqual(int(left[0,494,0]), 1)
+        self.assertEqual(int(left[0,-1,0]), 0)
+        self.assertEqual(int(right[0,0,0]), 1)
+        self.assertEqual(pitch_colors('clean-v13'), pitch_colors('clean-v11'))
+
+    def test_broad_v13_lr_preserves_world_phase_at_half_density(self):
+        import numpy as np
+        for width in (1024, 512, 256, 128):
+            left, band = mowing_blend('pitch_l_bsm_alp', width, 'clean-v13')
+            right, right_band = mowing_blend('pitch_r_bsm_alp', width, 'clean-v13')
+            combined, full_band = mowing_blend('pitch_lr_bsm_exLow_alp', width, 'clean-v13')
+            self.assertEqual(right_band, band)
+            self.assertEqual(full_band, band/2)
+            self.assertTrue(np.array_equal(left[0,::2,0], combined[0,:width//2,0]))
+            self.assertTrue(np.array_equal(right[0,::2,0], combined[0,width//2:,0]))
+            self.assertEqual(int(combined[0,width//2-1,0]), int(left[0,-2,0]))
+            self.assertEqual(int(combined[0,width//2,0]), int(right[0,0,0]))
+
+    def test_broad_v14_corrects_only_symmetric_goal_area_band(self):
+        import numpy as np
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v14')
+        right, right_band = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v14')
+        self.assertAlmostEqual(band, 530/3)
+        self.assertEqual(right_band, band)
+        self.assertEqual((np.flatnonzero(np.diff(left[0,:,0]))+1).tolist(),
+                         [155,331,494,671,848])
+        self.assertEqual((np.flatnonzero(np.diff(right[0,:,0]))+1).tolist(),
+                         [177,354,530,693,870])
+        self.assertEqual(int(left[0,330,0]), 1)
+        self.assertEqual(int(left[0,331,0]), 0)
+        self.assertEqual(int(left[0,493,0]), 0)
+        self.assertEqual(int(left[0,494,0]), 1)
+        self.assertEqual(494-331, 163)
+        self.assertEqual(693-530, 163)
+        self.assertEqual(pitch_colors('clean-v14'), pitch_colors('clean-v10'))
+
+    def test_broad_v14_lr_is_symmetric_and_alternates_at_midfield(self):
+        import numpy as np
+        for width in (1024,512,256,128):
+            left, band = mowing_blend('pitch_l_bsm_alp', width, 'clean-v14')
+            right, right_band = mowing_blend('pitch_r_bsm_alp', width, 'clean-v14')
+            combined, full_band = mowing_blend('pitch_lr_bsm_exLow_alp', width, 'clean-v14')
+            self.assertEqual(right_band, band)
+            self.assertEqual(full_band, band/2)
+            self.assertTrue(np.array_equal(left[0,::2,0], combined[0,:width//2,0]))
+            self.assertTrue(np.array_equal(right[0,::2,0], combined[0,width//2:,0]))
+            self.assertEqual(int(combined[0,width//2-1,0]), 1)
+            self.assertEqual(int(combined[0,width//2,0]), 0)
+
     def test_uniform_v9_all_bands_and_complemented_low_right(self):
         import numpy as np
         left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v9')

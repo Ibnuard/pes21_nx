@@ -1,8 +1,9 @@
 # Visual v10 - broad pitch stripes, small alignment correction
 
-Pitch-only candidate: `local-debug/visual-v10-20260831/install/`.
-Host/package validation passed; **Switch test pending**. User-confirmed v8
-remains the stable visual baseline. V9's 10 narrow bands per half are superseded.
+Pitch-only stable baseline: `local-debug/visual-v10-20260831/install/`.
+Host/package validation passed and the user confirmed the Switch test on
+1 September 2026. V10 supersedes v8 as the stable pitch baseline. V9's ten
+narrow bands per half remain rejected.
 
 ## Geometry
 

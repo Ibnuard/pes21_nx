@@ -77,6 +77,7 @@ void pes_controller_friend_press_update(int held, uint64_t now_ms);
 void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                          int32_t left, int32_t right, int connected);
+int pes_controller_native_pad_lab_active(void);
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
 int pes_controller_replay_active(void);

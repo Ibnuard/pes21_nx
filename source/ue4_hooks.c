@@ -321,7 +321,7 @@ static int main_menu_focus_painted;
 static const char *main_menu_titles[4] = {
     "Exhibition", "Credits", "2 Player", "Settings"};
 static const char *main_menu_descriptions[4] = {
-    "Local match", "Credits and support", "Coming Soon",
+    "Local match", "Credits and support", "Native Pad Lab",
     "Graphics and FPS"};
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
@@ -542,6 +542,10 @@ static int32_t pes_sound_cri_bind_cpk_diagnostic(
 }
 #endif
 static _Alignas(4) uint32_t exhibition_requested;
+// Armed only from the main-menu 2P tile, which is currently a ONE-player
+// native-input proof. Normal Exhibition remains on synthetic touch.
+static _Alignas(4) uint32_t native_gamepad_lab_active;
+static _Alignas(4) uint32_t native_gamepad_lab_autostart;
 static _Alignas(4) uint32_t exhibition_strategy_pending;
 static _Alignas(4) uint32_t exhibition_session_active;
 static _Alignas(4) uint32_t exhibition_team_select_active;
@@ -2223,21 +2227,25 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
       if (listener && exhibition_flow_direct_set) {
         static const char searching_flow[] =
             "MyClub/Match/Training/MenuMatchSearching";
-        __atomic_store_n(&exhibition_home_team_id, 0, __ATOMIC_RELEASE);
-        __atomic_store_n(&exhibition_away_team_id, 0, __ATOMIC_RELEASE);
+        static const char strategy_flow[] = "MyClub/Match/MenuMatchMenu";
+        const int native_lab = pes_controller_native_pad_lab_active();
+        if (!native_lab) {
+          __atomic_store_n(&exhibition_home_team_id, 0, __ATOMIC_RELEASE);
+          __atomic_store_n(&exhibition_away_team_id, 0, __ATOMIC_RELEASE);
+        }
         __atomic_store_n(&exhibition_select_side, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_strategy_action,
                          EXHIBITION_STRATEGY_NONE, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_return_to_selector, 0,
                          __ATOMIC_RELEASE);
-        __atomic_store_n(&exhibition_searching_active, 1,
+        __atomic_store_n(&exhibition_searching_active, native_lab ? 0 : 1,
                          __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_search_refresh_pending, 1,
                          __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_search_initial_refresh_ticks,
                          EXHIBITION_INITIAL_REFRESH_TICKS, __ATOMIC_RELEASE);
-        __atomic_store_n(&exhibition_team_select_active, 1,
+        __atomic_store_n(&exhibition_team_select_active, native_lab ? 0 : 1,
                          __ATOMIC_RELEASE);
         if (exhibition_status_get_instance && exhibition_status_set_game_mode)
           exhibition_status_set_game_mode(exhibition_status_get_instance(),
@@ -2245,12 +2253,18 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
         exhibition_prepare_search_parameters();
         exhibition_refresh_selected_tmpdb();
         exhibition_flow_direct_set((unsigned char *)listener + 0x118,
-                                   searching_flow);
+                                   native_lab ? strategy_flow : searching_flow);
+        if (native_lab) {
+          __atomic_store_n(&exhibition_strategy_action,
+                           EXHIBITION_STRATEGY_START, __ATOMIC_RELEASE);
+          __atomic_store_n(&exhibition_strategy_pending, 1,
+                           __ATOMIC_RELEASE);
+        }
         *state = 9;
         __atomic_store_n(&exhibition_requested, 0, __ATOMIC_RELEASE);
         debugPrintf("exhibition: TutorialMatch initialized master teams; "
-                    "DirectSet -> %s\n",
-                    searching_flow);
+                    "DirectSet -> %s nativeLab=%d\n",
+                    native_lab ? strategy_flow : searching_flow, native_lab);
       } else {
         debugPrintf("exhibition: waiting for FlowListener instance=%p "
                     "DirectSet=%p\n",
@@ -3516,7 +3530,7 @@ const char *pes_controller_custom_info_popup_line(uint32_t index) {
     return index < 3 ? lines[index] : "";
   }
   if (popup == MAIN_MENU_INFO_TWO_PLAYER)
-    return index == 0 ? "Coming Soon" : "";
+    return index == 0 ? "Single-player native controller test" : "";
   return "";
 }
 
@@ -4482,6 +4496,8 @@ void pes_main_menu_simplify(void *window) {
     return;
 
   __atomic_store_n(&main_menu_graphics_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_autostart, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_info_popup, MAIN_MENU_INFO_CLOSED,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
@@ -4496,8 +4512,8 @@ void pes_main_menu_simplify(void *window) {
   if (!root)
     return;
 
-  // Keep the stock 2x2 Match grid and relabel all four choices. Exhibition and
-  // Training retain their proven handlers; the other two open local windows.
+  // Keep the stock 2x2 Match grid and relabel all four choices. Exhibition
+  // retains its proven handler; tile 2 is an isolated single-player lab.
   void *tab_strip = exhibition_find_root_node(root, "p_tab");
   void *match_page = exhibition_find_root_node(root, "page_0");
   main_menu_match_page = match_page;
@@ -4555,7 +4571,29 @@ uintptr_t pes_main_menu_selected_entry(void *window,
   }
 
   if (choice == 2) {
-    main_menu_info_open(MAIN_MENU_INFO_TWO_PLAYER);
+    // Use the same TutorialMatch bootstrap as local Exhibition, but do not
+    // mutate the const native touch event or execute tile zero's handler.
+    // This DirectSet and every native-input flag remain scoped to tile 2.
+    void *listener = exhibition_flow_listener_instance
+                         ? *exhibition_flow_listener_instance
+                         : NULL;
+    if (!listener || !exhibition_flow_direct_set)
+      return 0;
+    static const char tutorial_flow[] = "MyClub/TutorialMatch";
+    __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&native_gamepad_lab_autostart, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_session_active, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_home_team_id, 108, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_away_team_id, 114, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
+    exhibition_flow_direct_set((unsigned char *)listener + 0x118,
+                               tutorial_flow);
+    debugPrintf("native gamepad lab: armed Barcelona(108) vs PSG(114), "
+                "single player\n");
     return 0;
   }
 
@@ -5116,6 +5154,14 @@ static uint32_t pes_exhibition_strategy_update(void *window,
                                     window, pad_status)
                               : 0;
 
+  if (window && pes_controller_native_pad_lab_active() &&
+      __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) &&
+      __atomic_exchange_n(&native_gamepad_lab_autostart, 0,
+                          __ATOMIC_ACQ_REL)) {
+    debugPrintf("native gamepad lab: auto Play from prepared Strategy\n");
+    pes_exhibition_strategy_footer(window, 0);
+  }
+
   if (window && exhibition_set_pad_key_string &&
       __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
       __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
@@ -5199,6 +5245,11 @@ static int cobra_controller_is_connected(void) {
   return __atomic_load_n(&cobra_pad_connected, __ATOMIC_ACQUIRE) != 0;
 }
 
+int pes_controller_native_pad_lab_active(void) {
+  return __atomic_load_n(&native_gamepad_lab_active,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
 uint32_t pes_mobile_control_context(int *mode) {
   const uint32_t generation =
       __atomic_load_n(&mobile_control_generation, __ATOMIC_ACQUIRE);
@@ -5207,8 +5258,9 @@ uint32_t pes_mobile_control_context(int *mode) {
   return generation;
 }
 
-// Native pad input is useful for menu and matchmaking widgets. Live gameplay
-// remains on the calibrated multi-touch mapping in android_shim.c.
+// Native pad input is useful for menu and matchmaking widgets. Normal live
+// gameplay remains on the calibrated multi-touch mapping in android_shim.c;
+// only the explicitly armed single-player lab uses the native gameplay path.
 int pes_controller_menu_active(void) {
   return pes_controller_start_prompt(NULL, NULL) ||
          __atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE) ||
@@ -7357,15 +7409,23 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   if (pad) {
     const uint64_t packed =
         __atomic_load_n(&cobra_pad_input, __ATOMIC_ACQUIRE);
-    const uint32_t buttons = (uint32_t)packed;
-    const int32_t x = (int16_t)(packed >> 32);
-    const int32_t y = (int16_t)(packed >> 48);
+    uint32_t buttons = (uint32_t)packed;
+    int32_t x = (int16_t)(packed >> 32);
+    int32_t y = (int16_t)(packed >> 48);
     int32_t pad_id;
     uint32_t previous;
     uint32_t current;
     memcpy(&pad_id, pad + 4, sizeof(pad_id));
     memcpy(&previous, pad + 12, sizeof(previous));
     memcpy(&current, pad + 16, sizeof(current));
+    // The tile-2 experiment is intentionally one-player. Pad::Update runs for
+    // multiple Cobra pad objects, so explicitly prevent player-1 HID state
+    // from leaking into any internal port other than pad zero.
+    if (pes_controller_native_pad_lab_active() && pad_id != 0) {
+      buttons = 0;
+      x = 0;
+      y = 0;
+    }
     const uint32_t current_before = current;
     current |= buttons;
     memcpy(pad + 16, &current, sizeof(current));
@@ -7756,7 +7816,7 @@ void install_ue4_hooks(so_module *module) {
                 (void *)strategy_main);
   exhibition_matchplan_get_instance =
       (void *)so_find_addr_rx(module,
-          "_ZN9matchPlan4Data11GetInstanceEv");
+                              "_ZN9matchPlan4Data11GetInstanceEv");
   exhibition_matchplan_setup_team =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan4Data17SetupDataByTeamIdEN6common6TeamIdE8HomeAway");

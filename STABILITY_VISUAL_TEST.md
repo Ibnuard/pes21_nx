@@ -1,12 +1,19 @@
 # Kandidat stabilitas + visual EF10 — 31 Agustus 2026
 
-Baseline visual stable (dikonfirmasi pengguna): [v8 Low phase/alignment](VISUAL_REVISION_8.md), di
-`local-debug/visual-v8-20260831/install/`. Paket ini tidak mengganti NRO;
-bagian stabilitas di bawah tetap merupakan catatan tes terpisah.
+Kandidat aktif 1 September 2026 adalah
+[visual v14 + Native Pad Lab 1P](VISUAL_REVISION_14.md), di
+`local-debug/visual-v14-native-pad-lab-20260901/install/`. Pitch v14 memakai
+koreksi simetris hanya pada satu strip area gawang dan mempertahankan fase
+selang-seling di tengah. Native Pad Lab masih satu pemain; PSG tetap CPU.
+Baseline stable/rollback tetap PAK visual v10 dan NRO visual v9.
 
-Kandidat lapangan terbaru: [v10 broad pitch](VISUAL_REVISION_10.md), hanya PAK.
-Pola kecil v9 diganti strip besar mendekati v8; NRO/OBB tidak berubah.
-Fitur runtime helper/cursor tetap dari [v9](VISUAL_REVISION_9.md).
+Baseline pitch stable terbaru (dikonfirmasi pengguna di Switch pada 1 September
+2026): [v10 broad pitch](VISUAL_REVISION_10.md), di
+`local-debug/visual-v10-20260831/install/`. Paket ini tidak mengganti NRO;
+v8 tetap disimpan sebagai baseline rollback historis.
+
+Kandidat berikutnya harus dibangun terpisah dari v10. Fitur runtime
+helper/cursor tetap dari [v9](VISUAL_REVISION_9.md).
 
 Status: **siap uji perangkat, belum dinyatakan stable**. Paket terpisah di
 `local-debug/stability-test-20260830/`; runtime yang sedang dipakai di `dist/`
