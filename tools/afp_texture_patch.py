@@ -73,9 +73,13 @@ def read_atlas(container: bytes):
     return atlas, regions, (base, table, offset, length)
 
 
-def lzss_encode(data: bytes) -> bytes:
+def lzss_encode(data: bytes, candidate_limit: int = 48, min_match: int = 3) -> bytes:
     from collections import defaultdict, deque
-    candidates = defaultdict(lambda: deque(maxlen=48))
+    if candidate_limit < 1:
+        raise ValueError('candidate limit must be positive')
+    if not 3 <= min_match <= 18:
+        raise ValueError('minimum match must be between 3 and 18')
+    candidates = defaultdict(lambda: deque(maxlen=candidate_limit))
     output=bytearray()
     pos=0
     while pos < len(data):
@@ -96,7 +100,7 @@ def lzss_encode(data: bytes) -> bytes:
                     best_length,best_pos=length,candidate
                 if length==18:
                     break
-            if best_length>=3:
+            if best_length>=min_match:
                 pointer=(4078+best_pos)&4095
                 output.extend((pointer&255,((pointer>>4)&0xf0)|(best_length-3)))
                 step=best_length
@@ -111,11 +115,11 @@ def lzss_encode(data: bytes) -> bytes:
     return bytes(output)
 
 
-def replace_atlas(container: bytes, atlas: bytes) -> bytes:
+def replace_atlas(container: bytes, atlas: bytes, candidate_limit: int = 48, min_match: int = 3) -> bytes:
     original,regions,(base,table,offset,length)=read_atlas(container)
     if len(atlas)!=len(original) or atlas[:64]!=original[:64]:
         raise ValueError('atlas dimensions/header must remain unchanged')
-    compressed=lzss_encode(atlas)
+    compressed=lzss_encode(atlas,candidate_limit,min_match)
     if lzss_decode(compressed,len(atlas))!=atlas:
         raise ValueError('atlas compression roundtrip failed')
     packed=struct.pack('>II',len(atlas),len(compressed))+compressed
@@ -124,7 +128,10 @@ def replace_atlas(container: bytes, atlas: bytes) -> bytes:
     if len(packed)>length:
         # The atlas is the last payload in this verified container. Resize it,
         # keeping every preceding script/name/region offset byte-identical.
-        if offset+length>txp_length or txp_length-offset-length>16:
+        # A previous in-place, smaller replacement leaves its old reserved
+        # atlas slot zero-padded. Permit that verified zero tail too, rather
+        # than mistaking it for another live payload on a second skin pass.
+        if offset+length>txp_length or any(container[base+offset+length:base+txp_length]):
             raise ValueError('cannot resize a non-terminal atlas')
         end=base+offset
         output=output[:end]+packed

@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from afp_texture_patch import lzss_decode, lzss_encode
+from build_efootball10_visual_patch import mowing_blend
 from cooked_texture import Texture
 
 
@@ -27,6 +28,34 @@ class CompressionTests(unittest.TestCase):
 
 
 class TextureTests(unittest.TestCase):
+    def test_legacy_v6_active_rectangle_recipe(self):
+        left, _ = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v6')
+        right, _ = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v6')
+        combined, _ = mowing_blend('pitch_lr_bsm_exLow_alp', 1024, 'clean-v6')
+        # Historical authored sample positions only. The v6 Switch test did
+        # not confirm these as the shader's actual midpoint sampling points.
+        self.assertEqual(int(left[0, 254, 0]), 0)
+        self.assertEqual(int(left[0, 1023, 0]), 1)
+        self.assertEqual(int(right[0, 0, 0]), 0)
+        self.assertEqual(int(right[0, 769, 0]), 1)
+        self.assertEqual(int(combined[0, 511, 0]), 1)
+        self.assertEqual(int(combined[0, 512, 0]), 0)
+
+    def test_global_phase_opposes_shared_texture_edges(self):
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v7')
+        right, _ = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v7')
+        combined, combined_band = mowing_blend('pitch_lr_bsm_exLow_alp', 1024, 'clean-v7')
+        self.assertAlmostEqual(band, 1024 / 6)
+        self.assertAlmostEqual(combined_band, 1024 / 12)
+        # Exported mesh UV0 before shader transforms: L u=1 and R u~=0.
+        # The runtime material's final sampling still needs a device test.
+        self.assertEqual(int(left[0, 0, 0]), 0)
+        self.assertEqual(int(left[0, 1023, 0]), 1)
+        self.assertEqual(int(right[0, 0, 0]), 0)
+        self.assertEqual(int(right[0, 1023, 0]), 1)
+        self.assertEqual(int(combined[0, 511, 0]), 1)
+        self.assertEqual(int(combined[0, 512, 0]), 0)
+
     def test_mips_and_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'fixture.uexp'

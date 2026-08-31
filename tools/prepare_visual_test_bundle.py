@@ -1,7 +1,7 @@
 """Prepare the optional scoreboard OBB without changing its external size.
 
-The existing roster/portrait OBB is the base. Only dt210's game2dPes atlas is
-replaced. Every other member is compared byte-for-byte after packing.
+The existing roster/portrait OBB is the base. Only dt210's game2dPes UI member
+is replaced. Every other member is compared byte-for-byte after packing.
 """
 from pathlib import Path
 import argparse

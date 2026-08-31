@@ -1,10 +1,55 @@
 # Kandidat stabilitas + visual EF10 — 31 Agustus 2026
 
+Visual terbaru: [v8 Low phase/alignment](VISUAL_REVISION_8.md), di
+`local-debug/visual-v8-20260831/install/`. Paket ini tidak mengganti NRO;
+bagian stabilitas di bawah tetap merupakan catatan tes terpisah.
+
 Status: **siap uji perangkat, belum dinyatakan stable**. Paket terpisah di
 `local-debug/stability-test-20260830/`; runtime yang sedang dipakai di `dist/`
 tidak ditimpa. Multiplayer/2P tidak dikerjakan pada iterasi ini.
 
+### Umpan balik perangkat: baseline visual lapangan
+
+Pada 31 Agustus pengguna melaporkan tampilan lapangan sudah bagus dan meminta
+versi ini dijadikan baseline. PAK persis beserta snapshot recipe disimpan di
+`local-debug/visual-baseline-20260831/` (SHA256 `ec763228...7a7faa`). Bukan revisi
+baru, sehingga tidak perlu menginstal ulang. Ini persetujuan **visual lapangan**,
+bukan konfirmasi crash match kedua/FriendPress sudah terselesaikan.
+
+Pola masih terlihat overlap. Audit lanjutan menemukan mask native
+`pitch_specular_mask_l/r` yang tetap digunakan material dan belum dipatch:
+kanal R/G-nya mengandung strip dua arah serta streak tipis. Ini kandidat kuat
+pola yang bertumpuk dengan diffuse baru; perlu A/B perangkat sebelum menyatakan
+akar masalah terkonfirmasi. Prioritas iterasi visual berikutnya adalah
+menyamakan pola warna/pantulan, lalu menguatkan dua shade tanpa menambah noise.
+Garis, UV, grain baseline, dan runtime tetap dijaga.
+
+Scoreboard yang dituju mengikuti baris ringkas referensi EF10 dengan nama tim
+kuning di navy dan skor/waktu navy di kotak kuning. Paket saat ini belum mengubah
+geometri maupun warna teks native PES21. Layout tersebut membutuhkan pekerjaan
+lanjutan pada UI, bukan sekadar recolor pelat.
+
 ## Perubahan
+
+Iterasi visual lanjutan, tanpa NRO baru, tersedia di
+[VISUAL_REVISION_2.md](VISUAL_REVISION_2.md). Penjelasan di bawah ini tetap
+merujuk paket baseline `stability-test-20260830`, bukan mengganti riwayatnya.
+
+Hasil perangkat menolak scoreboard/geometri v2 dan meminta grain serta fase
+midfield diperbaiki. Kandidat penggantinya ada di
+[VISUAL_REVISION_3.md](VISUAL_REVISION_3.md); v2 tidak lagi untuk dipasang.
+
+Tes v3 meminta grain sedikit lebih kuat, boundary midfield benar-benar digeser,
+dan single-row scoreboard diperbaiki. Kandidat aktif berikutnya adalah
+[VISUAL_REVISION_4.md](VISUAL_REVISION_4.md).
+
+Hasil Switch v4 menunjukkan kompensasi background scoreboard masih salah dan
+offset setengah band membuat shade gelap memotong garis tengah. V5 memperbaiki
+lebar plate, tetapi timer tertutup plate opaque dan mode Low_R masih membentuk
+terang-terang. Kandidat aktif sekarang adalah
+[VISUAL_REVISION_6.md](VISUAL_REVISION_6.md): clock dinaikkan pada display list,
+accent dipindah sebelum timer, dan pattern di-anchor ke rect lapangan aktif yang
+benar-benar dimirror oleh material Low_R.
 
 1. **Retensi memori mmap.** Implementasi sebelumnya menahan seluruh alokasi
    sampai halaman terakhir dilepas. Contohnya UE4 dapat meminta 4 MiB, lalu
@@ -104,7 +149,9 @@ menganggap memory retention sebagai satu-satunya penyebab sebelum tes ini.
 - OBB: 421 member dt210 lainnya dan 23 member OBB lainnya byte-identical.
   Ukuran OBB tidak berubah, sehingga tidak menambah perubahan whitelist NRO.
 
-Belum ada smoke test boot/gameplay untuk kandidat ini. Uji GUI lokal via skill
+Belum ada smoke test boot/gameplay lokal untuk kandidat ini; screenshot pengguna
+kemudian mengonfirmasi paket visual tampil di gameplay (lihat baseline di atas).
+Uji GUI lokal via skill
 `computer-use` terhalang Node runtime yang terlalu lama untuk helper tersebut;
 runtime sistem tidak diubah. Host test mmap bukan pengujian jalur kernel
 `svcMapMemory` di Switch, dan host test FriendPress tidak mengeksekusi game asli.
