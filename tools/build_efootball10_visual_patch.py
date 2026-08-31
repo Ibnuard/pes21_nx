@@ -58,7 +58,7 @@ def diffuse_grain_source(ef10):
 
 
 def pitch_colors(style):
-    if style in ('clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7'):
+    if style in ('clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10'):
         # Same mean green (61.5), stronger separation (31 instead of 21).
         # Contrast is not achieved by scaling the fine-grain layer.
         return ([26,46,12], [49,77,23])
@@ -70,7 +70,39 @@ def mowing_blend(name, width, style):
     bands=16 if '_lr_' in name else 8
     band_width=width//bands
     x=np.arange(width,dtype=np.int32)
-    if style=='clean-v7':
+    if style=='clean-v10':
+        # Retain v8's broad stripes: 176 2/3 px vs 170 2/3 px (+3.515625%).
+        # Three equal bands join the native penalty-box front x494 to the
+        # center x1024. Extend that same spacing over the entire texture;
+        # never shrink/stretch individual bands around the goal or seam.
+        # The small box and goal line are NOT claimed as aligned boundaries.
+        # L/Low_R keep v8's stock mirror + complementary texture binding.
+        scale=width/1024.0
+        if '_lr_' in name:
+            center=width/2
+            scale*=0.5
+        else:
+            center=width if name.startswith('pitch_l_') else 0
+        band_width=(1024-494)*scale/3
+        # Multiply before dividing so the x494/x1024 anchors stay exact.
+        values=np.floor((x-center)*3/((1024-494)*scale)).astype(np.int32)&1
+    elif style=='clean-v9':
+        # Ten EQUAL bands per painted half, not per padded texture. Stock L:
+        # goal line x254, small-box line x331/332, midpoint x1024. Width 77px
+        # aligns the first band with the small box; no locally stretched bands.
+        # Low_R still uses v8's separate complemented L texture + stock mirror.
+        if '_lr_' in name:
+            start,end,bands=127,897,20
+        elif name.startswith('pitch_l_'):
+            start,end,bands=254,1024,10
+        else:
+            start,end,bands=0,770,10
+        scale=width/1024.0
+        start,end=start*scale,end*scale
+        sample=np.clip(x,start,end-0.5*scale)
+        values=np.floor((sample-start)*bands/(end-start)).astype(np.int32)&1
+        band_width=(end-start)/bands
+    elif style=='clean-v7':
         # Cooked-asset audit: Low_L and Low_R share pitch_l_bsm_alp. The
         # exported mesh has seam UV0 L u=1, R u~=0, before shader transforms.
         # Six bands across the whole texture make those edges opposite. This
@@ -140,7 +172,7 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
     style=getattr(args,'pitch_style','baseline')
     names=('pitch_l_bsm_alp','pitch_r_bsm_alp','pitch_lr_bsm_exLow_alp',
            'pitch_l_bsm_exLow_alp','pitch_r_bsm_exLow_alp','pitch2_bsm_alp_copied')
-    if style in ('mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7'):
+    if style in ('mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10'):
         names+=('pitch_specular_mask_l','pitch_specular_mask_r')
     if selected_names is not None:
         if not set(selected_names).issubset(names):
@@ -175,7 +207,7 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
             light=np.array(light_color,dtype=np.float32)
             rgb=np.repeat(dark*(1-blend)+light*blend,height,axis=0)
             rgb=np.asarray(Image.fromarray(np.uint8(rgb),'RGB').filter(ImageFilter.GaussianBlur(0.7)),dtype=np.float32)
-            if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7'):
+            if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10'):
                 if diffuse_grain.shape != (height,width):
                     raise ValueError('unexpected diffuse texture dimensions for EF10 grain')
                 # Bake subtle grain into the diffuse itself. The separate
@@ -185,7 +217,9 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                              'clean-v4':[2.0,4.0,1.5],
                              'clean-v5':[2.4,4.8,1.8],
                              'clean-v6':[2.4,4.8,1.8],
-                             'clean-v7':[2.8,5.6,2.1]}
+                             'clean-v7':[2.8,5.6,2.1],
+                             'clean-v9':[2.8,5.6,2.1],
+                             'clean-v10':[2.8,5.6,2.1]}
                 gain=np.array(gain_values[style],dtype=np.float32)
                 rgb+=diffuse_grain[:,:,None]*gain
             image=Image.fromarray(np.uint8(np.clip(np.rint(rgb),0,255)),'RGB')
@@ -244,7 +278,9 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                                                   'clean-v4':[2.0,4.0,1.5],
                                                   'clean-v5':[2.4,4.8,1.8],
                                                   'clean-v6':[2.4,4.8,1.8],
-                                                  'clean-v7':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7') and not detail and not specular else None,
+                                                  'clean-v7':[2.8,5.6,2.1],
+                                                  'clean-v9':[2.8,5.6,2.1],
+                                                  'clean-v10':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10') and not detail and not specular else None,
                        'right_half_phase_inverted':bool(style=='clean-v3' and name.startswith('pitch_r_')),
                        'stripe_half_band_offset':bool(style=='clean-v4' and not detail and not specular),
                        'native_seam_anchored':bool(style=='clean-v5' and not detail and not specular),

@@ -614,6 +614,8 @@ static void overlay_render(void) {
   int setplay_helper_circle_quads = 0;
   int setplay_helper_text_first_quad = 0;
   int setplay_helper_text_quads = 0;
+  int setplay_key_first_quads[3] = {0};
+  int setplay_key_quads[3] = {0};
   int cinematic_helper_circle_first_quad = 0;
   int cinematic_helper_circle_quads = 0;
   int cinematic_helper_text_first_quad = 0;
@@ -1268,7 +1270,7 @@ static void overlay_render(void) {
     custom_key_text_quads += line_quads;
     quads += line_quads;
   } else if (custom_settings_popup || custom_video_settings_popup) {
-    const uint32_t item_count = custom_video_settings_popup ? 2u : 4u;
+    const uint32_t item_count = custom_video_settings_popup ? 2u : PES_MATCH_SETTINGS_COUNT;
     const float panel_x = (custom_video_settings_popup ? 0.20f : 0.17f) *
                           (float)screen_width;
     const float panel_y = (custom_video_settings_popup ? 0.16f : 0.08f) *
@@ -1285,13 +1287,13 @@ static void overlay_render(void) {
     const float row_x = panel_x + 0.030f * (float)screen_width;
     const float row_w = panel_w - 0.060f * (float)screen_width;
     const float row_y0 =
-        (custom_video_settings_popup ? 0.32f : 0.225f) *
+        (custom_video_settings_popup ? 0.32f : PES_MATCH_SETTINGS_ROW_Y) *
         (float)screen_height;
     const float row_h =
-        (custom_video_settings_popup ? 0.12f : 0.105f) *
+        (custom_video_settings_popup ? 0.12f : 0.090f) *
         (float)screen_height;
     const float row_step =
-        (custom_video_settings_popup ? 0.145f : 0.125f) *
+        (custom_video_settings_popup ? 0.145f : PES_MATCH_SETTINGS_ROW_STEP) *
         (float)screen_height;
     const float selector_inset = 0.006f * (float)screen_height;
     const float value_w = 0.200f * (float)screen_width;
@@ -1760,6 +1762,9 @@ static void overlay_render(void) {
     setplay_labels[0] = "KICK   LS AIM";
     setplay_helper_count = 1;
   }
+  // Keep these badges outside the generic white-text batch below. That pass
+  // used to repaint both the colored key glyphs and their circle geometry.
+  const int generic_text_end_quad = quads;
   if (setplay_helper_count) {
     const float helper_radius = 0.021f * (float)screen_height;
     const float helper_x = 0.815f * (float)screen_width;
@@ -1784,10 +1789,12 @@ static void overlay_render(void) {
     for (unsigned int index = 0; index < setplay_helper_count; index++) {
       const float y = helper_start_y + (float)index * helper_step;
       const int key_len = (int)strlen(setplay_keys[index]);
+      setplay_key_first_quads[index] = quads;
       int line_quads = emit_line(
           setplay_keys[index], key_len,
           helper_x - (float)key_len * gw * 0.5f, y - gh * 0.5f, gw, gh,
           verts + quads * 24);
+      setplay_key_quads[index] = line_quads;
       setplay_helper_text_quads += line_quads;
       quads += line_quads;
       const int label_len = (int)strlen(setplay_labels[index]);
@@ -2000,17 +2007,10 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_round_rect, 0.0f);
     glUniform1f(gl.loc_cursor, 0.0f);
     glUniform1f(gl.loc_circle, 0.0f);
-    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+    glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.32f, 1.0f);
     glDrawArrays(GL_TRIANGLES, setplay_helper_circle_first_quad * 6,
                  setplay_helper_circle_quads * 6);
     glUniform1f(gl.loc_circle, 0.0f);
-  }
-  if (setplay_helper_text_quads) {
-    glUniform1f(gl.loc_solid, 0.0f);
-    glUniform2f(gl.loc_off, 0.0f, 0.0f);
-    glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
-    glDrawArrays(GL_TRIANGLES, setplay_helper_text_first_quad * 6,
-                 setplay_helper_text_quads * 6);
   }
   if (cinematic_helper_circle_quads) {
     glUniform1f(gl.loc_solid, 1.0f);
@@ -2065,7 +2065,7 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_key_text_first_quad * 6,
                  custom_key_text_quads * 6);
   }
-  const int text_quads = quads - text_first_quad;
+  const int text_quads = generic_text_end_quad - text_first_quad;
   if (text_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 3.0f / (float)screen_width,
@@ -2075,6 +2075,24 @@ static void overlay_render(void) {
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, text_first_quad * 6, text_quads * 6);
+  }
+
+  if (setplay_helper_text_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 2.0f / (float)screen_width,
+                -2.0f / (float)screen_height);
+    glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f, 0.85f);
+    glDrawArrays(GL_TRIANGLES, setplay_helper_text_first_quad * 6,
+                 setplay_helper_text_quads * 6);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, setplay_helper_text_first_quad * 6,
+                 setplay_helper_text_quads * 6);
+    // Same high-contrast palette as the accepted scoreboard; labels stay white.
+    glUniform4f(gl.loc_color, 1.0f, 0.94f, 0.0f, 1.0f);
+    for (unsigned int i = 0; i < setplay_helper_count; i++)
+      glDrawArrays(GL_TRIANGLES, setplay_key_first_quads[i] * 6,
+                   setplay_key_quads[i] * 6);
   }
 
   // restore the two attrib arrays to whatever the engine had (it uses the same

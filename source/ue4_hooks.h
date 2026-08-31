@@ -175,6 +175,9 @@ uint32_t pes_controller_custom_cpu_popup_value(void);
 uint32_t pes_controller_custom_cpu_popup_count(void);
 const char *pes_controller_custom_cpu_popup_label(uint32_t index);
 int pes_controller_custom_match_settings_active(void);
+#define PES_MATCH_SETTINGS_COUNT 5u
+#define PES_MATCH_SETTINGS_ROW_Y 0.225f
+#define PES_MATCH_SETTINGS_ROW_STEP 0.105f
 uint32_t pes_controller_custom_match_settings_focus(void);
 const char *pes_controller_custom_match_settings_label(uint32_t index);
 const char *pes_controller_custom_match_settings_value(uint32_t index);

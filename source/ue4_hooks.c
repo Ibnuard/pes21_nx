@@ -5,6 +5,8 @@
 #include <switch.h>
 
 #include "aaudio_shim.h"
+#include "config.h"
+#include "match_visual_policy.h"
 #include "error.h"
 #include "so_util.h"
 #include "ue4_hooks.h"
@@ -259,6 +261,10 @@ static void (*exhibition_search_update_disp)(void *window);
 static void (*exhibition_search_update_team_info)(void *window,
                                                    const uint32_t *side);
 static void *(*exhibition_window_get_window)(void *window);
+static int32_t (*match_node_set_alpha)(void *node, float alpha);
+static void *(*match_setplay_get_root)(void *window);
+static void (*match_visual_model_action_original)(void *manager);
+static void (*match_visual_model_set_disp)(void *model, uint32_t visible);
 static void *(*exhibition_holder_get_duplicate)(void *holder,
                                                  uint32_t index);
 static void (*exhibition_node_set_visible)(void *node, uint32_t visible,
@@ -1020,6 +1026,10 @@ static void exhibition_adjust_match_setting(int direction) {
       exhibition_match_set_pk(match, value);
     __atomic_store_n(&exhibition_settings_penalties, value,
                      __ATOMIC_RELEASE);
+  } else if (focus == 4) {
+    value = !__atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&config.player_cursor_show, value, __ATOMIC_RELEASE);
+    write_config(CONFIG_NAME);
   } else {
     return;
   }
@@ -2517,7 +2527,7 @@ void pes_exhibition_search_pad_event(uint32_t buttons,
     if (settings_popup) {
       if (direction == 1 && exhibition_popup_focus_index > 0)
         exhibition_popup_focus_index--;
-      else if (direction == 2 && exhibition_popup_focus_index < 3)
+      else if (direction == 2 && exhibition_popup_focus_index + 1 < PES_MATCH_SETTINGS_COUNT)
         exhibition_popup_focus_index++;
       else if (direction == 3)
         exhibition_adjust_match_setting(-1);
@@ -3038,13 +3048,13 @@ int pes_controller_custom_match_settings_active(void) {
 }
 
 uint32_t pes_controller_custom_match_settings_focus(void) {
-  return exhibition_popup_focus_index < 4 ? exhibition_popup_focus_index : 0;
+  return exhibition_popup_focus_index < PES_MATCH_SETTINGS_COUNT ? exhibition_popup_focus_index : 0;
 }
 
 const char *pes_controller_custom_match_settings_label(uint32_t index) {
   static const char *const labels[] = {
-      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES"};
-  return index < 4 ? labels[index] : "";
+      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES", "PLAYER CURSOR"};
+  return index < PES_MATCH_SETTINGS_COUNT ? labels[index] : "";
 }
 
 const char *pes_controller_custom_match_settings_value(uint32_t index) {
@@ -3071,6 +3081,9 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
                            __ATOMIC_ACQUIRE)
                ? "ON"
                : "OFF";
+  if (index == 4)
+    return __atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE)
+               ? "SHOW" : "HIDE";
   return "";
 }
 
@@ -3752,12 +3765,13 @@ int pes_controller_menu_physical_tap(float normalized_x,
     return 1;
   }
   if (normalized_x >= 0.18f && normalized_x <= 0.82f &&
-      normalized_y >= 0.215f && normalized_y < 0.725f) {
-    int index = (int)floorf((normalized_y - 0.225f) / 0.125f);
+      normalized_y >= PES_MATCH_SETTINGS_ROW_Y &&
+      normalized_y < PES_MATCH_SETTINGS_ROW_Y + PES_MATCH_SETTINGS_ROW_STEP * PES_MATCH_SETTINGS_COUNT) {
+    int index = (int)floorf((normalized_y - PES_MATCH_SETTINGS_ROW_Y) / PES_MATCH_SETTINGS_ROW_STEP);
     if (index < 0)
       index = 0;
-    if (index > 3)
-      index = 3;
+    if (index >= (int)PES_MATCH_SETTINGS_COUNT)
+      index = (int)PES_MATCH_SETTINGS_COUNT - 1;
     exhibition_popup_focus_index = (uint32_t)index;
     exhibition_popup_focus_direction = 0;
     pes_controller_menu_tap(normalized_x, normalized_y);
@@ -6056,6 +6070,16 @@ static void pes_match_button_setplay_update(void *window) {
   if (!window)
     return;
 
+  // Alpha only: NeedDisp/SetVisible also gate the touch/joy-con action state.
+  // This is ButtonSetplay's own root, never the taker selector/pause window.
+  if (match_node_set_alpha && match_setplay_get_root) {
+    // Same visual root used by ActionButtonBase::SetupSwf, not the outer
+    // GetWindow node whose wrapper need not own a Flash MovieClip.
+    void *root = match_setplay_get_root(window);
+    if (root)
+      match_node_set_alpha(root, 0.0f);
+  }
+
   const uint32_t requested = __atomic_load_n(
       &match_button_setplay_pending_type, __ATOMIC_ACQUIRE);
   if (!requested)
@@ -7455,6 +7479,16 @@ void pes_virtual_pad_update_info(void *virtual_pad) {
   }
 }
 
+static void pes_match_visual_model_action(void *manager) {
+  // Always keep native updates/registry locks/lifecycle running. Only suppress
+  // the resulting assist draw objects; power/name/2D HUD paths are untouched.
+  if (match_visual_model_action_original)
+    match_visual_model_action_original(manager);
+  pes_hide_pitch_assists(manager,
+      __atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE),
+      match_visual_model_set_disp);
+}
+
 static void patch_checked_u32(uintptr_t address, uint32_t expected,
                               uint32_t replacement, const char *name) {
   const uint32_t found = *(const uint32_t *)address;
@@ -8032,6 +8066,35 @@ void install_ue4_hooks(so_module *module) {
   exhibition_node_set_visible =
       (void *)so_find_addr_rx(module,
           "_ZN10menusystem4Node10SetVisibleEbj");
+  match_node_set_alpha = (void *)so_find_addr_rx(
+      module, "_ZN10menusystem4Node8SetAlphaEf");
+  match_setplay_get_root = (void *)so_find_addr_rx(
+      module, "_ZN10menusystem6Window7GetRootEv");
+  if (!match_node_set_alpha || !match_setplay_get_root)
+    fatal_error("ButtonSetplay visual-only alpha function not found");
+
+  // Vtable dispatch wrapper: no inline trampoline, no altered input state,
+  // no camera/render-loop hook and no asset/object pointer retained per match.
+  const char *visual_action_symbol = "_ZN7match2D5Model7Manager6ActionEv";
+  const char *visual_set_disp_symbol = "_ZN7match2D5Model4Base7SetDispEb";
+  const uintptr_t visual_action = so_find_addr(module, visual_action_symbol);
+  const uintptr_t visual_set_disp = so_find_addr(module, visual_set_disp_symbol);
+  static const uint32_t visual_action_expected[4] = {
+      0xa9bf7bf3, 0xb9415808, 0xaa0003f3, 0x71000d1f};
+  static const uint32_t visual_set_disp_expected[4] = {
+      0xf9400000, 0xb4000060, 0x12000021, 0x16ed7a85};
+  if (!visual_action || !visual_set_disp ||
+      memcmp((void *)visual_action, visual_action_expected, sizeof(visual_action_expected)) ||
+      memcmp((void *)visual_set_disp, visual_set_disp_expected, sizeof(visual_set_disp_expected)))
+    fatal_error("Unexpected on-pitch assist model code revision");
+  const uintptr_t visual_action_runtime = so_find_addr_rx(module, visual_action_symbol);
+  uintptr_t *visual_action_slot = find_vtable_method_slot(
+      module, "_ZTVN7match2D5Model7ManagerE", visual_action_runtime, 64);
+  if (!visual_action_slot)
+    fatal_error("On-pitch assist Model::Manager Action slot not found");
+  match_visual_model_action_original = (void *)visual_action_runtime;
+  match_visual_model_set_disp = (void *)so_find_addr_rx(module, visual_set_disp_symbol);
+  *visual_action_slot = (uintptr_t)&pes_match_visual_model_action;
 
   // Gate the custom A prompt to the real title-window lifecycle. Initializing
   // it statically made the glyph visible during the long UE4 boot sequence.

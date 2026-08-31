@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from afp_texture_patch import lzss_decode, lzss_encode
-from build_efootball10_visual_patch import mowing_blend
+from build_efootball10_visual_patch import mowing_blend, pitch_colors
 from cooked_texture import Texture
 
 
@@ -28,6 +28,71 @@ class CompressionTests(unittest.TestCase):
 
 
 class TextureTests(unittest.TestCase):
+    def test_broad_v10_is_near_v8_width_and_aligns_penalty_front(self):
+        import numpy as np
+        for name in ('pitch_l_bsm_alp', 'pitch_l_bsm_exLow_alp'):
+            left, band = mowing_blend(name, 1024, 'clean-v10')
+            _, baseline_band = mowing_blend(name, 1024, 'clean-v7')
+            self.assertAlmostEqual(band, 530/3)
+            self.assertAlmostEqual(band/baseline_band, 1.03515625)
+            self.assertEqual(int(left[0,493,0]), 0)
+            self.assertEqual(int(left[0,494,0]), 1)
+            # Exactly one constant spacing from the penalty front to center.
+            self.assertEqual(494+3*band, 1024)
+            transitions = np.flatnonzero(np.diff(left[0,:,0]))+1
+            self.assertTrue(set(np.diff(transitions)).issubset({176,177}))
+            # The Low_R stock shader mirrors the complement of this L map.
+            playable = left[0,254:1024,0]
+            joined = np.r_[playable, 1-playable[::-1]]
+            edges = np.flatnonzero(np.diff(joined))+1
+            self.assertIn(770, edges)
+            self.assertEqual(len(edges), 9)  # five visible broad bands/half
+            self.assertTrue(set(np.diff(edges)).issubset({176,177}))
+        self.assertEqual(pitch_colors('clean-v10'), pitch_colors('clean-v7'))
+
+    def test_broad_v10_phase_and_scale_for_all_diffuse_variants(self):
+        import numpy as np
+        for width in (1024,512,256,128):
+            left, band = mowing_blend('pitch_l_bsm_alp', width, 'clean-v10')
+            right, right_band = mowing_blend('pitch_r_bsm_alp', width, 'clean-v10')
+            combined, full_band = mowing_blend('pitch_lr_bsm_exLow_alp', width, 'clean-v10')
+            self.assertEqual(right_band, band)
+            self.assertEqual(full_band, band/2)
+            self.assertEqual(int(left[0,-1,0]), 1)
+            self.assertEqual(int((1-left)[0,-1,0]), 0)
+            self.assertEqual(int(right[0,0,0]), 0)
+            self.assertEqual(int(combined[0,width//2-1,0]), 1)
+            self.assertEqual(int(combined[0,width//2,0]), 0)
+            # LR is the same world pattern, at half the texel density.
+            self.assertTrue(np.array_equal(left[0,::2,0], combined[0,:width//2,0]))
+            self.assertTrue(np.array_equal(right[0,::2,0], combined[0,width//2:,0]))
+        combined, _ = mowing_blend('pitch_lr_bsm_exLow_alp', 1024, 'clean-v10')
+        self.assertNotEqual(int(combined[0,246,0]), int(combined[0,247,0]))
+        self.assertNotEqual(int(combined[0,776,0]), int(combined[0,777,0]))
+
+    def test_uniform_v9_all_bands_and_complemented_low_right(self):
+        import numpy as np
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v9')
+        right, other_band = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v9')
+        combined, combined_band = mowing_blend('pitch_lr_bsm_exLow_alp', 1024, 'clean-v9')
+        self.assertEqual(band, 77)
+        self.assertEqual(other_band, band)
+        self.assertEqual(combined_band, band/2)
+        values = left[0, 254:1024, 0]
+        self.assertEqual(values.reshape(10, 77).sum(1).tolist(), [0,77]*5)
+        # Low_R mirrors the SAME L geometry, now in its own v8 alias.
+        inverse = 1-left
+        self.assertEqual(int(left[0,-1,0]), 1)
+        self.assertEqual(int(inverse[0,-1,0]), 0)
+        self.assertEqual(int(right[0,0,0]), 0)
+        self.assertEqual(int(combined[0,511,0]), 1)
+        self.assertEqual(int(combined[0,512,0]), 0)
+        # Pixel rounding <=1 px in the half-resolution distant full-pitch map.
+        edges = np.flatnonzero(np.diff(combined[0,127:897,0]))+1
+        lengths = np.diff(np.r_[0,edges,770])
+        self.assertEqual(len(lengths),20)
+        self.assertLessEqual(int(lengths.max()-lengths.min()),1)
+
     def test_legacy_v6_active_rectangle_recipe(self):
         left, _ = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v6')
         right, _ = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v6')

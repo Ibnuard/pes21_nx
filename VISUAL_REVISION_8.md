@@ -1,7 +1,10 @@
 # Visual v8 — Low material phase + scoreboard alignment
 
-Kandidat tes: `local-debug/visual-v8-20260831/install/`. V7 dipertahankan
-sebagai baseline/rollback. NRO, roster, portrait, controller dan setting
+**Baseline visual stable, dikonfirmasi pengguna di Switch pada 31 Agustus 2026:**
+scoreboard sudah oke dan midpoint lapangan sudah selang-seling. Paket v8 di
+`local-debug/visual-v8-20260831/install/` dipertahankan sebagai rollback untuk
+iterasi berikutnya. Konfirmasi ini mencakup visual, bukan audit seluruh mode
+atau jaminan stabilitas pertandingan berulang. NRO, roster, portrait, controller dan setting
 grafis tidak diubah. Tetap gunakan Standard/Low, tidak perlu mengaktifkan High.
 
 ## Penyebab lapangan mirror yang terbukti dari shader
@@ -85,9 +88,9 @@ game agar material baru dimuat. Rollback memakai kedua file dari v7.
 - OBB tetap 1.391.120.384 byte; 421 member CPK dan 23 member OBB lainnya
   byte-identical. Roster dan portrait tetap utuh.
 
-Checklist Switch: band kiri/kanan midpoint pada kickoff dan replay, garis
-tengah/gawang tetap benar, centering score, lalu pertandingan kedua untuk
-memastikan tidak ada regresi stabilitas. Belum disebut stable sebelum tes itu.
+Hasil Switch: scoreboard dan alternasi midpoint sudah disetujui. Permintaan
+selanjutnya adalah merapikan lebar strip secara seragam di seluruh lapangan,
+bukan meregangkan strip khusus di kotak penalti. V8 tetap baseline yang utuh.
 
 ## Reproduksi
 

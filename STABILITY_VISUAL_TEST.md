@@ -1,8 +1,12 @@
 # Kandidat stabilitas + visual EF10 — 31 Agustus 2026
 
-Visual terbaru: [v8 Low phase/alignment](VISUAL_REVISION_8.md), di
+Baseline visual stable (dikonfirmasi pengguna): [v8 Low phase/alignment](VISUAL_REVISION_8.md), di
 `local-debug/visual-v8-20260831/install/`. Paket ini tidak mengganti NRO;
 bagian stabilitas di bawah tetap merupakan catatan tes terpisah.
+
+Kandidat lapangan terbaru: [v10 broad pitch](VISUAL_REVISION_10.md), hanya PAK.
+Pola kecil v9 diganti strip besar mendekati v8; NRO/OBB tidak berubah.
+Fitur runtime helper/cursor tetap dari [v9](VISUAL_REVISION_9.md).
 
 Status: **siap uji perangkat, belum dinyatakan stable**. Paket terpisah di
 `local-debug/stability-test-20260830/`; runtime yang sedang dipakai di `dist/`
