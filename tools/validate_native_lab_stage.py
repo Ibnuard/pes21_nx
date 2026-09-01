@@ -23,9 +23,10 @@ def function(text, name):
     raise AssertionError(name+' has no end')
 
 
-def validate(baseline, runtime, pitch):
+def validate(baseline, runtime, pitch, marker):
     changed = []
-    allowed = {'android_shim.c', 'ue4_hooks.c', 'ue4_hooks.h', 'overlay.c'}
+    allowed = {'android_shim.c', 'cobra_pad_hook.s', 'ue4_hooks.c',
+               'ue4_hooks.h', 'overlay.c'}
     before_files = {p.name for p in (baseline/'source').iterdir() if p.is_file()}
     after_files = {p.name for p in (runtime/'source').iterdir() if p.is_file()}
     assert after_files-before_files == {'native_pad_lab.inc'}
@@ -47,8 +48,7 @@ def validate(baseline, runtime, pitch):
     preserved = ('pes_inplay_ball_position_broadcast', 'ue4_tickrate_clamp',
                  'pes_match_visual_model_action', 'pes_match_button_setplay_update',
                  'pes_match_button_setplay_need_disp',
-                 'pes_match_button_setplay_touch_sub',
-                 'pes_cursor_set_pad_no', 'pes_set_real_pad_is_enable')
+                 'pes_match_button_setplay_touch_sub')
     for name in preserved:
         assert function(before,name) == function(after,name), name
     overlay_before = (baseline/'source/overlay.c').read_text(encoding='utf-8')
@@ -59,22 +59,31 @@ def validate(baseline, runtime, pitch):
     end = overlay_before.index('  // restore the two attrib arrays', begin)
     assert overlay_before[begin:end] in overlay
     assert 'PRESS A TO START' in overlay
-    assert 'NATIVE LAB V2' in overlay
+    assert marker in overlay
+    assert 'HidNpadIdType_No2' in (runtime/'source/android_shim.c').read_text(
+        encoding='utf-8')
+    assert '_ZN9matchPlan4Data10SetPadPortE8HomeAwayj' in after
+    assert 'exhibition_matchplan_set_pad_port(data, 0, 0)' in after
+    assert 'exhibition_matchplan_set_pad_port(data, 1, 1)' in after
     assert 'PLAYER CURSOR' in after
     assert 'exhibition_migration.inc' not in after # Do not rebase roster code.
     for name in ('config.c','config.h','match_visual_policy.h','friend_press.inc',
-                 'main.c','imports.c','android_mmap.c','so_util.c','cobra_pad_hook.s'):
+                 'main.c','imports.c','android_mmap.c','so_util.c'):
         assert digest(baseline/'source'/name) == digest(runtime/'source'/name), name
+    hook_asm = (runtime/'source/cobra_pad_hook.s').read_text(encoding='utf-8')
+    assert 'pes_match_cursor_info_from_tmpdb_hook' in hook_asm
+    assert 'bl pes_match_cursor_info_ready' in hook_asm
     assert digest(pitch) == '152cedb75b306ea92456219d68fda51e37767f45c3fe3b3b7edc21ea284b53d9'
     nro = runtime/'pes21_nx.nro'
     payload = nro.read_bytes()
     assert payload[16:20] == b'NRO0'
-    assert b'NATIVE LAB V2' in payload
+    assert marker.encode('ascii') in payload
     assert b'PLAYER CURSOR' in payload and b'PRESS A TO START' in payload
     return {'runtime':str(runtime), 'baseline':str(baseline),
             'changed_existing_sources': changed, 'preserved_function_bodies':preserved,
             'all_other_source_and_data_equal_baseline':True,
             'helper_palette_batch_equal_baseline':True,
+            'native_2p_scope_validated':True,
             'pitch_v14_unchanged':True,
             'nro_bytes':len(payload), 'nro_sha256':digest(nro),
             'diagnostics':False, 'perf_trace':False, 'switch_tested':False}
@@ -85,8 +94,9 @@ if __name__ == '__main__':
     parser.add_argument('--baseline',type=Path,required=True)
     parser.add_argument('--runtime',type=Path,required=True)
     parser.add_argument('--pitch',type=Path,required=True)
+    parser.add_argument('--marker',default='NATIVE SETPLAY V4')
     parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args()
-    report = validate(args.baseline,args.runtime,args.pitch)
+    report = validate(args.baseline,args.runtime,args.pitch,args.marker)
     args.output.write_text(json.dumps(report,indent=2),encoding='utf-8')
     print(json.dumps(report,indent=2))

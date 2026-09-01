@@ -37,7 +37,12 @@ static ObjectInitializerArrayState object_initializer_states[
 static void *(*ue4_fmemory_malloc)(uint64_t size, uint32_t alignment);
 
 static _Alignas(8) uint64_t cobra_pad_input;
+static _Alignas(4) uint32_t cobra_pad_right_input;
 static _Alignas(4) uint32_t cobra_pad_connected;
+static _Alignas(8) uint64_t cobra_pad_input_p2;
+static _Alignas(4) uint32_t cobra_pad_right_input_p2;
+static _Alignas(4) uint32_t cobra_pad_connected_p2;
+static void *(*cobra_pad_get_pad)(uint32_t pad_no);
 static void native_pad_lab_reset(void);
 static uintptr_t cobra_pad_update_resume;
 static uintptr_t mobile_screen_tap_entry_resume;
@@ -75,6 +80,7 @@ static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
 uintptr_t pes_main_menu_graphics_d1_resume;
 uintptr_t pes_main_menu_graphics_d0_resume;
+uintptr_t pes_match_cursor_info_from_tmpdb_resume;
 uintptr_t pes_main_menu_graphics_destructor_page;
 uintptr_t pes_main_menu_graphics_d0_page;
 static void **exhibition_flow_listener_instance;
@@ -86,6 +92,11 @@ static void (*exhibition_matchplan_setup_team)(void *data,
                                                 uint32_t home_away);
 static void (*exhibition_matchplan_setup_tmpdb)(void *data);
 static void (*exhibition_matchplan_update_tmpdb)(void *data);
+static void (*exhibition_matchplan_set_pad_port)(void *data,
+                                                 uint32_t home_away,
+                                                 uint32_t pad_port);
+static uint32_t (*exhibition_matchplan_get_pad_port)(const void *data,
+                                                     uint32_t home_away);
 static void (*exhibition_set_team)(const uint32_t *team_id,
                                    uint32_t home_away,
                                    uint32_t preserve_player_data);
@@ -322,7 +333,7 @@ static int main_menu_focus_painted;
 static const char *main_menu_titles[4] = {
     "Exhibition", "Credits", "2 Player", "Settings"};
 static const char *main_menu_descriptions[4] = {
-    "Local match", "Credits and support", "Native Pad Lab",
+    "Local match", "Credits and support", "Native 2P Lab",
     "Graphics and FPS"};
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
@@ -543,10 +554,13 @@ static int32_t pes_sound_cri_bind_cpk_diagnostic(
 }
 #endif
 static _Alignas(4) uint32_t exhibition_requested;
-// Armed only from the main-menu 2P tile, which is currently a ONE-player
-// native-input proof. Normal Exhibition remains on synthetic touch.
+// Armed only from the main-menu 2P tile. This is a real two-controller lab:
+// Switch HID No1 owns HOME and No2 owns AWAY. Normal Exhibition remains on
+// the proven synthetic-touch route and keeps its CPU opponent.
 static _Alignas(4) uint32_t native_gamepad_lab_active;
 static _Alignas(4) uint32_t native_gamepad_lab_autostart;
+static _Alignas(4) uint32_t native_gamepad_lab_two_player;
+static _Alignas(4) uint32_t native_hid_connected_mask;
 static _Alignas(4) uint32_t exhibition_strategy_pending;
 static _Alignas(4) uint32_t exhibition_session_active;
 static _Alignas(4) uint32_t exhibition_team_select_active;
@@ -3328,7 +3342,7 @@ uint32_t pes_controller_custom_info_popup_line_count(void) {
   if (popup == MAIN_MENU_INFO_CREDITS)
     return 3;
   if (popup == MAIN_MENU_INFO_TWO_PLAYER)
-    return 1;
+    return 3;
   return 0;
 }
 
@@ -3530,8 +3544,17 @@ const char *pes_controller_custom_info_popup_line(uint32_t index) {
     };
     return index < 3 ? lines[index] : "";
   }
-  if (popup == MAIN_MENU_INFO_TWO_PLAYER)
-    return index == 0 ? "Single-player native controller test" : "";
+  if (popup == MAIN_MENU_INFO_TWO_PLAYER) {
+    const uint32_t connected =
+        pes_controller_native_hid_connected_mask();
+    if (index == 0)
+      return (connected & 1u) ? "PLAYER 1: READY (HOME)"
+                              : "PLAYER 1: CONNECT CONTROLLER";
+    if (index == 1)
+      return (connected & 2u) ? "PLAYER 2: READY (AWAY)"
+                              : "PLAYER 2: CONNECT CONTROLLER";
+    return index == 2 ? "Pair both pads, close this message, then retry" : "";
+  }
   return "";
 }
 
@@ -4499,6 +4522,7 @@ void pes_main_menu_simplify(void *window) {
   __atomic_store_n(&main_menu_graphics_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_autostart, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_two_player, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_info_popup, MAIN_MENU_INFO_CLOSED,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
@@ -4514,7 +4538,7 @@ void pes_main_menu_simplify(void *window) {
     return;
 
   // Keep the stock 2x2 Match grid and relabel all four choices. Exhibition
-  // retains its proven handler; tile 2 is an isolated single-player lab.
+  // retains its proven handler; tile 2 is an isolated two-controller lab.
   void *tab_strip = exhibition_find_root_node(root, "p_tab");
   void *match_page = exhibition_find_root_node(root, "page_0");
   main_menu_match_page = match_page;
@@ -4572,6 +4596,14 @@ uintptr_t pes_main_menu_selected_entry(void *window,
   }
 
   if (choice == 2) {
+    const uint32_t connected =
+        pes_controller_native_hid_connected_mask();
+    if ((connected & 3u) != 3u) {
+      main_menu_info_open(MAIN_MENU_INFO_TWO_PLAYER);
+      debugPrintf("native 2P lab: blocked; HID mask=0x%x requires No1+No2\n",
+                  connected);
+      return 0;
+    }
     // Use the same TutorialMatch bootstrap as local Exhibition, but do not
     // mutate the const native touch event or execute tile zero's handler.
     // This DirectSet and every native-input flag remain scoped to tile 2.
@@ -4584,6 +4616,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
     native_pad_lab_reset();
     __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&native_gamepad_lab_autostart, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&native_gamepad_lab_two_player, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_session_active, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
@@ -4594,8 +4627,8 @@ uintptr_t pes_main_menu_selected_entry(void *window,
     __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
     exhibition_flow_direct_set((unsigned char *)listener + 0x118,
                                tutorial_flow);
-    debugPrintf("native gamepad lab: armed Barcelona(108) vs PSG(114), "
-                "single player\n");
+    debugPrintf("native 2P lab: armed Barcelona(108) HOME/No1 vs "
+                "PSG(114) AWAY/No2 HID=0x%x\n", connected);
     return 0;
   }
 
@@ -4802,6 +4835,24 @@ uintptr_t pes_exhibition_filter_teams_entry(void *selector,
 // object empty even though the selected master TeamIds are valid. Build both
 // sides directly from CommonWork here, before Strategy's state-0 loader runs,
 // then publish the complete plan back to tmpdb::Match for MatchSetup.
+static void native_lab_assign_matchplan_pads(void *data) {
+  if (!data || !pes_controller_native_pad_lab_two_player() ||
+      !exhibition_matchplan_set_pad_port)
+    return;
+  exhibition_matchplan_set_pad_port(data, 0, 0);
+  exhibition_matchplan_set_pad_port(data, 1, 1);
+  const uint32_t home = exhibition_matchplan_get_pad_port
+                            ? exhibition_matchplan_get_pad_port(data, 0)
+                            : UINT32_MAX;
+  const uint32_t away = exhibition_matchplan_get_pad_port
+                            ? exhibition_matchplan_get_pad_port(data, 1)
+                            : UINT32_MAX;
+  debugPrintf("native 2P lab: matchPlan pad ownership home=%u away=%u "
+              "data=%p HID=0x%x\n",
+              home, away, data,
+              pes_controller_native_hid_connected_mask());
+}
+
 uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
   if (strategy_flow &&
       __atomic_load_n(&exhibition_strategy_pending, __ATOMIC_ACQUIRE)) {
@@ -4939,6 +4990,7 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
         memcpy((unsigned char *)data + 8, &strategy_mode,
                sizeof(strategy_mode));
         exhibition_matchplan_setup_tmpdb(data);
+        native_lab_assign_matchplan_pads(data);
         // SetupDataFromTmpdbMatch can copy the match record back over fields
         // written above, so apply the selected level once more afterwards.
         exhibition_apply_cpu_level(
@@ -4987,6 +5039,10 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
                       exhibition_matchplan_setup_tmpdb);
         }
       } else {
+        void *data = exhibition_matchplan_get_instance
+                         ? exhibition_matchplan_get_instance()
+                         : NULL;
+        native_lab_assign_matchplan_pads(data);
         exhibition_apply_cpu_level(
             __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE),
             NULL);
@@ -5225,30 +5281,158 @@ static int32_t clamp_pad_value(int32_t value) {
   return value;
 }
 
-void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
-                         int32_t left, int32_t right, int connected) {
-  const int16_t x = (int16_t)(clamp_pad_value(right) -
-                              clamp_pad_value(left));
-  const int16_t y = (int16_t)(clamp_pad_value(down) -
-                              clamp_pad_value(up));
+void cobra_pad_set_native_input_for_port(
+    uint32_t port, uint32_t buttons,
+    int32_t left_up, int32_t left_down,
+    int32_t left_left, int32_t left_right,
+    int32_t right_up, int32_t right_down,
+    int32_t right_left, int32_t right_right,
+    int connected) {
+  if (port > 1)
+    return;
+  const int16_t x = (int16_t)(clamp_pad_value(left_right) -
+                              clamp_pad_value(left_left));
+  const int16_t y = (int16_t)(clamp_pad_value(left_down) -
+                              clamp_pad_value(left_up));
+  const int16_t right_x = (int16_t)(clamp_pad_value(right_right) -
+                                    clamp_pad_value(right_left));
+  const int16_t right_y = (int16_t)(clamp_pad_value(right_down) -
+                                    clamp_pad_value(right_up));
   const uint64_t packed = (uint64_t)buttons |
                           ((uint64_t)(uint16_t)x << 32) |
                           ((uint64_t)(uint16_t)y << 48);
-  if (__atomic_load_n(&cobra_pad_input, __ATOMIC_RELAXED) != packed)
-    __atomic_store_n(&cobra_pad_input, packed, __ATOMIC_RELEASE);
+  const uint32_t right_packed = (uint32_t)(uint16_t)right_x |
+                                ((uint32_t)(uint16_t)right_y << 16);
+  uint64_t *const input_slot = port ? &cobra_pad_input_p2 : &cobra_pad_input;
+  uint32_t *const right_slot =
+      port ? &cobra_pad_right_input_p2 : &cobra_pad_right_input;
+  uint32_t *const connected_slot =
+      port ? &cobra_pad_connected_p2 : &cobra_pad_connected;
+  if (__atomic_load_n(right_slot, __ATOMIC_RELAXED) !=
+      right_packed)
+    __atomic_store_n(right_slot, right_packed, __ATOMIC_RELEASE);
+  if (__atomic_load_n(input_slot, __ATOMIC_RELAXED) != packed)
+    __atomic_store_n(input_slot, packed, __ATOMIC_RELEASE);
   const int connected_value = connected != 0;
-  if (__atomic_load_n(&cobra_pad_connected, __ATOMIC_RELAXED) !=
+  if (__atomic_load_n(connected_slot, __ATOMIC_RELAXED) !=
       connected_value)
-    __atomic_store_n(&cobra_pad_connected, connected_value,
-                     __ATOMIC_RELEASE);
+    __atomic_store_n(connected_slot, connected_value, __ATOMIC_RELEASE);
+}
+
+void cobra_pad_set_native_input(uint32_t buttons,
+                                int32_t left_up, int32_t left_down,
+                                int32_t left_left, int32_t left_right,
+                                int32_t right_up, int32_t right_down,
+                                int32_t right_left, int32_t right_right,
+                                int connected) {
+  cobra_pad_set_native_input_for_port(
+      0, buttons, left_up, left_down, left_left, left_right,
+      right_up, right_down, right_left, right_right, connected);
+}
+
+void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
+                         int32_t left, int32_t right, int connected) {
+  cobra_pad_set_native_input(buttons, up, down, left, right,
+                             0, 0, 0, 0, connected);
 }
 
 static int cobra_controller_is_connected(void) {
   return __atomic_load_n(&cobra_pad_connected, __ATOMIC_ACQUIRE) != 0;
 }
 
+static int cobra_controller_port_is_connected(uint32_t port) {
+  if (port > 1)
+    return 0;
+  return __atomic_load_n(port ? &cobra_pad_connected_p2
+                              : &cobra_pad_connected,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+void cobra_pad_clear_native_inputs(void) {
+  cobra_pad_set_native_input_for_port(0, 0, 0, 0, 0, 0,
+                                      0, 0, 0, 0, 0);
+  cobra_pad_set_native_input_for_port(1, 0, 0, 0, 0, 0,
+                                      0, 0, 0, 0, 0);
+}
+
+// Cobra's mobile Pad::Update returns early for every pad except the single
+// Android "primary" index.  Local 2P still needs pad No2 to travel through the
+// game's genuine PadInputUnit and KeyConfig path.  Immediately before that
+// unit is sampled, publish the second Switch state into its existing Cobra Pad
+// object, including native press/release edges and both stick axis banks.
+int cobra_pad_prime_native_port(uint32_t port) {
+  if (port != 1 || !pes_controller_native_pad_lab_two_player() ||
+      !cobra_pad_get_pad)
+    return 0;
+  unsigned char *pad = cobra_pad_get_pad(port);
+  if (!pad)
+    return 0;
+  const int connected = __atomic_load_n(&cobra_pad_connected_p2,
+                                         __ATOMIC_ACQUIRE) != 0;
+  const uint64_t packed = connected
+                              ? __atomic_load_n(&cobra_pad_input_p2,
+                                                __ATOMIC_ACQUIRE)
+                              : 0;
+  const uint32_t right_packed = connected
+                                    ? __atomic_load_n(
+                                          &cobra_pad_right_input_p2,
+                                          __ATOMIC_ACQUIRE)
+                                    : 0;
+  const uint32_t buttons = (uint32_t)packed;
+  uint32_t previous = 0;
+  memcpy(&previous, pad + 16, sizeof(previous));
+  const uint32_t clicked = buttons & ~previous;
+  const uint32_t released = previous & ~buttons;
+  pad[1] = connected ? 1 : 0; // Pad::IsConnected reads this byte.
+  memcpy(pad + 12, &previous, sizeof(previous));
+  memcpy(pad + 16, &buttons, sizeof(buttons));
+  memcpy(pad + 20, &clicked, sizeof(clicked));
+  memcpy(pad + 24, &released, sizeof(released));
+  memcpy(pad + 28, &clicked, sizeof(clicked)); // One repeat on initial press.
+
+  const int32_t zero = 0;
+  for (int index = 0; index < 24; ++index)
+    memcpy(pad + 140 + index * 4, &zero, sizeof(zero));
+  for (int index = 0; index < 16; ++index) {
+    const int32_t value = buttons & (1u << index) ? 0x7fff : 0;
+    memcpy(pad + 140 + index * 4, &value, sizeof(value));
+  }
+  const int32_t x = (int16_t)(packed >> 32);
+  const int32_t y = (int16_t)(packed >> 48);
+  const int32_t left_directions[4] = {
+      y < 0 ? -y : 0, y > 0 ? y : 0,
+      x < 0 ? -x : 0, x > 0 ? x : 0,
+  };
+  memcpy(pad + 140 + 16 * 4, left_directions,
+         sizeof(left_directions));
+  const int32_t right_x = (int16_t)right_packed;
+  const int32_t right_y = (int16_t)(right_packed >> 16);
+  const int32_t right_directions[4] = {
+      right_y < 0 ? -right_y : 0, right_y > 0 ? right_y : 0,
+      right_x < 0 ? -right_x : 0, right_x > 0 ? right_x : 0,
+  };
+  memcpy(pad + 140 + 20 * 4, right_directions,
+         sizeof(right_directions));
+  return connected;
+}
+
+void pes_controller_native_hid_connection_update(uint32_t connected_mask) {
+  __atomic_store_n(&native_hid_connected_mask, connected_mask & 3u,
+                   __ATOMIC_RELEASE);
+}
+
+uint32_t pes_controller_native_hid_connected_mask(void) {
+  return __atomic_load_n(&native_hid_connected_mask, __ATOMIC_ACQUIRE);
+}
+
 int pes_controller_native_pad_lab_active(void) {
   return __atomic_load_n(&native_gamepad_lab_active,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+int pes_controller_native_pad_lab_two_player(void) {
+  return pes_controller_native_pad_lab_active() &&
+         __atomic_load_n(&native_gamepad_lab_two_player,
                          __ATOMIC_ACQUIRE) != 0;
 }
 
@@ -5262,7 +5446,7 @@ uint32_t pes_mobile_control_context(int *mode) {
 
 // Native pad input is useful for menu and matchmaking widgets. Normal live
 // gameplay remains on the calibrated multi-touch mapping in android_shim.c;
-// only the explicitly armed single-player lab uses the native gameplay path.
+// only the explicitly armed 2P lab uses the native gameplay path.
 int pes_controller_menu_active(void) {
   return pes_controller_start_prompt(NULL, NULL) ||
          __atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE) ||
@@ -7365,42 +7549,54 @@ uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
 }
 
 // The Android/mobile match initializer calls SetPadNo(1), which this binary
-// deliberately collapses to -1. Command::ExecCommand then skips the complete
-// real-pad path for that cursor. When Switch HID is present, attach that primary
-// cursor to port 0; preserve the game's original behavior for every other call.
+// deliberately collapses to -1. In the 2P lab, use CursorData's side marker
+// (HOME=0, AWAY=2) to bind both stock cursors to their real Switch pad ports.
+// Outside the lab, preserve the proven port-zero behavior.
 static void pes_cursor_set_pad_no(void *cursor_ptr, uint32_t requested) {
   if (!cursor_ptr)
     return;
-  // Keep the primary cursor attached to port 0 even before the first HID poll;
-  // a disconnected Switch pad simply contributes no state to the game.
   const int connected = cobra_controller_is_connected();
-  const int32_t pad_no = requested == 1 ? 0 : (requested ? -1 : 0);
+  uint8_t side = 0xff;
+  memcpy(&side, cursor_ptr, sizeof(side));
+  int32_t pad_no = requested == 1 ? 0 : (requested ? -1 : 0);
+  if (pes_controller_native_pad_lab_two_player()) {
+    if (side == 0)
+      pad_no = 0;
+    else if (side == 2)
+      pad_no = 1;
+  }
   memcpy((unsigned char *)cursor_ptr + 16, &pad_no, sizeof(pad_no));
   if (cursor_pad_log_count < 16) {
     cursor_pad_log_count++;
     debugPrintf("input: CursorData::SetPadNo cursor=%p requested=%u "
-                "connected=%d stored=%d\n",
-                cursor_ptr, requested, connected, pad_no);
+                "side=%u connected=%d stored=%d twoP=%d\n",
+                cursor_ptr, requested, side, connected, pad_no,
+                pes_controller_native_pad_lab_two_player());
   }
 }
 
-// Mobile setup also disables all real-pad slots. Keep port 0 enabled only while
-// Ryujinx/libnx reports a controller, leaving the other seven ports and the
-// no-controller touch-only behavior unchanged.
+// Mobile setup also disables all real-pad slots. The 2P lab re-enables exactly
+// ports 0 and 1 from the HID connection mask. Normal Exhibition keeps the
+// original port-zero compatibility behavior.
 static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
                                        uint32_t requested_enable) {
   if (!pad_input_ptr || pad_no > 7)
     return;
-  const int connected = cobra_controller_is_connected();
-  const uint8_t enabled =
-      (requested_enable != 0 || pad_no == 0) ? 1 : 0;
+  const uint32_t connected_mask =
+      pes_controller_native_hid_connected_mask();
+  const int connected = pad_no < 2 &&
+                        (connected_mask & (1u << pad_no)) != 0;
+  uint8_t enabled = (requested_enable != 0 || pad_no == 0) ? 1 : 0;
+  if (pes_controller_native_pad_lab_two_player())
+    enabled = pad_no < 2 && connected ? 1 : 0;
   *((unsigned char *)pad_input_ptr + 0x86ca0 + pad_no) = enabled;
-  if ((pad_no == 0 || requested_enable) && real_pad_log_count < 24) {
+  if ((pad_no < 2 || requested_enable) && real_pad_log_count < 24) {
     real_pad_log_count++;
     debugPrintf("input: PadInput::SetRealPadIsEnable object=%p pad=%u "
-                "requested=%u connected=%d stored=%u\n",
+                "requested=%u connected=%d mask=0x%x stored=%u twoP=%d\n",
                 pad_input_ptr, pad_no, requested_enable != 0, connected,
-                enabled);
+                connected_mask, enabled,
+                pes_controller_native_pad_lab_two_player());
   }
 }
 
@@ -7409,25 +7605,35 @@ static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
 uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   unsigned char *pad = pad_ptr;
   if (pad) {
-    const uint64_t packed =
-        __atomic_load_n(&cobra_pad_input, __ATOMIC_ACQUIRE);
-    uint32_t buttons = (uint32_t)packed;
-    int32_t x = (int16_t)(packed >> 32);
-    int32_t y = (int16_t)(packed >> 48);
     int32_t pad_id;
     uint32_t previous;
     uint32_t current;
     memcpy(&pad_id, pad + 4, sizeof(pad_id));
     memcpy(&previous, pad + 12, sizeof(previous));
     memcpy(&current, pad + 16, sizeof(current));
-    // The tile-2 experiment is intentionally one-player. Pad::Update runs for
-    // multiple Cobra pad objects, so explicitly prevent player-1 HID state
-    // from leaking into any internal port other than pad zero.
-    if (pes_controller_native_pad_lab_active() && pad_id != 0) {
-      buttons = 0;
-      x = 0;
-      y = 0;
-    }
+    const int lab_active = pes_controller_native_pad_lab_active();
+    const int two_player = pes_controller_native_pad_lab_two_player();
+    const int use_p2 = two_player && pad_id == 1;
+    const int reject_pad = lab_active &&
+                           (pad_id < 0 || pad_id > (two_player ? 1 : 0));
+    const uint64_t packed = reject_pad
+                                ? 0
+                                : __atomic_load_n(
+                                      use_p2 ? &cobra_pad_input_p2
+                                             : &cobra_pad_input,
+                                      __ATOMIC_ACQUIRE);
+    const uint32_t right_packed = reject_pad
+                                      ? 0
+                                      : __atomic_load_n(
+                                            use_p2
+                                                ? &cobra_pad_right_input_p2
+                                                : &cobra_pad_right_input,
+                                            __ATOMIC_ACQUIRE);
+    uint32_t buttons = (uint32_t)packed;
+    const int32_t x = (int16_t)(packed >> 32);
+    const int32_t y = (int16_t)(packed >> 48);
+    const int32_t right_x = (int16_t)right_packed;
+    const int32_t right_y = (int16_t)(right_packed >> 16);
     const uint32_t current_before = current;
     current |= buttons;
     memcpy(pad + 16, &current, sizeof(current));
@@ -7442,6 +7648,17 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
         x > 0 ? x : 0,
     };
     memcpy(pad + 140 + 16 * 4, directions, sizeof(directions));
+    // cobra::game::Pad::GetAxis maps axes 2/3 to the four values at
+    // 0xdc..0xe8. PadInputUnit then stores them as StickKind 1, alongside
+    // the left-stick StickKind 0 history. Keep both sticks genuinely native.
+    const int32_t right_directions[4] = {
+        right_y < 0 ? -right_y : 0,
+        right_y > 0 ? right_y : 0,
+        right_x < 0 ? -right_x : 0,
+        right_x > 0 ? right_x : 0,
+    };
+    memcpy(pad + 140 + 20 * 4, right_directions,
+           sizeof(right_directions));
     pes_main_menu_pad_event(current, previous);
     pes_exhibition_search_pad_event(current, previous);
     if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
@@ -7452,17 +7669,17 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
       current &= ~buttons;
       memcpy(pad + 16, &current, sizeof(current));
       const int32_t zero = 0;
-      for (int index = 0; index < 20; index++)
+      for (int index = 0; index < 24; index++)
         memcpy(pad + 140 + index * 4, &zero, sizeof(zero));
     }
     if (packed != cobra_pad_last_applied && cobra_pad_apply_log_count < 64) {
       cobra_pad_apply_log_count++;
       debugPrintf("input: cobra apply pad=%p id=%d packed=0x%llx "
                   "buttons=0x%x previous=0x%x current=0x%x->0x%x "
-                  "axis=%d,%d raw=%d,%d,%d,%d resume=%p\n",
+                  "axis=%d,%d right=%d,%d raw=%d,%d,%d,%d resume=%p\n",
                   pad_ptr, pad_id, (unsigned long long)packed, buttons,
-                  previous, current_before, current, x, y, directions[0],
-                  directions[1], directions[2], directions[3],
+                  previous, current_before, current, x, y, right_x, right_y,
+                  directions[0], directions[1], directions[2], directions[3],
                   (void *)cobra_pad_update_resume);
       cobra_pad_last_applied = packed;
     }
@@ -7471,6 +7688,7 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
 }
 
 extern void cobra_pad_update_hook(void);
+extern void pes_match_cursor_info_from_tmpdb_hook(void);
 extern void pes_match_replay_check_skip_hook(void);
 extern void pes_match_goal_demo_update_hook(void);
 extern void pes_match_goal_demo_init_hook(void);
@@ -7830,6 +8048,12 @@ void install_ue4_hooks(so_module *module) {
   exhibition_matchplan_update_tmpdb =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan4Data24UpdateTmpdbMatchTeamDataEv");
+  exhibition_matchplan_set_pad_port =
+      (void *)so_find_addr_rx(module,
+          "_ZN9matchPlan4Data10SetPadPortE8HomeAwayj");
+  exhibition_matchplan_get_pad_port =
+      (void *)so_find_addr_rx(module,
+          "_ZN9matchPlan4Data10GetPadPortE8HomeAway");
   exhibition_set_team =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb4util17SetExhibitionTeamEN6common6TeamIdEhb");
@@ -7934,6 +8158,7 @@ void install_ue4_hooks(so_module *module) {
   debugPrintf("UE4 hook: Exhibition Strategy seed backing=%p runtime=%p "
                "hook=%p resume=%p childSite=%p childHook=%p childResume=%p "
                "get=%p setupTeam=%p setupTmpdb=%p setTeam=%p update=%p "
+               "setPad=%p getPad=%p "
                "vtable=%p post=%p footer=%p\n",
                (void *)strategy_main, (void *)strategy_main_runtime,
                pes_exhibition_strategy_main_hook,
@@ -7946,6 +8171,8 @@ void install_ue4_hooks(so_module *module) {
                exhibition_matchplan_setup_tmpdb,
                exhibition_set_team,
                exhibition_matchplan_update_tmpdb,
+               exhibition_matchplan_set_pad_port,
+               exhibition_matchplan_get_pad_port,
                (void *)strategy_vtable,
                pes_exhibition_strategy_update,
                pes_exhibition_strategy_footer);

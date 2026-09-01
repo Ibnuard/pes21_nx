@@ -1568,7 +1568,7 @@ static void disable_native_pad_bridge(void) {
   // PES Mobile consumes Android/native-pad events before its touch ThinkUnits.
   // Keep the old diagnostic hook inert so the original mobile cursor remains
   // on the touchscreen route used by the virtual controller below.
-  cobra_pad_set_input(0, 0, 0, 0, 0, 0);
+  cobra_pad_clear_native_inputs();
 }
 
 #if 0
@@ -1625,9 +1625,11 @@ static void emit_cobra_pad_input(const HidAnalogStickState *stick,
 }
 #endif
 
-// Only the dedicated single-player lab uses Cobra/PadInput for gameplay.
+// Only the dedicated native lab uses Cobra/PadInput for gameplay.
 // Normal Exhibition stays on the calibrated multi-touch mapper above.
-static void emit_native_lab_pad_input(const HidAnalogStickState *stick,
+static void emit_native_lab_pad_input(uint32_t port,
+                                      const HidAnalogStickState *left_stick,
+                                      const HidAnalogStickState *right_stick,
                                       int connected, u64 buttons) {
   uint32_t mapped = 0;
   if (buttons & HidNpadButton_B) mapped |= 1u << 0;
@@ -1647,14 +1649,24 @@ static void emit_native_lab_pad_input(const HidAnalogStickState *stick,
   if (buttons & HidNpadButton_Plus) mapped |= 1u << 14;
   if (buttons & HidNpadButton_Minus) mapped |= 1u << 15;
 
-  const int32_t x = connected ? stick->x : 0;
-  const int32_t y = connected ? stick->y : 0;
+  const int32_t x = connected ? left_stick->x : 0;
+  const int32_t y = connected ? left_stick->y : 0;
+  const int32_t right_x = connected ? right_stick->x : 0;
+  const int32_t right_y = connected ? right_stick->y : 0;
   // Switch raw +Y is up; Cobra stores up as a negative combined axis.
   const int32_t up = y > 0 ? y : 0;
   const int32_t down = y < 0 ? -y : 0;
   const int32_t left = x < 0 ? -x : 0;
   const int32_t right = x > 0 ? x : 0;
-  cobra_pad_set_input(mapped, up, down, left, right, connected);
+  const int32_t right_up = right_y > 0 ? right_y : 0;
+  const int32_t right_down = right_y < 0 ? -right_y : 0;
+  const int32_t right_left = right_x < 0 ? -right_x : 0;
+  const int32_t right_right = right_x > 0 ? right_x : 0;
+  pes_controller_native_pad_lab_debug_input(port, mapped, x, y,
+                                             right_x, right_y, connected);
+  cobra_pad_set_native_input_for_port(
+      port, mapped, up, down, left, right,
+      right_up, right_down, right_left, right_right, connected);
 }
 
 void android_input_poll(void) {
@@ -1671,6 +1683,7 @@ void android_input_poll(void) {
     previous_hid_buttons = 0;
     physical_touch_tracking = 0;
     replay_touch_requested = 0;
+    pes_controller_native_hid_connection_update(0);
     reset_virtual_surfaces();
     FakeTouchState empty = {0};
     reconcile_touch_state(&empty);
@@ -1687,35 +1700,78 @@ void android_input_poll(void) {
 
   HidNpadCommonState state;
   u64 buttons = 0;
+  u64 buttons_p2 = 0;
   HidAnalogStickState left_stick = {0};
   HidAnalogStickState right_stick = {0};
+  HidAnalogStickState left_stick_p2 = {0};
+  HidAnalogStickState right_stick_p2 = {0};
   int have_left_stick = 0;
   int have_right_stick = 0;
+  int have_left_stick_p2 = 0;
+  int have_right_stick_p2 = 0;
+  int controller_slot_connected = 0;
+  int controller_slot_connected_p2 = 0;
   if (hidGetNpadStatesFullKey(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected = 1;
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyDual(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected = 1;
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyLeft(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected = 1;
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyRight(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected = 1;
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected = 1;
     merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
+  if (hidGetNpadStatesFullKey(HidNpadIdType_No2, &state, 1) &&
+      (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected_p2 = 1;
+    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+                     &have_left_stick_p2, &right_stick_p2,
+                     &have_right_stick_p2);
+  }
+  if (hidGetNpadStatesJoyDual(HidNpadIdType_No2, &state, 1) &&
+      (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected_p2 = 1;
+    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+                     &have_left_stick_p2, &right_stick_p2,
+                     &have_right_stick_p2);
+  }
+  if (hidGetNpadStatesJoyLeft(HidNpadIdType_No2, &state, 1) &&
+      (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected_p2 = 1;
+    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+                     &have_left_stick_p2, &right_stick_p2,
+                     &have_right_stick_p2);
+  }
+  if (hidGetNpadStatesJoyRight(HidNpadIdType_No2, &state, 1) &&
+      (state.attributes & HidNpadAttribute_IsConnected)) {
+    controller_slot_connected_p2 = 1;
+    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+                     &have_left_stick_p2, &right_stick_p2,
+                     &have_right_stick_p2);
+  }
+  pes_controller_native_hid_connection_update(
+      (controller_slot_connected ? 1u : 0u) |
+      (controller_slot_connected_p2 ? 2u : 0u));
 
   float axis_x = 0.0f;
   float axis_y = 0.0f;
@@ -1724,7 +1780,8 @@ void android_input_poll(void) {
   normalize_stick(&left_stick, have_left_stick, &axis_x, &axis_y);
   normalize_stick(&right_stick, have_right_stick, &right_axis_x,
                   &right_axis_y);
-  const int controller_connected = have_left_stick || have_right_stick;
+  const int controller_connected = controller_slot_connected;
+  const int controller_connected_p2 = controller_slot_connected_p2;
   const uint64_t now_ms = monotonic_ms();
   int control_mode = 0;
   const int gameplay_active = mobile_gameplay_context(&control_mode);
@@ -2093,7 +2150,12 @@ void android_input_poll(void) {
   else if (custom_postmatch_active)
     disable_native_pad_bridge();
   else if (native_pad_lab_active && gameplay_active)
-    emit_native_lab_pad_input(&left_stick, controller_connected, buttons);
+  {
+    emit_native_lab_pad_input(0, &left_stick, &right_stick,
+                              controller_connected, buttons);
+    emit_native_lab_pad_input(1, &left_stick_p2, &right_stick_p2,
+                              controller_connected_p2, buttons_p2);
+  }
   else if (!gameplay_active && menu_controller_active)
     emit_menu_pad_input(&left_stick, have_left_stick, buttons,
                         have_left_stick);
@@ -2964,7 +3026,7 @@ void android_runtime_bootstrap(so_module *ue4) {
   resume_main(fake_env, activity.clazz);
   debugPrintf("bootstrap: nativeResumeMainInit done\n");
 
-  padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+  padConfigureInput(2, HidNpadStyleSet_NpadStandard);
   debugPrintf("input: HID shared memory=%p\n", hidGetSharedmemAddr());
   debugPrintf("Android NativeActivity bootstrap complete.\n");
 }

@@ -13,12 +13,25 @@ Joy-Con tidak mengontrol pemain, dan fitur runtime visual/controller stable
 ikut hilang. NRO tersebut hanya diarsipkan untuk diagnosis dan bukan file
 install. Detail hasil ada di [NATIVE_PAD_LAB_RESULT.md](NATIVE_PAD_LAB_RESULT.md).
 
-Kandidat **Native Pad Lab V2** tersedia terpisah di
-`local-debug/native-pad-lab-v2-20260901/install/`: **NRO saja**. Fitur v9
-dipertahankan dan pitch v14 tidak diubah. Menu 2 Player tetap tes satu pemain
-melawan CPU, sekarang dengan jalur aksi native dan indikator HID/PAD/OWNER/ROUTE.
-Belum diuji di Switch; bukan pengganti baseline stable sampai hasil perangkat
-diterima. [Petunjuk tes dan rollback](local-debug/native-pad-lab-v2-20260901/README.md).
+Native Pad Lab V2 sudah diuji di Switch dan binary yang sama dipromosikan
+menjadi **Native Mapping Baseline V1** di
+`local-debug/native-pad-v1-baseline-20260901/install/`. Live-play dan kombinasi
+R2, L1+X, serta L1+Segitiga sudah terkonfirmasi native. Power gauge visual serta
+goal kick/corner/throw-in masih backlog karena konteks itu tetap memilih unit
+mobile berbasis swipe. [Scope baseline](NATIVE_MAPPING_BASELINE_V1.md).
+
+Kandidat lanjutan terpisah untuk goal kick tersedia sebagai **Native Setplay
+V3** di `local-debug/native-setplay-v3-20260901/`. Kandidat ini memasang
+SetplayGuide, ShortPass, LongPass, Shoot, dan GoalkickPassSupport native serta
+menampilkan telemetry command langsung di layar; tidak menyintesis touch/swipe.
+Statusnya baru host/ABI validated dan belum menggantikan baseline sampai lolos
+uji Switch. [Checklist perangkat](NATIVE_SETPLAY_V3_TEST.md).
+
+V3 kini disimpan sebagai arsip diagnosis. Kandidat aktif **Native Setplay V4**
+berada di `local-debug/native-setplay-v4-20260901/`: LS masuk sebagai arah
+tendangan dan RS masuk ke slot native camera stick, dengan route terpisah untuk
+goal kick, corner, dan free kick. V4 tetap Lab-only dan belum menjadi baseline
+sampai lolos perangkat. [Checklist V4](NATIVE_SETPLAY_V4_TEST.md).
 
 Baseline pitch lama v10 tetap disimpan sebagai rollback historis di
 `local-debug/visual-v10-20260831/install/`, tetapi sudah digantikan oleh v14.

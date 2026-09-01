@@ -57,6 +57,36 @@ pes_mobile_screen_tap_entry_hook:
     .size pes_mobile_screen_tap_entry_hook, .-pes_mobile_screen_tap_entry_hook
 
     .align 2
+    .global pes_match_cursor_info_from_tmpdb_hook
+    .type pes_match_cursor_info_from_tmpdb_hook, %function
+
+// Entry/post-return hook for MatchListener::SetCursorInfoFromTmpdb.  The
+// original function has several early exits, so make its saved LR point at our
+// post label while preserving the real caller LR in a small outer frame.
+pes_match_cursor_info_from_tmpdb_hook:
+    sub sp, sp, #0x20
+    stp x29, x30, [sp, #0x00]
+    str x1, [sp, #0x10]
+    adr x30, 1f
+
+    // Replay the exact four displaced prologue instructions.
+    sub sp, sp, #0x1e0
+    stp x28, x27, [sp, #0x180]
+    stp x26, x25, [sp, #0x190]
+    stp x24, x23, [sp, #0x1a0]
+    adrp x17, pes_match_cursor_info_from_tmpdb_resume
+    ldr x17, [x17, #:lo12:pes_match_cursor_info_from_tmpdb_resume]
+    br x17
+1:
+    ldr x0, [sp, #0x10]
+    bl pes_match_cursor_info_ready
+    ldp x29, x30, [sp, #0x00]
+    add sp, sp, #0x20
+    ret
+
+    .size pes_match_cursor_info_from_tmpdb_hook, .-pes_match_cursor_info_from_tmpdb_hook
+
+    .align 2
     .global pes_inplay_ball_position_broadcast_original
     .type pes_inplay_ball_position_broadcast_original, %function
 

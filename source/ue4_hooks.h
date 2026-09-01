@@ -77,8 +77,100 @@ void pes_controller_friend_press_update(int held, uint64_t now_ms);
 void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
                          int32_t left, int32_t right, int connected);
+void cobra_pad_set_native_input(uint32_t buttons,
+                                int32_t left_up, int32_t left_down,
+                                int32_t left_left, int32_t left_right,
+                                int32_t right_up, int32_t right_down,
+                                int32_t right_left, int32_t right_right,
+                                int connected);
+void cobra_pad_set_native_input_for_port(
+    uint32_t port, uint32_t buttons,
+    int32_t left_up, int32_t left_down,
+    int32_t left_left, int32_t left_right,
+    int32_t right_up, int32_t right_down,
+    int32_t right_left, int32_t right_right,
+    int connected);
+void cobra_pad_clear_native_inputs(void);
+int cobra_pad_prime_native_port(uint32_t port);
+void pes_controller_native_hid_connection_update(uint32_t connected_mask);
+uint32_t pes_controller_native_hid_connected_mask(void);
 int pes_controller_native_pad_lab_active(void);
+int pes_controller_native_pad_lab_two_player(void);
 uint32_t pes_controller_native_pad_lab_status(void);
+
+#define PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE (1u << 0)
+#define PES_NATIVE_LAB_ROUTE_SHORT_PASS (1u << 1)
+#define PES_NATIVE_LAB_ROUTE_LONG_PASS (1u << 2)
+#define PES_NATIVE_LAB_ROUTE_SHOOT (1u << 3)
+#define PES_NATIVE_LAB_ROUTE_GOALKICK_SUPPORT (1u << 4)
+#define PES_NATIVE_LAB_ROUTE_CAMERA_STICK (1u << 5)
+#define PES_NATIVE_LAB_ROUTE_CORNER_TACTICS (1u << 6)
+#define PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS (1u << 7)
+
+#define PES_NATIVE_LAB_STOCK_MOBILE_KICK (1u << 0)
+#define PES_NATIVE_LAB_STOCK_MOBILE_CAMERA (1u << 1)
+#define PES_NATIVE_LAB_STOCK_GOALKICK_SUPPORT (1u << 2)
+#define PES_NATIVE_LAB_STOCK_SHORT_CORNER (1u << 3)
+#define PES_NATIVE_LAB_STOCK_CORNER_TACTICS (1u << 4)
+#define PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS (1u << 5)
+#define PES_NATIVE_LAB_STOCK_FREEKICK_POSITION (1u << 6)
+
+#define PES_NATIVE_LAB_EVENT_NONE 0u
+#define PES_NATIVE_LAB_EVENT_AIM 1u
+#define PES_NATIVE_LAB_EVENT_SHORT_PRESS 2u
+#define PES_NATIVE_LAB_EVENT_SHORT_RELEASE 3u
+#define PES_NATIVE_LAB_EVENT_LONG_PRESS 4u
+#define PES_NATIVE_LAB_EVENT_LONG_RELEASE 5u
+#define PES_NATIVE_LAB_EVENT_SHOOT_PRESS 6u
+#define PES_NATIVE_LAB_EVENT_SHOOT_RELEASE 7u
+#define PES_NATIVE_LAB_EVENT_SUPPORT_RELEASE 8u
+
+typedef struct {
+  uint32_t status;
+  uint32_t context;
+  uint32_t stock_mask;
+  uint32_t route_mask;
+  uint32_t buttons;
+  uint32_t native_keys;
+  uint32_t native_power_milli;
+  uint32_t native_right_power_milli;
+  uint32_t last_event;
+  uint32_t last_command;
+  int32_t axis_x;
+  int32_t axis_y;
+  int32_t right_axis_x;
+  int32_t right_axis_y;
+  uint32_t connected;
+  uint32_t connected_mask;
+  uint32_t native_sample_mask;
+  uint32_t owner_mask;
+  uint32_t route_player_mask;
+  uint32_t cursor_slots;
+  uint32_t input_unit_mask;
+  uint32_t accessor_bind_mask;
+  uint32_t prime_mask;
+  uint32_t setplay_pad;
+  uint32_t buttons_p2;
+  uint32_t native_keys_p2;
+  uint32_t native_power_milli_p2;
+  uint32_t native_right_power_milli_p2;
+  uint32_t last_event_p2;
+  uint32_t last_command_p2;
+  int32_t axis_x_p2;
+  int32_t axis_y_p2;
+  int32_t right_axis_x_p2;
+  int32_t right_axis_y_p2;
+} PesNativePadLabDebug;
+
+void pes_controller_native_pad_lab_debug_input(uint32_t port,
+                                               uint32_t buttons,
+                                               int32_t axis_x,
+                                               int32_t axis_y,
+                                               int32_t right_axis_x,
+                                               int32_t right_axis_y,
+                                               int connected);
+void pes_controller_native_pad_lab_debug_snapshot(
+    PesNativePadLabDebug *snapshot);
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
 int pes_controller_replay_active(void);

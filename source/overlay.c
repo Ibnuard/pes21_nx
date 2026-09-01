@@ -485,6 +485,42 @@ static struct {
   char text[8];
 } fps;
 
+static const char *native_lab_event_name(uint32_t event) {
+  switch (event) {
+  case PES_NATIVE_LAB_EVENT_AIM:
+    return "LS AIM";
+  case PES_NATIVE_LAB_EVENT_SHORT_PRESS:
+    return "B SHORT PRESS";
+  case PES_NATIVE_LAB_EVENT_SHORT_RELEASE:
+    return "B SHORT RELEASE";
+  case PES_NATIVE_LAB_EVENT_LONG_PRESS:
+    return "A LONG PRESS";
+  case PES_NATIVE_LAB_EVENT_LONG_RELEASE:
+    return "A LONG RELEASE";
+  case PES_NATIVE_LAB_EVENT_SHOOT_PRESS:
+    return "Y SHOOT PRESS";
+  case PES_NATIVE_LAB_EVENT_SHOOT_RELEASE:
+    return "Y SHOOT RELEASE";
+  case PES_NATIVE_LAB_EVENT_SUPPORT_RELEASE:
+    return "L SUPPORT RELEASE";
+  default:
+    return "NONE";
+  }
+}
+
+static const char *native_lab_setplay_name(uint32_t context) {
+  switch (context) {
+  case PES_SETPLAY_GOAL_KICK:
+    return "GOAL KICK";
+  case PES_SETPLAY_CORNER:
+    return "CORNER";
+  case PES_SETPLAY_FREE_KICK:
+    return "FREE KICK";
+  default:
+    return "--";
+  }
+}
+
 static void overlay_render(void) {
   if (config.show_fps) {
     const u64 now = armGetSystemTick();
@@ -559,6 +595,12 @@ static void overlay_render(void) {
   const int start_prompt =
       pes_controller_start_prompt(&prompt_x, &prompt_y);
   const int native_lab = pes_controller_native_pad_lab_active();
+  PesNativePadLabDebug native_debug = {0};
+  if (native_lab)
+    pes_controller_native_pad_lab_debug_snapshot(&native_debug);
+  const int native_setplay_debug =
+      native_lab && native_debug.context != PES_SETPLAY_NONE &&
+      setplay_context == native_debug.context;
   float gameplan_cursor_x = 0.0f;
   float gameplan_cursor_y = 0.0f;
   const int virtual_cursor_context = pes_controller_virtual_cursor_context();
@@ -1625,16 +1667,112 @@ static void overlay_render(void) {
   }
   const int text_first_quad = quads;
   if (native_lab && !custom_popup) {
-    const uint32_t status = pes_controller_native_pad_lab_status();
-    char label[112];
-    snprintf(label, sizeof(label), "NATIVE LAB V2  HID:%s PAD:%s OWNER:%s ROUTE:%s%s",
-             status & 1 ? "OK" : "--", status & 2 ? "OK" : "--",
-             status & 4 ? "OK" : "--", status & 8 ? "OK" : "--",
+    const uint32_t status = native_debug.status;
+    char label[192];
+    snprintf(label, sizeof(label),
+             "NATIVE 2P PAD V4 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u%s",
+             native_debug.connected_mask & 3u,
+             native_debug.native_sample_mask & 3u,
+             native_debug.owner_mask & 3u,
+             native_debug.route_player_mask & 3u,
+             native_debug.input_unit_mask & 3u,
+             native_debug.accessor_bind_mask & 3u,
+             native_debug.prime_mask & 3u,
+             native_debug.buttons_p2 & 0xffffu,
+             native_debug.axis_x_p2,
+             native_debug.axis_y_p2,
+             native_debug.native_keys_p2 & 0x00ffffffu,
+             native_debug.native_power_milli_p2,
              status & 128 ? " ABI ERROR" : "");
     const float gh = (float)screen_height / 50.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     quads += emit_line(label, (int)strlen(label), 12.0f,
                        (float)screen_height * 0.95f, gw, gh, verts + quads * 24);
+    if (native_setplay_debug) {
+      char debug_line[192];
+      const int debug_p2 = native_debug.setplay_pad == 1;
+      const uint32_t debug_buttons = debug_p2
+                                         ? native_debug.buttons_p2
+                                         : native_debug.buttons;
+      const uint32_t debug_keys = debug_p2
+                                      ? native_debug.native_keys_p2
+                                      : native_debug.native_keys;
+      const uint32_t debug_power = debug_p2
+                                       ? native_debug.native_power_milli_p2
+                                       : native_debug.native_power_milli;
+      const uint32_t debug_right_power =
+          debug_p2 ? native_debug.native_right_power_milli_p2
+                   : native_debug.native_right_power_milli;
+      const uint32_t debug_event = debug_p2
+                                       ? native_debug.last_event_p2
+                                       : native_debug.last_event;
+      const uint32_t debug_command = debug_p2
+                                         ? native_debug.last_command_p2
+                                         : native_debug.last_command;
+      const int32_t debug_axis_x = debug_p2
+                                       ? native_debug.axis_x_p2
+                                       : native_debug.axis_x;
+      const int32_t debug_axis_y = debug_p2
+                                       ? native_debug.axis_y_p2
+                                       : native_debug.axis_y;
+      const int32_t debug_right_axis_x = debug_p2
+                                             ? native_debug.right_axis_x_p2
+                                             : native_debug.right_axis_x;
+      const int32_t debug_right_axis_y = debug_p2
+                                             ? native_debug.right_axis_y_p2
+                                             : native_debug.right_axis_y;
+      const float debug_gh = (float)screen_height / 53.0f;
+      const float debug_gw =
+          debug_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      const float debug_y = 0.690f * (float)screen_height;
+      const float debug_step = 1.32f * debug_gh;
+      snprintf(debug_line, sizeof(debug_line),
+               "P%u %s NATIVE ROUTE - NO TOUCH OR SWIPE",
+               debug_p2 ? 2u : 1u,
+               native_lab_setplay_name(native_debug.context));
+      quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
+                         debug_y, debug_gw, debug_gh, verts + quads * 24);
+      snprintf(debug_line, sizeof(debug_line),
+               "LS=KICK DIRECTION/AIM   RS=CAMERA");
+      quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
+                         debug_y + debug_step, debug_gw, debug_gh,
+                         verts + quads * 24);
+      snprintf(debug_line, sizeof(debug_line),
+               "B=SHORT PASS   A=LONG PASS   Y=SHOOT   X=UNMAPPED");
+      quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
+                         debug_y + 2.0f * debug_step, debug_gw, debug_gh,
+                         verts + quads * 24);
+      snprintf(debug_line, sizeof(debug_line),
+               "LIVE B:%u A:%u Y:%u X:%u L:%u  LS:%d,%d  RS:%d,%d",
+               (debug_buttons >> 0) & 1u,
+               (debug_buttons >> 1) & 1u,
+               (debug_buttons >> 2) & 1u,
+               (debug_buttons >> 3) & 1u,
+               (debug_buttons >> 4) & 1u, debug_axis_x,
+               debug_axis_y, debug_right_axis_x,
+               debug_right_axis_y);
+      quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
+                         debug_y + 3.0f * debug_step, debug_gw, debug_gh,
+                         verts + quads * 24);
+      snprintf(debug_line, sizeof(debug_line),
+               "PADKEY:%06X  LPOW:%u  RPOW:%u",
+               debug_keys & 0x00ffffffu,
+               debug_power, debug_right_power);
+      quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
+                         debug_y + 4.0f * debug_step, debug_gw, debug_gh,
+                         verts + quads * 24);
+      snprintf(debug_line, sizeof(debug_line),
+               "LAST:%s CMD:%02X  STOCK:%02X ROUTED:%02X CONNECTED:%u",
+               native_lab_event_name(debug_event),
+               debug_command & 0xffu,
+               native_debug.stock_mask & 0xffu,
+               native_debug.route_mask & 0xffu,
+               native_debug.connected_mask & 3u);
+      quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
+                         debug_y + 5.0f * debug_step, debug_gw, debug_gh,
+                         verts + quads * 24);
+    }
   }
   int prompt_label_quads = 0;
   if (start_prompt) {
@@ -1714,13 +1852,15 @@ static void overlay_render(void) {
   const char *setplay_keys[3] = {NULL, NULL, NULL};
   const char *setplay_labels[3] = {NULL, NULL, NULL};
   unsigned int setplay_helper_count = 0;
-  if (setplay_context == PES_SETPLAY_GOAL_KICK) {
+  if (!native_setplay_debug &&
+      setplay_context == PES_SETPLAY_GOAL_KICK) {
     setplay_keys[0] = "Y";
     setplay_labels[0] = "POSITION SHIFT";
     setplay_keys[1] = "X";
     setplay_labels[1] = "SWITCH VIEW";
     setplay_helper_count = 2;
-  } else if (setplay_context == PES_SETPLAY_CORNER) {
+  } else if (!native_setplay_debug &&
+             setplay_context == PES_SETPLAY_CORNER) {
     setplay_keys[0] = "ZR";
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "X";
@@ -1728,7 +1868,8 @@ static void overlay_render(void) {
     setplay_keys[2] = "Y";
     setplay_labels[2] = "SWITCH VIEW";
     setplay_helper_count = 3;
-  } else if (setplay_context == PES_SETPLAY_FREE_KICK) {
+  } else if (!native_setplay_debug &&
+             setplay_context == PES_SETPLAY_FREE_KICK) {
     setplay_keys[0] = "ZR";
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "X";
