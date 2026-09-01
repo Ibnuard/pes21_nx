@@ -1805,7 +1805,7 @@ void android_input_poll(void) {
     synthetic_context = SYNTHETIC_INPUT_MENU;
   const int context_changed = synthetic_context_changed(synthetic_context);
   pes_controller_friend_press_update(
-      controller_connected && !context_changed &&
+      !native_pad_lab_active && controller_connected && !context_changed &&
           synthetic_context == SYNTHETIC_INPUT_GAMEPLAY &&
           control_mode == PES_MOBILE_CONTROL_DEFENSE &&
           (buttons & HidNpadButton_Y) && !(buttons & HidNpadButton_Plus),

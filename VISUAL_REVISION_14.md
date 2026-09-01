@@ -1,8 +1,8 @@
-# Visual revision 14 - symmetric goal-area correction + 1P native pad lab
+# Visual revision 14 - stable symmetric pitch
 
-Candidate files are in
-`local-debug/visual-v14-native-pad-lab-20260901/install/`. Stable rollback is
-still the v10 pitch PAK and v9 runtime NRO.
+The pitch was accepted on Switch and is now the latest stable baseline. The
+installable package is in `local-debug/visual-v14-stable-20260901/install/` and
+combines the accepted v14 PAK with the last stable v9/v1.98 runtime NRO.
 
 V14 keeps the accepted broad v10 cadence from midfield to the penalty-box
 front. A single local band per goal is re-anchored to the keeper-box line, so
@@ -16,11 +16,11 @@ and right phases at half density. Its samples adjacent to midfield are
 light-left/dark-right, eliminating the thin extra phase seen in the rejected
 unequal-width experiment.
 
-The accompanying NRO turns the old 2P tile into an isolated one-controller
-native-input proof. It immediately seeds Barcelona vs PSG, with PSG controlled
-by CPU. It does not poll controller 2 or assign a second human. Native Cobra
-input is emitted only during live offense/defense and only into pad ID 0;
-ordinary Exhibition retains the existing synthetic-touch implementation.
+The accompanying experimental Native Pad Lab NRO was rejected on hardware.
+It reached a one-player match, but Joy-Con input did not control the player and
+the accepted Player Cursor/helper presentation regressed. It remains archived
+under `local-debug/visual-v14-native-pad-lab-20260901/` only for diagnosis and
+must not be distributed as the stable runtime.
 
-See the [candidate README](local-debug/visual-v14-native-pad-lab-20260901/README.md)
-for copy order, hashes, expected behavior and rollback.
+See the [stable README](local-debug/visual-v14-stable-20260901/README.md) for
+the exact two files, destinations, hashes, and runtime split.

@@ -99,15 +99,14 @@ python -m pip install -r tools/visual-patch-requirements.txt -r tools/native-aud
 python -m unittest discover -s tests -v
 python tools/build_uniform_pitch_patch.py --output local-debug/rebuild-v9/pitch
 python tools/validate_visual_runtime.py --output local-debug/rebuild-v9/native-validation.json
-python tools/prepare_visual_runtime_build.py --output local-debug/rebuild-v9/runtime
 ```
 
-The runtime staging helper applies the current **uncommitted visual delta**
-against the preserved v1.98-derived source. After committing, replay the archived
-`runtime-release/runtime-delta.patch` plus `match_visual_policy.h` on that source,
-or use the complete `runtime-release/` snapshot, instead of expecting an empty
-`git diff` to reconstruct it. Build with its `build-wsl.ps1`, without diagnostic
-flags. Run `tests/run_match_visual_policy.sh` in WSL for the C/UBSan test.
+For v9 itself use the complete preserved `runtime-release/` snapshot and its
+`build-wsl.ps1`, without diagnostic flags. Do not reconstruct v9 from bare
+`git diff`: committed features are omitted. As of 1 September the staging helper
+requires explicit `--baseline` and `--delta-base` arguments for new experiments;
+see [Native Pad Lab V2](local-debug/native-pad-lab-v2-20260901/README.md).
+Run `tests/run_match_visual_policy.sh` in WSL for the C/UBSan test.
 
 ## Copy / rollback
 

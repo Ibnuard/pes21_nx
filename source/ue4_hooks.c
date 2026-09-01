@@ -38,6 +38,7 @@ static void *(*ue4_fmemory_malloc)(uint64_t size, uint32_t alignment);
 
 static _Alignas(8) uint64_t cobra_pad_input;
 static _Alignas(4) uint32_t cobra_pad_connected;
+static void native_pad_lab_reset(void);
 static uintptr_t cobra_pad_update_resume;
 static uintptr_t mobile_screen_tap_entry_resume;
 static uintptr_t exhibition_flow_create_resume;
@@ -4580,6 +4581,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
     if (!listener || !exhibition_flow_direct_set)
       return 0;
     static const char tutorial_flow[] = "MyClub/TutorialMatch";
+    native_pad_lab_reset();
     __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&native_gamepad_lab_autostart, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
@@ -7677,9 +7679,11 @@ int32_t ue4_object_initializer_resize_hook_c(Ue4Array *array,
 extern void ue4_object_initializer_resize_hook(void);
 
 #include "friend_press.inc"
+#include "native_pad_lab.inc"
 
 void install_ue4_hooks(so_module *module) {
   install_friend_press_prototype(module);
+  install_native_pad_lab(module);
   // The offline bundle already seeds the profile, club, coach, and squad.
   // Retain ModeEntry's command handshake (states 0..2), then send its completed
   // state 5 directly to the normal "proceed" exit. This removes the obsolete

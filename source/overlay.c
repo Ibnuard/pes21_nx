@@ -558,6 +558,7 @@ static void overlay_render(void) {
   float prompt_y = 0.0f;
   const int start_prompt =
       pes_controller_start_prompt(&prompt_x, &prompt_y);
+  const int native_lab = pes_controller_native_pad_lab_active();
   float gameplan_cursor_x = 0.0f;
   float gameplan_cursor_y = 0.0f;
   const int virtual_cursor_context = pes_controller_virtual_cursor_context();
@@ -574,7 +575,7 @@ static void overlay_render(void) {
   }
 
   if ((!config.show_fps || !fps.text[0]) && !selector &&
-      !start_prompt && !custom_popup && !gameplan_cursor &&
+      !start_prompt && !custom_popup && !gameplan_cursor && !native_lab &&
       !setplay_options && !pause_camera_active && !tutorial_play_active &&
       !cinematic_helper_active && penalty_role == PES_PENALTY_NONE)
     return;
@@ -1623,6 +1624,18 @@ static void overlay_render(void) {
     quads += gameplan_helper_text_quads;
   }
   const int text_first_quad = quads;
+  if (native_lab && !custom_popup) {
+    const uint32_t status = pes_controller_native_pad_lab_status();
+    char label[112];
+    snprintf(label, sizeof(label), "NATIVE LAB V2  HID:%s PAD:%s OWNER:%s ROUTE:%s%s",
+             status & 1 ? "OK" : "--", status & 2 ? "OK" : "--",
+             status & 4 ? "OK" : "--", status & 8 ? "OK" : "--",
+             status & 128 ? " ABI ERROR" : "");
+    const float gh = (float)screen_height / 50.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    quads += emit_line(label, (int)strlen(label), 12.0f,
+                       (float)screen_height * 0.95f, gw, gh, verts + quads * 24);
+  }
   int prompt_label_quads = 0;
   if (start_prompt) {
     const float gh = (float)screen_height / 22.0f;

@@ -1,16 +1,27 @@
 # Kandidat stabilitas + visual EF10 — 31 Agustus 2026
 
-Kandidat aktif 1 September 2026 adalah
-[visual v14 + Native Pad Lab 1P](VISUAL_REVISION_14.md), di
-`local-debug/visual-v14-native-pad-lab-20260901/install/`. Pitch v14 memakai
-koreksi simetris hanya pada satu strip area gawang dan mempertahankan fase
-selang-seling di tengah. Native Pad Lab masih satu pemain; PSG tetap CPU.
-Baseline stable/rollback tetap PAK visual v10 dan NRO visual v9.
+Baseline stable terbaru per 1 September 2026 adalah
+[visual v14](VISUAL_REVISION_14.md), di
+`local-debug/visual-v14-stable-20260901/install/`. Pitch v14 memakai koreksi
+simetris hanya pada satu strip area gawang dan mempertahankan fase
+selang-seling di tengah. Runtime-nya sengaja memakai kembali NRO visual v9 /
+rilis v1.98 agar mapping, Player Cursor Show/Hide, opacity tombol action native,
+warna helper, Press A, dan frame pacing stable tetap utuh.
 
-Baseline pitch stable terbaru (dikonfirmasi pengguna di Switch pada 1 September
-2026): [v10 broad pitch](VISUAL_REVISION_10.md), di
-`local-debug/visual-v10-20260831/install/`. Paket ini tidak mengganti NRO;
-v8 tetap disimpan sebagai baseline rollback historis.
+Native Pad Lab v14 ditolak pada uji perangkat: match dapat dimulai tetapi
+Joy-Con tidak mengontrol pemain, dan fitur runtime visual/controller stable
+ikut hilang. NRO tersebut hanya diarsipkan untuk diagnosis dan bukan file
+install. Detail hasil ada di [NATIVE_PAD_LAB_RESULT.md](NATIVE_PAD_LAB_RESULT.md).
+
+Kandidat **Native Pad Lab V2** tersedia terpisah di
+`local-debug/native-pad-lab-v2-20260901/install/`: **NRO saja**. Fitur v9
+dipertahankan dan pitch v14 tidak diubah. Menu 2 Player tetap tes satu pemain
+melawan CPU, sekarang dengan jalur aksi native dan indikator HID/PAD/OWNER/ROUTE.
+Belum diuji di Switch; bukan pengganti baseline stable sampai hasil perangkat
+diterima. [Petunjuk tes dan rollback](local-debug/native-pad-lab-v2-20260901/README.md).
+
+Baseline pitch lama v10 tetap disimpan sebagai rollback historis di
+`local-debug/visual-v10-20260831/install/`, tetapi sudah digantikan oleh v14.
 
 Kandidat berikutnya harus dibangun terpisah dari v10. Fitur runtime
 helper/cursor tetap dari [v9](VISUAL_REVISION_9.md).
