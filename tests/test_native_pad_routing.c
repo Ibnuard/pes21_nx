@@ -25,7 +25,7 @@ static uint32_t history[5], history_p2[5];
 static void *accessor, *original_input_unit;
 static int calls, sample_calls, prime_calls;
 int cobra_pad_prime_native_port(uint32_t port) {
-  assert(port == 1);
+  assert(port <= 1);
   prime_calls++;
   return 1;
 }
@@ -144,20 +144,26 @@ int main(void) {
   assert(*(uint32_t *)list == 6);
   assert(!memcmp(list+4, expected_defence, sizeof(expected_defence)));
 
-  // Stock goal kick contains mobile camera/kick plus native pass-support.
-  // V4 removes only both mobile consumers and schedules the dormant console
-  // guide/actions, retaining stock order around unrelated units.
+  // Stock goal kick contains the only consumers proven active by hardware.
+  // V7 keeps that list byte-identical and bridges native press/release through
+  // MobileSetplayKick instead of scheduling dormant console units.
   const uint32_t goal_kick[] = {61,60,95,64,90,96};
-  const uint32_t expected_goal_kick[] = {61,60,64,26,0,1,3,96};
   setup(); run(goal_kick,6);
-  assert(*(uint32_t *)list == 8);
-  assert(!memcmp(list+4, expected_goal_kick, sizeof(expected_goal_kick)));
+  unchanged();
+  assert(native_lab_action_units[0][NATIVE_LAB_ACTION_SHORT] ==
+         (uintptr_t)&objects[0]);
+  assert(native_lab_action_units[0][NATIVE_LAB_ACTION_LONG] ==
+         (uintptr_t)&objects[1]);
+  assert(native_lab_action_units[0][NATIVE_LAB_ACTION_SHOOT] ==
+         (uintptr_t)&objects[3]);
+  assert(native_lab_action_units[0][NATIVE_LAB_ACTION_GUIDE] ==
+         (uintptr_t)&objects[26]);
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.context == PES_SETPLAY_GOAL_KICK);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
                               PES_NATIVE_LAB_STOCK_MOBILE_CAMERA |
                               PES_NATIVE_LAB_STOCK_GOALKICK_SUPPORT));
-  assert(debug.route_mask == (PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE |
+  assert(debug.route_mask == (PES_NATIVE_LAB_ROUTE_MOBILE_KICK_BRIDGE |
                               PES_NATIVE_LAB_ROUTE_SHORT_PASS |
                               PES_NATIVE_LAB_ROUTE_LONG_PASS |
                               PES_NATIVE_LAB_ROUTE_SHOOT |
@@ -177,17 +183,15 @@ int main(void) {
          debug.right_axis_x_p2 == -333 && debug.right_axis_y_p2 == 444);
 
   const uint32_t corner[] = {61,60,95,65,70,90,96};
-  const uint32_t expected_corner[] = {61,60,65,70,26,0,1,3,96};
   setup(); run(corner,7);
-  assert(*(uint32_t *)list == 9);
-  assert(!memcmp(list+4, expected_corner, sizeof(expected_corner)));
+  unchanged();
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.context == PES_SETPLAY_CORNER);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
                               PES_NATIVE_LAB_STOCK_MOBILE_CAMERA |
                               PES_NATIVE_LAB_STOCK_SHORT_CORNER |
                               PES_NATIVE_LAB_STOCK_CORNER_TACTICS));
-  assert(debug.route_mask == (PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE |
+  assert(debug.route_mask == (PES_NATIVE_LAB_ROUTE_MOBILE_KICK_BRIDGE |
                               PES_NATIVE_LAB_ROUTE_SHORT_PASS |
                               PES_NATIVE_LAB_ROUTE_LONG_PASS |
                               PES_NATIVE_LAB_ROUTE_SHOOT |
@@ -195,22 +199,43 @@ int main(void) {
                               PES_NATIVE_LAB_ROUTE_CORNER_TACTICS));
 
   const uint32_t free_kick[] = {61,60,95,72,75,90,96};
-  const uint32_t expected_free_kick[] = {61,60,72,75,26,0,1,3,96};
   setup(); run(free_kick,7);
-  assert(*(uint32_t *)list == 9);
-  assert(!memcmp(list+4, expected_free_kick, sizeof(expected_free_kick)));
+  unchanged();
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.context == PES_SETPLAY_FREE_KICK);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
                               PES_NATIVE_LAB_STOCK_MOBILE_CAMERA |
                               PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
                               PES_NATIVE_LAB_STOCK_FREEKICK_POSITION));
-  assert(debug.route_mask == (PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE |
+  assert(debug.route_mask == (PES_NATIVE_LAB_ROUTE_MOBILE_KICK_BRIDGE |
                               PES_NATIVE_LAB_ROUTE_SHORT_PASS |
                               PES_NATIVE_LAB_ROUTE_LONG_PASS |
                               PES_NATIVE_LAB_ROUTE_SHOOT |
                               PES_NATIVE_LAB_ROUTE_CAMERA_STICK |
                               PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS));
+
+  // The close-range free-kick variant omits the tactics/position units. Its
+  // semantic ButtonSetplay context is a guarded fallback only while kind 90
+  // (MobileSetplayKick) is actually in the stock list.
+  const uint32_t close_free_kick[] = {61,60,95,90,96};
+  setup();
+  pes_controller_native_pad_lab_publish_setplay_context(
+      PES_SETPLAY_FREE_KICK);
+  run(close_free_kick,5);
+  unchanged();
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.context == PES_SETPLAY_FREE_KICK);
+  assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
+                              PES_NATIVE_LAB_STOCK_MOBILE_CAMERA));
+
+  const uint32_t no_mobile_kick[] = {61,60,95,96};
+  setup();
+  pes_controller_native_pad_lab_publish_setplay_context(
+      PES_SETPLAY_FREE_KICK);
+  run(no_mobile_kick,4);
+  unchanged();
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.context == PES_SETPLAY_NONE);
 
   setup(); active = 0; run(attack,6); unchanged(); // Exhibition.
   assert(pes_controller_native_pad_lab_status() == 0);
@@ -246,11 +271,12 @@ int main(void) {
   uint32_t copy[5]; memcpy(copy,history,sizeof(copy));
   native_lab_sample(history,0,cursor,input);
   assert(sample_calls == 1 && (pes_controller_native_pad_lab_status() & 2));
+  assert(prime_calls == 1);
   assert(!memcmp(history,copy,sizeof(copy)));
   native_pad_lab_reset();
   native_lab_sample(history,1,cursor,input);
   assert(pes_controller_native_pad_lab_status() & 2);
-  assert(prime_calls == 1);
+  assert(prime_calls == 2);
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.native_sample_mask == 2u && debug.prime_mask == 2u &&
          debug.native_keys_p2 == (1u << 14));

@@ -98,7 +98,7 @@ int pes_controller_native_pad_lab_active(void);
 int pes_controller_native_pad_lab_two_player(void);
 uint32_t pes_controller_native_pad_lab_status(void);
 
-#define PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE (1u << 0)
+#define PES_NATIVE_LAB_ROUTE_MOBILE_KICK_BRIDGE (1u << 0)
 #define PES_NATIVE_LAB_ROUTE_SHORT_PASS (1u << 1)
 #define PES_NATIVE_LAB_ROUTE_LONG_PASS (1u << 2)
 #define PES_NATIVE_LAB_ROUTE_SHOOT (1u << 3)
@@ -171,6 +171,7 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
                                                int connected);
 void pes_controller_native_pad_lab_debug_snapshot(
     PesNativePadLabDebug *snapshot);
+void pes_controller_native_pad_lab_publish_setplay_context(uint32_t context);
 uint32_t pes_mobile_control_context(int *mode);
 int pes_mobile_control_active_mode(void);
 int pes_controller_replay_active(void);

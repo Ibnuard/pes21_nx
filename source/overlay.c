@@ -657,8 +657,8 @@ static void overlay_render(void) {
   int setplay_helper_circle_quads = 0;
   int setplay_helper_text_first_quad = 0;
   int setplay_helper_text_quads = 0;
-  int setplay_key_first_quads[3] = {0};
-  int setplay_key_quads[3] = {0};
+  int setplay_key_first_quads[4] = {0};
+  int setplay_key_quads[4] = {0};
   int cinematic_helper_circle_first_quad = 0;
   int cinematic_helper_circle_quads = 0;
   int cinematic_helper_text_first_quad = 0;
@@ -1670,7 +1670,7 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P PAD V4 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V7 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
@@ -1728,7 +1728,7 @@ static void overlay_render(void) {
       const float debug_y = 0.690f * (float)screen_height;
       const float debug_step = 1.32f * debug_gh;
       snprintf(debug_line, sizeof(debug_line),
-               "P%u %s NATIVE ROUTE - NO TOUCH OR SWIPE",
+               "P%u %s NATIVE KICK + CAMERA PLUGIN",
                debug_p2 ? 2u : 1u,
                native_lab_setplay_name(native_debug.context));
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
@@ -1738,8 +1738,15 @@ static void overlay_render(void) {
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
                          debug_y + debug_step, debug_gw, debug_gh,
                          verts + quads * 24);
-      snprintf(debug_line, sizeof(debug_line),
-               "B=SHORT PASS   A=LONG PASS   Y=SHOOT   X=UNMAPPED");
+      if (native_debug.context == PES_SETPLAY_FREE_KICK)
+        snprintf(debug_line, sizeof(debug_line),
+                 "B=PASS   A=LOB/CROSS   Y=SHOOT   RIGHT=KICKER");
+      else if (native_debug.context == PES_SETPLAY_CORNER)
+        snprintf(debug_line, sizeof(debug_line),
+                 "B=SHORT PASS   A=LONG KICK   L=SHORT CORNER   RIGHT=KICKER");
+      else
+        snprintf(debug_line, sizeof(debug_line),
+                 "B=SHORT PASS   A=LONG KICK   L=POSITION SHIFT");
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
                          debug_y + 2.0f * debug_step, debug_gw, debug_gh,
                          verts + quads * 24);
@@ -1849,10 +1856,39 @@ static void overlay_render(void) {
       quads += celebrate_label_quads;
     }
   }
-  const char *setplay_keys[3] = {NULL, NULL, NULL};
-  const char *setplay_labels[3] = {NULL, NULL, NULL};
+  const char *setplay_keys[4] = {NULL, NULL, NULL, NULL};
+  const char *setplay_labels[4] = {NULL, NULL, NULL, NULL};
   unsigned int setplay_helper_count = 0;
-  if (!native_setplay_debug &&
+  if (native_setplay_debug &&
+      setplay_context == PES_SETPLAY_GOAL_KICK) {
+    setplay_keys[0] = "L";
+    setplay_labels[0] = "POSITION SHIFT";
+    setplay_keys[1] = "LS";
+    setplay_labels[1] = "KICK AIM";
+    setplay_keys[2] = "RS";
+    setplay_labels[2] = "CAMERA";
+    setplay_helper_count = 3;
+  } else if (native_setplay_debug &&
+             setplay_context == PES_SETPLAY_CORNER) {
+    setplay_keys[0] = "L";
+    setplay_labels[0] = "SHORT CORNER";
+    setplay_keys[1] = ">";
+    setplay_labels[1] = "SET PIECE TAKER";
+    setplay_keys[2] = "LS";
+    setplay_labels[2] = "KICK AIM";
+    setplay_keys[3] = "RS";
+    setplay_labels[3] = "CAMERA";
+    setplay_helper_count = 4;
+  } else if (native_setplay_debug &&
+             setplay_context == PES_SETPLAY_FREE_KICK) {
+    setplay_keys[0] = ">";
+    setplay_labels[0] = "SET PIECE TAKER";
+    setplay_keys[1] = "LS";
+    setplay_labels[1] = "KICK AIM";
+    setplay_keys[2] = "RS";
+    setplay_labels[2] = "CAMERA";
+    setplay_helper_count = 3;
+  } else if (!native_setplay_debug &&
       setplay_context == PES_SETPLAY_GOAL_KICK) {
     setplay_keys[0] = "Y";
     setplay_labels[0] = "POSITION SHIFT";
@@ -1924,7 +1960,8 @@ static void overlay_render(void) {
     const float helper_x = 0.815f * (float)screen_width;
     const float helper_step = 0.066f * (float)screen_height;
     const float helper_start_y =
-        (setplay_helper_count == 3 ? 0.790f
+        (setplay_helper_count == 4 ? 0.725f
+         : setplay_helper_count == 3 ? 0.790f
          : setplay_helper_count == 2 ? 0.855f
                                      : 0.925f) *
         (float)screen_height;

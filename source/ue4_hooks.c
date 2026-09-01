@@ -5355,28 +5355,33 @@ void cobra_pad_clear_native_inputs(void) {
                                       0, 0, 0, 0, 0);
 }
 
-// Cobra's mobile Pad::Update returns early for every pad except the single
-// Android "primary" index.  Local 2P still needs pad No2 to travel through the
-// game's genuine PadInputUnit and KeyConfig path.  Immediately before that
-// unit is sampled, publish the second Switch state into its existing Cobra Pad
-// object, including native press/release edges and both stick axis banks.
+// Cobra's mobile Pad::Update is timed around one Android "primary" pad and
+// returns early for the others.  Immediately before PadInputUnit samples a
+// local Switch port, publish that port into its existing Cobra Pad object.
+// Doing this for No1 as well as No2 is intentional: set-play can sample the
+// registry before the regular mobile Pad::Update hook, which previously left
+// P1 buttons/right-stick one frame stale (RAW RS moved while RPOW stayed 0).
 int cobra_pad_prime_native_port(uint32_t port) {
-  if (port != 1 || !pes_controller_native_pad_lab_two_player() ||
+  if (port > 1 || !pes_controller_native_pad_lab_active() ||
+      (port == 1 && !pes_controller_native_pad_lab_two_player()) ||
       !cobra_pad_get_pad)
     return 0;
   unsigned char *pad = cobra_pad_get_pad(port);
   if (!pad)
     return 0;
-  const int connected = __atomic_load_n(&cobra_pad_connected_p2,
-                                         __ATOMIC_ACQUIRE) != 0;
+  uint64_t *const input_slot = port ? &cobra_pad_input_p2 : &cobra_pad_input;
+  uint32_t *const right_slot =
+      port ? &cobra_pad_right_input_p2 : &cobra_pad_right_input;
+  uint32_t *const connected_slot =
+      port ? &cobra_pad_connected_p2 : &cobra_pad_connected;
+  const int connected =
+      __atomic_load_n(connected_slot, __ATOMIC_ACQUIRE) != 0;
   const uint64_t packed = connected
-                              ? __atomic_load_n(&cobra_pad_input_p2,
-                                                __ATOMIC_ACQUIRE)
+                              ? __atomic_load_n(input_slot, __ATOMIC_ACQUIRE)
                               : 0;
   const uint32_t right_packed = connected
-                                    ? __atomic_load_n(
-                                          &cobra_pad_right_input_p2,
-                                          __ATOMIC_ACQUIRE)
+                                    ? __atomic_load_n(right_slot,
+                                                      __ATOMIC_ACQUIRE)
                                     : 0;
   const uint32_t buttons = (uint32_t)packed;
   uint32_t previous = 0;

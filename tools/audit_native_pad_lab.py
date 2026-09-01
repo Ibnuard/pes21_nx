@@ -102,6 +102,14 @@ def audit(path):
              '_ZN5match3pad14ThinkUnitShoot8ExecPullERKNS0_18ThinkUnitInputDataE'),
             ('_ZTVN5match3pad28ThinkUnitGoalkickPassSupportE',
              '_ZN5match3pad28ThinkUnitGoalkickPassSupport8ExecPullERKNS0_18ThinkUnitInputDataE'),
+            ('_ZTVN5match3pad26ThinkUnitMobileSetplayKickE',
+             '_ZN5match3pad26ThinkUnitMobileSetplayKick4MainERKNS0_18ThinkUnitInputDataENS0_13ThinkUnitKindE'),
+            ('_ZTVN5match6camera6plugin16CornerKickCameraE',
+             '_ZN5match6camera6plugin16CornerKickCamera6UpdateERN4draw15CameraParameterE'),
+            ('_ZTVN5match6camera6plugin14GoalKickCameraE',
+             '_ZN5match6camera6plugin14GoalKickCamera6UpdateERN4draw15CameraParameterE'),
+            ('_ZTVN5match6camera6plugin14FreeKickCameraE',
+             '_ZN5match6camera6plugin14FreeKickCamera6UpdateERN4draw15CameraParameterE'),
         )
         action_audit = []
         for vtable_name, method_name in action_methods:
@@ -115,6 +123,10 @@ def audit(path):
             action_audit.append({'vtable': vtable_name,
                                  'method': method_name,
                                  'slots': [hex(slot) for slot in slots]})
+        filter_name = (
+            '_ZN5match3pad26ThinkUnitMobileSetplayKick11FilterAngleERKNS0_18ThinkUnitInputDataEf'
+        )
+        filter_symbol = names[filter_name]
         two_player_symbols = {}
         for name in (
             '_ZN9matchPlan4Data10SetPadPortE8HomeAwayj',
@@ -145,6 +157,11 @@ def audit(path):
             '<4I', read(cursor_info_symbol['st_value'], 16)))
         return {'units': units, 'plt': entries,
                 'setplay_action_methods': action_audit,
+                'setplay_filter_angle': {
+                    'symbol': filter_name,
+                    'address': hex(filter_symbol['st_value']),
+                    'size': filter_symbol['st_size'],
+                },
                 'two_player_symbols': two_player_symbols,
                 'cursor_info_entry_words': [hex(x) for x in cursor_info_words],
                 # Pad::GetAxis uses this six-byte boundary table. The last
@@ -166,7 +183,10 @@ def check_source(result, source):
         assert result['units'][kind]['vtable'] != '?', kind
     for entry in result['setplay_action_methods']:
         assert entry['method'] in content
-    assert len(result['setplay_action_methods']) == 8
+    assert len(result['setplay_action_methods']) == 12
+    assert result['setplay_filter_angle']['symbol'] in content
+    assert result['setplay_filter_angle']['address'] == '0x66a7cdc'
+    assert result['setplay_filter_angle']['size'] == 620
     for symbol in (
         '_ZN9matchPlan4Data10SetPadPortE8HomeAwayj',
         '_ZN9matchPlan4Data10GetPadPortE8HomeAway',
@@ -196,7 +216,8 @@ def check_source(result, source):
     assert 'HidNpadIdType_No2' in shim
     assert 'padConfigureInput(2, HidNpadStyleSet_NpadStandard)' in shim
     return {'unit_types_checked': checked, 'plt_stubs_checked': 2,
-            'setplay_action_methods_checked': 8,
+            'setplay_action_methods_checked': 12,
+            'setplay_filter_angle_checked': True,
             'two_player_ownership_symbols_checked': 4,
             'cursor_info_post_hook_checked': True,
             'native_button_table_checked': True,

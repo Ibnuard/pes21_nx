@@ -2,9 +2,9 @@
 import argparse
 import bisect
 import re
+import struct
 from pathlib import Path
 
-from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
 from elftools.elf.elffile import ELFFile
 
 
@@ -34,22 +34,32 @@ def inspect(path: Path, pattern: str):
             symbol['st_info']['type'] == 'STT_FUNC')
         starts = [item[0] for item in functions]
 
-        decoder = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
         found = []
         for section in elf.iter_sections():
             if not section['sh_flags'] & 0x4:  # SHF_EXECINSTR
                 continue
-            for instruction in decoder.disasm(section.data(), section['sh_addr']):
-                if instruction.mnemonic not in ('bl', 'b') or not instruction.op_str.startswith('#'):
+            data = section.data()
+            base = section['sh_addr']
+            # Direct AArch64 B/BL use one signed imm26.  Decoding these four
+            # bytes directly is much faster than disassembling the enormous
+            # UE4 text section and is immune to literal/alignment islands.
+            for offset in range(0, len(data) - 3, 4):
+                word, = struct.unpack_from('<I', data, offset)
+                opcode = word & 0xfc000000
+                if opcode not in (0x14000000, 0x94000000):
                     continue
-                target = int(instruction.op_str[1:], 16)
+                immediate = word & 0x03ffffff
+                if immediate & 0x02000000:
+                    immediate -= 0x04000000
+                address = base + offset
+                target = address + immediate * 4
                 if target not in targets:
                     continue
-                index = bisect.bisect_right(starts, instruction.address) - 1
+                index = bisect.bisect_right(starts, address) - 1
                 caller = '?'
-                if index >= 0 and instruction.address < functions[index][1]:
+                if index >= 0 and address < functions[index][1]:
                     caller = functions[index][2]
-                found.append((instruction.address, caller, target, targets[target]))
+                found.append((address, caller, target, targets[target]))
 
         for address, caller, target, name in found:
             print(f'{address:08x} {caller} -> {target:08x} {name}')

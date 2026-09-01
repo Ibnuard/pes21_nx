@@ -27,7 +27,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('exhibition_flow_direct_set', choice)
 
     def test_normal_exhibition_stays_touch_and_lab_is_native_only_in_play(self):
-        self.assertIn('if (!(native_pad_lab_active && gameplay_active))',
+        self.assertIn('if (native_pad_lab_active && gameplay_active)',
                       self.shim)
         self.assertIn('emit_native_lab_pad_input(0, &left_stick, &right_stick,',
                       self.shim)
@@ -70,16 +70,21 @@ class NativeGamepadLabTests(unittest.TestCase):
                     'L': 4, 'ZL': 5, 'R': 7, 'ZR': 8}
         for button, bit in expected.items():
             with self.subTest(button=button):
-                self.assertRegex(
-                    mapping,
-                    rf'HidNpadButton_{button}\) mapped \|= 1u << {bit};')
+                self.assertIn(f'HidNpadButton_{button}', mapping)
+                self.assertIn(f'mapped |= 1u << {bit};', mapping)
+        self.assertIn('HidNpadButton_AnySL', mapping)
+        self.assertIn('HidNpadButton_AnySR', mapping)
 
-    def test_setplays_use_native_units_not_mobile_swipe(self):
+    def test_setplays_keep_stock_consumers_and_bridge_native_kick_methods(self):
         route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
-        self.assertIn('native_setplay && kind == 95', route)
-        self.assertIn('native_setplay && kind == 90', route)
-        for kind in (26, 0, 1, 3):
-            self.assertIn(f'native_lab_append(entries, &count, {kind})', route)
+        self.assertNotIn('native_setplay && kind == 95', route)
+        self.assertNotIn('native_setplay && kind == 90', route)
+        self.assertIn('native_lab_mobile_kick_main', route)
+        self.assertIn('native_lab_exec_setplay_action', route)
+        self.assertIn('native_lab_short_press_original(unit, input)', route)
+        self.assertIn('native_lab_long_press_original(unit, input)', route)
+        self.assertIn('native_lab_shoot_press_original(unit, input)', route)
+        self.assertIn('_ZTVN5match3pad26ThinkUnitMobileSetplayKickE', route)
         self.assertIn('PES_NATIVE_LAB_ROUTE_GOALKICK_SUPPORT', route)
         self.assertIn('PES_NATIVE_LAB_ROUTE_CORNER_TACTICS', route)
         self.assertIn('PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS', route)
@@ -121,7 +126,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertLess(update.index('native_lab_list_update_original'),
                         update.index('native_lab_restore_input'))
 
-    def test_secondary_cobra_pad_is_primed_before_native_history_update(self):
+    def test_both_cobra_pads_are_primed_before_native_history_update(self):
         prime = re.search(
             r'int cobra_pad_prime_native_port\(.*?\n\}', self.hooks, re.S
         ).group(0)
@@ -134,8 +139,57 @@ class NativeGamepadLabTests(unittest.TestCase):
         sample = re.search(
             r'static void native_lab_sample\(.*?\n\}', route, re.S
         ).group(0)
-        self.assertLess(sample.index('cobra_pad_prime_native_port(1)'),
+        self.assertLess(sample.index('cobra_pad_prime_native_port(pad_no)'),
                         sample.index('native_lab_sample_original'))
+
+    def test_setplay_right_stick_hooks_each_stock_camera_plugin(self):
+        route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
+        self.assertNotIn('append_native_setplay_camera_swipe(', self.shim)
+        self.assertIn('native_lab_apply_camera_stick', route)
+        self.assertIn('&native_lab_debug_right_axis_x_p2', route)
+        for camera in ('CornerKickCamera', 'GoalKickCamera',
+                       'FreeKickCamera'):
+            with self.subTest(camera=camera):
+                self.assertIn(camera, route)
+        self.assertIn('state->yaw += axis_x * 0.025f', route)
+        self.assertIn('state->yaw > 0.55f', route)
+        self.assertIn('parameter->position_x = parameter->look_x', route)
+        self.assertIn('parameter->position_z = parameter->look_z', route)
+        camera = re.search(
+            r'static void native_lab_apply_camera_stick.*?\n\}',
+            route, re.S).group(0)
+        self.assertNotIn('raw_y', camera)
+
+    def test_left_stick_updates_mobile_kick_angle_without_touch_swipe(self):
+        route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
+        aim = re.search(r'static void native_lab_apply_kick_aim.*?\n\}',
+                        route, re.S).group(0)
+        self.assertIn('&native_lab_debug_axis_x_p2', aim)
+        self.assertIn('(const char *)unit + 0x38', aim)
+        self.assertIn('(char *)unit + 0x24', aim)
+        self.assertIn('native_lab_mobile_filter_angle(unit, input, desired)', aim)
+        self.assertIn('native_lab_camera_yaw_millirad[pad]', aim)
+        self.assertNotIn('touch_state_append', aim)
+
+    def test_native_setplay_uses_right_for_custom_kicker_and_keeps_l_stock(self):
+        self.assertIn('queue_native_lab_setplay_action', self.shim)
+        self.assertIn('pressed & HidNpadButton_Right', self.shim)
+        self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
+        self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('NATIVE 2P SETPLAY V7', overlay)
+        self.assertIn('setplay_keys[0] = "L";', overlay)
+        self.assertIn('setplay_keys[1] = ">";', overlay)
+        self.assertIn('setplay_labels[3] = "CAMERA";', overlay)
+
+    def test_second_pad_can_drive_selector_replay_and_title_start(self):
+        self.assertIn('previous_hid_buttons_p2', self.shim)
+        self.assertIn('native_setplay_owner_pad == 1', self.shim)
+        self.assertIn('(buttons_p2 & ~previous_hid_buttons_p2)', self.shim)
+        self.assertIn('controller_connected || controller_connected_p2',
+                      self.shim)
+        self.assertIn('pes_controller_start_prompt(NULL, NULL)', self.shim)
+        self.assertIn('HidNpadButton_AnySL | HidNpadButton_AnySR', self.shim)
 
 
 if __name__ == '__main__':
