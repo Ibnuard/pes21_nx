@@ -32,6 +32,10 @@ static uintptr_t native_lab_input_units[2];
 static uint32_t native_lab_debug_setplay_pad;
 static uint32_t native_lab_published_setplay_context;
 static uint32_t native_lab_trajectory_enabled;
+// Penalty trajectory is an opt-in visual aid, independent from the regular
+// set-play trajectory latch. Keep one bit per local pad so R1 on the keeper
+// cannot change the kicker's preview (and vice versa).
+static uint32_t native_lab_penalty_trajectory_enabled_mask;
 static uint32_t native_lab_previous_buttons[2];
 static uint32_t native_lab_setplay_linger_frames;
 static uint32_t native_lab_debug_buttons_p2;
@@ -55,6 +59,29 @@ enum {
   NATIVE_LAB_ACTION_COUNT
 };
 static uintptr_t native_lab_action_units[2][NATIVE_LAB_ACTION_COUNT];
+// PenaltykickGuide is a stock console unit. Each local list owns a separate
+// instance whose +0x54 Vector3 is the LS-derived target used by the debug trail.
+static uintptr_t native_lab_penalty_guide_units[2];
+// ThinkUnitPenaltykick is the stock console press/pull action. Keep its real
+// per-list object so the custom gauge can observe native charge without
+// fabricating a command or sharing P1 state with P2.
+static uintptr_t native_lab_penalty_action_units[2];
+// Native penalty objects are optional on this mobile build.  Their indexes
+// come from ThinkUnitList's constructor table (object offsets 0x840, 0xab0,
+// 0xc08, 0xc40, and 0x1218 respectively).  Keep their ABI gate separate from
+// native_lab_units: a penalty mismatch must never disable ordinary gameplay.
+enum {
+  NATIVE_LAB_KIND_PENALTY_GUIDE = 27,
+  NATIVE_LAB_KIND_PENALTY_KICK = 37,
+  NATIVE_LAB_KIND_KEEPER_PENALTY_MOVE = 43,
+  NATIVE_LAB_KIND_KEEPER_PENALTY_ACTION = 44,
+  NATIVE_LAB_KIND_KEEPER_PENALTY_LAYER = 66,
+};
+enum {
+  NATIVE_LAB_PENALTY_READY_KICKER = 1u,
+  NATIVE_LAB_PENALTY_READY_KEEPER = 2u,
+};
+static uint32_t native_lab_penalty_ready_role_mask;
 // Keep the real native action unit for each local cursor. Its +0x20 charge is
 // the sole source for the pad-owned custom gauge and release power bridge.
 static uint32_t native_lab_active_action[2];
@@ -142,6 +169,7 @@ static NativeLabUnit native_lab_units[] = {
   {12, "_ZTVN5match3pad21ThinkUnitCursorChangeE", 0},
   {24, "_ZTVN5match3pad20ThinkUnitSuperCancelE", 0},
   {26, "_ZTVN5match3pad21ThinkUnitSetplayGuideE", 0},
+  {27, "_ZTVN5match3pad25ThinkUnitPenaltykickGuideE", 0},
   {62, "_ZTVN5match3pad33ThinkUnitThrowinBodyAngleRotationE", 0},
   {64, "_ZTVN5match3pad28ThinkUnitGoalkickPassSupportE", 0},
   {65, "_ZTVN5match3pad20ThinkUnitShortCornerE", 0},
@@ -162,6 +190,23 @@ static NativeLabUnit native_lab_units[] = {
   {89, "_ZTVN5match3pad23ThinkUnitMobileFreeMoveE", 0},
   {90, "_ZTVN5match3pad26ThinkUnitMobileSetplayKickE", 0},
   {95, "_ZTVN5match3pad34ThinkUnitMobileSetplayCameraChangeE", 0},
+};
+
+// Resolved opportunistically during install and checked immediately before a
+// penalty list is augmented.  Missing or mismatched entries only disable the
+// native penalty route; they are deliberately excluded from the global ABI
+// validator above.
+static NativeLabUnit native_lab_optional_penalty_units[] = {
+  {NATIVE_LAB_KIND_PENALTY_GUIDE,
+   "_ZTVN5match3pad25ThinkUnitPenaltykickGuideE", 0},
+  {NATIVE_LAB_KIND_PENALTY_KICK,
+   "_ZTVN5match3pad20ThinkUnitPenaltykickE", 0},
+  {NATIVE_LAB_KIND_KEEPER_PENALTY_MOVE,
+   "_ZTVN5match3pad30ThinkUnitKeeperPenaltykickMoveE", 0},
+  {NATIVE_LAB_KIND_KEEPER_PENALTY_ACTION,
+   "_ZTVN5match3pad32ThinkUnitKeeperPenaltykickActionE", 0},
+  {NATIVE_LAB_KIND_KEEPER_PENALTY_LAYER,
+   "_ZTVN5match3pad31ThinkUnitKeeperPenaltykickLayerE", 0},
 };
 
 static void native_pad_lab_reset(void) {
@@ -204,6 +249,10 @@ static void native_pad_lab_reset(void) {
   __atomic_store_n(&native_lab_published_setplay_context, PES_SETPLAY_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_trajectory_enabled, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_penalty_trajectory_enabled_mask, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_penalty_ready_role_mask, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_previous_buttons[0], 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_previous_buttons[1], 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_setplay_linger_frames, 0, __ATOMIC_RELEASE);
@@ -288,6 +337,10 @@ static void native_pad_lab_reset(void) {
       __atomic_store_n(&native_lab_action_units[pad][action], 0,
                        __ATOMIC_RELEASE);
     __atomic_store_n(&native_lab_active_action[pad], 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_penalty_guide_units[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_penalty_action_units[pad], 0,
+                     __ATOMIC_RELEASE);
   }
   memset(&native_lab_corner_camera, 0, sizeof(native_lab_corner_camera));
   memset(&native_lab_goal_camera, 0, sizeof(native_lab_goal_camera));
@@ -535,11 +588,24 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
       &native_lab_debug_context, __ATOMIC_ACQUIRE);
   if (connected && port == setplay_pad && (buttons & (1u << 7)) &&
       !(previous_buttons & (1u << 7)) &&
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+      pes_controller_penalty_role_for_pad(port) == PES_PENALTY_NONE &&
+#endif
       (context == PES_SETPLAY_GOAL_KICK ||
        context == PES_SETPLAY_CORNER ||
        context == PES_SETPLAY_FREE_KICK))
     __atomic_fetch_xor(&native_lab_trajectory_enabled, 1u,
                        __ATOMIC_ACQ_REL);
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+  const uint32_t penalty_role = pes_controller_penalty_role_for_pad(port);
+  if (penalty_role == PES_PENALTY_NONE)
+    __atomic_fetch_and(&native_lab_penalty_trajectory_enabled_mask,
+                       ~(1u << port), __ATOMIC_ACQ_REL);
+  else if (connected && (buttons & (1u << 7)) &&
+           !(previous_buttons & (1u << 7)))
+    __atomic_fetch_xor(&native_lab_penalty_trajectory_enabled_mask,
+                       1u << port, __ATOMIC_ACQ_REL);
+#endif
   if (port == 1) {
     __atomic_store_n(&native_lab_debug_buttons_p2, buttons,
                      __ATOMIC_RELEASE);
@@ -866,6 +932,19 @@ void pes_match_cursor_info_ready(void *cursor_info) {
     __atomic_fetch_or(&native_lab_status, 128u, __ATOMIC_RELAXED);
 }
 
+static uint32_t native_lab_gauge_release_linger(void) {
+  uint32_t gauge_context = __atomic_load_n(
+      &native_lab_debug_context, __ATOMIC_ACQUIRE);
+  if (gauge_context == PES_SETPLAY_NONE)
+    gauge_context = __atomic_load_n(&native_lab_published_setplay_context,
+                                    __ATOMIC_ACQUIRE);
+  return gauge_context == PES_SETPLAY_GOAL_KICK ||
+                 gauge_context == PES_SETPLAY_CORNER ||
+                 gauge_context == PES_SETPLAY_FREE_KICK
+             ? 900u
+             : 180u;
+}
+
 #ifndef NATIVE_PAD_LAB_HOST_TEST
 static uint32_t native_lab_input_pad(const void *input) {
   if (!input)
@@ -927,12 +1006,18 @@ static void native_lab_note_action(const void *input, uint32_t event,
                       __ATOMIC_ACQ_REL);
     __atomic_fetch_and(&native_lab_gauge_charging_mask, ~pad_bit,
                        __ATOMIC_ACQ_REL);
+    // Far free-kick takers can have a run-up longer than the ordinary
+    // three-second cancellation guard. BallInfo remains the primary completion
+    // signal; this longer set-play-only fallback cannot cut the bar before
+    // contact, while ordinary gameplay retains the tested 180-frame lifetime.
+    const uint32_t release_linger = native_lab_gauge_release_linger();
     uint32_t expected = pad + 1u;
     if (__atomic_load_n(&native_lab_gauge_owner_pad, __ATOMIC_ACQUIRE) ==
         expected)
-      __atomic_store_n(&native_lab_gauge_linger_frames, 180,
+      __atomic_store_n(&native_lab_gauge_linger_frames, release_linger,
                        __ATOMIC_RELEASE);
-    __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad], 180,
+    __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad],
+                     release_linger,
                      __ATOMIC_RELEASE);
     __atomic_fetch_and(&native_lab_gauge_release_ball_valid_mask, ~pad_bit,
                        __ATOMIC_ACQ_REL);
@@ -1085,6 +1170,60 @@ static int native_lab_layout_matches(const void *list) {
   return 1;
 }
 
+static const NativeLabUnit *native_lab_optional_penalty_unit(uint32_t kind) {
+  for (unsigned i = 0;
+       i < sizeof(native_lab_optional_penalty_units) /
+               sizeof(native_lab_optional_penalty_units[0]);
+       ++i) {
+    if (native_lab_optional_penalty_units[i].kind == kind)
+      return &native_lab_optional_penalty_units[i];
+  }
+  return NULL;
+}
+
+static int native_lab_optional_penalty_matches(const void *list,
+                                               uint32_t kind) {
+  const NativeLabUnit *expected = native_lab_optional_penalty_unit(kind);
+  if (!list || !expected || !expected->vptr)
+    return 0;
+  const void *unit = *(void *const *)((const char *)list + 0x3bf8 +
+                                     kind * sizeof(uintptr_t));
+  return unit && *(const uintptr_t *)unit == expected->vptr;
+}
+
+static int native_lab_penalty_suite_matches(const void *list,
+                                            uint32_t role) {
+  if (!native_lab_optional_penalty_matches(
+          list, NATIVE_LAB_KIND_PENALTY_GUIDE))
+    return 0;
+  if (role == PES_PENALTY_KICKER)
+    return native_lab_optional_penalty_matches(
+        list, NATIVE_LAB_KIND_PENALTY_KICK);
+  if (role == PES_PENALTY_GOALKEEPER)
+    return native_lab_optional_penalty_matches(
+               list, NATIVE_LAB_KIND_KEEPER_PENALTY_MOVE) &&
+           native_lab_optional_penalty_matches(
+               list, NATIVE_LAB_KIND_KEEPER_PENALTY_ACTION) &&
+           native_lab_optional_penalty_matches(
+               list, NATIVE_LAB_KIND_KEEPER_PENALTY_LAYER);
+  return 0;
+}
+
+int pes_controller_native_penalty_ready(uint32_t pad, uint32_t role) {
+  if (pad > 1u)
+    return 0;
+  const uint32_t role_bit = role == PES_PENALTY_KICKER
+                                ? NATIVE_LAB_PENALTY_READY_KICKER
+                                : role == PES_PENALTY_GOALKEEPER
+                                      ? NATIVE_LAB_PENALTY_READY_KEEPER
+                                      : 0u;
+  if (!role_bit)
+    return 0;
+  const uint32_t mask = __atomic_load_n(
+      &native_lab_penalty_ready_role_mask, __ATOMIC_ACQUIRE);
+  return (mask & (role_bit << (pad * 2u))) != 0;
+}
+
 static int native_lab_append(uint32_t *entries, uint32_t *count, uint32_t kind) {
   // The original list has 97 entry slots. Preserve ordering and avoid executing
   // a native action twice if another context already selected it.
@@ -1169,6 +1308,18 @@ static void native_lab_list_update(void *list, const void *input,
       __atomic_store_n(&native_lab_action_units[binding.pad][action], unit,
                        __ATOMIC_RELEASE);
     }
+    const uintptr_t penalty_guide = *(const uintptr_t *)((const char *)list +
+        0x3bf8 + NATIVE_LAB_KIND_PENALTY_GUIDE * sizeof(uintptr_t));
+    __atomic_store_n(&native_lab_penalty_guide_units[binding.pad],
+                     penalty_guide, __ATOMIC_RELEASE);
+    const uintptr_t penalty_action = native_lab_optional_penalty_matches(
+            list, NATIVE_LAB_KIND_PENALTY_KICK)
+        ? *(const uintptr_t *)((const char *)list + 0x3bf8 +
+                              NATIVE_LAB_KIND_PENALTY_KICK *
+                                  sizeof(uintptr_t))
+        : 0;
+    __atomic_store_n(&native_lab_penalty_action_units[binding.pad],
+                     penalty_action, __ATOMIC_RELEASE);
   }
   native_lab_list_update_original(list, input, previous, context);
   native_lab_restore_input(&binding);
@@ -1193,6 +1344,30 @@ static void native_lab_list_update(void *list, const void *input,
   const uint32_t setplay_context =
       native_lab_setplay_context(stock + 1, stock[0]);
   const int native_setplay = setplay_context != PES_SETPLAY_NONE;
+  const int native_penalty_kicker =
+      native_lab_has_kind(stock + 1, stock[0], 91);
+  const int native_penalty_goalkeeper =
+      native_lab_has_kind(stock + 1, stock[0], 92) ||
+      native_lab_has_kind(stock + 1, stock[0], 93);
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+  // ThinkUnitList is the only callback that remains pad-owned throughout the
+  // penalty idle/aim transition.  Publish from its already-bound local pad so
+  // both P1 and P2 retain the correct kicker/keeper role between animations.
+  if (route_pad == 0 || route_pad == 1) {
+    // Some shootout templates carry both mobile penalty units in the same
+    // local list. Presence alone is then ambiguous; let the exact Main
+    // callback heartbeat classify the active role instead of making both pads
+    // look like kickers (the failure mode where P2 keeper LS shot with P1).
+    const int penalty_role_count = native_penalty_kicker +
+                                   (native_penalty_goalkeeper ? 1 : 0);
+    if (penalty_role_count == 1 && native_penalty_kicker)
+      match_native_penalty_publish_for_pad(PES_PENALTY_KICKER,
+                                           (uint32_t)route_pad);
+    else if (penalty_role_count == 1 && native_penalty_goalkeeper)
+      match_native_penalty_publish_for_pad(PES_PENALTY_GOALKEEPER,
+                                           (uint32_t)route_pad);
+  }
+#endif
   uint32_t stock_mask = 0;
   if (native_lab_has_kind(stock + 1, stock[0], 90))
     stock_mask |= PES_NATIVE_LAB_STOCK_MOBILE_KICK;
@@ -1261,6 +1436,44 @@ static void native_lab_list_update(void *list, const void *input,
         changed++;
       }
     }
+  }
+  // Keep the mobile penalty units for lifecycle/Update2D.  Append dormant
+  // console actions only after their exact per-object vptrs match.  This is a
+  // local, non-fatal ABI gate: a future mobile layout can fall back to touch
+  // for penalties without turning normal P1/P2 gameplay into ABI ERROR.
+  const int native_penalty_kicker_ready =
+      native_penalty_kicker &&
+      native_lab_penalty_suite_matches(list, PES_PENALTY_KICKER);
+  const int native_penalty_goalkeeper_ready =
+      native_penalty_goalkeeper &&
+      native_lab_penalty_suite_matches(list, PES_PENALTY_GOALKEEPER);
+  if (native_penalty_kicker_ready) {
+    if (!native_lab_append(entries, &count,
+                           NATIVE_LAB_KIND_PENALTY_GUIDE) ||
+        !native_lab_append(entries, &count,
+                           NATIVE_LAB_KIND_PENALTY_KICK))
+      return;
+    if (route_pad == 0 || route_pad == 1)
+      __atomic_fetch_or(&native_lab_penalty_ready_role_mask,
+                        NATIVE_LAB_PENALTY_READY_KICKER <<
+                            ((uint32_t)route_pad * 2u),
+                        __ATOMIC_ACQ_REL);
+    changed++;
+  }
+  if (native_penalty_goalkeeper_ready) {
+    if (!native_lab_append(entries, &count,
+                           NATIVE_LAB_KIND_KEEPER_PENALTY_MOVE) ||
+        !native_lab_append(entries, &count,
+                           NATIVE_LAB_KIND_KEEPER_PENALTY_ACTION) ||
+        !native_lab_append(entries, &count,
+                           NATIVE_LAB_KIND_KEEPER_PENALTY_LAYER))
+      return;
+    if (route_pad == 0 || route_pad == 1)
+      __atomic_fetch_or(&native_lab_penalty_ready_role_mask,
+                        NATIVE_LAB_PENALTY_READY_KEEPER <<
+                            ((uint32_t)route_pad * 2u),
+                        __ATOMIC_ACQ_REL);
+    changed++;
   }
   if (changed) {
     memcpy(stock + 1, entries, count * sizeof(entries[0]));
@@ -1370,6 +1583,8 @@ static uint32_t (*native_lab_long_press_original)(void *, const void *);
 static uint32_t (*native_lab_long_pull_original)(void *, const void *);
 static uint32_t (*native_lab_shoot_press_original)(void *, const void *);
 static uint32_t (*native_lab_shoot_pull_original)(void *, const void *);
+static uint32_t (*native_lab_penalty_press_original)(void *, const void *);
+static uint32_t (*native_lab_penalty_pull_original)(void *, const void *);
 static uint32_t (*native_lab_support_pull_original)(void *, const void *);
 static uint32_t (*native_lab_mobile_kick_main_original)(void *, const void *,
                                                         uint32_t);
@@ -1384,8 +1599,12 @@ static void (*native_lab_shoot_update_2d_original)(void *, const void *,
                                                    void *);
 static void (*native_lab_mobile_kick_update_2d_original)(void *, const void *,
                                                          void *);
+static void (*native_lab_penalty_update_2d_original)(void *, const void *,
+                                                     void *);
 static void (*native_lab_draw_pass_line)(uint32_t, uint32_t, uint32_t,
                                          uint32_t, float, const void *, void *);
+static void (*native_lab_draw_shoot_line)(uint32_t, uint32_t, uint32_t,
+                                          const void *, const void *, void *);
 static void (*native_lab_set_kick_original)(void *, uint32_t, float, float,
                                              float, uint32_t, float, float,
                                              uint32_t, uint32_t);
@@ -1442,6 +1661,12 @@ NATIVE_LAB_ACTION_WRAPPER(native_lab_shoot_press,
 NATIVE_LAB_ACTION_WRAPPER(native_lab_shoot_pull,
                           PES_NATIVE_LAB_EVENT_SHOOT_RELEASE,
                           native_lab_shoot_pull_original)
+NATIVE_LAB_ACTION_WRAPPER(native_lab_penalty_press,
+                          PES_NATIVE_LAB_EVENT_SHOOT_PRESS,
+                          native_lab_penalty_press_original)
+NATIVE_LAB_ACTION_WRAPPER(native_lab_penalty_pull,
+                          PES_NATIVE_LAB_EVENT_SHOOT_RELEASE,
+                          native_lab_penalty_pull_original)
 NATIVE_LAB_ACTION_WRAPPER(native_lab_support_pull,
                           PES_NATIVE_LAB_EVENT_SUPPORT_RELEASE,
                           native_lab_support_pull_original)
@@ -1551,6 +1776,40 @@ static void native_lab_mobile_kick_update_2d(void *unit, const void *input,
   const void *power_unit = (const void *)__atomic_load_n(
       &native_lab_action_units[pad][action - 1u], __ATOMIC_ACQUIRE);
   native_lab_track_action_power(power_unit, input, screen_2d);
+}
+
+static void native_lab_penalty_update_2d(void *unit, const void *input,
+                                         void *screen_2d) {
+  if (native_lab_penalty_update_2d_original)
+    native_lab_penalty_update_2d_original(unit, input, screen_2d);
+  const uint32_t pad = native_lab_input_pad(input);
+  const void *power_unit = (const void *)__atomic_load_n(
+      &native_lab_penalty_action_units[pad], __ATOMIC_ACQUIRE);
+  native_lab_track_action_power(power_unit, input, screen_2d);
+  if (!unit || !input || !screen_2d || !native_lab_draw_shoot_line ||
+      !pes_controller_native_pad_lab_active() ||
+      !*((const uint8_t *)unit + 24))
+    return;
+  if (!(__atomic_load_n(&native_lab_penalty_trajectory_enabled_mask,
+                        __ATOMIC_ACQUIRE) & (1u << pad)))
+    return;
+  const uintptr_t guide = __atomic_load_n(
+      &native_lab_penalty_guide_units[pad], __ATOMIC_ACQUIRE);
+  uint32_t player = UINT32_MAX;
+  memcpy(&player, (const char *)input + 0x24, sizeof(player));
+  const void *registry = *(void *const *)input;
+  if (!guide || !registry || player >= 22u)
+    return;
+  float target[3];
+  memcpy(target, (const char *)guide + 0x54, sizeof(target));
+  if (!isfinite(target[0]) || !isfinite(target[1]) ||
+      !isfinite(target[2]) ||
+      fabsf(target[0]) + fabsf(target[1]) + fabsf(target[2]) < 0.001f)
+    return;
+  // 0x58 is the engine's penalty-shoot PadCommandKind. This is visual-only:
+  // the actual kick still requires Y and uses the same LS target.
+  native_lab_draw_shoot_line(0x58u, 0u, player,
+                             (const char *)guide + 0x54, registry, screen_2d);
 }
 
 static float native_lab_normalize_axis(int32_t raw) {
@@ -1951,6 +2210,12 @@ static int install_native_lab_action_debug(so_module *module) {
   uintptr_t *shoot_pull_slot = native_lab_method_slot(
       module, "_ZTVN5match3pad14ThinkUnitShootE",
       "_ZN5match3pad14ThinkUnitShoot8ExecPullERKNS0_18ThinkUnitInputDataE");
+  uintptr_t *penalty_press_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad20ThinkUnitPenaltykickE",
+      "_ZN5match3pad20ThinkUnitPenaltykick9ExecPressERKNS0_18ThinkUnitInputDataE");
+  uintptr_t *penalty_pull_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad20ThinkUnitPenaltykickE",
+      "_ZN5match3pad20ThinkUnitPenaltykick8ExecPullERKNS0_18ThinkUnitInputDataE");
   uintptr_t *support_pull_slot = native_lab_method_slot(
       module, "_ZTVN5match3pad28ThinkUnitGoalkickPassSupportE",
       "_ZN5match3pad28ThinkUnitGoalkickPassSupport8ExecPullERKNS0_18ThinkUnitInputDataE");
@@ -1968,9 +2233,15 @@ static int install_native_lab_action_debug(so_module *module) {
   uintptr_t *mobile_kick_update_2d_slot = native_lab_method_slot(
       module, "_ZTVN5match3pad26ThinkUnitMobileSetplayKickE",
       "_ZN5match3pad26ThinkUnitMobileSetplayKick12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE");
+  uintptr_t *penalty_update_2d_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad26ThinkUnitMobilePenaltyKickE",
+      "_ZN5match3pad26ThinkUnitMobilePenaltyKick12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE");
   const uintptr_t draw_pass_line = so_try_find_addr_rx(
       module,
       "_ZN5match3pad12DrawPassLineENS_14PadCommandKindEh8PlayerNoS2_fPKNS_8registry8RegistryEPNS3_12Screen2dInfoE");
+  const uintptr_t draw_shoot_line = so_try_find_addr_rx(
+      module,
+      "_ZN5match3pad13DrawShootLineENS_14PadCommandKindEh8PlayerNoRKN4math7Vector3EPKNS_8registry8RegistryEPNS7_12Screen2dInfoE");
   const uintptr_t mobile_filter_angle = so_try_find_addr_rx(
       module,
       "_ZN5match3pad26ThinkUnitMobileSetplayKick11FilterAngleERKNS0_18ThinkUnitInputDataEf");
@@ -1991,10 +2262,12 @@ static int install_native_lab_action_debug(so_module *module) {
       "_ZN5match6camera6plugin14FreeKickCamera6UpdateERN4draw15CameraParameterE");
   if (!guide || !guide_slot || !short_press_slot || !short_pull_slot ||
       !long_press_slot || !long_pull_slot || !shoot_press_slot ||
-      !shoot_pull_slot || !support_pull_slot || !mobile_kick_main_slot ||
+      !shoot_pull_slot || !penalty_press_slot || !penalty_pull_slot ||
+      !support_pull_slot || !mobile_kick_main_slot ||
       !short_update_2d_slot || !long_update_2d_slot ||
       !shoot_update_2d_slot || !mobile_kick_update_2d_slot ||
-      !draw_pass_line || !mobile_filter_angle || !set_kick ||
+      !penalty_update_2d_slot || !draw_pass_line || !draw_shoot_line ||
+      !mobile_filter_angle || !set_kick ||
       !set_kick_no_player ||
       !corner_camera_slot ||
       !goal_camera_slot || !free_camera_slot)
@@ -2022,6 +2295,8 @@ static int install_native_lab_action_debug(so_module *module) {
   native_lab_long_pull_original = (void *)*long_pull_slot;
   native_lab_shoot_press_original = (void *)*shoot_press_slot;
   native_lab_shoot_pull_original = (void *)*shoot_pull_slot;
+  native_lab_penalty_press_original = (void *)*penalty_press_slot;
+  native_lab_penalty_pull_original = (void *)*penalty_pull_slot;
   native_lab_support_pull_original = (void *)*support_pull_slot;
   native_lab_mobile_kick_main_original = (void *)*mobile_kick_main_slot;
   native_lab_mobile_filter_angle_abi = (void *)mobile_filter_angle;
@@ -2030,7 +2305,10 @@ static int install_native_lab_action_debug(so_module *module) {
   native_lab_shoot_update_2d_original = (void *)*shoot_update_2d_slot;
   native_lab_mobile_kick_update_2d_original =
       (void *)*mobile_kick_update_2d_slot;
+  native_lab_penalty_update_2d_original =
+      (void *)*penalty_update_2d_slot;
   native_lab_draw_pass_line = (void *)draw_pass_line;
+  native_lab_draw_shoot_line = (void *)draw_shoot_line;
   native_lab_set_kick_original = (void *)set_kick;
   native_lab_set_kick_no_player_original = (void *)set_kick_no_player;
   native_lab_corner_camera_update_original = (void *)*corner_camera_slot;
@@ -2043,6 +2321,8 @@ static int install_native_lab_action_debug(so_module *module) {
   *long_pull_slot = (uintptr_t)&native_lab_long_pull;
   *shoot_press_slot = (uintptr_t)&native_lab_shoot_press;
   *shoot_pull_slot = (uintptr_t)&native_lab_shoot_pull;
+  *penalty_press_slot = (uintptr_t)&native_lab_penalty_press;
+  *penalty_pull_slot = (uintptr_t)&native_lab_penalty_pull;
   *support_pull_slot = (uintptr_t)&native_lab_support_pull;
   *mobile_kick_main_slot = (uintptr_t)&native_lab_mobile_kick_main;
   *short_update_2d_slot = (uintptr_t)&native_lab_short_update_2d;
@@ -2050,6 +2330,7 @@ static int install_native_lab_action_debug(so_module *module) {
   *shoot_update_2d_slot = (uintptr_t)&native_lab_shoot_update_2d;
   *mobile_kick_update_2d_slot =
       (uintptr_t)&native_lab_mobile_kick_update_2d;
+  *penalty_update_2d_slot = (uintptr_t)&native_lab_penalty_update_2d;
   *corner_camera_slot = (uintptr_t)&native_lab_corner_camera_update;
   *goal_camera_slot = (uintptr_t)&native_lab_goal_camera_update;
   *free_camera_slot = (uintptr_t)&native_lab_free_camera_update;
@@ -2085,6 +2366,16 @@ static void install_native_pad_lab(so_module *module) {
     if (!vt)
       return;
     native_lab_units[i].vptr = vt + 16;
+  }
+  for (unsigned i = 0;
+       i < sizeof(native_lab_optional_penalty_units) /
+               sizeof(native_lab_optional_penalty_units[0]);
+       ++i) {
+    const uintptr_t vt = so_try_find_addr_rx(
+        module, native_lab_optional_penalty_units[i].symbol);
+    // Optional by design: zero leaves only the penalty route on its mobile
+    // fallback and cannot fail native gameplay installation.
+    native_lab_optional_penalty_units[i].vptr = vt ? vt + 16 : 0;
   }
   hook_arm64(list_plt, (uintptr_t)&native_lab_list_update);
   hook_arm64(sample_plt, (uintptr_t)&native_lab_sample);

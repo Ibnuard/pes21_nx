@@ -569,7 +569,11 @@ static void overlay_render(void) {
   const int pause_camera_active = pes_controller_pause_camera_active();
   const int tutorial_play_active =
       pes_controller_inmatch_tutorial_active();
-  const uint32_t penalty_role = pes_controller_penalty_role();
+  const uint32_t penalty_role_p1 = pes_controller_penalty_role_for_pad(0);
+  const int penalty_two_player = pes_controller_native_pad_lab_two_player();
+  const uint32_t penalty_role_p2 =
+      penalty_two_player ? pes_controller_penalty_role_for_pad(1)
+                         : PES_PENALTY_NONE;
   const int set_piece_selector =
       pes_controller_set_piece_selector_active();
   float selector_x = 0.0f;
@@ -621,11 +625,25 @@ static void overlay_render(void) {
     setplay_context = PES_SETPLAY_NONE;
     setplay_options = 0;
   }
+  // Penalty is a controller-owned surface, not a set-piece selector.  The
+  // stock ButtonSetplay snapshot can still carry its old option bits for a
+  // few frames, which used to repaint the exhibition `ZR SET PIECE TAKER`
+  // helper over the native P1/P2 penalty legend.  Give the latched penalty
+  // roles priority for the complete idle/aim/kick transition.
+  const int penalty_session_active =
+      penalty_role_p1 != PES_PENALTY_NONE ||
+      penalty_role_p2 != PES_PENALTY_NONE;
+  if (penalty_session_active) {
+    setplay_context = PES_SETPLAY_NONE;
+    setplay_options = 0;
+    native_setplay_debug = 0;
+  }
 
   if ((!config.show_fps || !fps.text[0]) && !selector &&
       !start_prompt && !custom_popup && !gameplan_cursor && !native_lab &&
       !setplay_options && !pause_camera_active && !tutorial_play_active &&
-      !cinematic_helper_active && penalty_role == PES_PENALTY_NONE)
+      !cinematic_helper_active && penalty_role_p1 == PES_PENALTY_NONE &&
+      penalty_role_p2 == PES_PENALTY_NONE)
     return;
   if (!gl_init())
     return;
@@ -1683,8 +1701,8 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V8.12 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
-             "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u%s",
+             "NATIVE 2P SETPLAY V8.15.1 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
              native_debug.owner_mask & 3u,
@@ -1700,6 +1718,8 @@ static void overlay_render(void) {
              native_debug.gauge_active_mask & 3u,
              native_debug.gauge_power_milli,
              native_debug.gauge_power_milli_p2,
+             penalty_role_p1,
+             penalty_role_p2,
              status & 128 ? " ABI ERROR" : "");
     const float gh = (float)screen_height / 50.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
@@ -1918,9 +1938,11 @@ static void overlay_render(void) {
                             : "TRAJECTORY OFF";
     setplay_helper_count = 5;
   } else if (native_far_free_kick) {
-    // The overhead/far free kick already reads naturally from the match view;
-    // keep its top-right area completely clean.
-    setplay_helper_count = 0;
+    // Far free kicks retain the stock overhead camera, but taker selection is
+    // still our native-controller action rather than the old ZR touch legend.
+    setplay_keys[0] = ">";
+    setplay_labels[0] = "SET PIECE TAKER";
+    setplay_helper_count = 1;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_FREE_KICK) {
     setplay_keys[0] = ">";
@@ -1993,15 +2015,44 @@ static void overlay_render(void) {
     }
   }
   const int penalty_helper_active =
+      (penalty_role_p1 != PES_PENALTY_NONE ||
+       penalty_role_p2 != PES_PENALTY_NONE) &&
       !set_piece_selector && !tutorial_play_active &&
       !cinematic_helper_active &&
       controller_snapshot.surface != PES_CONTROLLER_SURFACE_REPLAY &&
       controller_snapshot.surface != PES_CONTROLLER_SURFACE_CINEMATIC;
-  if (!setplay_helper_count && penalty_helper_active &&
-      penalty_role == PES_PENALTY_KICKER) {
-    setplay_keys[0] = "Y";
-    setplay_labels[0] = "KICK   LS AIM";
-    setplay_helper_count = 1;
+  if (!setplay_helper_count && penalty_helper_active) {
+    // A foul penalty keeps ButtonSetplay's native taker action alive.  A
+    // shootout/imbalance penalty has no taker selector, so do not expose a
+    // dead Right action there. R1 is a visual-only trajectory toggle and is
+    // deliberately shown for each penalty session, never as a touch helper.
+    const int penalty_foul_mode =
+        controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY &&
+        (controller_snapshot.setplay_button_mask &
+         (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER));
+    if (penalty_foul_mode && setplay_helper_count < 5) {
+      setplay_keys[setplay_helper_count] = ">";
+      setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
+    }
+    if (setplay_helper_count < 5) {
+      setplay_keys[setplay_helper_count] = "R";
+      setplay_labels[setplay_helper_count++] = "TRAJECTORY ON/OFF";
+    }
+    if (penalty_role_p1 == PES_PENALTY_KICKER) {
+      setplay_keys[setplay_helper_count] = "Y";
+      setplay_labels[setplay_helper_count++] = "P1 KICKER + LS AIM";
+    } else if (penalty_role_p1 == PES_PENALTY_GOALKEEPER) {
+      setplay_keys[setplay_helper_count] = "LS";
+      setplay_labels[setplay_helper_count++] = "P1 KEEPER DIVE";
+    }
+    if (penalty_two_player && penalty_role_p2 == PES_PENALTY_KICKER) {
+      setplay_keys[setplay_helper_count] = "Y";
+      setplay_labels[setplay_helper_count++] = "P2 KICKER + LS AIM";
+    } else if (penalty_two_player &&
+               penalty_role_p2 == PES_PENALTY_GOALKEEPER) {
+      setplay_keys[setplay_helper_count] = "LS";
+      setplay_labels[setplay_helper_count++] = "P2 KEEPER DIVE";
+    }
   }
   // Keep these badges outside the generic white-text batch below. That pass
   // used to repaint both the colored key glyphs and their circle geometry.
@@ -2075,7 +2126,9 @@ static void overlay_render(void) {
     const float bar_w = 0.075f * (float)screen_width;
     const float bar_h = 0.0060f * (float)screen_height;
     const float padding = 0.0045f * (float)screen_height;
-    const float gap = 0.0018f * (float)screen_width;
+    // Adjacent colored quads share their edge exactly, producing one connected
+    // spectrum bar while retaining the existing green-to-orange color ramp.
+    const float gap = 0.0f;
     const float segment_w =
         (bar_w - gap * (float)(segment_count - 1)) /
         (float)segment_count;
@@ -2131,24 +2184,6 @@ static void overlay_render(void) {
       power_gauge_active_segments[pad] =
           (int)((power_milli * (uint32_t)segment_count + 999u) / 1000u);
     }
-  }
-  if (penalty_helper_active && penalty_role == PES_PENALTY_GOALKEEPER) {
-    // Goalkeeper dive is an analog gesture rather than a button action, so it
-    // intentionally remains a compact text hint without a button badge.
-    const char *legend = "L STICK DIVE";
-    const int legend_len = 12;
-    const float gh = (float)screen_height / 43.0f;
-    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    const float legend_w = (float)legend_len * gw * 0.82f;
-    if (!setplay_helper_text_quads)
-      setplay_helper_text_first_quad = quads;
-    const int line_quads = emit_line(
-        legend, legend_len,
-        0.975f * (float)screen_width - legend_w,
-        0.925f * (float)screen_height, gw * 0.82f, gh,
-        verts + quads * 24);
-    setplay_helper_text_quads += line_quads;
-    quads += line_quads;
   }
   if (!quads)
     return;

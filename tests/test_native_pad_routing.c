@@ -78,6 +78,15 @@ static void setup(void) {
     objects[unit->kind] = unit->vptr;
     *(void **)(list+0x3bf8+unit->kind*8) = &objects[unit->kind];
   }
+  for (unsigned i = 0;
+       i < sizeof(native_lab_optional_penalty_units) /
+               sizeof(native_lab_optional_penalty_units[0]);
+       ++i) {
+    NativeLabUnit *unit = &native_lab_optional_penalty_units[i];
+    unit->vptr = 1000 + unit->kind;
+    objects[unit->kind] = unit->vptr;
+    *(void **)(list + 0x3bf8 + unit->kind * 8) = &objects[unit->kind];
+  }
 }
 static void run(const uint32_t *entries, uint32_t n) {
   *(uint32_t *)list = n;
@@ -143,6 +152,41 @@ int main(void) {
   setup(); run(defence,6);
   assert(*(uint32_t *)list == 6);
   assert(!memcmp(list+4, expected_defence, sizeof(expected_defence)));
+
+  // Mobile penalty remains for lifecycle/Update2D, while the native console
+  // guide/action are appended. Execution reads this pad's real PadAccessor.
+  const uint32_t penalty[] = {91};
+  const uint32_t expected_penalty[] = {91,27,37};
+  setup(); run(penalty,1);
+  assert(*(uint32_t *)list == 3);
+  assert(!memcmp(list+4, expected_penalty, sizeof(expected_penalty)));
+  assert(native_lab_penalty_guide_units[0] == (uintptr_t)&objects[27]);
+  assert(native_lab_penalty_action_units[0] == (uintptr_t)&objects[37]);
+  assert(pes_controller_native_penalty_ready(0, PES_PENALTY_KICKER));
+
+  // Keeper uses the three native console layers; no mobile ScreenTap is
+  // needed, and an ambiguous list can safely carry both role suites.
+  const uint32_t penalty_keeper[] = {92,93};
+  const uint32_t expected_penalty_keeper[] = {92,93,43,44,66};
+  setup(); run(penalty_keeper,2);
+  assert(*(uint32_t *)list == 5);
+  assert(!memcmp(list+4, expected_penalty_keeper,
+                 sizeof(expected_penalty_keeper)));
+  const uint32_t penalty_both[] = {91,92,93};
+  const uint32_t expected_penalty_both[] = {91,92,93,27,37,43,44,66};
+  setup(); run(penalty_both,3);
+  assert(*(uint32_t *)list == 8);
+  assert(!memcmp(list+4, expected_penalty_both,
+                 sizeof(expected_penalty_both)));
+
+  // Optional penalty ABI failure is local and non-fatal. It must neither
+  // rewrite the penalty list nor raise global ABI ERROR for normal gameplay.
+  setup();
+  objects[NATIVE_LAB_KIND_PENALTY_KICK] = 0;
+  run(penalty, 1);
+  assert(*(uint32_t *)list == 1 && ((uint32_t *)list)[1] == 91);
+  assert(!(pes_controller_native_pad_lab_status() & 128u));
+  assert(!pes_controller_native_penalty_ready(0, PES_PENALTY_KICKER));
 
   // MobileSetplayKick must run before SetplayGuide so its Pull/Release command
   // cannot be masked by a non-zero LS guide command. The real guide still runs
@@ -409,6 +453,15 @@ int main(void) {
   assert(native_lab_gauge_active_mask & 1u);
   pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
   assert(!(native_lab_gauge_active_mask & 1u));
+
+  // Set-play releases use a longer cancellation guard so a far free-kick
+  // taker's run-up cannot expire the bar before contact. Ordinary gameplay
+  // keeps the shorter baseline guard.
+  native_pad_lab_reset();
+  native_lab_debug_context = PES_SETPLAY_FREE_KICK;
+  assert(native_lab_gauge_release_linger() == 900u);
+  native_pad_lab_reset();
+  assert(native_lab_gauge_release_linger() == 180u);
 
   // Release freezes the gauge. Ball movement during a wind-up is not enough:
   // the ball must also separate from the nearest observed foot position for

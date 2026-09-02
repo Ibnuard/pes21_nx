@@ -199,6 +199,9 @@ int pes_controller_cinematic_skip_active(void);
 int pes_controller_inmatch_tutorial_active(void);
 void pes_controller_inmatch_tutorial_play_request(void);
 uint32_t pes_controller_penalty_role(void);
+uint32_t pes_controller_penalty_role_for_pad(uint32_t pad);
+void pes_controller_penalty_touch_owner_set(uint32_t pad, uint32_t role);
+int pes_controller_native_penalty_ready(uint32_t pad, uint32_t role);
 void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot);
 // Read the controller surface last published by the 60 Hz input thread.
 // Render code must use this cached form so it does not repeat native lifecycle

@@ -198,7 +198,11 @@ enum {
   FAKE_POINTER_REPLAY = FAKE_POINTER_MENU_BACK,
   FAKE_POINTER_GOAL_DEMO = FAKE_POINTER_MENU_BACK,
   FAKE_POINTER_CINEMATIC = FAKE_POINTER_MENU_BACK,
-  FAKE_POINTER_PENALTY = FAKE_POINTER_MENU_BACK,
+  // Penalty is the only gameplay surface that may need two concurrent local
+  // gestures. Menu/replay pointers never coexist with it, so keep one stable
+  // pointer identity per controller.
+  FAKE_POINTER_PENALTY_P1 = FAKE_POINTER_MENU_BACK,
+  FAKE_POINTER_PENALTY_P2 = FAKE_POINTER_MENU_SCROLL,
 };
 
 #define FAKE_PIPE_BASE 0x70000000
@@ -1317,6 +1321,25 @@ static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
                                    ui->generation);
 }
 
+// A foul penalty still exposes ButtonSetplay's native taker action, but the
+// normal set-play branch is intentionally bypassed while the two penalty
+// roles are active. Route D-pad Right from the kicker's own pad so a keeper's
+// stick/buttons can never open or confirm the kicker selector by accident.
+static void queue_native_penalty_action(const PesControllerSnapshot *ui,
+                                        int connected, u64 buttons,
+                                        u64 previous_buttons, uint32_t role) {
+  if (!ui || !connected || role != PES_PENALTY_KICKER)
+    return;
+  const u64 pressed = buttons & ~previous_buttons;
+  if (!(pressed & HidNpadButton_Right) ||
+      ui->surface != PES_CONTROLLER_SURFACE_SETPLAY ||
+      !(ui->setplay_button_mask &
+        (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER)))
+    return;
+  pes_controller_setplay_request(PES_SETPLAY_BUTTON_SET_PIECE_TAKER,
+                                 ui->generation);
+}
+
 static void queue_set_piece_selector_input(int connected, u64 buttons,
                                            u64 previous_buttons,
                                            float axis_x, float axis_y,
@@ -1475,40 +1498,48 @@ static uint32_t append_cinematic_skip_controller(FakeTouchState *desired,
   return 0;
 }
 
-static void append_penalty_controller(FakeTouchState *desired,
+typedef struct {
+  uint32_t generation_seen;
+  uint64_t swipe_started_ms;
+  uint64_t swipe_until_ms;
+  float swipe_start_x;
+  float swipe_start_y;
+  float swipe_end_x;
+  float swipe_end_y;
+  int keeper_stick_armed;
+} PenaltyGestureState;
+
+static void append_penalty_controller(FakeTouchState *desired, uint32_t pad,
                                       int connected, u64 buttons,
+                                      u64 previous_buttons,
                                       float left_x, float left_y,
                                       float right_x, float right_y,
                                       uint32_t role, uint64_t now_ms) {
   (void)right_x;
   (void)right_y;
-  static uint32_t generation_seen;
-  static uint64_t swipe_started_ms;
-  static uint64_t swipe_until_ms;
-  static float swipe_start_x;
-  static float swipe_start_y;
-  static float swipe_end_x;
-  static float swipe_end_y;
-  static int keeper_stick_armed = 1;
-  if (generation_seen != synthetic_input_generation) {
-    generation_seen = synthetic_input_generation;
-    swipe_started_ms = 0;
-    swipe_until_ms = 0;
-    keeper_stick_armed = 1;
+  static PenaltyGestureState states[2] = {
+      {.keeper_stick_armed = 1}, {.keeper_stick_armed = 1}};
+  if (pad > 1)
+    return;
+  PenaltyGestureState *state = &states[pad];
+  if (state->generation_seen != synthetic_input_generation) {
+    memset(state, 0, sizeof(*state));
+    state->generation_seen = synthetic_input_generation;
+    state->keeper_stick_armed = 1;
   }
   if (!connected || role == PES_PENALTY_NONE) {
-    swipe_started_ms = 0;
-    swipe_until_ms = 0;
-    keeper_stick_armed = 1;
+    state->swipe_started_ms = 0;
+    state->swipe_until_ms = 0;
+    state->keeper_stick_armed = 1;
     return;
   }
 
-  const u64 pressed = buttons & ~previous_hid_buttons;
+  const u64 pressed = buttons & ~previous_buttons;
   float direction_x = 0.0f;
   float direction_y = -1.0f;
   int begin_swipe = 0;
   if (role == PES_PENALTY_KICKER &&
-      (pressed & HidNpadButton_Y) && swipe_until_ms <= now_ms) {
+      (pressed & HidNpadButton_Y) && state->swipe_until_ms <= now_ms) {
     const float magnitude = sqrtf(left_x * left_x + left_y * left_y);
     if (magnitude >= 0.20f) {
       direction_x = left_x / magnitude;
@@ -1518,51 +1549,57 @@ static void append_penalty_controller(FakeTouchState *desired,
   } else if (role == PES_PENALTY_GOALKEEPER) {
     const float magnitude = sqrtf(left_x * left_x + left_y * left_y);
     if (magnitude <= 0.24f)
-      keeper_stick_armed = 1;
-    if (keeper_stick_armed && magnitude >= 0.55f &&
-        swipe_until_ms <= now_ms) {
+      state->keeper_stick_armed = 1;
+    if (state->keeper_stick_armed && magnitude >= 0.55f &&
+        state->swipe_until_ms <= now_ms) {
       direction_x = left_x / magnitude;
       direction_y = left_y / magnitude;
-      keeper_stick_armed = 0;
+      state->keeper_stick_armed = 0;
       begin_swipe = 1;
     }
   }
 
   if (begin_swipe) {
+    // ScreenTap has no controller id. Claim the role for the short gesture
+    // window so the other local penalty unit cannot consume this same event.
+    pes_controller_penalty_touch_owner_set(pad, role);
     // MobilePenaltyKick consumes ScreenTapInfo ButtonKind 0x10 and derives
     // both target height/side and goalkeeper saving angle from the gesture.
     // The kicker listens on the tutorial's right-hand gesture area.  The
     // goalkeeper variant is different: its native hit test requires DOWN to
     // begin on the goalkeeper model before the directional flick.
     if (role == PES_PENALTY_GOALKEEPER) {
-      swipe_start_x = 0.50f;
-      swipe_start_y = 0.40f;
-      swipe_end_x = fmaxf(0.20f, fminf(0.80f,
-                                      swipe_start_x + direction_x * 0.30f));
-      swipe_end_y = fmaxf(0.12f, fminf(0.76f,
-                                      swipe_start_y + direction_y * 0.32f));
+      state->swipe_start_x = 0.50f;
+      state->swipe_start_y = 0.40f;
+      state->swipe_end_x = fmaxf(
+          0.20f, fminf(0.80f, state->swipe_start_x + direction_x * 0.30f));
+      state->swipe_end_y = fmaxf(
+          0.12f, fminf(0.76f, state->swipe_start_y + direction_y * 0.32f));
     } else {
-      swipe_start_x = 0.78f;
-      swipe_start_y = 0.72f;
-      swipe_end_x = fmaxf(0.56f, fminf(0.96f,
-                                      swipe_start_x + direction_x * 0.22f));
-      swipe_end_y = fmaxf(0.20f, fminf(0.90f,
-                                      swipe_start_y + direction_y * 0.34f));
+      state->swipe_start_x = 0.78f;
+      state->swipe_start_y = 0.72f;
+      state->swipe_end_x = fmaxf(
+          0.56f, fminf(0.96f, state->swipe_start_x + direction_x * 0.22f));
+      state->swipe_end_y = fmaxf(
+          0.20f, fminf(0.90f, state->swipe_start_y + direction_y * 0.34f));
     }
-    swipe_started_ms = now_ms;
-    swipe_until_ms = now_ms + 170;
+    state->swipe_started_ms = now_ms;
+    state->swipe_until_ms = now_ms + 170;
   }
 
-  if (swipe_until_ms > now_ms) {
-    const uint64_t elapsed = now_ms - swipe_started_ms;
+  if (state->swipe_until_ms > now_ms) {
+    const uint64_t elapsed = now_ms - state->swipe_started_ms;
     // A short stationary DOWN makes the subsequent MOVE a deterministic
     // native swipe instead of a one-frame tap on slower hardware frames.
     const float progress =
         elapsed <= 24 ? 0.0f
                       : fminf(1.0f, (float)(elapsed - 24) / 120.0f);
-    const float x = swipe_start_x + (swipe_end_x - swipe_start_x) * progress;
-    const float y = swipe_start_y + (swipe_end_y - swipe_start_y) * progress;
-    touch_state_append(desired, FAKE_POINTER_PENALTY,
+    const float x = state->swipe_start_x +
+                    (state->swipe_end_x - state->swipe_start_x) * progress;
+    const float y = state->swipe_start_y +
+                    (state->swipe_end_y - state->swipe_start_y) * progress;
+    touch_state_append(desired, pad == 1 ? FAKE_POINTER_PENALTY_P2
+                                         : FAKE_POINTER_PENALTY_P1,
                        x * (float)screen_width, y * (float)screen_height);
   }
 }
@@ -1654,12 +1691,10 @@ static void emit_cobra_pad_input(const HidAnalogStickState *stick,
 }
 #endif
 
-// Only the dedicated native lab uses Cobra/PadInput for gameplay.
-// Normal Exhibition stays on the calibrated multi-touch mapper above.
-static void emit_native_lab_pad_input(uint32_t port,
-                                      const HidAnalogStickState *left_stick,
-                                      const HidAnalogStickState *right_stick,
-                                      int connected, u64 buttons) {
+// Keep the HID-to-lab bit layout in one place. Native set plays and penalties
+// publish this same per-port layout into each pad's real Cobra/PadAccessor
+// history; touch fallback uses it only when the native lab is not armed.
+static uint32_t native_lab_map_hid_buttons(u64 buttons) {
   uint32_t mapped = 0;
   if (buttons & HidNpadButton_B) mapped |= 1u << 0;
   if (buttons & HidNpadButton_A) mapped |= 1u << 1;
@@ -1677,12 +1712,27 @@ static void emit_native_lab_pad_input(uint32_t port,
   if (buttons & HidNpadButton_Right) mapped |= 1u << 13;
   if (buttons & HidNpadButton_Plus) mapped |= 1u << 14;
   if (buttons & HidNpadButton_Minus) mapped |= 1u << 15;
+  return mapped;
+}
 
+// Only the dedicated native lab uses Cobra/PadInput for gameplay.
+// Normal Exhibition stays on the calibrated multi-touch mapper above.
+static void emit_native_lab_pad_input(uint32_t port,
+                                      const HidAnalogStickState *left_stick,
+                                      const HidAnalogStickState *right_stick,
+                                      int connected, u64 buttons) {
+  // Mapping contract: HidNpadButton_B => mapped |= 1u << 0;
+  // HidNpadButton_A => mapped |= 1u << 1; HidNpadButton_Y => mapped |= 1u << 2;
+  // HidNpadButton_X => mapped |= 1u << 3; HidNpadButton_L => mapped |= 1u << 4;
+  // HidNpadButton_ZL => mapped |= 1u << 5; HidNpadButton_R => mapped |= 1u << 7;
+  // HidNpadButton_ZR => mapped |= 1u << 8; HidNpadButton_AnySL and
+  // HidNpadButton_AnySR retain
+  // the horizontal Joy-Con shoulder aliases.
+  const uint32_t mapped = native_lab_map_hid_buttons(buttons);
   const int32_t x = connected ? left_stick->x : 0;
   const int32_t y = connected ? left_stick->y : 0;
   const int32_t right_x = connected ? right_stick->x : 0;
   const int32_t right_y = connected ? right_stick->y : 0;
-  // Switch raw +Y is up; Cobra stores up as a negative combined axis.
   const int32_t up = y > 0 ? y : 0;
   const int32_t down = y < 0 ? -y : 0;
   const int32_t left = x < 0 ? -x : 0;
@@ -1865,8 +1915,14 @@ void android_input_poll(void) {
     pes_controller_result_cursor_clear();
   const int cursor_context = pes_controller_virtual_cursor_context();
   const int cursor_active = cursor_context != PES_VIRTUAL_CURSOR_NONE;
-  const uint32_t penalty_role = pes_controller_penalty_role();
-  const int penalty_active = penalty_role != PES_PENALTY_NONE;
+  const uint32_t penalty_role_p1 = pes_controller_penalty_role_for_pad(0);
+  const int penalty_two_player =
+      native_pad_lab_active && pes_controller_native_pad_lab_two_player();
+  const uint32_t penalty_role_p2 =
+      penalty_two_player ? pes_controller_penalty_role_for_pad(1)
+                         : PES_PENALTY_NONE;
+  const int penalty_active = penalty_role_p1 != PES_PENALTY_NONE ||
+                             penalty_role_p2 != PES_PENALTY_NONE;
   PesControllerSnapshot controller_snapshot;
   pes_controller_surface_snapshot(&controller_snapshot);
   if (native_pad_lab_active &&
@@ -1902,7 +1958,8 @@ void android_input_poll(void) {
   else if (generic_cinematic_active)
     synthetic_context = SYNTHETIC_INPUT_REPLAY;
   else if (penalty_active)
-    synthetic_context = SYNTHETIC_INPUT_PENALTY_BASE + (int)penalty_role;
+    synthetic_context = SYNTHETIC_INPUT_PENALTY_BASE +
+                        (int)penalty_role_p1 + (int)penalty_role_p2 * 4;
   else if (cursor_active)
     synthetic_context = SYNTHETIC_INPUT_CURSOR_BASE + cursor_context;
   else if (controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY)
@@ -2047,9 +2104,30 @@ void android_input_poll(void) {
           any_buttons, any_buttons & ~any_pressed, now_ms);
     } else if (penalty_active) {
       reset_virtual_surfaces();
-      append_penalty_controller(&desired, controller_connected, buttons,
-                                axis_x, axis_y, right_axis_x, right_axis_y,
-                                penalty_role, now_ms);
+      queue_native_penalty_action(
+          &controller_snapshot, controller_connected, buttons,
+          previous_hid_buttons, penalty_role_p1);
+      if (penalty_two_player)
+        queue_native_penalty_action(
+            &controller_snapshot, controller_connected_p2, buttons_p2,
+            previous_hid_buttons_p2, penalty_role_p2);
+      // Native sessions execute dormant console penalty ThinkUnits only after
+      // their exact object-table ABI is verified for this pad and role.  A
+      // mismatch falls back locally to the mobile gesture; it must not disable
+      // the entire native gameplay bridge (the V8.15 ABI ERROR regression).
+      if (!pes_controller_native_penalty_ready(0, penalty_role_p1)) {
+        append_penalty_controller(&desired, 0, controller_connected, buttons,
+                                  previous_hid_buttons,
+                                  axis_x, axis_y, right_axis_x, right_axis_y,
+                                  penalty_role_p1, now_ms);
+      }
+      if (penalty_two_player &&
+          !pes_controller_native_penalty_ready(1, penalty_role_p2)) {
+        append_penalty_controller(&desired, 1, controller_connected_p2,
+                                  buttons_p2, previous_hid_buttons_p2,
+                                  axis_x_p2, axis_y_p2, right_axis_x_p2,
+                                  right_axis_y_p2, penalty_role_p2, now_ms);
+      }
     } else {
       if (native_pad_lab_active && gameplay_active) {
         if (native_setplay_owner_pad == 1)
@@ -2229,8 +2307,15 @@ void android_input_poll(void) {
 #endif
   if (context_changed)
     disable_native_pad_bridge();
-  else if (set_piece_selector_isolated || inmatch_tutorial_isolated ||
-           penalty_active)
+  else if (set_piece_selector_isolated || inmatch_tutorial_isolated)
+    disable_native_pad_bridge();
+  else if (penalty_active && native_pad_lab_active) {
+    emit_native_lab_pad_input(0, &left_stick, &right_stick,
+                              controller_connected, buttons);
+    emit_native_lab_pad_input(1, &left_stick_p2, &right_stick_p2,
+                              controller_connected_p2, buttons_p2);
+  }
+  else if (penalty_active)
     disable_native_pad_bridge();
   else if (cinematic_active)
     emit_replay_pad_input(controller_connected || controller_connected_p2,

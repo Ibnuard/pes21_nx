@@ -716,8 +716,22 @@ static _Alignas(8) uint64_t match_result_started_tick;
 static _Alignas(8) uint64_t match_gameplan_seen_tick;
 static _Alignas(8) uint64_t match_kicker_select_seen_tick;
 static _Alignas(4) uint32_t match_native_setplay_context;
-static _Alignas(4) uint32_t match_penalty_role;
-static _Alignas(8) uint64_t match_penalty_seen_tick;
+// Penalty units for the kicker and goalkeeper are evaluated independently.
+// A single global role lets whichever unit runs last steal the input surface,
+// which made P1's LS behave like a keeper swipe and left P2 with no controls.
+static _Alignas(4) uint32_t match_penalty_role_by_pad[2];
+static _Alignas(8) uint64_t match_penalty_seen_tick_by_pad[2];
+// ThinkUnitList has the exact local PadAccessor binding and is authoritative
+// in the 2P lab.  The mobile Main callbacks remain a fallback for Exhibition
+// and for the short interval before a list heartbeat arrives.
+static _Alignas(4) uint32_t match_penalty_role_source_by_pad[2];
+// Android's ScreenTap queue is process-global, so two local penalty units can
+// otherwise inspect the same directional flick. The input thread publishes a
+// short-lived role owner around each synthetic swipe; the opposite unit is
+// ignored for that window and cannot turn a P2 keeper flick into P1's kick.
+static _Alignas(4) uint32_t match_penalty_touch_owner_role;
+static _Alignas(4) uint32_t match_penalty_touch_owner_pad;
+static _Alignas(8) uint64_t match_penalty_touch_owner_started_tick;
 static _Alignas(8) uintptr_t match_button_setplay_owner;
 static _Alignas(8) uint64_t match_button_setplay_seen_tick;
 static _Alignas(4) uint32_t match_button_setplay_mask;
@@ -6471,62 +6485,170 @@ static void match_native_setplay_publish(uint32_t context) {
                      __ATOMIC_RELEASE);
 }
 
-static void match_native_penalty_publish(uint32_t role) {
-  if (__atomic_load_n(&match_penalty_role, __ATOMIC_RELAXED) != role)
-    __atomic_store_n(&match_penalty_role, role, __ATOMIC_RELEASE);
-  __atomic_store_n(&match_penalty_seen_tick, armGetSystemTick(),
+static uint32_t match_native_penalty_input_pad(const void *input) {
+  if (!input)
+    return 0;
+  uint32_t player_no = UINT32_MAX;
+  memcpy(&player_no, (const char *)input + 0x24, sizeof(player_no));
+  if (player_no < 22u)
+    return player_no >= 11u ? 1u : 0u;
+  const void *cursor = *(void *const *)((const char *)input + 0x08);
+  int32_t stored_pad = -1;
+  if (cursor)
+    memcpy(&stored_pad, (const char *)cursor + 16, sizeof(stored_pad));
+  return stored_pad == 1 ? 1u : 0u;
+}
+
+static void match_native_penalty_publish_for_pad(uint32_t role,
+                                                 uint32_t pad) {
+  if (pad > 1u || (role != PES_PENALTY_KICKER &&
+                   role != PES_PENALTY_GOALKEEPER))
+    return;
+  if (__atomic_load_n(&match_penalty_role_by_pad[pad], __ATOMIC_RELAXED) !=
+      role)
+    __atomic_store_n(&match_penalty_role_by_pad[pad], role,
+                     __ATOMIC_RELEASE);
+  __atomic_store_n(&match_penalty_role_source_by_pad[pad],
+                   pes_controller_native_pad_lab_two_player() ? 1u : 0u,
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&match_penalty_seen_tick_by_pad[pad], armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+  // A two-player penalty always has one kicker and one goalkeeper.  The
+  // mobile list can expose only the active side's unit during an idle frame,
+  // so seed the opposite controller immediately instead of leaving P2 with
+  // no role until its own list wakes up.
+  if (pes_controller_native_pad_lab_two_player()) {
+    const uint32_t other = pad ^ 1u;
+    const uint32_t opposite = role == PES_PENALTY_KICKER
+                                  ? PES_PENALTY_GOALKEEPER
+                                  : PES_PENALTY_KICKER;
+    __atomic_store_n(&match_penalty_role_by_pad[other], opposite,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&match_penalty_seen_tick_by_pad[other],
+                     armGetSystemTick(), __ATOMIC_RELEASE);
+  }
+}
+
+void pes_controller_penalty_touch_owner_set(uint32_t pad, uint32_t role) {
+  if (pad > 1u || (role != PES_PENALTY_KICKER &&
+                   role != PES_PENALTY_GOALKEEPER))
+    return;
+  __atomic_store_n(&match_penalty_touch_owner_pad, pad, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_penalty_touch_owner_role, role, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_penalty_touch_owner_started_tick,
+                   armGetSystemTick(), __ATOMIC_RELEASE);
+}
+
+static int pes_controller_penalty_touch_owner_blocks(
+    uint32_t callback_role, const void *input) {
+  const uint64_t started = __atomic_load_n(
+      &match_penalty_touch_owner_started_tick, __ATOMIC_ACQUIRE);
+  if (!started || armTicksToNs(armGetSystemTick() - started) > 350000000ULL)
+    return 0;
+  const uint32_t owner_role = __atomic_load_n(
+      &match_penalty_touch_owner_role, __ATOMIC_ACQUIRE);
+  const uint32_t owner_pad = __atomic_load_n(
+      &match_penalty_touch_owner_pad, __ATOMIC_ACQUIRE);
+  return owner_role != PES_PENALTY_NONE &&
+         (owner_role != callback_role ||
+          owner_pad != match_native_penalty_input_pad(input));
+}
+
+static void match_native_penalty_publish(uint32_t role, const void *input) {
+  const uint32_t pad = match_native_penalty_input_pad(input);
+  if (pad > 1u)
+    return;
+  // A list-published role must not be overwritten by the other shared mobile
+  // unit callback.  Refresh its heartbeat, but retain the pad-owned role.
+  if (__atomic_load_n(&match_penalty_role_source_by_pad[pad],
+                      __ATOMIC_ACQUIRE) == 1u) {
+    __atomic_store_n(&match_penalty_seen_tick_by_pad[pad],
+                     armGetSystemTick(), __ATOMIC_RELEASE);
+    return;
+  }
+  match_native_penalty_publish_for_pad(role, pad);
 }
 
 static uint32_t pes_match_penalty_kicker_main(void *unit,
                                                const void *input,
                                                uint32_t kind) {
-  const uint32_t result = match_penalty_kicker_main_original
-                              ? match_penalty_kicker_main_original(unit,
-                                                                    input,
-                                                                    kind)
-                              : 0;
-  // ThinkUnitBase::m_active is byte +24. Only the active mobile penalty unit
-  // may own the controller surface; idle objects must not race the keeper.
-  if (unit && input && *((const uint8_t *)unit + 24))
-    match_native_penalty_publish(PES_PENALTY_KICKER);
+  const uint32_t pad = match_native_penalty_input_pad(input);
+  const int native_ready = pes_controller_native_penalty_ready(
+      pad, PES_PENALTY_KICKER);
+  const uint32_t result =
+      !native_ready &&
+              !pes_controller_penalty_touch_owner_blocks(PES_PENALTY_KICKER,
+                                                          input) &&
+              match_penalty_kicker_main_original
+          ? match_penalty_kicker_main_original(unit, input, kind)
+          : 0;
+  // The list heartbeat is authoritative when available; this remains a
+  // fallback for Exhibition and the first penalty frame.
+  if (unit && input)
+    match_native_penalty_publish(PES_PENALTY_KICKER, input);
   return result;
 }
 
 static uint32_t pes_match_penalty_goalkeeper_main(void *unit,
                                                    const void *input,
                                                    uint32_t kind) {
+  const uint32_t pad = match_native_penalty_input_pad(input);
+  const int native_ready = pes_controller_native_penalty_ready(
+      pad, PES_PENALTY_GOALKEEPER);
   const uint32_t result =
-      match_penalty_goalkeeper_main_original
+      !native_ready &&
+              !pes_controller_penalty_touch_owner_blocks(
+                  PES_PENALTY_GOALKEEPER, input) &&
+              match_penalty_goalkeeper_main_original
           ? match_penalty_goalkeeper_main_original(unit, input, kind)
           : 0;
-  if (unit && input && *((const uint8_t *)unit + 24))
-    match_native_penalty_publish(PES_PENALTY_GOALKEEPER);
+  if (unit && input)
+    match_native_penalty_publish(PES_PENALTY_GOALKEEPER, input);
   return result;
 }
 
 static uint32_t pes_match_penalty_goalkeeper_move_main(void *unit,
                                                         const void *input,
                                                         uint32_t kind) {
+  const uint32_t pad = match_native_penalty_input_pad(input);
+  const int native_ready = pes_controller_native_penalty_ready(
+      pad, PES_PENALTY_GOALKEEPER);
   const uint32_t result =
-      match_penalty_goalkeeper_move_main_original
+      !native_ready &&
+              !pes_controller_penalty_touch_owner_blocks(
+                  PES_PENALTY_GOALKEEPER, input) &&
+              match_penalty_goalkeeper_move_main_original
           ? match_penalty_goalkeeper_move_main_original(unit, input, kind)
           : 0;
   // The nested GKMove unit is the object that actually consumes ScreenTap's
   // right-half swipe and calculates the save angle. Its heartbeat is the
   // authoritative keeper state even if the outer unit changes lifecycle.
-  if (unit && input && *((const uint8_t *)unit + 24))
-    match_native_penalty_publish(PES_PENALTY_GOALKEEPER);
+  if (unit && input)
+    match_native_penalty_publish(PES_PENALTY_GOALKEEPER, input);
   return result;
 }
 
-uint32_t pes_controller_penalty_role(void) {
-  const uint64_t seen = __atomic_load_n(&match_penalty_seen_tick,
+uint32_t pes_controller_penalty_role_for_pad(uint32_t pad) {
+  if (pad > 1u)
+    return PES_PENALTY_NONE;
+  const uint64_t seen = __atomic_load_n(&match_penalty_seen_tick_by_pad[pad],
                                          __ATOMIC_ACQUIRE);
   if (!seen ||
-      armTicksToNs(armGetSystemTick() - seen) > 250000000ULL)
+      armTicksToNs(armGetSystemTick() - seen) > 600000000ULL)
+  {
+    __atomic_store_n(&match_penalty_role_by_pad[pad], PES_PENALTY_NONE,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&match_penalty_role_source_by_pad[pad], 0,
+                     __ATOMIC_RELEASE);
     return PES_PENALTY_NONE;
-  return __atomic_load_n(&match_penalty_role, __ATOMIC_ACQUIRE);
+  }
+  return __atomic_load_n(&match_penalty_role_by_pad[pad], __ATOMIC_ACQUIRE);
+}
+
+uint32_t pes_controller_penalty_role(void) {
+  const uint32_t p1 = pes_controller_penalty_role_for_pad(0);
+  return p1 != PES_PENALTY_NONE ? p1
+                                : pes_controller_penalty_role_for_pad(1);
 }
 
 void pes_controller_cinematic_update(int gameplay_active, int control_mode,
