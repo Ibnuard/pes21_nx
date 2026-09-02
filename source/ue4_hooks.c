@@ -32,6 +32,14 @@ typedef struct {
   uint32_t growths;
 } ObjectInitializerArrayState;
 
+// math::Vector3 is a three-float homogeneous aggregate on this AArch64 build.
+// Keep the by-value type exact for ModelBase::ProjectPos3DToScreen's ABI.
+typedef struct {
+  float x;
+  float y;
+  float z;
+} Match2DVector3;
+
 static ObjectInitializerArrayState object_initializer_states[
     OBJECT_INITIALIZER_STATE_SLOTS];
 static void *(*ue4_fmemory_malloc)(uint64_t size, uint32_t alignment);
@@ -44,6 +52,7 @@ static _Alignas(4) uint32_t cobra_pad_right_input_p2;
 static _Alignas(4) uint32_t cobra_pad_connected_p2;
 static void *(*cobra_pad_get_pad)(uint32_t pad_no);
 static void native_pad_lab_reset(void);
+static void native_pad_lab_enable_exhibition(void);
 static uintptr_t cobra_pad_update_resume;
 static uintptr_t mobile_screen_tap_entry_resume;
 static uintptr_t exhibition_flow_create_resume;
@@ -195,6 +204,8 @@ static uint32_t (*match_goal_demo_get_goal_side)(const void *registry);
 static uint32_t (*match_goal_demo_is_cpu_goal)(void *goal_demo,
                                                const void *registry);
 static void *(*match_global_registry_get_instance)(void);
+static const void *(*match_global_registry_get_player_move)(
+    const void *registry, uint32_t player_no);
 static uint32_t (*match_cursor_is_user_control_team)(
     const void *cursor_info, uint32_t home_away, uint32_t cursor_change_type);
 static uint32_t (*match_goalkick_main_original)(void *unit,
@@ -214,6 +225,7 @@ static uint32_t (*match_kicker_select_is_disp_enable)(const void *input);
 static uint32_t (*match_goal_demo_pad_main_original)(void *unit,
                                                      const void *input,
                                                      uint32_t kind);
+static void (*match_goal_button_update_original)(void *window);
 static uint32_t (*match_penalty_kicker_main_original)(void *unit,
                                                        const void *input,
                                                        uint32_t kind);
@@ -277,6 +289,10 @@ static int32_t (*match_node_set_alpha)(void *node, float alpha);
 static void *(*match_setplay_get_root)(void *window);
 static void (*match_visual_model_action_original)(void *manager);
 static void (*match_visual_model_set_disp)(void *model, uint32_t visible);
+static uint32_t (*match_cursor_name_get_position_original)(
+    void *model, uint32_t index, Match2DVector3 *position);
+static void (*match_model_project_pos_3d_to_screen)(
+    void *model, Match2DVector3 position, float *screen_x, float *screen_y);
 static void *(*exhibition_holder_get_duplicate)(void *holder,
                                                  uint32_t index);
 static void (*exhibition_node_set_visible)(void *node, uint32_t visible,
@@ -4515,6 +4531,10 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
 void pes_main_menu_simplify(void *window) {
   static int logged;
   main_menu_match_page = NULL;
+  // A return to the Match menu is the session boundary for both the lab and
+  // Exhibition's native bridge. Clear set-piece/gauge state before disabling
+  // the bridge so no trajectory or charge can leak into the next match.
+  native_pad_lab_reset();
   if (!window || !exhibition_window_get_window ||
       !exhibition_node_set_visible)
     return;
@@ -5252,6 +5272,19 @@ static void pes_exhibition_strategy_footer(void *window,
     exhibition_apply_match_settings(NULL);
     __atomic_store_n(&exhibition_match_settings_armed, 1,
                      __ATOMIC_RELEASE);
+    // Strategy Play is the first point at which Exhibition is committed to a
+    // live local match. Keep its setup/search UI on the existing path, then
+    // switch only the gameplay bridge to the same native action route used by
+    // the two-player lab. This prevents Exhibition from falling back to the
+    // old ZR/X/Y touch legend in corner, goal-kick, free-kick and throw-in.
+    // Tile 2 has already armed both local pad owners. Do not run the
+    // Exhibition initializer here: it deliberately clears two_player for the
+    // P1-vs-CPU route. Preserve the stable P1-vs-P2 ownership through
+    // MatchSetup; ordinary Exhibition still enables only P1 below.
+    if (!pes_controller_native_pad_lab_two_player())
+      native_pad_lab_enable_exhibition();
+    else
+      debugPrintf("native 2P lab: preserving P1-vs-P2 gameplay bridge\n");
   }
 
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
@@ -5449,9 +5482,9 @@ uint32_t pes_mobile_control_context(int *mode) {
   return generation;
 }
 
-// Native pad input is useful for menu and matchmaking widgets. Normal live
-// gameplay remains on the calibrated multi-touch mapping in android_shim.c;
-// only the explicitly armed 2P lab uses the native gameplay path.
+// Native pad input is useful for menu and matchmaking widgets. Live gameplay
+// switches to the native bridge only after an explicit local session arm:
+// either the two-player lab tile or Exhibition's Strategy Play commit.
 int pes_controller_menu_active(void) {
   return pes_controller_start_prompt(NULL, NULL) ||
          __atomic_load_n(&main_menu_graphics_active, __ATOMIC_ACQUIRE) ||
@@ -5921,6 +5954,14 @@ static uint32_t match_goal_demo_resolve_owner(void *goal_demo,
 
   if (match_goal_demo_get_goal_side && exhibition_get_match_my_side) {
     const uint32_t goal_side = match_goal_demo_get_goal_side(registry);
+    // Both sides are locally owned in the native 2P lab. GoalSide still
+    // selects the correct scorer, but either HOME or AWAY must be allowed to
+    // trigger Goal Celebration. The own-goal predicate below remains the
+    // authoritative override and will force the action back to skip-only.
+    if (goal_side < 2u && pes_controller_native_pad_lab_two_player()) {
+      *player_goal = 1u;
+      return 1;
+    }
     const uint32_t user_side = exhibition_get_match_my_side();
     if (goal_side < 2u && user_side < 2u) {
       *player_goal = goal_side == user_side;
@@ -6053,6 +6094,21 @@ static uint32_t pes_match_goal_demo_pad_main(void *unit, const void *input,
       match_goal_demo_refresh_owner();
   }
   return result;
+}
+
+static void pes_match_goal_button_update(void *window) {
+  if (match_goal_button_update_original)
+    match_goal_button_update_original(window);
+  if (!window || !pes_controller_native_pad_lab_active() ||
+      !match_node_set_alpha || !match_setplay_get_root)
+    return;
+
+  // Visual alpha only. NeedDisp and the ButtonObject remain alive so the
+  // existing 90 ms celebration/skip touch bridge stays functional for both
+  // local players while only our bottom-right Joy-Con helper is visible.
+  void *root = match_setplay_get_root(window);
+  if (root)
+    match_node_set_alpha(root, 0.0f);
 }
 
 int pes_controller_goal_demo_active(void) {
@@ -7769,9 +7825,22 @@ static void pes_match_visual_model_action(void *manager) {
   // the resulting assist draw objects; power/name/2D HUD paths are untouched.
   if (match_visual_model_action_original)
     match_visual_model_action_original(manager);
-  pes_hide_pitch_assists(manager,
-      __atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE),
-      match_visual_model_set_disp);
+  int show = __atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE);
+  const uint32_t setplay_context =
+      pes_controller_native_pad_lab_setplay_context();
+  int native_setplay_trajectory = 0;
+  if (pes_controller_native_pad_lab_active()) {
+    if (setplay_context == PES_SETPLAY_GOAL_KICK ||
+        setplay_context == PES_SETPLAY_CORNER ||
+        setplay_context == PES_SETPLAY_FREE_KICK) {
+      show = 0;
+      native_setplay_trajectory =
+          pes_controller_native_pad_lab_trajectory_enabled();
+    }
+  }
+  pes_hide_pitch_assists(manager, show, match_visual_model_set_disp);
+  if (native_setplay_trajectory)
+    pes_set_pitch_trajectory(manager, 1, match_visual_model_set_disp);
 }
 
 static void patch_checked_u32(uintptr_t address, uint32_t expected,
@@ -7903,6 +7972,104 @@ extern void ue4_object_initializer_resize_hook(void);
 
 #include "friend_press.inc"
 #include "native_pad_lab.inc"
+
+static uint32_t pes_match_cursor_name_get_position(
+    void *model, uint32_t index, Match2DVector3 *position) {
+  const uint32_t result = match_cursor_name_get_position_original
+                              ? match_cursor_name_get_position_original(
+                                    model, index, position)
+                              : 0;
+  // ModelCursorName owns four draw models: indices 0/1 are the always-visible
+  // HOME/AWAY controlled-player names, while 2/3 are NPC name layers. Unlike
+  // ModelStaminaGauge this source is live even when stamina display is disabled.
+  // Its returned position, however, is the name target above the player's
+  // head. Resolve PlayerMove::trans (+0x55c, confirmed by InplayCamera and
+  // SnapShot call sites) so the custom gauge is anchored at the model's feet.
+  if (!result || !position || index > 1u ||
+      !pes_controller_native_pad_lab_active() ||
+      !match_model_project_pos_3d_to_screen ||
+      !match_global_registry_get_instance ||
+      !match_global_registry_get_player_move)
+    return result;
+
+  const uint32_t active_mask = __atomic_load_n(
+      &native_lab_gauge_active_mask, __ATOMIC_ACQUIRE);
+  const uint32_t charging_mask = __atomic_load_n(
+      &native_lab_gauge_charging_mask, __ATOMIC_ACQUIRE);
+  const void *registry = match_global_registry_get_instance();
+  if (!registry)
+    return result;
+
+  // CursorName indices describe HOME/AWAY, not controller ports. Resolve each
+  // active pad by its latched action PlayerNo so Exhibition-away and P2 never
+  // inherit index 0's home goalkeeper anchor.
+  for (uint32_t pad = 0; pad < 2; ++pad) {
+    const uint32_t pad_bit = 1u << pad;
+    if (!(active_mask & pad_bit))
+      continue;
+    const uint32_t action_player_no = __atomic_load_n(
+        &native_lab_gauge_player_no_by_pad[pad], __ATOMIC_ACQUIRE);
+    if (action_player_no > 21u ||
+        (action_player_no >= 11u ? 1u : 0u) != index)
+      continue;
+
+    const void *player_move = match_global_registry_get_player_move(
+        registry, action_player_no);
+    if (!player_move) {
+      __atomic_store_n(&native_lab_gauge_anchor_ttl[pad], 0,
+                       __ATOMIC_RELEASE);
+      continue;
+    }
+
+    Match2DVector3 foot_position;
+    memcpy(&foot_position, (const char *)player_move + 0x55c,
+           sizeof(foot_position));
+    float screen_x = 0.0f;
+    float screen_y = 0.0f;
+    match_model_project_pos_3d_to_screen(model, foot_position,
+                                         &screen_x, &screen_y);
+    if (isfinite(screen_x) && isfinite(screen_y) &&
+        fabsf(screen_x) < 100000.0f && fabsf(screen_y) < 100000.0f) {
+      __atomic_store_n(&native_lab_gauge_anchor_x_milli[pad],
+                       (int32_t)(screen_x * 1000.0f), __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_anchor_y_milli[pad],
+                       (int32_t)(screen_y * 1000.0f), __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_anchor_ttl[pad], 12u,
+                       __ATOMIC_RELEASE);
+    } else {
+      __atomic_store_n(&native_lab_gauge_anchor_ttl[pad], 0,
+                       __ATOMIC_RELEASE);
+    }
+
+    // Releasing a button only freezes the visible power. Completion is real
+    // displacement of BallInfo followed by separation from the action
+    // player's foot, so the bar survives the remaining kick animation.
+    if (!(charging_mask & pad_bit) && match_ball_info_get_trans) {
+      const void *ball_info = NULL;
+      // GlobalRegistry::OpenRead stores its live BallInfo read pointer at +0x90.
+      memcpy(&ball_info, (const char *)registry + 0x90, sizeof(ball_info));
+      const float *ball =
+          ball_info ? match_ball_info_get_trans(ball_info) : NULL;
+      if (ball && isfinite(ball[0]) && isfinite(ball[1]) &&
+          isfinite(ball[2]))
+        native_lab_gauge_observe_released_ball(
+            pad, ball[0], ball[1], ball[2], foot_position.x,
+            foot_position.y, foot_position.z);
+    }
+  }
+  return result;
+}
+
+static void native_pad_lab_enable_exhibition(void) {
+  // Reuse the exact native-pad state reset used by the two-player lab. The
+  // Exhibition bridge owns only P1, so P2 remains disconnected from gameplay
+  // while the action/set-piece implementation stays identical.
+  native_pad_lab_reset();
+  __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_autostart, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_two_player, 0, __ATOMIC_RELEASE);
+  debugPrintf("native pad: Exhibition gameplay bridge armed (P1)\n");
+}
 
 void install_ue4_hooks(so_module *module) {
   install_friend_press_prototype(module);
@@ -8391,6 +8558,56 @@ void install_ue4_hooks(so_module *module) {
   match_visual_model_action_original = (void *)visual_action_runtime;
   match_visual_model_set_disp = (void *)so_find_addr_rx(module, visual_set_disp_symbol);
   *visual_action_slot = (uintptr_t)&pes_match_visual_model_action;
+
+  // Reuse the engine's own active-cursor world position and camera projection
+  // for the custom power gauge. This is the same always-live model that places
+  // the stock cursor names, so P1/P2 anchors follow the controlled 3D players
+  // through camera movement instead of being guessed from HUD coordinates.
+  const char *cursor_position_symbol =
+      "_ZN7match2D6Screen15ModelCursorName11GetPositionEjRN4math7Vector3E";
+  const char *project_position_symbol =
+      "_ZN7match2D6Screen9ModelBase20ProjectPos3DToScreenEN4math7Vector3ERfS4_";
+  const char *player_move_symbol =
+      "_ZNK5match8registry14GlobalRegistry13GetPlayerMoveE8PlayerNo";
+  const uintptr_t cursor_position =
+      so_find_addr(module, cursor_position_symbol);
+  const uintptr_t cursor_position_runtime =
+      so_find_addr_rx(module, cursor_position_symbol);
+  const uintptr_t project_position =
+      so_find_addr(module, project_position_symbol);
+  const uintptr_t player_move = so_find_addr(module, player_move_symbol);
+  static const uint32_t cursor_position_expected[4] = {
+      0x6db92beb, 0x6d0123e9, 0xa90363f9, 0xa9045bf7};
+  static const uint32_t project_position_expected[4] = {
+      0xd10383ff, 0x6d0b23e9, 0xa90c53f5, 0xa90d7bf3};
+  static const uint32_t player_move_expected[4] = {
+      0x52800a08, 0x52865409, 0x9ba80028, 0x8b09000a};
+  if (!cursor_position || !cursor_position_runtime || !project_position ||
+      !player_move ||
+      memcmp((const void *)cursor_position, cursor_position_expected,
+             sizeof(cursor_position_expected)) != 0 ||
+      memcmp((const void *)project_position, project_position_expected,
+             sizeof(project_position_expected)) != 0 ||
+      memcmp((const void *)player_move, player_move_expected,
+             sizeof(player_move_expected)) != 0)
+    fatal_error("Unexpected ModelCursorName projection ABI");
+  uintptr_t *cursor_position_slot = find_vtable_method_slot(
+      module, "_ZTVN7match2D6Screen15ModelCursorNameE",
+      cursor_position_runtime, 64);
+  if (!cursor_position_slot)
+    fatal_error("ModelCursorName GetPosition vtable slot not found");
+  match_cursor_name_get_position_original =
+      (void *)cursor_position_runtime;
+  match_model_project_pos_3d_to_screen =
+      (void *)so_find_addr_rx(module, project_position_symbol);
+  match_global_registry_get_player_move =
+      (void *)so_find_addr_rx(module, player_move_symbol);
+  *cursor_position_slot =
+      (uintptr_t)&pes_match_cursor_name_get_position;
+  debugPrintf("UE4 input: dynamic gauge cursor anchor=%p/%p project=%p\n",
+              (void *)cursor_position_runtime,
+              (void *)cursor_position_slot,
+              match_model_project_pos_3d_to_screen);
 
   // Gate the custom A prompt to the real title-window lifecycle. Initializing
   // it statically made the glyph visible during the long UE4 boot sequence.
@@ -8996,6 +9213,18 @@ void install_ue4_hooks(so_module *module) {
     fatal_error("InteractiveGoalDemo Main vtable slot not found");
   match_goal_demo_pad_main_original = (void *)goal_demo_pad_main_runtime;
   *goal_demo_pad_main_slot = (uintptr_t)&pes_match_goal_demo_pad_main;
+
+  const char *goal_button_update_symbol =
+      "_ZN7match2D6Screen21ButtonGoalPerformance25UpdatePreControlWindowSubEv";
+  const uintptr_t goal_button_update_runtime =
+      so_find_addr_rx(module, goal_button_update_symbol);
+  uintptr_t *goal_button_update_slot = find_vtable_method_slot(
+      module, "_ZTVN7match2D6Screen21ButtonGoalPerformanceE",
+      goal_button_update_runtime, 128);
+  if (!goal_button_update_slot)
+    fatal_error("ButtonGoalPerformance update vtable slot not found");
+  match_goal_button_update_original = (void *)goal_button_update_runtime;
+  *goal_button_update_slot = (uintptr_t)&pes_match_goal_button_update;
 
   const char *setplay_camera_main_symbol =
       "_ZN5match3pad34ThinkUnitMobileSetplayCameraChange4MainERKNS0_18ThinkUnitInputDataENS0_13ThinkUnitKindE";

@@ -1310,6 +1310,11 @@ static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
        (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER)))
     pes_controller_setplay_request(PES_SETPLAY_BUTTON_SET_PIECE_TAKER,
                                    ui->generation);
+  else if (ui->setplay_context == PES_SETPLAY_THROW_IN &&
+           (ui->setplay_button_mask &
+            (1u << PES_SETPLAY_BUTTON_SELECT_THROWER)))
+    pes_controller_setplay_request(PES_SETPLAY_BUTTON_SELECT_THROWER,
+                                   ui->generation);
 }
 
 static void queue_set_piece_selector_input(int connected, u64 buttons,

@@ -104,6 +104,14 @@ def audit(path):
              '_ZN5match3pad28ThinkUnitGoalkickPassSupport8ExecPullERKNS0_18ThinkUnitInputDataE'),
             ('_ZTVN5match3pad26ThinkUnitMobileSetplayKickE',
              '_ZN5match3pad26ThinkUnitMobileSetplayKick4MainERKNS0_18ThinkUnitInputDataENS0_13ThinkUnitKindE'),
+            ('_ZTVN5match3pad18ThinkUnitShortPassE',
+             '_ZN5match3pad13ThinkUnitBase12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE'),
+            ('_ZTVN5match3pad17ThinkUnitLongPassE',
+             '_ZN5match3pad13ThinkUnitBase12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE'),
+            ('_ZTVN5match3pad14ThinkUnitShootE',
+             '_ZN5match3pad13ThinkUnitBase12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE'),
+            ('_ZTVN5match3pad26ThinkUnitMobileSetplayKickE',
+             '_ZN5match3pad26ThinkUnitMobileSetplayKick12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE'),
             ('_ZTVN5match6camera6plugin16CornerKickCameraE',
              '_ZN5match6camera6plugin16CornerKickCamera6UpdateERN4draw15CameraParameterE'),
             ('_ZTVN5match6camera6plugin14GoalKickCameraE',
@@ -141,13 +149,21 @@ def audit(path):
             }
         plt = elf.get_section_by_name('.plt')['sh_addr']
         entries = {}
+        gauge_plt_targets = {}
+        gauge_calls = {
+            0x38d39d0, 0x38e7710, 0x3855570, 0x38968f0,
+        }
         for i, r in enumerate(elf.get_section_by_name('.rela.plt').iter_relocations()):
             name = symbols[r['r_info_sym']].name
+            address = plt+32+i*16
+            if address in gauge_calls:
+                gauge_plt_targets[hex(address)] = name
             if name in (
                 '_ZN5match3pad13ThinkUnitList6UpdateERKNS0_18ThinkUnitInputDataENS0_13ThinkUnitKindEj',
                 '_ZN5match8registry12PadInputUnit6UpdateEjPKNS0_9KeyConfigEPKNS0_9MatchInfoE',
+                '_ZN5match8registry10PadCommand7SetKickENS_14PadCommandKindEfffhffhh',
+                '_ZN5match8registry10PadCommand7SetKickENS_14PadCommandKindEfffhffh',
             ):
-                address = plt+32+i*16
                 entries[name] = {'address': hex(address),
                                  'words': [hex(x) for x in struct.unpack('<4I', read(address,16))]}
         cursor_info_symbol = names[
@@ -155,7 +171,32 @@ def audit(path):
         ]
         cursor_info_words = list(struct.unpack(
             '<4I', read(cursor_info_symbol['st_value'], 16)))
+        trajectory_symbols = {}
+        for name in (
+            '_ZN5match3pad12DrawPassLineENS_14PadCommandKindEh8PlayerNoS2_fPKNS_8registry8RegistryEPNS3_12Screen2dInfoE',
+        ):
+            symbol = names[name]
+            trajectory_symbols[name] = {
+                'address': hex(symbol['st_value']),
+                'size': symbol['st_size'],
+            }
+        projection_symbols = {}
+        for name in (
+            '_ZN7match2D6Screen15ModelCursorName11GetPositionEjRN4math7Vector3E',
+            '_ZN7match2D6Screen9ModelBase20ProjectPos3DToScreenEN4math7Vector3ERfS4_',
+            '_ZNK5match8registry14GlobalRegistry13GetPlayerMoveE8PlayerNo',
+        ):
+            symbol = names[name]
+            projection_symbols[name] = {
+                'address': hex(symbol['st_value']),
+                'size': symbol['st_size'],
+                'entry_words': [hex(x) for x in struct.unpack(
+                    '<4I', read(symbol['st_value'], 16))],
+            }
         return {'units': units, 'plt': entries,
+                'mobile_shoot_update_2d_plt_targets': gauge_plt_targets,
+                'trajectory_symbols': trajectory_symbols,
+                'gauge_projection_symbols': projection_symbols,
                 'setplay_action_methods': action_audit,
                 'setplay_filter_angle': {
                     'symbol': filter_name,
@@ -178,12 +219,12 @@ def check_source(result, source):
     for kind, symbol in re.findall(r'\{(\d+), "(_ZTV[^"]+)", 0\}', content):
         assert result['units'][int(kind)]['vtable'] == symbol, (kind, symbol)
         checked += 1
-    assert checked == 32
-    for kind in (26, 64, 65, 70, 72, 75, 90, 95):
+    assert checked == 33
+    for kind in (26, 62, 64, 65, 70, 72, 75, 90, 95):
         assert result['units'][kind]['vtable'] != '?', kind
     for entry in result['setplay_action_methods']:
         assert entry['method'] in content
-    assert len(result['setplay_action_methods']) == 12
+    assert len(result['setplay_action_methods']) == 16
     assert result['setplay_filter_angle']['symbol'] in content
     assert result['setplay_filter_angle']['address'] == '0x66a7cdc'
     assert result['setplay_filter_angle']['size'] == 620
@@ -205,24 +246,59 @@ def check_source(result, source):
     for entry in result['plt'].values():
         assert entry['address'] in content
         assert all(word in content for word in entry['words'])
-    assert len(result['plt']) == 2
+    assert len(result['plt']) == 4
+    trajectory_addresses = {
+        entry['address'] for entry in result['trajectory_symbols'].values()
+    }
+    assert trajectory_addresses == {'0x66a0928'}
+    for symbol in result['trajectory_symbols']:
+        assert symbol in content
     # Native action keys: B pass, A loft/slide, X through, Y shoot/friend press.
     key_map = result['pad_key_to_cobra_key']
     assert [key_map[x] for x in (14,13,12,15,18,17,19,10)] == [0,1,3,2,0,1,2,4]
     assert result['units'][64]['pad_key'] == 10
     assert result['cobra_axis_pair_boundaries'] == [0, 5, 8, 11, 14, 16]
+    assert 'native_lab_gauge_owner_pad' in content
+    assert 'native_lab_gauge_power_milli' in content
+    assert 'native_lab_gauge_charging_mask' in content
+    assert 'native_lab_draw_shoot_line' not in content
+    assert 'DrawShootLine' not in content
+    assert 'native_lab_draw_pass_line(0x50u' in content
+    assert 'native_lab_pending_kick_power_bits' in content
+    assert '*kick_power = native_power' in content
+    assert 'atan2f(-left_x, left_y)' in content
+    assert 'native_lab_left_aim_latched_mask' in content
+    assert 'native_lab_mobile_filter_angle_abi' in content
+    assert 'native_lab_mobile_filter_angle(unit, input, desired)' not in content
+    hooks = source.parent.joinpath('ue4_hooks.c').read_text(encoding='utf-8')
+    assert len(result['gauge_projection_symbols']) == 3
+    for symbol, entry in result['gauge_projection_symbols'].items():
+        assert symbol in hooks
+        assert all(word in hooks for word in entry['entry_words'])
+    assert 'pes_match_cursor_name_get_position' in hooks
+    assert 'native_pad_lab_enable_exhibition' in hooks
+    assert 'native_pad_lab_enable_exhibition();' in hooks
+    assert 'native_pad_lab_reset();' in hooks
     assert 'pad + 140 + 20 * 4' in source.parent.joinpath('ue4_hooks.c').read_text(encoding='utf-8')
     shim = source.parent.joinpath('android_shim.c').read_text(encoding='utf-8')
     assert 'HidNpadIdType_No2' in shim
     assert 'padConfigureInput(2, HidNpadStyleSet_NpadStandard)' in shim
-    return {'unit_types_checked': checked, 'plt_stubs_checked': 2,
-            'setplay_action_methods_checked': 12,
+    return {'unit_types_checked': checked, 'plt_stubs_checked': 4,
+            'setplay_action_methods_checked': 16,
             'setplay_filter_angle_checked': True,
             'two_player_ownership_symbols_checked': 4,
             'cursor_info_post_hook_checked': True,
             'native_button_table_checked': True,
             'goalkick_support_key_checked': True,
-            'dual_stick_axis_layout_checked': True, 'device_tested': False}
+            'dual_stick_axis_layout_checked': True,
+            'custom_pad_owned_gauge_checked': True,
+            'dynamic_player_gauge_projection_checked': True,
+            'player_move_foot_transform_checked': True,
+            'setplay_power_bridge_checked': True,
+            'latched_noninverted_aim_checked': True,
+            'stock_setplay_trajectory_checked': True,
+            'gesture_angle_filter_bypassed': True,
+            'device_tested': False}
 
 
 if __name__ == '__main__':

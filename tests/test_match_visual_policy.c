@@ -12,6 +12,11 @@ static void hide(void *model, uint32_t visible) {
   calls++;
 }
 
+static void set_visibility(void *model, uint32_t visible) {
+  *(uint32_t *)model = visible;
+  calls++;
+}
+
 int main(void) {
   _Alignas(8) uint8_t manager[0x220] = {0};
   uint32_t draws[17];
@@ -30,12 +35,16 @@ int main(void) {
   assert(calls == 14);
   for (unsigned int i = 0; i < 17; i++)
     assert(draws[i] == (i == 10 || i >= 15));
+  pes_set_pitch_trajectory(manager, 1, set_visibility);
+  assert(calls == 16 && draws[11] == 1 && draws[12] == 1);
+  pes_set_pitch_trajectory(manager, 0, set_visibility);
+  assert(calls == 18 && draws[11] == 0 && draws[12] == 0);
   for (uint32_t state = 0; state <= 4; state++) {
     if (state == 2) continue;
     memcpy(manager + 0x158, &state, sizeof(state));
     pes_hide_pitch_assists(manager, 0, hide);
   }
-  assert(calls == 14);
+  assert(calls == 18);
   // A fresh match may allocate completely different models, with null slots.
   memset(manager, 0, sizeof(manager));
   memcpy(manager + 0x158, &ready, sizeof(ready));
@@ -43,7 +52,7 @@ int main(void) {
   void *fresh_ptr = &fresh;
   memcpy(manager + 0x160, &fresh_ptr, sizeof(fresh_ptr));
   pes_hide_pitch_assists(manager, 0, hide);
-  assert(calls == 15 && fresh == 0);
+  assert(calls == 19 && fresh == 0);
 
   // Tests run from a new temporary working directory; never user config.
   assert(read_config("missing.cfg") == -1);

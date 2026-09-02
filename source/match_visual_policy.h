@@ -27,4 +27,24 @@ static inline void pes_hide_pitch_assists(void *manager, int show,
   }
 }
 
+// The real set-play trail is carried by the audited pass/cross trajectory
+// models (11/12). Re-enable only those two after the broad cursor-hide pass;
+// targets, guide rings, and area overlays stay hidden.
+static inline void pes_set_pitch_trajectory(
+    void *manager, int visible, void (*set_disp)(void *, uint32_t)) {
+  if (!manager || !set_disp)
+    return;
+  uint32_t state = 0;
+  memcpy(&state, (const uint8_t *)manager + 0x158, sizeof(state));
+  if (state != 2)
+    return;
+  for (uint32_t index = 11; index <= 12; ++index) {
+    void *model = NULL;
+    memcpy(&model, (const uint8_t *)manager + 0x160 + index * 8,
+           sizeof(model));
+    if (model)
+      set_disp(model, visible != 0);
+  }
+}
+
 #endif

@@ -97,6 +97,8 @@ uint32_t pes_controller_native_hid_connected_mask(void);
 int pes_controller_native_pad_lab_active(void);
 int pes_controller_native_pad_lab_two_player(void);
 uint32_t pes_controller_native_pad_lab_status(void);
+uint32_t pes_controller_native_pad_lab_setplay_context(void);
+int pes_controller_native_pad_lab_trajectory_enabled(void);
 
 #define PES_NATIVE_LAB_ROUTE_MOBILE_KICK_BRIDGE (1u << 0)
 #define PES_NATIVE_LAB_ROUTE_SHORT_PASS (1u << 1)
@@ -106,6 +108,8 @@ uint32_t pes_controller_native_pad_lab_status(void);
 #define PES_NATIVE_LAB_ROUTE_CAMERA_STICK (1u << 5)
 #define PES_NATIVE_LAB_ROUTE_CORNER_TACTICS (1u << 6)
 #define PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS (1u << 7)
+#define PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE (1u << 8)
+#define PES_NATIVE_LAB_ROUTE_THROWIN_AIM (1u << 9)
 
 #define PES_NATIVE_LAB_STOCK_MOBILE_KICK (1u << 0)
 #define PES_NATIVE_LAB_STOCK_MOBILE_CAMERA (1u << 1)
@@ -160,6 +164,16 @@ typedef struct {
   int32_t axis_y_p2;
   int32_t right_axis_x_p2;
   int32_t right_axis_y_p2;
+  uint32_t trajectory_enabled;
+  uint32_t gauge_owner_pad;
+  uint32_t gauge_power_milli;
+  uint32_t gauge_active_mask;
+  uint32_t gauge_power_milli_p2;
+  uint32_t gauge_anchor_valid_mask;
+  int32_t gauge_anchor_x_milli;
+  int32_t gauge_anchor_y_milli;
+  int32_t gauge_anchor_x_milli_p2;
+  int32_t gauge_anchor_y_milli_p2;
 } PesNativePadLabDebug;
 
 void pes_controller_native_pad_lab_debug_input(uint32_t port,

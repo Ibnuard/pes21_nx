@@ -144,12 +144,14 @@ int main(void) {
   assert(*(uint32_t *)list == 6);
   assert(!memcmp(list+4, expected_defence, sizeof(expected_defence)));
 
-  // Stock goal kick contains the only consumers proven active by hardware.
-  // V7 keeps that list byte-identical and bridges native press/release through
-  // MobileSetplayKick instead of scheduling dormant console units.
+  // MobileSetplayKick must run before SetplayGuide so its Pull/Release command
+  // cannot be masked by a non-zero LS guide command. The real guide still runs
+  // on idle frames and RS retains the stable V7 camera angle.
   const uint32_t goal_kick[] = {61,60,95,64,90,96};
   setup(); run(goal_kick,6);
-  unchanged();
+  const uint32_t expected_goal_kick[] = {61,60,95,64,90,26,96};
+  assert(*(uint32_t *)list == 7);
+  assert(!memcmp(list+4, expected_goal_kick, sizeof(expected_goal_kick)));
   assert(native_lab_action_units[0][NATIVE_LAB_ACTION_SHORT] ==
          (uintptr_t)&objects[0]);
   assert(native_lab_action_units[0][NATIVE_LAB_ACTION_LONG] ==
@@ -168,7 +170,9 @@ int main(void) {
                               PES_NATIVE_LAB_ROUTE_LONG_PASS |
                               PES_NATIVE_LAB_ROUTE_SHOOT |
                               PES_NATIVE_LAB_ROUTE_GOALKICK_SUPPORT |
-                              PES_NATIVE_LAB_ROUTE_CAMERA_STICK));
+                              PES_NATIVE_LAB_ROUTE_CAMERA_STICK |
+                              PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE));
+  assert(debug.trajectory_enabled == 1);
   assert((debug.status & (32u|64u)) == (32u|64u));
   pes_controller_native_pad_lab_debug_input(0, 0x15u, -1234, 2345,
                                              3456, -4567, 1);
@@ -184,8 +188,11 @@ int main(void) {
 
   const uint32_t corner[] = {61,60,95,65,70,90,96};
   setup(); run(corner,7);
-  unchanged();
+  const uint32_t expected_corner[] = {61,60,95,65,70,90,26,96};
+  assert(*(uint32_t *)list == 8);
+  assert(!memcmp(list+4, expected_corner, sizeof(expected_corner)));
   pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.trajectory_enabled == 1);
   assert(debug.context == PES_SETPLAY_CORNER);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
                               PES_NATIVE_LAB_STOCK_MOBILE_CAMERA |
@@ -196,11 +203,54 @@ int main(void) {
                               PES_NATIVE_LAB_ROUTE_LONG_PASS |
                               PES_NATIVE_LAB_ROUTE_SHOOT |
                               PES_NATIVE_LAB_ROUTE_CAMERA_STICK |
-                              PES_NATIVE_LAB_ROUTE_CORNER_TACTICS));
+                              PES_NATIVE_LAB_ROUTE_CORNER_TACTICS |
+                              PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE));
+
+  // The other local player's ordinary defensive list must not tear down the
+  // corner owner. This used to clear the native helper every frame and the
+  // following attacking update then cleared the frozen/charging gauge.
+  native_lab_gauge_active_mask = 1u;
+  native_lab_gauge_charging_mask = 0u;
+  native_lab_gauge_power_milli_by_pad[0] = 800u;
+  native_lab_gauge_linger_frames_by_pad[0] = 180u;
+  *(uint32_t *)(input + 0x24) = 15;
+  *(int32_t *)(cursor + 16) = 1;
+  calls = 0;
+  run(defence, 6);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.context == PES_SETPLAY_CORNER);
+  assert(debug.setplay_pad == 0u);
+  assert(debug.gauge_active_mask & 1u);
+  *(uint32_t *)(input + 0x24) = 4;
+  *(int32_t *)(cursor + 16) = 0;
+  calls = 0;
+  run(corner, 7);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.context == PES_SETPLAY_CORNER);
+  assert(debug.gauge_active_mask & 1u);
+
+  pes_controller_native_pad_lab_debug_input(0, 1u << 7, 0, 0, 0, 0, 1);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.trajectory_enabled == 0); // Owner toggles the real trail off.
+  pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+  pes_controller_native_pad_lab_debug_input(0, 1u << 7, 0, 0, 0, 0, 1);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.trajectory_enabled == 1);
+
+  // The set-play owner's own ordinary list remains authoritative at action
+  // end, so the helper cannot leak into open play.
+  *(uint32_t *)(input + 0x24) = 4;
+  *(int32_t *)(cursor + 16) = 0;
+  calls = 0;
+  run(defence, 6);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.context == PES_SETPLAY_NONE);
 
   const uint32_t free_kick[] = {61,60,95,72,75,90,96};
   setup(); run(free_kick,7);
-  unchanged();
+  const uint32_t expected_free_kick[] = {61,60,95,72,75,90,26,96};
+  assert(*(uint32_t *)list == 8);
+  assert(!memcmp(list+4, expected_free_kick, sizeof(expected_free_kick)));
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.context == PES_SETPLAY_FREE_KICK);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
@@ -212,7 +262,13 @@ int main(void) {
                               PES_NATIVE_LAB_ROUTE_LONG_PASS |
                               PES_NATIVE_LAB_ROUTE_SHOOT |
                               PES_NATIVE_LAB_ROUTE_CAMERA_STICK |
-                              PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS));
+                              PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS |
+                              PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE));
+  pes_controller_native_pad_lab_publish_setplay_context(
+      PES_SETPLAY_FREE_KICK);
+  pes_controller_native_pad_lab_debug_input(1, 1u << 7, 0, 0, 0, 0, 1);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.trajectory_enabled == 1); // P2 cannot alter P1's set play.
 
   // The close-range free-kick variant omits the tactics/position units. Its
   // semantic ButtonSetplay context is a guarded fallback only while kind 90
@@ -222,11 +278,45 @@ int main(void) {
   pes_controller_native_pad_lab_publish_setplay_context(
       PES_SETPLAY_FREE_KICK);
   run(close_free_kick,5);
-  unchanged();
+  const uint32_t expected_close_free_kick[] = {61,60,95,90,26,96};
+  assert(*(uint32_t *)list == 6);
+  assert(!memcmp(list+4, expected_close_free_kick,
+                 sizeof(expected_close_free_kick)));
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.context == PES_SETPLAY_FREE_KICK);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
                               PES_NATIVE_LAB_STOCK_MOBILE_CAMERA));
+
+  // Variants that already contain a guide are normalized as well. A guide
+  // before kind 90 could otherwise consume LS and mask the kick release.
+  const uint32_t existing_guide[] = {61,60,95,26,90,96};
+  setup();
+  pes_controller_native_pad_lab_publish_setplay_context(
+      PES_SETPLAY_FREE_KICK);
+  run(existing_guide,6);
+  assert(*(uint32_t *)list == 6);
+  assert(!memcmp(list+4, expected_close_free_kick,
+                 sizeof(expected_close_free_kick)));
+
+  // Throw-ins use their dedicated body-angle unit. The reduced list can omit
+  // MobileSetplayKick entirely and must still retain the semantic context.
+  const uint32_t throw_in[] = {61,60,62,96};
+  setup();
+  pes_controller_native_pad_lab_publish_setplay_context(PES_SETPLAY_THROW_IN);
+  run(throw_in,4);
+  unchanged();
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert(debug.context == PES_SETPLAY_THROW_IN);
+  assert(debug.route_mask & PES_NATIVE_LAB_ROUTE_THROWIN_AIM);
+
+  const uint32_t throw_with_kick[] = {61,60,62,90,96};
+  const uint32_t expected_throw_with_kick[] = {61,60,90,62,96};
+  setup();
+  pes_controller_native_pad_lab_publish_setplay_context(PES_SETPLAY_THROW_IN);
+  run(throw_with_kick,5);
+  assert(*(uint32_t *)list == 5);
+  assert(!memcmp(list+4, expected_throw_with_kick,
+                 sizeof(expected_throw_with_kick)));
 
   const uint32_t no_mobile_kick[] = {61,60,95,96};
   setup();
@@ -292,6 +382,59 @@ int main(void) {
   pes_controller_native_pad_lab_debug_snapshot(&debug);
   assert(debug.native_power_milli == 750);
   assert(debug.native_right_power_milli == 625);
+  assert(debug.gauge_owner_pad == 0);
+  assert(debug.gauge_power_milli == 0);
+
+  // A normal-gameplay native press has no set-play active_action token. Its
+  // independent charging bit must keep the per-pad gauge alive until release,
+  // then the pad-local linger owns the final value.
+  native_pad_lab_reset();
+  active = 1;
+  native_lab_gauge_active_mask = 1u;
+  native_lab_gauge_charging_mask = 1u;
+  native_lab_gauge_power_milli_by_pad[0] = 625u;
+  native_lab_gauge_anchor_x_milli[0] = 640000;
+  native_lab_gauge_anchor_y_milli[0] = 400000;
+  native_lab_gauge_anchor_ttl[0] = 12u;
+  pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+  pes_controller_native_pad_lab_debug_snapshot(&debug);
+  assert((debug.gauge_active_mask & 1u) &&
+         (debug.gauge_anchor_valid_mask & 1u) &&
+         debug.gauge_power_milli == 625u &&
+         debug.gauge_anchor_x_milli == 640000);
+  native_lab_gauge_charging_mask = 0;
+  native_lab_gauge_linger_frames_by_pad[0] = 2u;
+  pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+  pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+  assert(native_lab_gauge_active_mask & 1u);
+  pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+  assert(!(native_lab_gauge_active_mask & 1u));
+
+  // Release freezes the gauge. Ball movement during a wind-up is not enough:
+  // the ball must also separate from the nearest observed foot position for
+  // three consecutive samples before the completed action removes the bar.
+  native_lab_gauge_active_mask = 1u;
+  native_lab_gauge_charging_mask = 0u;
+  native_lab_gauge_power_milli_by_pad[0] = 800u;
+  native_lab_gauge_linger_frames_by_pad[0] = 180u;
+  native_lab_gauge_observe_released_ball(0, 10.0f, 0.0f, 20.0f,
+                                         9.5f, 0.0f, 20.0f);
+  assert(native_lab_gauge_active_mask & 1u);
+  native_lab_gauge_observe_released_ball(0, 10.1f, 0.0f, 20.1f,
+                                         9.6f, 0.0f, 20.1f);
+  assert(native_lab_gauge_active_mask & 1u);
+  native_lab_gauge_observe_released_ball(0, 10.4f, 0.0f, 20.0f,
+                                         9.9f, 0.0f, 20.0f);
+  assert(native_lab_gauge_active_mask & 1u);
+  native_lab_gauge_observe_released_ball(0, 11.2f, 0.0f, 20.0f,
+                                         10.0f, 0.0f, 20.0f);
+  assert(native_lab_gauge_active_mask & 1u);
+  native_lab_gauge_observe_released_ball(0, 11.3f, 0.0f, 20.0f,
+                                         10.0f, 0.0f, 20.0f);
+  assert(native_lab_gauge_active_mask & 1u);
+  native_lab_gauge_observe_released_ball(0, 11.4f, 0.0f, 20.0f,
+                                         10.0f, 0.0f, 20.0f);
+  assert(!(native_lab_gauge_active_mask & 1u));
   puts("native-pad routing: pass (scope, types, actions, history, reset, bounds)");
   return 0;
 }

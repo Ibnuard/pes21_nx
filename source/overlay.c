@@ -598,9 +598,15 @@ static void overlay_render(void) {
   PesNativePadLabDebug native_debug = {0};
   if (native_lab)
     pes_controller_native_pad_lab_debug_snapshot(&native_debug);
-  const int native_setplay_debug =
-      native_lab && native_debug.context != PES_SETPLAY_NONE &&
-      setplay_context == native_debug.context;
+  int native_setplay_debug =
+      native_lab && native_debug.context != PES_SETPLAY_NONE;
+  if (native_setplay_debug) {
+    // The semantic snapshot can lag one frame behind ThinkUnitList. During
+    // the native lab, the routed native context is authoritative; otherwise
+    // corner/free kick briefly fall back to the exhibition ZR/X/Y legend.
+    setplay_context = native_debug.context;
+    setplay_options = 0;
+  }
   float gameplan_cursor_x = 0.0f;
   float gameplan_cursor_y = 0.0f;
   const int virtual_cursor_context = pes_controller_virtual_cursor_context();
@@ -655,10 +661,17 @@ static void overlay_render(void) {
   int gameplan_helper_text_quads = 0;
   int setplay_helper_circle_first_quad = 0;
   int setplay_helper_circle_quads = 0;
+  int setplay_helper_icon_first_quad = 0;
+  int setplay_helper_icon_quads = 0;
   int setplay_helper_text_first_quad = 0;
   int setplay_helper_text_quads = 0;
-  int setplay_key_first_quads[4] = {0};
-  int setplay_key_quads[4] = {0};
+  int setplay_key_first_quads[5] = {0};
+  int setplay_key_quads[5] = {0};
+  int power_gauge_background_first_quad[2] = {0};
+  int power_gauge_background_quads[2] = {0};
+  int power_gauge_segment_first_quad[2] = {0};
+  int power_gauge_segment_quads[2] = {0};
+  int power_gauge_active_segments[2] = {0};
   int cinematic_helper_circle_first_quad = 0;
   int cinematic_helper_circle_quads = 0;
   int cinematic_helper_text_first_quad = 0;
@@ -1670,8 +1683,8 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V7 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
-             "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u%s",
+             "NATIVE 2P SETPLAY V8.12 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
              native_debug.owner_mask & 3u,
@@ -1684,6 +1697,9 @@ static void overlay_render(void) {
              native_debug.axis_y_p2,
              native_debug.native_keys_p2 & 0x00ffffffu,
              native_debug.native_power_milli_p2,
+             native_debug.gauge_active_mask & 3u,
+             native_debug.gauge_power_milli,
+             native_debug.gauge_power_milli_p2,
              status & 128 ? " ABI ERROR" : "");
     const float gh = (float)screen_height / 50.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
@@ -1733,8 +1749,14 @@ static void overlay_render(void) {
                native_lab_setplay_name(native_debug.context));
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
                          debug_y, debug_gw, debug_gh, verts + quads * 24);
-      snprintf(debug_line, sizeof(debug_line),
-               "LS=KICK DIRECTION/AIM   RS=CAMERA");
+      if (native_debug.context == PES_SETPLAY_FREE_KICK)
+        snprintf(debug_line, sizeof(debug_line),
+                 "LS=KICK AIM + HEIGHT   RS=CAMERA (BALL ANCHOR)");
+      else if (native_debug.context == PES_SETPLAY_THROW_IN)
+        snprintf(debug_line, sizeof(debug_line), "LS=THROW DIRECTION/AIM");
+      else
+        snprintf(debug_line, sizeof(debug_line),
+                 "LS=KICK AIM   RS=CAMERA (BALL ANCHOR)");
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
                          debug_y + debug_step, debug_gw, debug_gh,
                          verts + quads * 24);
@@ -1744,6 +1766,9 @@ static void overlay_render(void) {
       else if (native_debug.context == PES_SETPLAY_CORNER)
         snprintf(debug_line, sizeof(debug_line),
                  "B=SHORT PASS   A=LONG KICK   L=SHORT CORNER   RIGHT=KICKER");
+      else if (native_debug.context == PES_SETPLAY_THROW_IN)
+        snprintf(debug_line, sizeof(debug_line),
+                 "B=NORMAL THROW   Y=LONG THROW   RIGHT=THROWER");
       else
         snprintf(debug_line, sizeof(debug_line),
                  "B=SHORT PASS   A=LONG KICK   L=POSITION SHIFT");
@@ -1770,11 +1795,11 @@ static void overlay_render(void) {
                          debug_y + 4.0f * debug_step, debug_gw, debug_gh,
                          verts + quads * 24);
       snprintf(debug_line, sizeof(debug_line),
-               "LAST:%s CMD:%02X  STOCK:%02X ROUTED:%02X CONNECTED:%u",
+               "LAST:%s CMD:%02X  STOCK:%02X ROUTED:%03X CONNECTED:%u",
                native_lab_event_name(debug_event),
                debug_command & 0xffu,
                native_debug.stock_mask & 0xffu,
-               native_debug.route_mask & 0xffu,
+               native_debug.route_mask & 0xfffu,
                native_debug.connected_mask & 3u);
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
                          debug_y + 5.0f * debug_step, debug_gw, debug_gh,
@@ -1856,9 +1881,14 @@ static void overlay_render(void) {
       quads += celebrate_label_quads;
     }
   }
-  const char *setplay_keys[4] = {NULL, NULL, NULL, NULL};
-  const char *setplay_labels[4] = {NULL, NULL, NULL, NULL};
+  const char *setplay_keys[5] = {NULL, NULL, NULL, NULL, NULL};
+  const char *setplay_labels[5] = {NULL, NULL, NULL, NULL, NULL};
   unsigned int setplay_helper_count = 0;
+  const int native_far_free_kick =
+      native_setplay_debug && setplay_context == PES_SETPLAY_FREE_KICK &&
+      (native_debug.stock_mask &
+       (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
+        PES_NATIVE_LAB_STOCK_FREEKICK_POSITION));
   if (native_setplay_debug &&
       setplay_context == PES_SETPLAY_GOAL_KICK) {
     setplay_keys[0] = "L";
@@ -1867,7 +1897,11 @@ static void overlay_render(void) {
     setplay_labels[1] = "KICK AIM";
     setplay_keys[2] = "RS";
     setplay_labels[2] = "CAMERA";
-    setplay_helper_count = 3;
+    setplay_keys[3] = "R";
+    setplay_labels[3] = native_debug.trajectory_enabled
+                            ? "TRAJECTORY ON"
+                            : "TRAJECTORY OFF";
+    setplay_helper_count = 4;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_CORNER) {
     setplay_keys[0] = "L";
@@ -1878,24 +1912,41 @@ static void overlay_render(void) {
     setplay_labels[2] = "KICK AIM";
     setplay_keys[3] = "RS";
     setplay_labels[3] = "CAMERA";
-    setplay_helper_count = 4;
+    setplay_keys[4] = "R";
+    setplay_labels[4] = native_debug.trajectory_enabled
+                            ? "TRAJECTORY ON"
+                            : "TRAJECTORY OFF";
+    setplay_helper_count = 5;
+  } else if (native_far_free_kick) {
+    // The overhead/far free kick already reads naturally from the match view;
+    // keep its top-right area completely clean.
+    setplay_helper_count = 0;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_FREE_KICK) {
     setplay_keys[0] = ">";
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "LS";
-    setplay_labels[1] = "KICK AIM";
+    setplay_labels[1] = "KICK AIM + HEIGHT";
     setplay_keys[2] = "RS";
     setplay_labels[2] = "CAMERA";
-    setplay_helper_count = 3;
-  } else if (!native_setplay_debug &&
+    setplay_keys[3] = "R";
+    setplay_labels[3] = native_debug.trajectory_enabled
+                            ? "TRAJECTORY ON"
+                            : "TRAJECTORY OFF";
+    setplay_helper_count = 4;
+  } else if (native_setplay_debug &&
+             setplay_context == PES_SETPLAY_THROW_IN) {
+    setplay_keys[0] = ">";
+    setplay_labels[0] = "SET THROWER";
+    setplay_helper_count = 1;
+  } else if (!native_setplay_debug && !native_lab &&
       setplay_context == PES_SETPLAY_GOAL_KICK) {
     setplay_keys[0] = "Y";
     setplay_labels[0] = "POSITION SHIFT";
     setplay_keys[1] = "X";
     setplay_labels[1] = "SWITCH VIEW";
     setplay_helper_count = 2;
-  } else if (!native_setplay_debug &&
+  } else if (!native_setplay_debug && !native_lab &&
              setplay_context == PES_SETPLAY_CORNER) {
     setplay_keys[0] = "ZR";
     setplay_labels[0] = "SET PIECE TAKER";
@@ -1904,7 +1955,7 @@ static void overlay_render(void) {
     setplay_keys[2] = "Y";
     setplay_labels[2] = "SWITCH VIEW";
     setplay_helper_count = 3;
-  } else if (!native_setplay_debug &&
+  } else if (!native_setplay_debug && !native_lab &&
              setplay_context == PES_SETPLAY_FREE_KICK) {
     setplay_keys[0] = "ZR";
     setplay_labels[0] = "SET PIECE TAKER";
@@ -1912,8 +1963,8 @@ static void overlay_render(void) {
     setplay_labels[1] = "SWITCH VIEW";
     setplay_helper_count = 2;
   } else if (setplay_context == PES_SETPLAY_THROW_IN) {
-    setplay_keys[0] = "ZR";
-    setplay_labels[0] = "SELECT THROWER";
+    setplay_keys[0] = ">";
+    setplay_labels[0] = "SET THROWER";
     setplay_helper_count = 1;
   } else if (setplay_options) {
     // Native option bits are retained as a fallback for short transition
@@ -1960,7 +2011,8 @@ static void overlay_render(void) {
     const float helper_x = 0.815f * (float)screen_width;
     const float helper_step = 0.066f * (float)screen_height;
     const float helper_start_y =
-        (setplay_helper_count == 4 ? 0.725f
+        (setplay_helper_count == 5 ? 0.660f
+         : setplay_helper_count == 4 ? 0.725f
          : setplay_helper_count == 3 ? 0.790f
          : setplay_helper_count == 2 ? 0.855f
                                      : 0.925f) *
@@ -1974,6 +2026,23 @@ static void overlay_render(void) {
       quads += circle_quads;
     }
 
+    // The font atlas does not contain the Switch D-pad Right glyph. Draw its
+    // actual right-pointing triangular cap as geometry inside the blue badge.
+    setplay_helper_icon_first_quad = quads;
+    for (unsigned int index = 0; index < setplay_helper_count; index++) {
+      if (strcmp(setplay_keys[index], ">") != 0)
+        continue;
+      const float y = helper_start_y + (float)index * helper_step;
+      const float half_w = helper_radius * 0.34f;
+      const float half_h = helper_radius * 0.46f;
+      setplay_helper_icon_quads += emit_triangle(
+          helper_x - half_w, y - half_h,
+          helper_x + half_w, y,
+          helper_x - half_w, y + half_h,
+          verts + quads * 24);
+      quads++;
+    }
+
     const float gh = (float)screen_height / 43.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     setplay_helper_text_first_quad = quads;
@@ -1981,10 +2050,12 @@ static void overlay_render(void) {
       const float y = helper_start_y + (float)index * helper_step;
       const int key_len = (int)strlen(setplay_keys[index]);
       setplay_key_first_quads[index] = quads;
-      int line_quads = emit_line(
-          setplay_keys[index], key_len,
-          helper_x - (float)key_len * gw * 0.5f, y - gh * 0.5f, gw, gh,
-          verts + quads * 24);
+      int line_quads = 0;
+      if (strcmp(setplay_keys[index], ">") != 0)
+        line_quads = emit_line(
+            setplay_keys[index], key_len,
+            helper_x - (float)key_len * gw * 0.5f, y - gh * 0.5f, gw, gh,
+            verts + quads * 24);
       setplay_key_quads[index] = line_quads;
       setplay_helper_text_quads += line_quads;
       quads += line_quads;
@@ -1994,6 +2065,71 @@ static void overlay_render(void) {
           y - gh * 0.5f, gw * 0.72f, gh, verts + quads * 24);
       setplay_helper_text_quads += line_quads;
       quads += line_quads;
+    }
+  }
+  if (native_lab && !custom_popup && (native_debug.gauge_active_mask & 3u)) {
+    // Each local pad has an independent visual-only bar. Keeping both states
+    // in the snapshot avoids the stock Screen2d PlayerNo/global gauge path,
+    // which is why P2 previously appeared on P1's cursor.
+    const int segment_count = 12;
+    const float bar_w = 0.075f * (float)screen_width;
+    const float bar_h = 0.0060f * (float)screen_height;
+    const float padding = 0.0045f * (float)screen_height;
+    const float gap = 0.0018f * (float)screen_width;
+    const float segment_w =
+        (bar_w - gap * (float)(segment_count - 1)) /
+        (float)segment_count;
+    for (int pad = 0; pad < 2; pad++) {
+      if (!(native_debug.gauge_active_mask & (1u << pad)))
+        continue;
+      const int anchor_valid =
+          (native_debug.gauge_anchor_valid_mask & (1u << pad)) != 0;
+      // Never render this as a fixed HUD widget. If the engine has not yet
+      // published the controlled player's CursorName projection, wait for it.
+      if (!anchor_valid)
+        continue;
+      const int32_t anchor_x_milli =
+          pad == 0 ? native_debug.gauge_anchor_x_milli
+                   : native_debug.gauge_anchor_x_milli_p2;
+      const int32_t anchor_y_milli =
+          pad == 0 ? native_debug.gauge_anchor_y_milli
+                   : native_debug.gauge_anchor_y_milli_p2;
+      float bar_x;
+      float bar_y;
+      // Projected point is the controlled player's foot position. Center the
+      // compact bar there and move it a few pixels down, matching the reference
+      // without touching the engine's player/cursor data.
+      bar_x = (float)anchor_x_milli / 1000.0f - bar_w * 0.5f;
+      bar_y = (float)anchor_y_milli / 1000.0f +
+              0.007f * (float)screen_height;
+      if (bar_x < padding)
+        bar_x = padding;
+      if (bar_x + bar_w + padding > (float)screen_width)
+        bar_x = (float)screen_width - bar_w - padding;
+      if (bar_y < padding)
+        bar_y = padding;
+      if (bar_y + bar_h + padding > (float)screen_height)
+        bar_y = (float)screen_height - bar_h - padding;
+      power_gauge_background_first_quad[pad] = quads;
+      power_gauge_background_quads[pad] = emit_rect(
+          bar_x - padding, bar_y - padding,
+          bar_w + padding * 2.0f, bar_h + padding * 2.0f,
+          verts + quads * 24);
+      quads += power_gauge_background_quads[pad];
+      power_gauge_segment_first_quad[pad] = quads;
+      for (int index = 0; index < segment_count; index++) {
+        power_gauge_segment_quads[pad] += emit_rect(
+            bar_x + (segment_w + gap) * (float)index, bar_y,
+            segment_w, bar_h, verts + quads * 24);
+        quads++;
+      }
+      uint32_t power_milli =
+          pad == 0 ? native_debug.gauge_power_milli
+                    : native_debug.gauge_power_milli_p2;
+      if (power_milli > 1000u)
+        power_milli = 1000u;
+      power_gauge_active_segments[pad] =
+          (int)((power_milli * (uint32_t)segment_count + 999u) / 1000u);
     }
   }
   if (penalty_helper_active && penalty_role == PES_PENALTY_GOALKEEPER) {
@@ -2202,6 +2338,40 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, setplay_helper_circle_first_quad * 6,
                  setplay_helper_circle_quads * 6);
     glUniform1f(gl.loc_circle, 0.0f);
+  }
+  if (setplay_helper_icon_quads) {
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_round_rect, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform4f(gl.loc_color, 1.0f, 0.94f, 0.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, setplay_helper_icon_first_quad * 6,
+                 setplay_helper_icon_quads * 6);
+  }
+  for (int pad = 0; pad < 2; pad++) {
+    if (!power_gauge_background_quads[pad])
+      continue;
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_round_rect, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform4f(gl.loc_color, 0.005f, 0.015f, 0.035f, 0.82f);
+    glDrawArrays(GL_TRIANGLES, power_gauge_background_first_quad[pad] * 6,
+                 power_gauge_background_quads[pad] * 6);
+    glUniform4f(gl.loc_color, 0.12f, 0.17f, 0.19f, 0.78f);
+    glDrawArrays(GL_TRIANGLES, power_gauge_segment_first_quad[pad] * 6,
+                 power_gauge_segment_quads[pad] * 6);
+    for (int index = 0; index < power_gauge_active_segments[pad]; index++) {
+      const float t = (float)index / 11.0f;
+      glUniform4f(gl.loc_color,
+                  0.12f + 0.88f * t,
+                  0.88f - 0.38f * t,
+                  0.28f - 0.20f * t, 1.0f);
+      glDrawArrays(GL_TRIANGLES,
+                   (power_gauge_segment_first_quad[pad] + index) * 6, 6);
+    }
   }
   if (cinematic_helper_circle_quads) {
     glUniform1f(gl.loc_solid, 1.0f);

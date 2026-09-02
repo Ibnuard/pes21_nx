@@ -31,6 +31,9 @@ static uint32_t native_lab_debug_prime_mask;
 static uintptr_t native_lab_input_units[2];
 static uint32_t native_lab_debug_setplay_pad;
 static uint32_t native_lab_published_setplay_context;
+static uint32_t native_lab_trajectory_enabled;
+static uint32_t native_lab_previous_buttons[2];
+static uint32_t native_lab_setplay_linger_frames;
 static uint32_t native_lab_debug_buttons_p2;
 static uint32_t native_lab_debug_native_keys_p2;
 static uint32_t native_lab_debug_native_power_milli_p2;
@@ -52,7 +55,56 @@ enum {
   NATIVE_LAB_ACTION_COUNT
 };
 static uintptr_t native_lab_action_units[2][NATIVE_LAB_ACTION_COUNT];
+// Keep the real native action unit for each local cursor. Its +0x20 charge is
+// the sole source for the pad-owned custom gauge and release power bridge.
 static uint32_t native_lab_active_action[2];
+// The stock Screen2d gauge is global and keeps snapping P2 charge to P1.
+// Publish only pad-owned charge state; overlay.c renders a visual-only HUD bar
+// without touching the command or the engine's shared player marker.
+static uint32_t native_lab_gauge_owner_pad;
+static uint32_t native_lab_gauge_power_milli;
+static uint32_t native_lab_gauge_linger_frames;
+static uint32_t native_lab_gauge_active_mask;
+// Charging is independent from set-play action tokens. The same native
+// press/pull wrappers are also used in ordinary Exhibition gameplay, where
+// native_lab_active_action is intentionally zero. Without this mask the input
+// poll cleared a newly pressed gauge before its next charge sample arrived.
+static uint32_t native_lab_gauge_charging_mask;
+static uint32_t native_lab_gauge_power_milli_p2;
+static uint32_t native_lab_gauge_power_milli_by_pad[2];
+static uint32_t native_lab_gauge_linger_frames_by_pad[2];
+// PlayerNo that owned the ball/action when charging started. This comes from
+// ThinkUnitInputData +0x24 (the field passed by the engine to GetPlayerMove),
+// not CursorData +0x20: that cursor field resolves to the team slot/GK on this
+// build and caused every custom gauge to follow the goalkeeper.
+static uint32_t native_lab_gauge_player_no_by_pad[2];
+// A release freezes the bar; it does not dismiss it. The first post-release
+// BallInfo sample becomes the origin. Movement alone is insufficient because
+// the ball can roll during the kicker's wind-up; completion also requires the
+// ball to separate from the closest observed player/ball distance for several
+// consecutive render samples. Bit storage keeps the render/input-thread
+// handoff atomic.
+static uint32_t native_lab_gauge_release_ball_valid_mask;
+static uint32_t native_lab_gauge_release_ball_bits[2][3];
+static uint32_t native_lab_gauge_release_min_distance_bits[2];
+static uint32_t native_lab_gauge_completion_frames[2];
+// World-follow anchor published by ModelCursorName::GetPosition. Coordinates
+// are display pixels * 1000; the short TTL prevents a stale player position
+// from surviving a camera cut, replay, or match teardown.
+static int32_t native_lab_gauge_anchor_x_milli[2];
+static int32_t native_lab_gauge_anchor_y_milli[2];
+static uint32_t native_lab_gauge_anchor_ttl[2];
+// ThinkUnitManager creates the PadCommand after a unit returns its release
+// command. Keep a one-command token so only that user's close-free-kick command
+// receives LS vertical aim; unrelated and CPU kicks are never modified.
+static uint32_t native_lab_pending_kick_pad;
+static uint32_t native_lab_pending_kick_command;
+static uint32_t native_lab_pending_kick_action;
+static uint32_t native_lab_pending_kick_power_bits;
+static uint32_t native_lab_command_angle_bits[2];
+static uint32_t native_lab_command_vertical_bits[2];
+static uint32_t native_lab_command_angle_valid_mask;
+static uint32_t native_lab_left_aim_latched_mask;
 
 typedef struct {
   void *plugin;
@@ -64,17 +116,9 @@ static NativeLabCameraState native_lab_corner_camera;
 static NativeLabCameraState native_lab_goal_camera;
 static NativeLabCameraState native_lab_free_camera;
 
-typedef struct {
-  void *unit;
-  float offset;
-  uint32_t override;
-  uint32_t context;
-  uint64_t last_tick;
-} NativeLabAimState;
-static NativeLabAimState native_lab_aim[2];
 // Camera and kick units update independently. Publish the bounded RS yaw as
-// fixed-point radians so MobileSetplayKick can safely inherit it until LS is
-// used for a more precise aim override.
+// fixed-point radians so the native PadCommand can inherit the stable V7
+// camera angle. LS never moves the camera; it is reserved for kick direction.
 static int32_t native_lab_camera_yaw_millirad[2];
 
 typedef struct {
@@ -98,6 +142,7 @@ static NativeLabUnit native_lab_units[] = {
   {12, "_ZTVN5match3pad21ThinkUnitCursorChangeE", 0},
   {24, "_ZTVN5match3pad20ThinkUnitSuperCancelE", 0},
   {26, "_ZTVN5match3pad21ThinkUnitSetplayGuideE", 0},
+  {62, "_ZTVN5match3pad33ThinkUnitThrowinBodyAngleRotationE", 0},
   {64, "_ZTVN5match3pad28ThinkUnitGoalkickPassSupportE", 0},
   {65, "_ZTVN5match3pad20ThinkUnitShortCornerE", 0},
   {70, "_ZTVN5match3pad26ThinkUnitCornerKickTacticsE", 0},
@@ -158,6 +203,71 @@ static void native_pad_lab_reset(void) {
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_published_setplay_context, PES_SETPLAY_NONE,
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_trajectory_enabled, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_previous_buttons[0], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_previous_buttons[1], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_setplay_linger_frames, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_owner_pad, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_power_milli, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_linger_frames, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_active_mask, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_charging_mask, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_power_milli_p2, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_power_milli_by_pad[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_power_milli_by_pad[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_player_no_by_pad[0], UINT32_MAX,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_player_no_by_pad[1], UINT32_MAX,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_release_ball_valid_mask, 0,
+                   __ATOMIC_RELEASE);
+  for (uint32_t pad = 0; pad < 2; ++pad)
+    for (uint32_t axis = 0; axis < 3; ++axis)
+      __atomic_store_n(&native_lab_gauge_release_ball_bits[pad][axis], 0,
+                       __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_release_min_distance_bits[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_release_min_distance_bits[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_completion_frames[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_completion_frames[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_x_milli[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_x_milli[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_y_milli[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_y_milli[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_ttl[0], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_ttl[1], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_pending_kick_pad, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_pending_kick_command, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_pending_kick_action, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_pending_kick_power_bits, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_command_angle_bits[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_command_angle_bits[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_command_vertical_bits[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_command_vertical_bits[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_command_angle_valid_mask, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_left_aim_latched_mask, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_buttons_p2, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_native_keys_p2, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_native_power_milli_p2, 0,
@@ -182,10 +292,147 @@ static void native_pad_lab_reset(void) {
   memset(&native_lab_corner_camera, 0, sizeof(native_lab_corner_camera));
   memset(&native_lab_goal_camera, 0, sizeof(native_lab_goal_camera));
   memset(&native_lab_free_camera, 0, sizeof(native_lab_free_camera));
-  memset(native_lab_aim, 0, sizeof(native_lab_aim));
   __atomic_store_n(&native_lab_camera_yaw_millirad[0], 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_camera_yaw_millirad[1], 0,
+                   __ATOMIC_RELEASE);
+}
+
+static void native_lab_gauge_clear_pad(uint32_t pad) {
+  if (pad > 1)
+    return;
+  __atomic_store_n(&native_lab_gauge_power_milli_by_pad[pad], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_player_no_by_pad[pad], UINT32_MAX,
+                   __ATOMIC_RELEASE);
+  __atomic_fetch_and(&native_lab_gauge_release_ball_valid_mask,
+                     ~(1u << pad), __ATOMIC_ACQ_REL);
+  __atomic_store_n(&native_lab_gauge_release_min_distance_bits[pad], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_completion_frames[pad], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_anchor_ttl[pad], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_fetch_and(&native_lab_gauge_active_mask, ~(1u << pad),
+                     __ATOMIC_ACQ_REL);
+  __atomic_fetch_and(&native_lab_gauge_charging_mask, ~(1u << pad),
+                     __ATOMIC_ACQ_REL);
+  if (pad == 0)
+    __atomic_store_n(&native_lab_gauge_power_milli, 0, __ATOMIC_RELEASE);
+  else
+    __atomic_store_n(&native_lab_gauge_power_milli_p2, 0,
+                     __ATOMIC_RELEASE);
+  const uint32_t owner = __atomic_load_n(&native_lab_gauge_owner_pad,
+                                         __ATOMIC_ACQUIRE);
+  if (owner == pad + 1u) {
+    const uint32_t active = __atomic_load_n(&native_lab_gauge_active_mask,
+                                            __ATOMIC_ACQUIRE) & 3u;
+    if (active & (1u << (pad ^ 1u))) {
+      const uint32_t other = pad ^ 1u;
+      __atomic_store_n(&native_lab_gauge_owner_pad, other + 1u,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_power_milli,
+                       __atomic_load_n(&native_lab_gauge_power_milli_by_pad[
+                                           other], __ATOMIC_ACQUIRE),
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_linger_frames,
+                       __atomic_load_n(&native_lab_gauge_linger_frames_by_pad[
+                                           other], __ATOMIC_ACQUIRE),
+                       __ATOMIC_RELEASE);
+    } else {
+      __atomic_store_n(&native_lab_gauge_owner_pad, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_linger_frames, 0,
+                       __ATOMIC_RELEASE);
+    }
+  }
+}
+
+static void native_lab_gauge_observe_released_ball(
+    uint32_t pad, float ball_x, float ball_y, float ball_z, float player_x,
+    float player_y, float player_z) {
+  if (pad > 1)
+    return;
+  const uint32_t pad_bit = 1u << pad;
+  if (!(__atomic_load_n(&native_lab_gauge_active_mask, __ATOMIC_ACQUIRE) &
+        pad_bit) ||
+      (__atomic_load_n(&native_lab_gauge_charging_mask, __ATOMIC_ACQUIRE) &
+       pad_bit))
+    return;
+
+  const float sample[3] = {ball_x, ball_y, ball_z};
+  uint32_t sample_bits[3];
+  memcpy(sample_bits, sample, sizeof(sample_bits));
+  const float player_dx = ball_x - player_x;
+  const float player_dy = ball_y - player_y;
+  const float player_dz = ball_z - player_z;
+  const float player_distance_sq =
+      player_dx * player_dx + player_dy * player_dy +
+      player_dz * player_dz;
+  if (!(__atomic_load_n(&native_lab_gauge_release_ball_valid_mask,
+                        __ATOMIC_ACQUIRE) & pad_bit)) {
+    for (uint32_t axis = 0; axis < 3; ++axis)
+      __atomic_store_n(&native_lab_gauge_release_ball_bits[pad][axis],
+                       sample_bits[axis], __ATOMIC_RELEASE);
+    uint32_t distance_bits;
+    memcpy(&distance_bits, &player_distance_sq, sizeof(distance_bits));
+    __atomic_store_n(&native_lab_gauge_release_min_distance_bits[pad],
+                     distance_bits, __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_completion_frames[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_fetch_or(&native_lab_gauge_release_ball_valid_mask, pad_bit,
+                      __ATOMIC_ACQ_REL);
+    return;
+  }
+
+  float origin[3];
+  for (uint32_t axis = 0; axis < 3; ++axis) {
+    const uint32_t bits = __atomic_load_n(
+        &native_lab_gauge_release_ball_bits[pad][axis], __ATOMIC_ACQUIRE);
+    memcpy(&origin[axis], &bits, sizeof(bits));
+  }
+  uint32_t min_distance_bits = __atomic_load_n(
+      &native_lab_gauge_release_min_distance_bits[pad], __ATOMIC_ACQUIRE);
+  float min_distance_sq;
+  memcpy(&min_distance_sq, &min_distance_bits, sizeof(min_distance_sq));
+  if (min_distance_sq != min_distance_sq ||
+      player_distance_sq < min_distance_sq) {
+    min_distance_sq = player_distance_sq;
+    memcpy(&min_distance_bits, &min_distance_sq, sizeof(min_distance_bits));
+    __atomic_store_n(&native_lab_gauge_release_min_distance_bits[pad],
+                     min_distance_bits, __ATOMIC_RELEASE);
+  }
+
+  const float dx = ball_x - origin[0];
+  const float dy = ball_y - origin[1];
+  const float dz = ball_z - origin[2];
+  const int ball_moved = dx * dx + dy * dy + dz * dz >= 0.1225f;
+  // A 0.70-unit increase from the closest observed foot/ball separation keeps
+  // the bar through the run-up and contact animation. Three consecutive
+  // samples reject one-frame projection/registry jitter, then completion
+  // follows the kicked ball rather than button release.
+  const int ball_separated =
+      player_distance_sq >= min_distance_sq + 0.49f;
+  if (ball_moved && ball_separated) {
+    const uint32_t completion_frames = __atomic_add_fetch(
+        &native_lab_gauge_completion_frames[pad], 1u, __ATOMIC_ACQ_REL);
+    if (completion_frames >= 3u)
+      native_lab_gauge_clear_pad(pad);
+  } else {
+    __atomic_store_n(&native_lab_gauge_completion_frames[pad], 0,
+                     __ATOMIC_RELEASE);
+  }
+}
+
+static void native_lab_gauge_clear_all(void) {
+  native_lab_gauge_clear_pad(0);
+  native_lab_gauge_clear_pad(1);
+  __atomic_store_n(&native_lab_gauge_owner_pad, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_power_milli, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_power_milli_p2, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_linger_frames, 0,
                    __ATOMIC_RELEASE);
 }
 
@@ -215,12 +462,84 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
                                                int connected) {
   if (!pes_controller_native_pad_lab_active() || port > 1)
     return;
+  const uint32_t previous_buttons = __atomic_exchange_n(
+      &native_lab_previous_buttons[port], connected ? buttons : 0,
+      __ATOMIC_ACQ_REL);
+  uint32_t anchor_ttl = __atomic_load_n(
+      &native_lab_gauge_anchor_ttl[port], __ATOMIC_ACQUIRE);
+  if (anchor_ttl)
+    __atomic_fetch_sub(&native_lab_gauge_anchor_ttl[port], 1u,
+                       __ATOMIC_ACQ_REL);
+  // Keep each pad's last charge visible until BallInfo confirms that the kick
+  // happened. This three-second counter is only a safety net for cancelled
+  // actions, camera cuts, and match teardown; release itself never clears.
+  if (port < 2 && (__atomic_load_n(&native_lab_gauge_active_mask,
+                                   __ATOMIC_ACQUIRE) & (1u << port))) {
+    uint32_t linger = __atomic_load_n(
+        &native_lab_gauge_linger_frames_by_pad[port], __ATOMIC_ACQUIRE);
+    if (linger)
+      __atomic_fetch_sub(&native_lab_gauge_linger_frames_by_pad[port], 1u,
+                         __ATOMIC_ACQ_REL);
+    else if (!(__atomic_load_n(&native_lab_gauge_charging_mask,
+                               __ATOMIC_ACQUIRE) & (1u << port)))
+      native_lab_gauge_clear_pad(port);
+    if (__atomic_load_n(&native_lab_gauge_owner_pad, __ATOMIC_ACQUIRE) ==
+        port + 1u) {
+      __atomic_store_n(&native_lab_gauge_linger_frames, linger,
+                       __ATOMIC_RELEASE);
+    }
+  }
+  // ButtonSetplay's surface snapshot can briefly report NONE while its
+  // native ThinkUnitList is still active. Keep the last native context for a
+  // short, input-thread-paced grace period so the helper never falls back to
+  // the exhibition ZR/X/Y legend during that handoff.
+  uint32_t setplay_linger = __atomic_load_n(
+      &native_lab_setplay_linger_frames, __ATOMIC_ACQUIRE);
+  if (setplay_linger) {
+    if (__atomic_fetch_sub(&native_lab_setplay_linger_frames, 1u,
+                           __ATOMIC_ACQ_REL) == 1u) {
+      const uint32_t published = __atomic_load_n(
+          &native_lab_published_setplay_context, __ATOMIC_ACQUIRE);
+      if (published == PES_SETPLAY_NONE) {
+        __atomic_store_n(&native_lab_debug_context, PES_SETPLAY_NONE,
+                         __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_debug_stock_mask, 0,
+                         __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_debug_route_mask, 0,
+                         __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_active_action[0], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_active_action[1], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_pending_kick_pad, 0,
+                         __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_pending_kick_command, 0,
+                         __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_pending_kick_action, 0,
+                         __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_pending_kick_power_bits, 0,
+                         __ATOMIC_RELEASE);
+        native_lab_gauge_clear_all();
+      }
+    }
+  }
   if (connected)
     __atomic_fetch_or(&native_lab_debug_connected_mask, 1u << port,
                       __ATOMIC_RELAXED);
   else
     __atomic_fetch_and(&native_lab_debug_connected_mask, ~(1u << port),
                        __ATOMIC_RELAXED);
+  // R toggles the real stock pass/cross trajectory only for the pad that owns
+  // the current set play. This is a visual aid; it never changes PadCommand.
+  const uint32_t setplay_pad = __atomic_load_n(
+      &native_lab_debug_setplay_pad, __ATOMIC_ACQUIRE);
+  const uint32_t context = __atomic_load_n(
+      &native_lab_debug_context, __ATOMIC_ACQUIRE);
+  if (connected && port == setplay_pad && (buttons & (1u << 7)) &&
+      !(previous_buttons & (1u << 7)) &&
+      (context == PES_SETPLAY_GOAL_KICK ||
+       context == PES_SETPLAY_CORNER ||
+       context == PES_SETPLAY_FREE_KICK))
+    __atomic_fetch_xor(&native_lab_trajectory_enabled, 1u,
+                       __ATOMIC_ACQ_REL);
   if (port == 1) {
     __atomic_store_n(&native_lab_debug_buttons_p2, buttons,
                      __ATOMIC_RELEASE);
@@ -250,14 +569,56 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
 void pes_controller_native_pad_lab_publish_setplay_context(uint32_t context) {
   if (context > PES_SETPLAY_THROW_IN)
     context = PES_SETPLAY_NONE;
-  __atomic_store_n(&native_lab_published_setplay_context, context,
-                   __ATOMIC_RELEASE);
-  if (context == PES_SETPLAY_NONE) {
-    __atomic_store_n(&native_lab_debug_context, PES_SETPLAY_NONE,
+  const uint32_t previous = __atomic_exchange_n(
+      &native_lab_published_setplay_context, context, __ATOMIC_ACQ_REL);
+  if (context != previous) {
+    const uint32_t show_trajectory =
+        context == PES_SETPLAY_GOAL_KICK ||
+        context == PES_SETPLAY_CORNER ||
+        context == PES_SETPLAY_FREE_KICK;
+    __atomic_store_n(&native_lab_trajectory_enabled, show_trajectory,
                      __ATOMIC_RELEASE);
-    __atomic_store_n(&native_lab_active_action[0], 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&native_lab_active_action[1], 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_command_angle_valid_mask, 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_left_aim_latched_mask, 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_command_vertical_bits[0], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_command_vertical_bits[1], 0,
+                     __ATOMIC_RELEASE);
   }
+  if (context == PES_SETPLAY_NONE) {
+    const uint32_t previous_debug_context = __atomic_load_n(
+        &native_lab_debug_context, __ATOMIC_ACQUIRE);
+    // NONE is published every normal-gameplay frame. Do not clear a regular
+    // shot/cross gauge or a still-live native set-play helper there. The
+    // context linger expires in debug_input once the native list stops
+    // refreshing it; an explicit context change still clears all action state.
+    const uint32_t existing_linger = __atomic_load_n(
+        &native_lab_setplay_linger_frames, __ATOMIC_ACQUIRE);
+    if (previous != PES_SETPLAY_NONE ||
+        (previous_debug_context != PES_SETPLAY_NONE && !existing_linger)) {
+      __atomic_store_n(&native_lab_setplay_linger_frames, 60,
+                       __ATOMIC_RELEASE);
+    }
+  }
+}
+
+uint32_t pes_controller_native_pad_lab_setplay_context(void) {
+  return __atomic_load_n(&native_lab_debug_context, __ATOMIC_ACQUIRE);
+}
+
+int pes_controller_native_pad_lab_trajectory_enabled(void) {
+  if (!pes_controller_native_pad_lab_active())
+    return 0;
+  const uint32_t context = __atomic_load_n(&native_lab_debug_context,
+                                           __ATOMIC_ACQUIRE);
+  if (context != PES_SETPLAY_GOAL_KICK &&
+      context != PES_SETPLAY_CORNER &&
+      context != PES_SETPLAY_FREE_KICK)
+    return 0;
+  return __atomic_load_n(&native_lab_trajectory_enabled,
+                         __ATOMIC_ACQUIRE) != 0;
 }
 
 void pes_controller_native_pad_lab_debug_snapshot(
@@ -332,6 +693,33 @@ void pes_controller_native_pad_lab_debug_snapshot(
       &native_lab_debug_right_axis_x_p2, __ATOMIC_ACQUIRE);
   snapshot->right_axis_y_p2 = __atomic_load_n(
       &native_lab_debug_right_axis_y_p2, __ATOMIC_ACQUIRE);
+  snapshot->trajectory_enabled = __atomic_load_n(
+      &native_lab_trajectory_enabled, __ATOMIC_ACQUIRE);
+  snapshot->gauge_owner_pad = __atomic_load_n(
+      &native_lab_gauge_owner_pad, __ATOMIC_ACQUIRE);
+  snapshot->gauge_power_milli = __atomic_load_n(
+      &native_lab_gauge_power_milli_by_pad[0], __ATOMIC_ACQUIRE);
+  snapshot->gauge_active_mask = __atomic_load_n(
+      &native_lab_gauge_active_mask, __ATOMIC_ACQUIRE);
+  snapshot->gauge_power_milli_p2 = __atomic_load_n(
+      &native_lab_gauge_power_milli_by_pad[1], __ATOMIC_ACQUIRE);
+  const uint32_t gauge_mask = snapshot->gauge_active_mask & 3u;
+  uint32_t anchor_mask = 0;
+  for (uint32_t pad = 0; pad < 2; ++pad) {
+    if ((gauge_mask & (1u << pad)) &&
+        __atomic_load_n(&native_lab_gauge_anchor_ttl[pad],
+                        __ATOMIC_ACQUIRE))
+      anchor_mask |= 1u << pad;
+  }
+  snapshot->gauge_anchor_valid_mask = anchor_mask;
+  snapshot->gauge_anchor_x_milli = __atomic_load_n(
+      &native_lab_gauge_anchor_x_milli[0], __ATOMIC_ACQUIRE);
+  snapshot->gauge_anchor_y_milli = __atomic_load_n(
+      &native_lab_gauge_anchor_y_milli[0], __ATOMIC_ACQUIRE);
+  snapshot->gauge_anchor_x_milli_p2 = __atomic_load_n(
+      &native_lab_gauge_anchor_x_milli[1], __ATOMIC_ACQUIRE);
+  snapshot->gauge_anchor_y_milli_p2 = __atomic_load_n(
+      &native_lab_gauge_anchor_y_milli[1], __ATOMIC_ACQUIRE);
 }
 
 // CursorInfo starts with 24 CursorData records at a fixed 0xa0-byte stride.
@@ -493,11 +881,69 @@ static uint32_t native_lab_input_pad(const void *input) {
 
 static void native_lab_note_action(const void *input, uint32_t event,
                                    uint32_t command) {
-  if (!pes_controller_native_pad_lab_active() ||
-      __atomic_load_n(&native_lab_debug_context, __ATOMIC_ACQUIRE) ==
-          PES_SETPLAY_NONE)
+  if (!pes_controller_native_pad_lab_active())
     return;
   const uint32_t pad = native_lab_input_pad(input);
+  const uint32_t pad_bit = 1u << pad;
+  if (event == PES_NATIVE_LAB_EVENT_SHORT_PRESS ||
+      event == PES_NATIVE_LAB_EVENT_LONG_PRESS ||
+      event == PES_NATIVE_LAB_EVENT_SHOOT_PRESS) {
+    __atomic_fetch_or(&native_lab_gauge_active_mask, pad_bit,
+                      __ATOMIC_ACQ_REL);
+    __atomic_fetch_or(&native_lab_gauge_charging_mask, pad_bit,
+                      __ATOMIC_ACQ_REL);
+    __atomic_store_n(&native_lab_gauge_power_milli_by_pad[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad], 0,
+                     __ATOMIC_RELEASE);
+    uint32_t player_no = UINT32_MAX;
+    if (input)
+      memcpy(&player_no, (const char *)input + 0x24,
+             sizeof(player_no));
+    if (player_no > 21u)
+      player_no = UINT32_MAX;
+    __atomic_store_n(&native_lab_gauge_player_no_by_pad[pad], player_no,
+                     __ATOMIC_RELEASE);
+    __atomic_fetch_and(&native_lab_gauge_release_ball_valid_mask, ~pad_bit,
+                       __ATOMIC_ACQ_REL);
+    __atomic_store_n(&native_lab_gauge_release_min_distance_bits[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_completion_frames[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_owner_pad, pad + 1u,
+                     __ATOMIC_RELEASE);
+    if (pad == 0)
+      __atomic_store_n(&native_lab_gauge_power_milli, 0,
+                       __ATOMIC_RELEASE);
+    else
+      __atomic_store_n(&native_lab_gauge_power_milli_p2, 0,
+                       __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_linger_frames, 0,
+                     __ATOMIC_RELEASE);
+  } else if (event == PES_NATIVE_LAB_EVENT_SHORT_RELEASE ||
+             event == PES_NATIVE_LAB_EVENT_LONG_RELEASE ||
+             event == PES_NATIVE_LAB_EVENT_SHOOT_RELEASE) {
+    __atomic_fetch_or(&native_lab_gauge_active_mask, pad_bit,
+                      __ATOMIC_ACQ_REL);
+    __atomic_fetch_and(&native_lab_gauge_charging_mask, ~pad_bit,
+                       __ATOMIC_ACQ_REL);
+    uint32_t expected = pad + 1u;
+    if (__atomic_load_n(&native_lab_gauge_owner_pad, __ATOMIC_ACQUIRE) ==
+        expected)
+      __atomic_store_n(&native_lab_gauge_linger_frames, 180,
+                       __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad], 180,
+                     __ATOMIC_RELEASE);
+    __atomic_fetch_and(&native_lab_gauge_release_ball_valid_mask, ~pad_bit,
+                       __ATOMIC_ACQ_REL);
+    __atomic_store_n(&native_lab_gauge_release_min_distance_bits[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_completion_frames[pad], 0,
+                     __ATOMIC_RELEASE);
+  }
+  if (__atomic_load_n(&native_lab_debug_context, __ATOMIC_ACQUIRE) ==
+      PES_SETPLAY_NONE)
+    return;
   __atomic_store_n(&native_lab_debug_setplay_pad, pad, __ATOMIC_RELEASE);
   if (pad == 1) {
     __atomic_store_n(&native_lab_debug_last_command_p2, command,
@@ -661,8 +1107,36 @@ static int native_lab_has_kind(const uint32_t *entries, uint32_t count,
 
 static uint32_t native_lab_setplay_context(const uint32_t *entries,
                                            uint32_t count) {
-  if (!native_lab_has_kind(entries, count, 90))
-    return PES_SETPLAY_NONE;
+  uint32_t published = __atomic_load_n(
+      &native_lab_published_setplay_context, __ATOMIC_ACQUIRE);
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+  if (published == PES_SETPLAY_NONE)
+    published = pes_controller_setplay_context();
+#endif
+  const int has_setplay_unit =
+      native_lab_has_kind(entries, count, 62) ||
+      native_lab_has_kind(entries, count, 64) ||
+      native_lab_has_kind(entries, count, 65) ||
+      native_lab_has_kind(entries, count, 70) ||
+      native_lab_has_kind(entries, count, 72) ||
+      native_lab_has_kind(entries, count, 75) ||
+      native_lab_has_kind(entries, count, 90);
+  // A semantic ButtonSetplay snapshot can lead/lag the native list by a
+  // frame, but it must never turn an ordinary gameplay list into a set-piece.
+  // Only apply the short context grace when a real set-play unit is present.
+  if (has_setplay_unit && published == PES_SETPLAY_NONE &&
+      __atomic_load_n(&native_lab_setplay_linger_frames, __ATOMIC_ACQUIRE))
+    published = __atomic_load_n(&native_lab_debug_context, __ATOMIC_ACQUIRE);
+  if (!native_lab_has_kind(entries, count, 90)) {
+    // Throw-ins use their own native body-angle unit and do not always carry
+    // MobileSetplayKick in the reduced mobile list.
+    if (published == PES_SETPLAY_THROW_IN &&
+        native_lab_has_kind(entries, count, 62))
+      return PES_SETPLAY_THROW_IN;
+    return (published != PES_SETPLAY_NONE && has_setplay_unit)
+               ? published
+               : PES_SETPLAY_NONE;
+  }
   if (native_lab_has_kind(entries, count, 64))
     return PES_SETPLAY_GOAL_KICK;
   if (native_lab_has_kind(entries, count, 65) ||
@@ -674,11 +1148,10 @@ static uint32_t native_lab_setplay_context(const uint32_t *entries,
   // Close-range free kicks use a reduced list without tactics/position-change
   // markers on this mobile build. ButtonSetplay still publishes the semantic
   // context, so use it only as a fallback while MobileSetplayKick is present.
-  const uint32_t published = __atomic_load_n(
-      &native_lab_published_setplay_context, __ATOMIC_ACQUIRE);
   if (published == PES_SETPLAY_GOAL_KICK ||
       published == PES_SETPLAY_CORNER ||
-      published == PES_SETPLAY_FREE_KICK)
+      published == PES_SETPLAY_FREE_KICK ||
+      published == PES_SETPLAY_THROW_IN)
     return published;
   return PES_SETPLAY_NONE;
 }
@@ -736,6 +1209,11 @@ static void native_lab_list_update(void *list, const void *input,
   if (native_lab_has_kind(stock + 1, stock[0], 75))
     stock_mask |= PES_NATIVE_LAB_STOCK_FREEKICK_POSITION;
   uint32_t entries[97], count = 0, changed = 0;
+  const int route_setplay_guide =
+      native_setplay && setplay_context != PES_SETPLAY_THROW_IN;
+  const int route_throwin_aim =
+      setplay_context == PES_SETPLAY_THROW_IN &&
+      native_lab_has_kind(stock + 1, stock[0], 90);
   for (uint32_t i = 0; i < stock[0]; i++) {
     uint32_t kind = stock[1+i];
     if (kind >= 78 && kind <= 89) {
@@ -759,8 +1237,30 @@ static void native_lab_list_update(void *list, const void *input,
         case 89: kind = 11; break;  // Free movement.
       }
     }
+    // Normalize an existing native guide too; different set-play variants can
+    // supply it in different positions. It is appended after kind 90 below.
+    if ((route_setplay_guide && kind == 26) ||
+        (route_throwin_aim && kind == 62)) {
+      changed++;
+      continue;
+    }
     if (!native_lab_append(entries, &count, kind))
       return; // Transactional: no partial rewrite on invalid/oversized data.
+    // Directional units run after MobileSetplayKick. A non-zero guide command
+    // before kind 90 prevented its Pull/Release command from ever executing,
+    // leaving A/B charging forever. The guide still publishes native LS aim
+    // on idle frames, while a kick release always has first priority.
+    if (kind == 90) {
+      if (route_setplay_guide) {
+        if (!native_lab_append(entries, &count, 26))
+          return;
+        changed++;
+      } else if (route_throwin_aim) {
+        if (!native_lab_append(entries, &count, 62))
+          return;
+        changed++;
+      }
+    }
   }
   if (changed) {
     memcpy(stock + 1, entries, count * sizeof(entries[0]));
@@ -773,14 +1273,33 @@ static void native_lab_list_update(void *list, const void *input,
                           PES_NATIVE_LAB_ROUTE_LONG_PASS |
                           PES_NATIVE_LAB_ROUTE_SHOOT |
                           PES_NATIVE_LAB_ROUTE_CAMERA_STICK;
+    if (setplay_context == PES_SETPLAY_THROW_IN)
+      route_mask |= PES_NATIVE_LAB_ROUTE_THROWIN_AIM;
+    else
+      route_mask |= PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE;
     if (setplay_context == PES_SETPLAY_GOAL_KICK)
       route_mask |= PES_NATIVE_LAB_ROUTE_GOALKICK_SUPPORT;
     else if (setplay_context == PES_SETPLAY_CORNER)
       route_mask |= PES_NATIVE_LAB_ROUTE_CORNER_TACTICS;
     else if (setplay_context == PES_SETPLAY_FREE_KICK)
       route_mask |= PES_NATIVE_LAB_ROUTE_FREEKICK_TACTICS;
-    __atomic_store_n(&native_lab_debug_context, setplay_context,
+    const uint32_t previous_context = __atomic_exchange_n(
+        &native_lab_debug_context, setplay_context, __ATOMIC_ACQ_REL);
+    __atomic_store_n(&native_lab_setplay_linger_frames, 60,
                      __ATOMIC_RELEASE);
+    if (previous_context != setplay_context) {
+      native_lab_gauge_clear_all();
+      __atomic_store_n(&native_lab_trajectory_enabled, 1,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_command_angle_valid_mask, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_left_aim_latched_mask, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_command_vertical_bits[0], 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_command_vertical_bits[1], 0,
+                       __ATOMIC_RELEASE);
+    }
     __atomic_store_n(&native_lab_debug_stock_mask, stock_mask,
                      __ATOMIC_RELEASE);
     __atomic_store_n(&native_lab_debug_route_mask, route_mask,
@@ -797,10 +1316,48 @@ static void native_lab_list_update(void *list, const void *input,
                      route_pad == 1 ? 1u : 0u, __ATOMIC_RELEASE);
     __atomic_fetch_or(&native_lab_status, 32u | 64u, __ATOMIC_RELAXED);
   } else if (route_pad == 0 || route_pad == 1) {
-    // Do not carry a held kick across a set-play boundary.  The next set-play
-    // starts from the stock unit's idle state instead of emitting a stale pull.
+    // In 2P, the attacking set-play list and the defending ordinary list are
+    // updated independently. Only the pad that owns the current set play may
+    // tear it down; otherwise the defender clears the attacker's context each
+    // frame, restores the old ZR/X/Y touch legend, and resets a charging gauge.
+    // Once the owner's own list returns to ordinary gameplay, clear the
+    // helper/trajectory/action state immediately so it cannot linger.
     __atomic_store_n(&native_lab_active_action[route_pad], 0,
                      __ATOMIC_RELEASE);
+    const uint32_t previous_context = __atomic_load_n(
+        &native_lab_debug_context, __ATOMIC_ACQUIRE);
+    const uint32_t setplay_pad = __atomic_load_n(
+        &native_lab_debug_setplay_pad, __ATOMIC_ACQUIRE);
+    if (previous_context != PES_SETPLAY_NONE &&
+        setplay_pad == (uint32_t)route_pad) {
+      __atomic_store_n(&native_lab_debug_context, PES_SETPLAY_NONE,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_debug_stock_mask, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_debug_route_mask, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_debug_setplay_pad, UINT32_MAX,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_trajectory_enabled, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_setplay_linger_frames, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_command_angle_valid_mask, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_left_aim_latched_mask, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_pending_kick_pad, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_pending_kick_command, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_pending_kick_action, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_pending_kick_power_bits, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_owner_pad, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_power_milli, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&native_lab_gauge_linger_frames, 0,
+                       __ATOMIC_RELEASE);
+    }
   }
 }
 
@@ -816,20 +1373,48 @@ static uint32_t (*native_lab_shoot_pull_original)(void *, const void *);
 static uint32_t (*native_lab_support_pull_original)(void *, const void *);
 static uint32_t (*native_lab_mobile_kick_main_original)(void *, const void *,
                                                         uint32_t);
-static float (*native_lab_mobile_filter_angle)(void *, const void *, float);
+// Kept as an ABI fingerprint for this owned mobile binary. Native aim bypasses
+// this gesture-state filter and writes the physical-stick angle directly.
+static float (*native_lab_mobile_filter_angle_abi)(void *, const void *, float);
+static void (*native_lab_short_update_2d_original)(void *, const void *,
+                                                   void *);
+static void (*native_lab_long_update_2d_original)(void *, const void *,
+                                                  void *);
+static void (*native_lab_shoot_update_2d_original)(void *, const void *,
+                                                   void *);
+static void (*native_lab_mobile_kick_update_2d_original)(void *, const void *,
+                                                         void *);
+static void (*native_lab_draw_pass_line)(uint32_t, uint32_t, uint32_t,
+                                         uint32_t, float, const void *, void *);
+static void (*native_lab_set_kick_original)(void *, uint32_t, float, float,
+                                             float, uint32_t, float, float,
+                                             uint32_t, uint32_t);
+static void (*native_lab_set_kick_no_player_original)(
+    void *, uint32_t, float, float, float, uint32_t, float, float,
+    uint32_t);
 static void (*native_lab_corner_camera_update_original)(void *, void *);
 static void (*native_lab_goal_camera_update_original)(void *, void *);
 static void (*native_lab_free_camera_update_original)(void *, void *);
 
+static void native_lab_publish_setplay_trajectory(const void *input,
+                                                   void *screen_2d);
+
 static uint32_t native_lab_guide_main(void *unit, const void *input,
                                       uint32_t kind) {
-  const uint32_t result = native_lab_guide_main_original
-                              ? native_lab_guide_main_original(unit, input,
-                                                               kind)
-                              : 0;
-  if (result)
-    native_lab_note_action(input, PES_NATIVE_LAB_EVENT_AIM, result);
-  return result;
+  if (pes_controller_native_pad_lab_active() &&
+      __atomic_load_n(&native_lab_debug_context, __ATOMIC_ACQUIRE) !=
+          PES_SETPLAY_NONE) {
+    // Stock SetplayGuide consumes LS and changes the mobile camera target.
+    // Native lab owns aim through PadCommand instead, so do not execute the
+    // guide at all while a native set play is active.
+    (void)unit;
+    (void)input;
+    (void)kind;
+    return 0;
+  }
+  return native_lab_guide_main_original
+             ? native_lab_guide_main_original(unit, input, kind)
+             : 0;
 }
 
 #define NATIVE_LAB_ACTION_WRAPPER(name, event, original)                    \
@@ -863,13 +1448,219 @@ NATIVE_LAB_ACTION_WRAPPER(native_lab_support_pull,
 
 #undef NATIVE_LAB_ACTION_WRAPPER
 
+// Capture only the genuine native unit charge. The custom renderer consumes
+// this state and never writes Screen2d trajectory/gauge data, so a later P1
+// update cannot steal P2's gauge and this cannot affect the kick command.
+static void native_lab_track_action_power(const void *power_unit,
+                                          const void *input,
+                                          void *screen_2d) {
+  // native_lab_gauge_owner_pad remains the latest-action presentation owner;
+  // per-pad state below is what prevents P2 from being projected onto P1.
+  // Screen2dInfo +0x10b9 is only an output of MobileShoot::Update2DInfo.
+  // Native Short/Long/Shoot Update2DInfo are no-op methods, so after the
+  // mobile-to-native migration this byte is not a usable lifecycle source;
+  // keep it hidden and use native power + BallInfo completion instead.
+  if (screen_2d && pes_controller_native_pad_lab_active()) {
+    const uint8_t hidden = 0;
+    memcpy((char *)screen_2d + 0x10b9, &hidden, sizeof(hidden));
+  }
+  if (!power_unit || !input || !pes_controller_native_pad_lab_active())
+    return;
+  const uint32_t pad = native_lab_input_pad(input);
+  if (!(__atomic_load_n(&native_lab_gauge_active_mask, __ATOMIC_ACQUIRE) &
+        (1u << pad)))
+    return;
+  float power = 0.0f;
+  memcpy(&power, (const char *)power_unit + 0x20, sizeof(power));
+  if (!(power > 0.0f) &&
+      __atomic_load_n(&native_lab_gauge_linger_frames_by_pad[pad],
+                      __ATOMIC_ACQUIRE))
+    return;
+  if (!(power > 0.0f))
+    power = 0.0f;
+  if (power > 1.0f)
+    power = 1.0f;
+  const uint32_t power_milli = (uint32_t)(power * 1000.0f + 0.5f);
+  __atomic_store_n(&native_lab_gauge_power_milli_by_pad[pad], power_milli,
+                   __ATOMIC_RELEASE);
+  if (pad == 0)
+    __atomic_store_n(&native_lab_gauge_power_milli, power_milli,
+                     __ATOMIC_RELEASE);
+  else
+    __atomic_store_n(&native_lab_gauge_power_milli_p2, power_milli,
+                     __ATOMIC_RELEASE);
+}
+
+static void native_lab_publish_setplay_trajectory(const void *input,
+                                                   void *screen_2d) {
+  if (!input || !screen_2d || !native_lab_draw_pass_line ||
+      !pes_controller_native_pad_lab_trajectory_enabled())
+    return;
+  const uint32_t pad = native_lab_input_pad(input);
+  const uint32_t owner = __atomic_load_n(&native_lab_debug_setplay_pad,
+                                         __ATOMIC_ACQUIRE);
+  const uint32_t valid = __atomic_load_n(
+      &native_lab_command_angle_valid_mask, __ATOMIC_ACQUIRE);
+  if (pad != owner || !(valid & (1u << pad)))
+    return;
+  uint32_t player = 0;
+  memcpy(&player, (const char *)input + 0x24, sizeof(player));
+  const void *registry = *(void *const *)input;
+  if (!registry || player >= 22)
+    return;
+  float angle = 0.0f;
+  const uint32_t angle_bits = __atomic_load_n(
+      &native_lab_command_angle_bits[pad], __ATOMIC_ACQUIRE);
+  memcpy(&angle, &angle_bits, sizeof(angle));
+  // Native LongPass produces the cross-style curved world trail. 0xff asks
+  // DrawPassLine to derive the target from our angle instead of another player.
+  native_lab_draw_pass_line(0x50u, 0u, player, 0xffu, angle, registry,
+                            screen_2d);
+}
+
+#define NATIVE_LAB_GAUGE_WRAPPER(name, original)                         \
+  static void name(void *unit, const void *input, void *screen_2d) {      \
+    if (original)                                                        \
+      original(unit, input, screen_2d);                                  \
+    native_lab_track_action_power(unit, input, screen_2d);               \
+    if (!(__atomic_load_n(&native_lab_debug_stock_mask, __ATOMIC_ACQUIRE) & \
+          PES_NATIVE_LAB_STOCK_MOBILE_KICK))                             \
+      native_lab_publish_setplay_trajectory(input, screen_2d);            \
+  }
+
+NATIVE_LAB_GAUGE_WRAPPER(native_lab_short_update_2d,
+                         native_lab_short_update_2d_original)
+NATIVE_LAB_GAUGE_WRAPPER(native_lab_long_update_2d,
+                         native_lab_long_update_2d_original)
+NATIVE_LAB_GAUGE_WRAPPER(native_lab_shoot_update_2d,
+                         native_lab_shoot_update_2d_original)
+
+#undef NATIVE_LAB_GAUGE_WRAPPER
+
+static void native_lab_mobile_kick_update_2d(void *unit, const void *input,
+                                              void *screen_2d) {
+  if (native_lab_mobile_kick_update_2d_original)
+    native_lab_mobile_kick_update_2d_original(unit, input, screen_2d);
+  native_lab_track_action_power(NULL, input, screen_2d);
+  native_lab_publish_setplay_trajectory(input, screen_2d);
+  const uint32_t pad = native_lab_input_pad(input);
+  const uint32_t action = __atomic_load_n(&native_lab_active_action[pad],
+                                           __ATOMIC_ACQUIRE);
+  if (!action || action > NATIVE_LAB_ACTION_SHOOT + 1u)
+    return;
+  const void *power_unit = (const void *)__atomic_load_n(
+      &native_lab_action_units[pad][action - 1u], __ATOMIC_ACQUIRE);
+  native_lab_track_action_power(power_unit, input, screen_2d);
+}
+
+static float native_lab_normalize_axis(int32_t raw) {
+  float axis = (float)raw / 32768.0f;
+  const float absolute = fabsf(axis);
+  if (absolute <= 0.18f)
+    return 0.0f;
+  const float clamped = absolute > 1.0f ? 1.0f : absolute;
+  return copysignf((clamped - 0.18f) / 0.82f, axis);
+}
+
+// ThinkUnitManager owns the real native PadCommand. The mobile gesture route
+// normally populates its angle, but our physical Short/Long/Shoot unit returns
+// only a command kind. Patch the exact release command with the direct native
+// set-play angle, native hold power, and (close free kick only) LS-Y height.
+// No touch/swipe event is synthesized and no ThinkUnit charge field is
+// modified.
+static void native_lab_adjust_kick(uint32_t kind, float *angle,
+                                   float *kick_power, float *vertical) {
+  const uint32_t pending_command = __atomic_load_n(
+      &native_lab_pending_kick_command, __ATOMIC_ACQUIRE);
+  const uint32_t pending_pad = __atomic_load_n(
+      &native_lab_pending_kick_pad, __ATOMIC_ACQUIRE);
+  const uint32_t pending_action = __atomic_load_n(
+      &native_lab_pending_kick_action, __ATOMIC_ACQUIRE);
+  const uint32_t stock_mask = __atomic_load_n(
+      &native_lab_debug_stock_mask, __ATOMIC_ACQUIRE);
+  if (pending_pad && pending_command == kind) {
+    const uint32_t context = __atomic_load_n(
+        &native_lab_debug_context, __ATOMIC_ACQUIRE);
+    const uint32_t pad = pending_pad - 1u;
+    if (context == PES_SETPLAY_GOAL_KICK || context == PES_SETPLAY_CORNER ||
+        context == PES_SETPLAY_FREE_KICK) {
+      const uint32_t angle_bits = __atomic_load_n(
+          &native_lab_command_angle_bits[pad], __ATOMIC_ACQUIRE);
+      if (__atomic_load_n(&native_lab_command_angle_valid_mask,
+                          __ATOMIC_ACQUIRE) & (1u << pad))
+        memcpy(angle, &angle_bits, sizeof(*angle));
+    }
+    if (kick_power && pending_action &&
+        pending_action <= NATIVE_LAB_ACTION_SHOOT + 1u) {
+      float native_power = 0.0f;
+      const uint32_t power_bits = __atomic_load_n(
+          &native_lab_pending_kick_power_bits, __ATOMIC_ACQUIRE);
+      memcpy(&native_power, &power_bits, sizeof(native_power));
+      if (!(native_power > 0.0f)) {
+        const void *power_unit = (const void *)__atomic_load_n(
+            &native_lab_action_units[pad][pending_action - 1u],
+            __ATOMIC_ACQUIRE);
+        if (power_unit)
+          memcpy(&native_power, (const char *)power_unit + 0x20,
+                 sizeof(native_power));
+      }
+      if (native_power > 1.0f)
+        native_power = 1.0f;
+      if (native_power > 0.0f)
+        *kick_power = native_power;
+    }
+    if (context == PES_SETPLAY_FREE_KICK &&
+        !(stock_mask & (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
+                        PES_NATIVE_LAB_STOCK_FREEKICK_POSITION))) {
+      const uint32_t vertical_bits = __atomic_load_n(
+          &native_lab_command_vertical_bits[pad], __ATOMIC_ACQUIRE);
+      memcpy(vertical, &vertical_bits, sizeof(*vertical));
+    }
+    __atomic_store_n(&native_lab_pending_kick_pad, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_pending_kick_command, 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_pending_kick_action, 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_pending_kick_power_bits, 0,
+                     __ATOMIC_RELEASE);
+  }
+}
+
+static void native_lab_set_kick(void *command, uint32_t kind, float angle,
+                                float stick_power, float kick_power,
+                                uint32_t kick_flags, float vertical,
+                                float aux_power, uint32_t target,
+                                uint32_t player) {
+  native_lab_adjust_kick(kind, &angle, &kick_power, &vertical);
+  if (native_lab_set_kick_original)
+    native_lab_set_kick_original(command, kind, angle, stick_power,
+                                 kick_power, kick_flags, vertical, aux_power,
+                                 target, player);
+}
+
+// CreateCommand uses this overload for another subset of pass/shot kinds.
+// Hook both overloads so LS aim cannot silently fall back to the stock straight
+// angle depending on whether B, A, or Y produced the release command.
+static void native_lab_set_kick_no_player(
+    void *command, uint32_t kind, float angle, float stick_power,
+    float kick_power, uint32_t kick_flags, float vertical, float aux_power,
+    uint32_t target) {
+  native_lab_adjust_kick(kind, &angle, &kick_power, &vertical);
+  if (native_lab_set_kick_no_player_original)
+    native_lab_set_kick_no_player_original(
+        command, kind, angle, stick_power, kick_power, kick_flags, vertical,
+        aux_power, target);
+}
+
 static uint32_t native_lab_setplay_button_action(uint32_t context,
                                                   uint32_t buttons) {
-  // B/A are kick actions in every native set-play.  Goal kick and corner
-  // reserve Y/X for their working stock Position Shift/Short Corner/View
-  // units; free kick leaves Y available for Shoot.
+  // Throw-in uses the mobile presentation's B normal / Y long convention.
+  // The other set plays retain B short / A long; near free kicks additionally
+  // expose Y shoot.
   if (buttons & (1u << 0))
     return NATIVE_LAB_ACTION_SHORT + 1u;
+  if (context == PES_SETPLAY_THROW_IN && (buttons & (1u << 2)))
+    return NATIVE_LAB_ACTION_LONG + 1u;
   if (buttons & (1u << 1))
     return NATIVE_LAB_ACTION_LONG + 1u;
   if (context == PES_SETPLAY_FREE_KICK && (buttons & (1u << 2)))
@@ -889,6 +1680,10 @@ static uint32_t native_lab_exec_setplay_action(uint32_t pad,
     return 0;
   uint32_t result = 0;
   uint32_t event = PES_NATIVE_LAB_EVENT_NONE;
+  float release_power = 0.0f;
+  if (!pressed)
+    memcpy(&release_power, (const char *)unit + 0x20,
+           sizeof(release_power));
   switch (action - 1u) {
   case NATIVE_LAB_ACTION_SHORT:
     result = pressed ? native_lab_short_press_original(unit, input)
@@ -911,57 +1706,88 @@ static uint32_t native_lab_exec_setplay_action(uint32_t pad,
   default:
     return 0;
   }
+  if (!pressed && result) {
+    uint32_t power_bits = 0;
+    memcpy(&power_bits, &release_power, sizeof(power_bits));
+    __atomic_store_n(&native_lab_pending_kick_pad, pad + 1u,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_pending_kick_command, result,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_pending_kick_action, action,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_pending_kick_power_bits, power_bits,
+                     __ATOMIC_RELEASE);
+  }
   native_lab_note_action(input, event, result);
+  if (pressed)
+    native_lab_track_action_power(unit, input, NULL);
   return result;
 }
 
-static void native_lab_apply_kick_aim(void *unit, const void *input,
-                                      uint32_t pad, uint32_t context) {
-  if (!unit || !input || pad > 1 || !native_lab_mobile_filter_angle)
+static void native_lab_apply_native_kick_angle(void *unit, const void *input,
+                                               uint32_t pad,
+                                               uint32_t context) {
+  if (!unit || !input || pad > 1)
     return;
-  NativeLabAimState *state = &native_lab_aim[pad];
-  const uint64_t now = armGetSystemTick();
-  if (state->unit != unit || state->context != context ||
-      (state->last_tick &&
-       armTicksToNs(now - state->last_tick) > 400000000ULL)) {
-    memset(state, 0, sizeof(*state));
-    state->unit = unit;
-    state->context = context;
-  }
-  state->last_tick = now;
-
-  const int32_t raw_x = __atomic_load_n(
-      pad == 1 ? &native_lab_debug_axis_x_p2 : &native_lab_debug_axis_x,
-      __ATOMIC_ACQUIRE);
-  float axis_x = (float)raw_x / 32768.0f;
-  const float absolute_x = fabsf(axis_x);
-  if (absolute_x > 0.18f) {
-    const float clamped = absolute_x > 1.0f ? 1.0f : absolute_x;
-    axis_x = copysignf((clamped - 0.18f) / 0.82f, axis_x);
-    if (!state->override) {
-      state->offset = (float)__atomic_load_n(
-                          &native_lab_camera_yaw_millirad[pad],
-                          __ATOMIC_ACQUIRE) /
-                      1000.0f;
-      state->override = 1;
-    }
-    state->offset += axis_x * 0.025f;
-    if (state->offset > 1.0f)
-      state->offset = 1.0f;
-    else if (state->offset < -1.0f)
-      state->offset = -1.0f;
-  }
-
   float base_angle = 0.0f;
   memcpy(&base_angle, (const char *)unit + 0x38, sizeof(base_angle));
-  const float camera_yaw =
+  const float camera_yaw_degrees =
       (float)__atomic_load_n(&native_lab_camera_yaw_millirad[pad],
                              __ATOMIC_ACQUIRE) /
-      1000.0f;
-  const float desired = base_angle +
-                        (state->override ? state->offset : camera_yaw);
-  const float filtered = native_lab_mobile_filter_angle(unit, input, desired);
-  memcpy((char *)unit + 0x24, &filtered, sizeof(filtered));
+      1000.0f * 57.2957795131f;
+  const int32_t raw_left_x = __atomic_load_n(
+      pad == 1 ? &native_lab_debug_axis_x_p2 : &native_lab_debug_axis_x,
+      __ATOMIC_ACQUIRE);
+  const int32_t raw_left_y = __atomic_load_n(
+      pad == 1 ? &native_lab_debug_axis_y_p2 : &native_lab_debug_axis_y,
+      __ATOMIC_ACQUIRE);
+  const float left_x = native_lab_normalize_axis(raw_left_x);
+  const float left_y = native_lab_normalize_axis(raw_left_y);
+  const uint32_t stock_mask = __atomic_load_n(
+      &native_lab_debug_stock_mask, __ATOMIC_ACQUIRE);
+  const int close_free_kick =
+      context == PES_SETPLAY_FREE_KICK &&
+      !(stock_mask & (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
+                      PES_NATIVE_LAB_STOCK_FREEKICK_POSITION));
+  float desired = base_angle + camera_yaw_degrees;
+  if (left_x != 0.0f || left_y != 0.0f) {
+    if (close_free_kick) {
+      // For the behind-player free-kick camera, LS-X selects left/right while
+      // LS-Y is written to PadCommand's vertical field on release.
+      desired -= left_x * 60.0f;
+      const float vertical = -left_y * 30.0f;
+      uint32_t vertical_bits = 0;
+      memcpy(&vertical_bits, &vertical, sizeof(vertical_bits));
+      __atomic_store_n(&native_lab_command_vertical_bits[pad],
+                       vertical_bits, __ATOMIC_RELEASE);
+    } else {
+      // Corner, goal kick and the overhead free-kick camera accept the full
+      // physical stick vector. The Switch reports the vertical stick axis
+      // with positive-up polarity in this input path; keep X unchanged and
+      // use Y directly so up is straight through the current RS angle and a
+      // clockwise physical rotation remains clockwise in the trajectory.
+      desired += atan2f(-left_x, left_y) * 57.2957795131f;
+    }
+    __atomic_fetch_or(&native_lab_left_aim_latched_mask, 1u << pad,
+                      __ATOMIC_ACQ_REL);
+  } else if ((__atomic_load_n(&native_lab_left_aim_latched_mask,
+                              __ATOMIC_ACQUIRE) & (1u << pad)) &&
+             (__atomic_load_n(&native_lab_command_angle_valid_mask,
+                              __ATOMIC_ACQUIRE) & (1u << pad))) {
+    const uint32_t previous_bits = __atomic_load_n(
+        &native_lab_command_angle_bits[pad], __ATOMIC_ACQUIRE);
+    memcpy(&desired, &previous_bits, sizeof(desired));
+  }
+  while (desired < 0.0f)
+    desired += 360.0f;
+  while (desired >= 360.0f)
+    desired -= 360.0f;
+  uint32_t angle_bits = 0;
+  memcpy(&angle_bits, &desired, sizeof(angle_bits));
+  __atomic_store_n(&native_lab_command_angle_bits[pad], angle_bits,
+                   __ATOMIC_RELEASE);
+  __atomic_fetch_or(&native_lab_command_angle_valid_mask, 1u << pad,
+                    __ATOMIC_RELEASE);
 }
 
 static uint32_t native_lab_mobile_kick_main(void *unit, const void *input,
@@ -980,7 +1806,7 @@ static uint32_t native_lab_mobile_kick_main(void *unit, const void *input,
   if (context == PES_SETPLAY_NONE)
     return stock;
   const uint32_t pad = native_lab_input_pad(input);
-  native_lab_apply_kick_aim(unit, input, pad, context);
+  native_lab_apply_native_kick_angle(unit, input, pad, context);
   const uint32_t buttons = __atomic_load_n(
       pad == 1 ? &native_lab_debug_buttons_p2 : &native_lab_debug_buttons,
       __ATOMIC_ACQUIRE);
@@ -998,17 +1824,6 @@ static uint32_t native_lab_mobile_kick_main(void *unit, const void *input,
     return native_lab_exec_setplay_action(pad, action, 1, input);
   }
 
-  void *guide = (void *)__atomic_load_n(
-      &native_lab_action_units[pad][NATIVE_LAB_ACTION_GUIDE],
-      __ATOMIC_ACQUIRE);
-  if (guide && native_lab_guide_main_original) {
-    const uint32_t guide_result =
-        native_lab_guide_main_original(guide, input, 26u);
-    if (guide_result) {
-      native_lab_note_action(input, PES_NATIVE_LAB_EVENT_AIM, guide_result);
-      return guide_result;
-    }
-  }
   return stock;
 }
 
@@ -1054,6 +1869,9 @@ static void native_lab_apply_camera_stick(void *plugin, void *parameter_ptr,
       pad == 1 ? &native_lab_debug_right_axis_x_p2
                : &native_lab_debug_right_axis_x,
       __ATOMIC_ACQUIRE);
+  // Exact hardware-tested V7 camera baseline. RS accumulates a bounded orbit
+  // around the stock ball pivot and remains at that yaw after stick release.
+  // LS is intentionally absent from this plugin hook.
   float axis_x = (float)raw_x / 32768.0f;
   const float absolute_x = fabsf(axis_x);
   if (absolute_x > 0.18f) {
@@ -1139,9 +1957,29 @@ static int install_native_lab_action_debug(so_module *module) {
   uintptr_t *mobile_kick_main_slot = native_lab_method_slot(
       module, "_ZTVN5match3pad26ThinkUnitMobileSetplayKickE",
       "_ZN5match3pad26ThinkUnitMobileSetplayKick4MainERKNS0_18ThinkUnitInputDataENS0_13ThinkUnitKindE");
+  const char *base_update_2d =
+      "_ZN5match3pad13ThinkUnitBase12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE";
+  uintptr_t *short_update_2d_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad18ThinkUnitShortPassE", base_update_2d);
+  uintptr_t *long_update_2d_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad17ThinkUnitLongPassE", base_update_2d);
+  uintptr_t *shoot_update_2d_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad14ThinkUnitShootE", base_update_2d);
+  uintptr_t *mobile_kick_update_2d_slot = native_lab_method_slot(
+      module, "_ZTVN5match3pad26ThinkUnitMobileSetplayKickE",
+      "_ZN5match3pad26ThinkUnitMobileSetplayKick12Update2DInfoERKNS0_18ThinkUnitInputDataEPNS_8registry12Screen2dInfoE");
+  const uintptr_t draw_pass_line = so_try_find_addr_rx(
+      module,
+      "_ZN5match3pad12DrawPassLineENS_14PadCommandKindEh8PlayerNoS2_fPKNS_8registry8RegistryEPNS3_12Screen2dInfoE");
   const uintptr_t mobile_filter_angle = so_try_find_addr_rx(
       module,
       "_ZN5match3pad26ThinkUnitMobileSetplayKick11FilterAngleERKNS0_18ThinkUnitInputDataEf");
+  const uintptr_t set_kick = so_try_find_addr_rx(
+      module,
+      "_ZN5match8registry10PadCommand7SetKickENS_14PadCommandKindEfffhffhh");
+  const uintptr_t set_kick_no_player = so_try_find_addr_rx(
+      module,
+      "_ZN5match8registry10PadCommand7SetKickENS_14PadCommandKindEfffhffh");
   uintptr_t *corner_camera_slot = native_lab_method_slot(
       module, "_ZTVN5match6camera6plugin16CornerKickCameraE",
       "_ZN5match6camera6plugin16CornerKickCamera6UpdateERN4draw15CameraParameterE");
@@ -1154,8 +1992,27 @@ static int install_native_lab_action_debug(so_module *module) {
   if (!guide || !guide_slot || !short_press_slot || !short_pull_slot ||
       !long_press_slot || !long_pull_slot || !shoot_press_slot ||
       !shoot_pull_slot || !support_pull_slot || !mobile_kick_main_slot ||
-      !mobile_filter_angle || !corner_camera_slot || !goal_camera_slot ||
-      !free_camera_slot)
+      !short_update_2d_slot || !long_update_2d_slot ||
+      !shoot_update_2d_slot || !mobile_kick_update_2d_slot ||
+      !draw_pass_line || !mobile_filter_angle || !set_kick ||
+      !set_kick_no_player ||
+      !corner_camera_slot ||
+      !goal_camera_slot || !free_camera_slot)
+    return 0;
+
+  const uintptr_t set_kick_plt =
+      (uintptr_t)module->load_base + 0x38619b0;
+  const uint32_t set_kick_plt_words[] = {
+      0xb002e470, 0xf9479a11, 0x913cc210, 0xd61f0220};
+  const uintptr_t set_kick_no_player_plt =
+      (uintptr_t)module->load_base + 0x391ed80;
+  const uint32_t set_kick_no_player_plt_words[] = {
+      0xf002e170, 0xf9448e11, 0x91246210, 0xd61f0220};
+  if (memcmp((const void *)set_kick_plt, set_kick_plt_words,
+             sizeof(set_kick_plt_words)) ||
+      memcmp((const void *)set_kick_no_player_plt,
+             set_kick_no_player_plt_words,
+             sizeof(set_kick_no_player_plt_words)))
     return 0;
 
   native_lab_guide_main_original = (void *)guide;
@@ -1167,7 +2024,15 @@ static int install_native_lab_action_debug(so_module *module) {
   native_lab_shoot_pull_original = (void *)*shoot_pull_slot;
   native_lab_support_pull_original = (void *)*support_pull_slot;
   native_lab_mobile_kick_main_original = (void *)*mobile_kick_main_slot;
-  native_lab_mobile_filter_angle = (void *)mobile_filter_angle;
+  native_lab_mobile_filter_angle_abi = (void *)mobile_filter_angle;
+  native_lab_short_update_2d_original = (void *)*short_update_2d_slot;
+  native_lab_long_update_2d_original = (void *)*long_update_2d_slot;
+  native_lab_shoot_update_2d_original = (void *)*shoot_update_2d_slot;
+  native_lab_mobile_kick_update_2d_original =
+      (void *)*mobile_kick_update_2d_slot;
+  native_lab_draw_pass_line = (void *)draw_pass_line;
+  native_lab_set_kick_original = (void *)set_kick;
+  native_lab_set_kick_no_player_original = (void *)set_kick_no_player;
   native_lab_corner_camera_update_original = (void *)*corner_camera_slot;
   native_lab_goal_camera_update_original = (void *)*goal_camera_slot;
   native_lab_free_camera_update_original = (void *)*free_camera_slot;
@@ -1180,9 +2045,17 @@ static int install_native_lab_action_debug(so_module *module) {
   *shoot_pull_slot = (uintptr_t)&native_lab_shoot_pull;
   *support_pull_slot = (uintptr_t)&native_lab_support_pull;
   *mobile_kick_main_slot = (uintptr_t)&native_lab_mobile_kick_main;
+  *short_update_2d_slot = (uintptr_t)&native_lab_short_update_2d;
+  *long_update_2d_slot = (uintptr_t)&native_lab_long_update_2d;
+  *shoot_update_2d_slot = (uintptr_t)&native_lab_shoot_update_2d;
+  *mobile_kick_update_2d_slot =
+      (uintptr_t)&native_lab_mobile_kick_update_2d;
   *corner_camera_slot = (uintptr_t)&native_lab_corner_camera_update;
   *goal_camera_slot = (uintptr_t)&native_lab_goal_camera_update;
   *free_camera_slot = (uintptr_t)&native_lab_free_camera_update;
+  hook_arm64(set_kick_plt, (uintptr_t)&native_lab_set_kick);
+  hook_arm64(set_kick_no_player_plt,
+             (uintptr_t)&native_lab_set_kick_no_player);
   return 1;
 }
 
