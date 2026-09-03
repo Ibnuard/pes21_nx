@@ -230,7 +230,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.16.7', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.16.8', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = ">";', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)
@@ -425,6 +425,21 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('native_lab_pending_kick_action', bridge)
         self.assertIn('*kick_power = native_power', bridge)
         self.assertIn('native_lab_command_vertical_bits[pad]', bridge)
+        self.assertIn('close_free_kick_shoot', bridge)
+        self.assertIn('native_lab_free_kick_elevation_bits[pad]', bridge)
+        self.assertIn('native_lab_free_kick_elevation_mask', bridge)
+        injection = re.search(
+            r'static void native_lab_ball_injection\(.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('native_lab_ball_injection_original', injection)
+        self.assertIn('PES_SETPLAY_FREE_KICK', injection)
+        self.assertIn('sqrtf(velocity[0] * velocity[0] + velocity[2] * velocity[2])',
+                      injection)
+        self.assertIn('velocity[1] = vertical', injection)
+        install = route[route.index('static int install_native_lab_action_debug'):]
+        self.assertIn('GetBallInjectionSpeedAndRotation', install)
+        self.assertIn('(uintptr_t)module->load_base + 0x38b4850', install)
+        self.assertIn('hook_arm64(ball_injection_plt', install)
         release = re.search(
             r'static uint32_t native_lab_exec_setplay_action.*?\n\}',
             route, re.S).group(0)

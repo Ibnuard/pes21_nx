@@ -144,6 +144,26 @@ static uint32_t native_lab_base_angle_player[2];
 static uint32_t native_lab_command_vertical_bits[2];
 static uint32_t native_lab_command_angle_valid_mask;
 static uint32_t native_lab_left_aim_latched_mask;
+// Close free-kick elevation is consumed by the ball-injection pipeline, not
+// by PadCommand::SetKick. Keep a short pad-owned token from the shoot release
+// until GetBallInjectionSpeedAndRotation has produced the first flight vector.
+// This avoids changing ordinary shots, corners, goal kicks, or CPU kicks.
+static uint32_t native_lab_free_kick_elevation_bits[2];
+static uint32_t native_lab_free_kick_elevation_mask;
+static uint32_t native_lab_free_kick_elevation_linger[2];
+
+static void native_lab_clear_free_kick_elevation(void) {
+  __atomic_store_n(&native_lab_free_kick_elevation_mask, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_free_kick_elevation_bits[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_free_kick_elevation_bits[1], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_free_kick_elevation_linger[0], 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_free_kick_elevation_linger[1], 0,
+                   __ATOMIC_RELEASE);
+}
 
 typedef struct {
   void *plugin;
@@ -333,6 +353,7 @@ static void native_pad_lab_reset(void) {
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_left_aim_latched_mask, 0,
                    __ATOMIC_RELEASE);
+  native_lab_clear_free_kick_elevation();
   __atomic_store_n(&native_lab_debug_buttons_p2, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_native_keys_p2, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_native_power_milli_p2, 0,
@@ -584,6 +605,7 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
                          __ATOMIC_RELEASE);
         __atomic_store_n(&native_lab_pending_kick_power_bits, 0,
                          __ATOMIC_RELEASE);
+        native_lab_clear_free_kick_elevation();
         native_lab_gauge_clear_all();
       }
     }
@@ -665,6 +687,7 @@ void pes_controller_native_pad_lab_publish_setplay_context(uint32_t context) {
   const uint32_t previous = __atomic_exchange_n(
       &native_lab_published_setplay_context, context, __ATOMIC_ACQ_REL);
   if (context != previous) {
+    native_lab_clear_free_kick_elevation();
     const uint32_t show_trajectory =
         context == PES_SETPLAY_GOAL_KICK ||
         context == PES_SETPLAY_CORNER ||
@@ -1529,6 +1552,7 @@ static void native_lab_list_update(void *list, const void *input,
     __atomic_store_n(&native_lab_setplay_linger_frames, 60,
                      __ATOMIC_RELEASE);
     if (previous_context != setplay_context) {
+      native_lab_clear_free_kick_elevation();
       native_lab_gauge_clear_all();
       __atomic_store_n(&native_lab_trajectory_enabled, 1,
                        __ATOMIC_RELEASE);
@@ -1592,6 +1616,7 @@ static void native_lab_list_update(void *list, const void *input,
                        __ATOMIC_RELEASE);
       __atomic_store_n(&native_lab_pending_kick_power_bits, 0,
                        __ATOMIC_RELEASE);
+      native_lab_clear_free_kick_elevation();
       __atomic_store_n(&native_lab_gauge_owner_pad, 0,
                        __ATOMIC_RELEASE);
       __atomic_store_n(&native_lab_gauge_power_milli, 0,
@@ -1669,6 +1694,11 @@ static void (*native_lab_set_kick_original)(void *, uint32_t, float, float,
 static void (*native_lab_set_kick_no_player_original)(
     void *, uint32_t, float, float, float, uint32_t, float, float,
     uint32_t);
+// This is the last native stage before ActionBall receives its flight vector.
+// PadCommand's final float is a horizontal auxiliary vector, so it cannot
+// carry the LS-Y free-kick height.  The game computes the real vertical speed
+// in GetBallInjectionSpeedAndRotation instead.
+static void (*native_lab_ball_injection_original)(const void *, void *, void *);
 static void (*native_lab_corner_camera_update_original)(void *, void *);
 static void (*native_lab_goal_camera_update_original)(void *, void *);
 static void (*native_lab_free_camera_update_original)(void *, void *);
@@ -1975,6 +2005,29 @@ static void native_lab_adjust_kick(uint32_t kind, float *angle,
       const uint32_t vertical_bits = __atomic_load_n(
           &native_lab_command_vertical_bits[pad], __ATOMIC_ACQUIRE);
       memcpy(vertical, &vertical_bits, sizeof(*vertical));
+      // Only a Y/shoot release in a close free kick should override the
+      // flight solver. B/A passes keep the stock elevation, and the token is
+      // explicitly disarmed for them so a previous shot cannot leak forward.
+      const int close_free_kick_shoot =
+          context == PES_SETPLAY_FREE_KICK &&
+          pending_action == NATIVE_LAB_ACTION_SHOOT + 1u;
+      float requested_elevation = 0.0f;
+      memcpy(&requested_elevation, &vertical_bits,
+             sizeof(requested_elevation));
+      if (close_free_kick_shoot && isfinite(requested_elevation) &&
+          fabsf(requested_elevation) > 0.01f) {
+        __atomic_store_n(&native_lab_free_kick_elevation_bits[pad],
+                         vertical_bits, __ATOMIC_RELEASE);
+        __atomic_store_n(&native_lab_free_kick_elevation_linger[pad], 120u,
+                         __ATOMIC_RELEASE);
+        __atomic_fetch_or(&native_lab_free_kick_elevation_mask, 1u << pad,
+                          __ATOMIC_ACQ_REL);
+      } else {
+        __atomic_store_n(&native_lab_free_kick_elevation_linger[pad], 0,
+                         __ATOMIC_RELEASE);
+        __atomic_fetch_and(&native_lab_free_kick_elevation_mask,
+                           ~(1u << pad), __ATOMIC_ACQ_REL);
+      }
     }
     __atomic_store_n(&native_lab_pending_kick_pad, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&native_lab_pending_kick_command, 0,
@@ -2010,6 +2063,66 @@ static void native_lab_set_kick_no_player(
     native_lab_set_kick_no_player_original(
         command, kind, angle, stick_power, kick_power, kick_flags, vertical,
         aux_power, target);
+}
+
+// Apply the requested close-free-kick pitch after the stock solver has built
+// its world-space flight vector.  `speed` is math::Vector3 (x/y/z): x/z are
+// the ground-plane components and y is the vertical component.  Replacing y
+// from the horizontal magnitude preserves the native direction and power,
+// while making the preview's LS-Y height affect the actual kick.
+static void native_lab_ball_injection(const void *input, void *speed,
+                                      void *rotation) {
+  if (native_lab_ball_injection_original)
+    native_lab_ball_injection_original(input, speed, rotation);
+  if (!speed || __atomic_load_n(&native_lab_debug_context, __ATOMIC_ACQUIRE) !=
+                   PES_SETPLAY_FREE_KICK)
+    return;
+  const uint32_t armed = __atomic_load_n(
+      &native_lab_free_kick_elevation_mask, __ATOMIC_ACQUIRE);
+  if (!armed)
+    return;
+  uint32_t pad = UINT32_MAX;
+  for (uint32_t candidate = 0; candidate < 2; ++candidate) {
+    if (!(armed & (1u << candidate)))
+      continue;
+    const uint32_t linger = __atomic_load_n(
+        &native_lab_free_kick_elevation_linger[candidate],
+        __ATOMIC_ACQUIRE);
+    if (!linger) {
+      __atomic_fetch_and(&native_lab_free_kick_elevation_mask,
+                         ~(1u << candidate), __ATOMIC_ACQ_REL);
+      continue;
+    }
+    __atomic_fetch_sub(&native_lab_free_kick_elevation_linger[candidate], 1u,
+                       __ATOMIC_ACQ_REL);
+    pad = candidate;
+    break;
+  }
+  if (pad == UINT32_MAX)
+    return;
+  uint32_t elevation_bits = __atomic_load_n(
+      &native_lab_free_kick_elevation_bits[pad], __ATOMIC_ACQUIRE);
+  float elevation_degrees = 0.0f;
+  memcpy(&elevation_degrees, &elevation_bits, sizeof(elevation_degrees));
+  if (!isfinite(elevation_degrees))
+    return;
+  if (elevation_degrees > 30.0f)
+    elevation_degrees = 30.0f;
+  else if (elevation_degrees < -30.0f)
+    elevation_degrees = -30.0f;
+  float *velocity = (float *)speed;
+  const float horizontal =
+      sqrtf(velocity[0] * velocity[0] + velocity[2] * velocity[2]);
+  if (!isfinite(horizontal) || horizontal <= 0.001f)
+    return;
+  const float pitch = elevation_degrees * 0.0174532925199433f;
+  const float vertical = horizontal * tanf(pitch);
+  if (isfinite(vertical))
+    velocity[1] = vertical;
+  if (__atomic_load_n(&native_lab_free_kick_elevation_linger[pad],
+                      __ATOMIC_ACQUIRE) == 0)
+    __atomic_fetch_and(&native_lab_free_kick_elevation_mask, ~(1u << pad),
+                       __ATOMIC_ACQ_REL);
 }
 
 static uint32_t native_lab_setplay_button_action(uint32_t context,
@@ -2355,6 +2468,9 @@ static int install_native_lab_action_debug(so_module *module) {
   const uintptr_t set_kick_no_player = so_try_find_addr_rx(
       module,
       "_ZN5match8registry10PadCommand7SetKickENS_14PadCommandKindEfffhffh");
+  const uintptr_t ball_injection = so_try_find_addr_rx(
+      module,
+      "_ZN5match32GetBallInjectionSpeedAndRotationERKNS_23InputBallInjectionSpeedERN4math7Vector3ES5_");
   uintptr_t *corner_camera_slot = native_lab_method_slot(
       module, "_ZTVN5match6camera6plugin16CornerKickCameraE",
       "_ZN5match6camera6plugin16CornerKickCamera6UpdateERN4draw15CameraParameterE");
@@ -2372,7 +2488,7 @@ static int install_native_lab_action_debug(so_module *module) {
       !shoot_update_2d_slot || !mobile_kick_update_2d_slot ||
       !penalty_update_2d_slot || !draw_pass_line ||
       !mobile_filter_angle || !set_kick ||
-      !set_kick_no_player ||
+      !set_kick_no_player || !ball_injection ||
       !corner_camera_slot ||
       !goal_camera_slot || !free_camera_slot)
     return 0;
@@ -2385,11 +2501,17 @@ static int install_native_lab_action_debug(so_module *module) {
       (uintptr_t)module->load_base + 0x391ed80;
   const uint32_t set_kick_no_player_plt_words[] = {
       0xf002e170, 0xf9448e11, 0x91246210, 0xd61f0220};
+  const uintptr_t ball_injection_plt =
+      (uintptr_t)module->load_base + 0x38b4850;
+  const uint32_t ball_injection_plt_words[] = {
+      0x9002e330, 0xf9434211, 0x911a0210, 0xd61f0220};
   if (memcmp((const void *)set_kick_plt, set_kick_plt_words,
              sizeof(set_kick_plt_words)) ||
       memcmp((const void *)set_kick_no_player_plt,
              set_kick_no_player_plt_words,
-             sizeof(set_kick_no_player_plt_words)))
+             sizeof(set_kick_no_player_plt_words)) ||
+      memcmp((const void *)ball_injection_plt, ball_injection_plt_words,
+             sizeof(ball_injection_plt_words)))
     return 0;
 
   native_lab_guide_main_original = (void *)guide;
@@ -2414,6 +2536,7 @@ static int install_native_lab_action_debug(so_module *module) {
   native_lab_draw_pass_line = (void *)draw_pass_line;
   native_lab_set_kick_original = (void *)set_kick;
   native_lab_set_kick_no_player_original = (void *)set_kick_no_player;
+  native_lab_ball_injection_original = (void *)ball_injection;
   native_lab_corner_camera_update_original = (void *)*corner_camera_slot;
   native_lab_goal_camera_update_original = (void *)*goal_camera_slot;
   native_lab_free_camera_update_original = (void *)*free_camera_slot;
@@ -2440,6 +2563,7 @@ static int install_native_lab_action_debug(so_module *module) {
   hook_arm64(set_kick_plt, (uintptr_t)&native_lab_set_kick);
   hook_arm64(set_kick_no_player_plt,
              (uintptr_t)&native_lab_set_kick_no_player);
+  hook_arm64(ball_injection_plt, (uintptr_t)&native_lab_ball_injection);
   return 1;
 }
 
