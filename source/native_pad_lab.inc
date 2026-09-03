@@ -32,10 +32,6 @@ static uintptr_t native_lab_input_units[2];
 static uint32_t native_lab_debug_setplay_pad;
 static uint32_t native_lab_published_setplay_context;
 static uint32_t native_lab_trajectory_enabled;
-// Penalty trajectory is an opt-in visual aid, independent from the regular
-// set-play trajectory latch. Keep one bit per local pad so R1 on the keeper
-// cannot change the kicker's preview (and vice versa).
-static uint32_t native_lab_penalty_trajectory_enabled_mask;
 static uint32_t native_lab_previous_buttons[2];
 static uint32_t native_lab_setplay_linger_frames;
 static uint32_t native_lab_debug_buttons_p2;
@@ -48,6 +44,19 @@ static int32_t native_lab_debug_axis_x_p2;
 static int32_t native_lab_debug_axis_y_p2;
 static int32_t native_lab_debug_right_axis_x_p2;
 static int32_t native_lab_debug_right_axis_y_p2;
+
+// The HID polling path latches LS-Y before any ThinkUnit is scheduled. Some
+// set-play variants do not call MobileSetplayKick::Main on every idle frame,
+// so elevation must not depend on that callback being active.
+static float native_lab_normalize_axis(int32_t raw) {
+  float axis = (float)raw / 32768.0f;
+  const float absolute = axis < 0.0f ? -axis : axis;
+  if (absolute <= 0.18f)
+    return 0.0f;
+  const float clamped = absolute > 1.0f ? 1.0f : absolute;
+  const float normalized = (clamped - 0.18f) / 0.82f;
+  return axis < 0.0f ? -normalized : normalized;
+}
 // One ThinkUnitList exists per local cursor.  Keep the real unit objects for
 // each pad so MobileSetplayKick can delegate to the console press/release
 // implementations without adding dormant units to the active list.
@@ -59,9 +68,6 @@ enum {
   NATIVE_LAB_ACTION_COUNT
 };
 static uintptr_t native_lab_action_units[2][NATIVE_LAB_ACTION_COUNT];
-// PenaltykickGuide is a stock console unit. Each local list owns a separate
-// instance whose +0x54 Vector3 is the LS-derived target used by the debug trail.
-static uintptr_t native_lab_penalty_guide_units[2];
 // ThinkUnitPenaltykick is the stock console press/pull action. Keep its real
 // per-list object so the custom gauge can observe native charge without
 // fabricating a command or sharing P1 state with P2.
@@ -129,6 +135,12 @@ static uint32_t native_lab_pending_kick_command;
 static uint32_t native_lab_pending_kick_action;
 static uint32_t native_lab_pending_kick_power_bits;
 static uint32_t native_lab_command_angle_bits[2];
+// Stable, stock angle captured once per set-piece owner/player. The command
+// angle is written back into MobileSetplayKick, so reading +0x38 again on the
+// next frame would otherwise treat our previous override as a new baseline
+// and accumulate LS/camera offsets until the preview spins.
+static uint32_t native_lab_base_angle_bits[2];
+static uint32_t native_lab_base_angle_player[2];
 static uint32_t native_lab_command_vertical_bits[2];
 static uint32_t native_lab_command_angle_valid_mask;
 static uint32_t native_lab_left_aim_latched_mask;
@@ -249,8 +261,6 @@ static void native_pad_lab_reset(void) {
   __atomic_store_n(&native_lab_published_setplay_context, PES_SETPLAY_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_trajectory_enabled, 0, __ATOMIC_RELEASE);
-  __atomic_store_n(&native_lab_penalty_trajectory_enabled_mask, 0,
-                   __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_penalty_ready_role_mask, 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_previous_buttons[0], 0, __ATOMIC_RELEASE);
@@ -309,6 +319,12 @@ static void native_pad_lab_reset(void) {
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_command_angle_bits[1], 0,
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_base_angle_bits[0], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_base_angle_bits[1], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_base_angle_player[0], UINT32_MAX,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_base_angle_player[1], UINT32_MAX,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_command_vertical_bits[0], 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_command_vertical_bits[1], 0,
@@ -337,8 +353,6 @@ static void native_pad_lab_reset(void) {
       __atomic_store_n(&native_lab_action_units[pad][action], 0,
                        __ATOMIC_RELEASE);
     __atomic_store_n(&native_lab_active_action[pad], 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&native_lab_penalty_guide_units[pad], 0,
-                     __ATOMIC_RELEASE);
     __atomic_store_n(&native_lab_penalty_action_units[pad], 0,
                      __ATOMIC_RELEASE);
   }
@@ -586,26 +600,39 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
       &native_lab_debug_setplay_pad, __ATOMIC_ACQUIRE);
   const uint32_t context = __atomic_load_n(
       &native_lab_debug_context, __ATOMIC_ACQUIRE);
+  const uint32_t trajectory_stock_mask = __atomic_load_n(
+      &native_lab_debug_stock_mask, __ATOMIC_ACQUIRE);
+  const int trajectory_context =
+      context == PES_SETPLAY_GOAL_KICK || context == PES_SETPLAY_CORNER ||
+      (context == PES_SETPLAY_FREE_KICK &&
+       !(trajectory_stock_mask &
+         (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
+          PES_NATIVE_LAB_STOCK_FREEKICK_POSITION)));
   if (connected && port == setplay_pad && (buttons & (1u << 7)) &&
       !(previous_buttons & (1u << 7)) &&
 #ifndef NATIVE_PAD_LAB_HOST_TEST
       pes_controller_penalty_role_for_pad(port) == PES_PENALTY_NONE &&
 #endif
-      (context == PES_SETPLAY_GOAL_KICK ||
-       context == PES_SETPLAY_CORNER ||
-       context == PES_SETPLAY_FREE_KICK))
+      trajectory_context)
     __atomic_fetch_xor(&native_lab_trajectory_enabled, 1u,
                        __ATOMIC_ACQ_REL);
-#ifndef NATIVE_PAD_LAB_HOST_TEST
-  const uint32_t penalty_role = pes_controller_penalty_role_for_pad(port);
-  if (penalty_role == PES_PENALTY_NONE)
-    __atomic_fetch_and(&native_lab_penalty_trajectory_enabled_mask,
-                       ~(1u << port), __ATOMIC_ACQ_REL);
-  else if (connected && (buttons & (1u << 7)) &&
-           !(previous_buttons & (1u << 7)))
-    __atomic_fetch_xor(&native_lab_penalty_trajectory_enabled_mask,
-                       1u << port, __ATOMIC_ACQ_REL);
-#endif
+  // Sample elevation directly from the set-play owner's physical LS. This
+  // path runs at HID cadence and therefore remains responsive even when the
+  // mobile kick ThinkUnit is idle. Neutral does not overwrite the value: the
+  // selected height stays frozen through the wind-up and is cleared only on
+  // a real context transition/completion.
+  if (connected && port == setplay_pad && trajectory_context) {
+    const float left_y = native_lab_normalize_axis(axis_y);
+    if (left_y != 0.0f) {
+      const float vertical = -left_y * 30.0f;
+      uint32_t vertical_bits = 0;
+      memcpy(&vertical_bits, &vertical, sizeof(vertical_bits));
+      __atomic_store_n(&native_lab_command_vertical_bits[port],
+                       vertical_bits, __ATOMIC_RELEASE);
+      __atomic_fetch_or(&native_lab_left_aim_latched_mask, 1u << port,
+                        __ATOMIC_ACQ_REL);
+    }
+  }
   if (port == 1) {
     __atomic_store_n(&native_lab_debug_buttons_p2, buttons,
                      __ATOMIC_RELEASE);
@@ -683,6 +710,11 @@ int pes_controller_native_pad_lab_trajectory_enabled(void) {
       context != PES_SETPLAY_CORNER &&
       context != PES_SETPLAY_FREE_KICK)
     return 0;
+  if (context == PES_SETPLAY_FREE_KICK &&
+      (__atomic_load_n(&native_lab_debug_stock_mask, __ATOMIC_ACQUIRE) &
+       (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
+        PES_NATIVE_LAB_STOCK_FREEKICK_POSITION)))
+    return 0;
   return __atomic_load_n(&native_lab_trajectory_enabled,
                          __ATOMIC_ACQUIRE) != 0;
 }
@@ -759,8 +791,8 @@ void pes_controller_native_pad_lab_debug_snapshot(
       &native_lab_debug_right_axis_x_p2, __ATOMIC_ACQUIRE);
   snapshot->right_axis_y_p2 = __atomic_load_n(
       &native_lab_debug_right_axis_y_p2, __ATOMIC_ACQUIRE);
-  snapshot->trajectory_enabled = __atomic_load_n(
-      &native_lab_trajectory_enabled, __ATOMIC_ACQUIRE);
+  snapshot->trajectory_enabled =
+      pes_controller_native_pad_lab_trajectory_enabled();
   snapshot->gauge_owner_pad = __atomic_load_n(
       &native_lab_gauge_owner_pad, __ATOMIC_ACQUIRE);
   snapshot->gauge_power_milli = __atomic_load_n(
@@ -1308,10 +1340,6 @@ static void native_lab_list_update(void *list, const void *input,
       __atomic_store_n(&native_lab_action_units[binding.pad][action], unit,
                        __ATOMIC_RELEASE);
     }
-    const uintptr_t penalty_guide = *(const uintptr_t *)((const char *)list +
-        0x3bf8 + NATIVE_LAB_KIND_PENALTY_GUIDE * sizeof(uintptr_t));
-    __atomic_store_n(&native_lab_penalty_guide_units[binding.pad],
-                     penalty_guide, __ATOMIC_RELEASE);
     const uintptr_t penalty_action = native_lab_optional_penalty_matches(
             list, NATIVE_LAB_KIND_PENALTY_KICK)
         ? *(const uintptr_t *)((const char *)list + 0x3bf8 +
@@ -1574,6 +1602,38 @@ static void native_lab_list_update(void *list, const void *input,
   }
 }
 
+static float native_lab_stable_setplay_base_angle(uint32_t pad,
+                                                   uint32_t player,
+                                                   float stock_angle,
+                                                   int *same_target_out) {
+  const uint32_t valid = __atomic_load_n(
+      &native_lab_command_angle_valid_mask, __ATOMIC_ACQUIRE);
+  const uint32_t base_player = __atomic_load_n(
+      &native_lab_base_angle_player[pad], __ATOMIC_ACQUIRE);
+  const int same_target = (valid & (1u << pad)) && base_player == player;
+  float base_angle = stock_angle;
+  if (same_target) {
+    const uint32_t base_bits = __atomic_load_n(
+        &native_lab_base_angle_bits[pad], __ATOMIC_ACQUIRE);
+    memcpy(&base_angle, &base_bits, sizeof(base_angle));
+  } else {
+    uint32_t base_bits = 0;
+    memcpy(&base_bits, &stock_angle, sizeof(base_bits));
+    __atomic_store_n(&native_lab_base_angle_bits[pad], base_bits,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_base_angle_player[pad], player,
+                     __ATOMIC_RELEASE);
+    // A changed taker starts from its own stock direction and height.
+    __atomic_fetch_and(&native_lab_left_aim_latched_mask, ~(1u << pad),
+                       __ATOMIC_ACQ_REL);
+    __atomic_store_n(&native_lab_command_vertical_bits[pad], 0,
+                     __ATOMIC_RELEASE);
+  }
+  if (same_target_out)
+    *same_target_out = same_target;
+  return base_angle;
+}
+
 #ifndef NATIVE_PAD_LAB_HOST_TEST
 static uint32_t (*native_lab_guide_main_original)(void *, const void *,
                                                   uint32_t);
@@ -1588,8 +1648,8 @@ static uint32_t (*native_lab_penalty_pull_original)(void *, const void *);
 static uint32_t (*native_lab_support_pull_original)(void *, const void *);
 static uint32_t (*native_lab_mobile_kick_main_original)(void *, const void *,
                                                         uint32_t);
-// Kept as an ABI fingerprint for this owned mobile binary. Native aim bypasses
-// this gesture-state filter and writes the physical-stick angle directly.
+// Reuse the owned mobile binary's boundary filter for corner aim after the
+// physical LS has produced an angle; no gesture state is synthesized.
 static float (*native_lab_mobile_filter_angle_abi)(void *, const void *, float);
 static void (*native_lab_short_update_2d_original)(void *, const void *,
                                                    void *);
@@ -1603,8 +1663,6 @@ static void (*native_lab_penalty_update_2d_original)(void *, const void *,
                                                      void *);
 static void (*native_lab_draw_pass_line)(uint32_t, uint32_t, uint32_t,
                                          uint32_t, float, const void *, void *);
-static void (*native_lab_draw_shoot_line)(uint32_t, uint32_t, uint32_t,
-                                          const void *, const void *, void *);
 static void (*native_lab_set_kick_original)(void *, uint32_t, float, float,
                                              float, uint32_t, float, float,
                                              uint32_t, uint32_t);
@@ -1721,6 +1779,12 @@ static void native_lab_publish_setplay_trajectory(const void *input,
   if (!input || !screen_2d || !native_lab_draw_pass_line ||
       !pes_controller_native_pad_lab_trajectory_enabled())
     return;
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+  // Pause, Game Plan and other modal windows own the whole foreground. Do not
+  // leave the in-match set-play spline visible behind those native screens.
+  if (pes_controller_virtual_cursor_context() != PES_VIRTUAL_CURSOR_NONE)
+    return;
+#endif
   const uint32_t pad = native_lab_input_pad(input);
   const uint32_t owner = __atomic_load_n(&native_lab_debug_setplay_pad,
                                          __ATOMIC_ACQUIRE);
@@ -1737,10 +1801,83 @@ static void native_lab_publish_setplay_trajectory(const void *input,
   const uint32_t angle_bits = __atomic_load_n(
       &native_lab_command_angle_bits[pad], __ATOMIC_ACQUIRE);
   memcpy(&angle, &angle_bits, sizeof(angle));
+  uint32_t vertical_bits = __atomic_load_n(
+      &native_lab_command_vertical_bits[pad], __ATOMIC_ACQUIRE);
+  float vertical = 0.0f;
+  memcpy(&vertical, &vertical_bits, sizeof(vertical));
   // Native LongPass produces the cross-style curved world trail. 0xff asks
   // DrawPassLine to derive the target from our angle instead of another player.
+  // This is the stock white renderer used by the mobile set-piece preview.
   native_lab_draw_pass_line(0x50u, 0u, player, 0xffu, angle, registry,
                             screen_2d);
+
+  // The 0xff angle-only path in DrawPassLine stops after roughly 15 metres.
+  // Preserve its stock nine-point curve, but extend X/Z about the ball so the
+  // preview reaches a useful set-piece target instead of ending at the wall.
+  // Corner and close free kick need about one penalty-area depth; goal kick is
+  // kept longer while it remains available as a diagnostic trajectory.
+  const uint32_t context = __atomic_load_n(
+      &native_lab_debug_context, __ATOMIC_ACQUIRE);
+  const float target_distance = context == PES_SETPLAY_GOAL_KICK
+                                    ? 42.0f
+                                    : context == PES_SETPLAY_CORNER ? 34.0f
+                                                                    : 30.0f;
+  float start_x = 0.0f;
+  float start_z = 0.0f;
+  float end_x = 0.0f;
+  float end_z = 0.0f;
+  memcpy(&start_x, (char *)screen_2d + 0x10f0, sizeof(start_x));
+  memcpy(&start_z, (char *)screen_2d + 0x10f8, sizeof(start_z));
+  memcpy(&end_x, (char *)screen_2d + 0x1150, sizeof(end_x));
+  memcpy(&end_z, (char *)screen_2d + 0x1158, sizeof(end_z));
+  const float current_dx = end_x - start_x;
+  const float current_dz = end_z - start_z;
+  const float current_distance =
+      sqrtf(current_dx * current_dx + current_dz * current_dz);
+  if (isfinite(current_distance) && current_distance > 0.01f) {
+    const float distance_scale = target_distance / current_distance;
+    for (uint32_t index = 1; index < 9; ++index) {
+      float x = 0.0f;
+      float z = 0.0f;
+      memcpy(&x, (char *)screen_2d + 0x10f0 + index * 12u, sizeof(x));
+      memcpy(&z, (char *)screen_2d + 0x10f8 + index * 12u, sizeof(z));
+      x = start_x + (x - start_x) * distance_scale;
+      z = start_z + (z - start_z) * distance_scale;
+      memcpy((char *)screen_2d + 0x10f0 + index * 12u, &x, sizeof(x));
+      memcpy((char *)screen_2d + 0x10f8 + index * 12u, &z, sizeof(z));
+    }
+  }
+
+  if (vertical == 0.0f)
+    return;
+
+  // DrawPassLine has no elevation parameter, but it publishes the same nine
+  // world-space spline points that the stock renderer consumes at +0x10f0.
+  // Bend only the interior points with a sine envelope: the ball and endpoint
+  // stay on the ground while LS-Y raises/lowers the white trajectory. This
+  // preserves the native colour/material and avoids the cyan DrawShootLine
+  // variant, whose command kind is intended for a different mobile action.
+  // Mobile swipe elevation uses screen-space Y (up is negative), whereas the
+  // white spline stores world-space Y (up is positive). Invert it here so a
+  // physical LS-up raises both the native kick command and its preview.
+  const float lift = fmaxf(-4.0f, fminf(4.0f, -vertical * 0.13333334f));
+  float start_y = 0.0f;
+  float end_y = 0.0f;
+  memcpy(&start_y, (char *)screen_2d + 0x10f4, sizeof(start_y));
+  memcpy(&end_y, (char *)screen_2d + 0x1154, sizeof(end_y));
+  const float pi = 3.14159265358979323846f;
+  for (uint32_t index = 1; index < 8; ++index) {
+    const float t = (float)index / 8.0f;
+    float y = 0.0f;
+    memcpy(&y, (char *)screen_2d + 0x10f4 + index * 12u, sizeof(y));
+    y += lift * sinf(pi * t);
+    // LS-down may flatten the stock arc, but never push its preview below the
+    // straight ground line between the ball and the target.
+    const float floor_y = start_y + (end_y - start_y) * t;
+    if (y < floor_y)
+      y = floor_y;
+    memcpy((char *)screen_2d + 0x10f4 + index * 12u, &y, sizeof(y));
+  }
 }
 
 #define NATIVE_LAB_GAUGE_WRAPPER(name, original)                         \
@@ -1786,47 +1923,14 @@ static void native_lab_penalty_update_2d(void *unit, const void *input,
   const void *power_unit = (const void *)__atomic_load_n(
       &native_lab_penalty_action_units[pad], __ATOMIC_ACQUIRE);
   native_lab_track_action_power(power_unit, input, screen_2d);
-  if (!unit || !input || !screen_2d || !native_lab_draw_shoot_line ||
-      !pes_controller_native_pad_lab_active() ||
-      !*((const uint8_t *)unit + 24))
-    return;
-  if (!(__atomic_load_n(&native_lab_penalty_trajectory_enabled_mask,
-                        __ATOMIC_ACQUIRE) & (1u << pad)))
-    return;
-  const uintptr_t guide = __atomic_load_n(
-      &native_lab_penalty_guide_units[pad], __ATOMIC_ACQUIRE);
-  uint32_t player = UINT32_MAX;
-  memcpy(&player, (const char *)input + 0x24, sizeof(player));
-  const void *registry = *(void *const *)input;
-  if (!guide || !registry || player >= 22u)
-    return;
-  float target[3];
-  memcpy(target, (const char *)guide + 0x54, sizeof(target));
-  if (!isfinite(target[0]) || !isfinite(target[1]) ||
-      !isfinite(target[2]) ||
-      fabsf(target[0]) + fabsf(target[1]) + fabsf(target[2]) < 0.001f)
-    return;
-  // 0x58 is the engine's penalty-shoot PadCommandKind. This is visual-only:
-  // the actual kick still requires Y and uses the same LS target.
-  native_lab_draw_shoot_line(0x58u, 0u, player,
-                             (const char *)guide + 0x54, registry, screen_2d);
-}
-
-static float native_lab_normalize_axis(int32_t raw) {
-  float axis = (float)raw / 32768.0f;
-  const float absolute = fabsf(axis);
-  if (absolute <= 0.18f)
-    return 0.0f;
-  const float clamped = absolute > 1.0f ? 1.0f : absolute;
-  return copysignf((clamped - 0.18f) / 0.82f, axis);
 }
 
 // ThinkUnitManager owns the real native PadCommand. The mobile gesture route
 // normally populates its angle, but our physical Short/Long/Shoot unit returns
 // only a command kind. Patch the exact release command with the direct native
-// set-play angle, native hold power, and (close free kick only) LS-Y height.
-// No touch/swipe event is synthesized and no ThinkUnit charge field is
-// modified.
+// set-play angle, native hold power, and LS-Y height.
+// No touch/swipe event is synthesized. The mobile unit's presentation-only
+// elevation cache is mirrored for the debug trail; charge remains untouched.
 static void native_lab_adjust_kick(uint32_t kind, float *angle,
                                    float *kick_power, float *vertical) {
   const uint32_t pending_command = __atomic_load_n(
@@ -1835,8 +1939,6 @@ static void native_lab_adjust_kick(uint32_t kind, float *angle,
       &native_lab_pending_kick_pad, __ATOMIC_ACQUIRE);
   const uint32_t pending_action = __atomic_load_n(
       &native_lab_pending_kick_action, __ATOMIC_ACQUIRE);
-  const uint32_t stock_mask = __atomic_load_n(
-      &native_lab_debug_stock_mask, __ATOMIC_ACQUIRE);
   if (pending_pad && pending_command == kind) {
     const uint32_t context = __atomic_load_n(
         &native_lab_debug_context, __ATOMIC_ACQUIRE);
@@ -1868,9 +1970,8 @@ static void native_lab_adjust_kick(uint32_t kind, float *angle,
       if (native_power > 0.0f)
         *kick_power = native_power;
     }
-    if (context == PES_SETPLAY_FREE_KICK &&
-        !(stock_mask & (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
-                        PES_NATIVE_LAB_STOCK_FREEKICK_POSITION))) {
+    if (context == PES_SETPLAY_GOAL_KICK || context == PES_SETPLAY_CORNER ||
+        context == PES_SETPLAY_FREE_KICK) {
       const uint32_t vertical_bits = __atomic_load_n(
           &native_lab_command_vertical_bits[pad], __ATOMIC_ACQUIRE);
       memcpy(vertical, &vertical_bits, sizeof(*vertical));
@@ -1988,8 +2089,8 @@ static void native_lab_apply_native_kick_angle(void *unit, const void *input,
                                                uint32_t context) {
   if (!unit || !input || pad > 1)
     return;
-  float base_angle = 0.0f;
-  memcpy(&base_angle, (const char *)unit + 0x38, sizeof(base_angle));
+  float stock_angle = 0.0f;
+  memcpy(&stock_angle, (const char *)unit + 0x38, sizeof(stock_angle));
   const float camera_yaw_degrees =
       (float)__atomic_load_n(&native_lab_camera_yaw_millirad[pad],
                              __ATOMIC_ACQUIRE) /
@@ -2002,45 +2103,51 @@ static void native_lab_apply_native_kick_angle(void *unit, const void *input,
       __ATOMIC_ACQUIRE);
   const float left_x = native_lab_normalize_axis(raw_left_x);
   const float left_y = native_lab_normalize_axis(raw_left_y);
-  const uint32_t stock_mask = __atomic_load_n(
-      &native_lab_debug_stock_mask, __ATOMIC_ACQUIRE);
-  const int close_free_kick =
-      context == PES_SETPLAY_FREE_KICK &&
-      !(stock_mask & (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
-                      PES_NATIVE_LAB_STOCK_FREEKICK_POSITION));
+  const uint32_t latched = __atomic_load_n(
+      &native_lab_left_aim_latched_mask, __ATOMIC_ACQUIRE);
+  uint32_t player = UINT32_MAX;
+  memcpy(&player, (const char *)input + 0x24, sizeof(player));
+  int same_target = 0;
+  const float base_angle = native_lab_stable_setplay_base_angle(
+      pad, player, stock_angle, &same_target);
   float desired = base_angle + camera_yaw_degrees;
-  if (left_x != 0.0f || left_y != 0.0f) {
-    if (close_free_kick) {
-      // For the behind-player free-kick camera, LS-X selects left/right while
-      // LS-Y is written to PadCommand's vertical field on release.
-      desired -= left_x * 60.0f;
-      const float vertical = -left_y * 30.0f;
-      uint32_t vertical_bits = 0;
-      memcpy(&vertical_bits, &vertical, sizeof(vertical_bits));
-      __atomic_store_n(&native_lab_command_vertical_bits[pad],
-                       vertical_bits, __ATOMIC_RELEASE);
-    } else {
-      // Corner, goal kick and the overhead free-kick camera accept the full
-      // physical stick vector. The Switch reports the vertical stick axis
-      // with positive-up polarity in this input path; keep X unchanged and
-      // use Y directly so up is straight through the current RS angle and a
-      // clockwise physical rotation remains clockwise in the trajectory.
-      desired += atan2f(-left_x, left_y) * 57.2957795131f;
-    }
-    __atomic_fetch_or(&native_lab_left_aim_latched_mask, 1u << pad,
-                      __ATOMIC_ACQ_REL);
-  } else if ((__atomic_load_n(&native_lab_left_aim_latched_mask,
-                              __ATOMIC_ACQUIRE) & (1u << pad)) &&
-             (__atomic_load_n(&native_lab_command_angle_valid_mask,
-                              __ATOMIC_ACQUIRE) & (1u << pad))) {
+  if (left_x != 0.0f) {
+    // Horizontal direction and vertical lift are independent, matching the
+    // mobile swipe's X/Z semantics. A bounded offset prevents a corner from
+    // rotating through the taker's back.
+    desired -= left_x * (context == PES_SETPLAY_CORNER ? 75.0f : 60.0f);
+  } else if (same_target && (latched & (1u << pad))) {
     const uint32_t previous_bits = __atomic_load_n(
         &native_lab_command_angle_bits[pad], __ATOMIC_ACQUIRE);
     memcpy(&desired, &previous_bits, sizeof(desired));
+  }
+  if (context == PES_SETPLAY_CORNER && native_lab_mobile_filter_angle_abi)
+    desired = native_lab_mobile_filter_angle_abi(unit, input, desired);
+  if (left_y != 0.0f) {
+    const float vertical = -left_y * 30.0f;
+    uint32_t vertical_bits = 0;
+    memcpy(&vertical_bits, &vertical, sizeof(vertical_bits));
+    __atomic_store_n(&native_lab_command_vertical_bits[pad], vertical_bits,
+                     __ATOMIC_RELEASE);
+  }
+  // ThinkUnitManager forwards MobileSetplayKick +0x38 as PadCommand angle and
+  // +0x44 as its signed vertical/elevation parameter. Mirror both pad-owned
+  // values after the original Main() call so close free kicks execute along
+  // the same horizontal and vertical direction shown by the white preview.
+  const uint32_t vertical_bits = __atomic_load_n(
+      &native_lab_command_vertical_bits[pad], __ATOMIC_ACQUIRE);
+  float latched_vertical = 0.0f;
+  memcpy(&latched_vertical, &vertical_bits, sizeof(latched_vertical));
+  memcpy((char *)unit + 0x44, &latched_vertical, sizeof(latched_vertical));
+  if (left_x != 0.0f || left_y != 0.0f) {
+    __atomic_fetch_or(&native_lab_left_aim_latched_mask, 1u << pad,
+                      __ATOMIC_ACQ_REL);
   }
   while (desired < 0.0f)
     desired += 360.0f;
   while (desired >= 360.0f)
     desired -= 360.0f;
+  memcpy((char *)unit + 0x38, &desired, sizeof(desired));
   uint32_t angle_bits = 0;
   memcpy(&angle_bits, &desired, sizeof(angle_bits));
   __atomic_store_n(&native_lab_command_angle_bits[pad], angle_bits,
@@ -2239,9 +2346,6 @@ static int install_native_lab_action_debug(so_module *module) {
   const uintptr_t draw_pass_line = so_try_find_addr_rx(
       module,
       "_ZN5match3pad12DrawPassLineENS_14PadCommandKindEh8PlayerNoS2_fPKNS_8registry8RegistryEPNS3_12Screen2dInfoE");
-  const uintptr_t draw_shoot_line = so_try_find_addr_rx(
-      module,
-      "_ZN5match3pad13DrawShootLineENS_14PadCommandKindEh8PlayerNoRKN4math7Vector3EPKNS_8registry8RegistryEPNS7_12Screen2dInfoE");
   const uintptr_t mobile_filter_angle = so_try_find_addr_rx(
       module,
       "_ZN5match3pad26ThinkUnitMobileSetplayKick11FilterAngleERKNS0_18ThinkUnitInputDataEf");
@@ -2266,7 +2370,7 @@ static int install_native_lab_action_debug(so_module *module) {
       !support_pull_slot || !mobile_kick_main_slot ||
       !short_update_2d_slot || !long_update_2d_slot ||
       !shoot_update_2d_slot || !mobile_kick_update_2d_slot ||
-      !penalty_update_2d_slot || !draw_pass_line || !draw_shoot_line ||
+      !penalty_update_2d_slot || !draw_pass_line ||
       !mobile_filter_angle || !set_kick ||
       !set_kick_no_player ||
       !corner_camera_slot ||
@@ -2308,7 +2412,6 @@ static int install_native_lab_action_debug(so_module *module) {
   native_lab_penalty_update_2d_original =
       (void *)*penalty_update_2d_slot;
   native_lab_draw_pass_line = (void *)draw_pass_line;
-  native_lab_draw_shoot_line = (void *)draw_shoot_line;
   native_lab_set_kick_original = (void *)set_kick;
   native_lab_set_kick_no_player_original = (void *)set_kick_no_player;
   native_lab_corner_camera_update_original = (void *)*corner_camera_slot;

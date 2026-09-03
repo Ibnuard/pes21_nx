@@ -854,14 +854,17 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
   const int a_held = connected && (buttons & HidNpadButton_A) != 0;
   const int l_held = connected && (buttons & HidNpadButton_L) != 0;
   const int r_held = connected && (buttons & HidNpadButton_R) != 0;
-  const int plus_held = connected && (buttons & HidNpadButton_Plus) != 0;
+  const int plus_held =
+      connected &&
+      (buttons & (HidNpadButton_Plus | HidNpadButton_Minus)) != 0;
   const int b_pressed = b_held && !(previous_hid_buttons & HidNpadButton_B);
   const int x_pressed = x_held && !(previous_hid_buttons & HidNpadButton_X);
   const int y_pressed = y_held && !(previous_hid_buttons & HidNpadButton_Y);
   const int a_pressed = a_held && !(previous_hid_buttons & HidNpadButton_A);
   const int l_pressed = l_held && !(previous_hid_buttons & HidNpadButton_L);
-  const int plus_pressed =
-      plus_held && !(previous_hid_buttons & HidNpadButton_Plus);
+  const int plus_pressed = plus_held &&
+      !(previous_hid_buttons &
+        (HidNpadButton_Plus | HidNpadButton_Minus));
   const uint32_t setplay_options = ui ? ui->setplay_options : 0;
   const uint32_t setplay_context = ui ? ui->setplay_context : PES_SETPLAY_NONE;
   int x_is_context = 0;
@@ -1044,6 +1047,31 @@ static void append_virtual_gamepad_touches(FakeTouchState *desired,
 
 }
 
+// Native gameplay intentionally has no virtual action buttons, but Pause is
+// a frontend event rather than a football action. Queue one stock pause event
+// from either local controller; no hidden touch target is involved.
+static void append_native_pause_touch(FakeTouchState *desired,
+                                      int connected_p1, u64 buttons_p1,
+                                      u64 previous_p1,
+                                      int connected_p2, u64 buttons_p2,
+                                      u64 previous_p2,
+                                      uint64_t now_ms) {
+  (void)desired;
+  (void)now_ms;
+  const u64 pause_buttons = HidNpadButton_Plus | HidNpadButton_Minus;
+  const int pressed_p1 =
+      connected_p1 && ((buttons_p1 & ~previous_p1) & pause_buttons);
+  const int pressed_p2 =
+      connected_p2 && ((buttons_p2 & ~previous_p2) & pause_buttons);
+  // If both edges arrive in one poll, P1 wins deterministically. Otherwise
+  // preserve the exact pad that generated the pause request so its controller
+  // owns the pause cursor and can close it with B.
+  if (pressed_p1)
+    pes_controller_pause_request_for_pad(0);
+  else if (pressed_p2)
+    pes_controller_pause_request_for_pad(1);
+}
+
 static void append_menu_controller_tap(FakeTouchState *desired, int a_pressed,
                                         uint64_t now_ms) {
   static uint64_t tap_until_ms;
@@ -1128,6 +1156,7 @@ static void append_menu_controller_scroll(FakeTouchState *desired,
 static void append_virtual_cursor_controller(FakeTouchState *desired,
                                              float axis_x, float axis_y,
                                              int connected, u64 buttons,
+                                             u64 previous_buttons,
                                              uint64_t now_ms, int cursor_context) {
   static uint64_t cursor_previous_ms;
   static uint64_t play_until_ms;
@@ -1163,7 +1192,7 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   }
 
   const int a_pressed = connected && (buttons & HidNpadButton_A) != 0 &&
-                        (previous_hid_buttons & HidNpadButton_A) == 0;
+                        (previous_buttons & HidNpadButton_A) == 0;
   const int pre_match_gameplan =
       cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
       !pes_controller_gameplan_pause_route();
@@ -1175,7 +1204,7 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
                               !pre_match_gameplan)) &&
                             (buttons & HidNpadButton_A) != 0));
   const int b_pressed = connected && (buttons & HidNpadButton_B) != 0 &&
-                        (previous_hid_buttons & HidNpadButton_B) == 0;
+                        (previous_buttons & HidNpadButton_B) == 0;
   if (b_pressed && back_until_ms <= now_ms) {
     if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE)
       pes_controller_pause_back_request();
@@ -1229,6 +1258,7 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
 
 static void append_pause_camera_swipe(FakeTouchState *desired,
                                       int connected, u64 buttons,
+                                      u64 previous_buttons,
                                       uint64_t now_ms) {
   static uint64_t until_ms;
   static float start_x;
@@ -1242,7 +1272,7 @@ static void append_pause_camera_swipe(FakeTouchState *desired,
     until_ms = 0;
     return;
   }
-  const u64 pressed = buttons & ~previous_hid_buttons;
+  const u64 pressed = buttons & ~previous_buttons;
   if (pressed & (HidNpadButton_Left | HidNpadButton_Right)) {
     // Keep the virtual gesture and the visible page indicator aligned with
     // the D-pad direction.
@@ -1300,7 +1330,8 @@ static void queue_native_setplay_action(const PesControllerSnapshot *ui,
 }
 
 static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
-                                            int connected, u64 buttons,
+                                            uint32_t pad, int connected,
+                                            u64 buttons,
                                             u64 previous_buttons) {
   if (!ui || !connected ||
       ui->surface != PES_CONTROLLER_SURFACE_SETPLAY)
@@ -1312,13 +1343,13 @@ static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
        ui->setplay_context == PES_SETPLAY_FREE_KICK) &&
       (ui->setplay_button_mask &
        (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER)))
-    pes_controller_setplay_request(PES_SETPLAY_BUTTON_SET_PIECE_TAKER,
-                                   ui->generation);
+    pes_controller_setplay_request_for_pad(
+        PES_SETPLAY_BUTTON_SET_PIECE_TAKER, ui->generation, pad);
   else if (ui->setplay_context == PES_SETPLAY_THROW_IN &&
            (ui->setplay_button_mask &
             (1u << PES_SETPLAY_BUTTON_SELECT_THROWER)))
-    pes_controller_setplay_request(PES_SETPLAY_BUTTON_SELECT_THROWER,
-                                   ui->generation);
+    pes_controller_setplay_request_for_pad(
+        PES_SETPLAY_BUTTON_SELECT_THROWER, ui->generation, pad);
 }
 
 // A foul penalty still exposes ButtonSetplay's native taker action, but the
@@ -1326,7 +1357,7 @@ static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
 // roles are active. Route D-pad Right from the kicker's own pad so a keeper's
 // stick/buttons can never open or confirm the kicker selector by accident.
 static void queue_native_penalty_action(const PesControllerSnapshot *ui,
-                                        int connected, u64 buttons,
+                                        uint32_t pad, int connected, u64 buttons,
                                         u64 previous_buttons, uint32_t role) {
   if (!ui || !connected || role != PES_PENALTY_KICKER)
     return;
@@ -1336,8 +1367,8 @@ static void queue_native_penalty_action(const PesControllerSnapshot *ui,
       !(ui->setplay_button_mask &
         (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER)))
     return;
-  pes_controller_setplay_request(PES_SETPLAY_BUTTON_SET_PIECE_TAKER,
-                                 ui->generation);
+  pes_controller_setplay_request_for_pad(
+      PES_SETPLAY_BUTTON_SET_PIECE_TAKER, ui->generation, pad);
 }
 
 static void queue_set_piece_selector_input(int connected, u64 buttons,
@@ -1915,6 +1946,20 @@ void android_input_poll(void) {
     pes_controller_result_cursor_clear();
   const int cursor_context = pes_controller_virtual_cursor_context();
   const int cursor_active = cursor_context != PES_VIRTUAL_CURSOR_NONE;
+  const int pause_owned_cursor =
+      cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
+      (cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
+       pes_controller_gameplan_pause_route());
+  const int pause_cursor_p2 =
+      pause_owned_cursor && pes_controller_pause_owner_pad() == 1u;
+  const float cursor_axis_x = pause_cursor_p2 ? axis_x_p2 : axis_x;
+  const float cursor_axis_y = pause_cursor_p2 ? axis_y_p2 : axis_y;
+  const int cursor_connected = pause_cursor_p2 ? controller_connected_p2
+                                               : controller_connected;
+  const u64 cursor_buttons = pause_cursor_p2 ? buttons_p2 : buttons;
+  const u64 cursor_previous_buttons = pause_cursor_p2
+                                          ? previous_hid_buttons_p2
+                                          : previous_hid_buttons;
   const uint32_t penalty_role_p1 = pes_controller_penalty_role_for_pad(0);
   const int penalty_two_player =
       native_pad_lab_active && pes_controller_native_pad_lab_two_player();
@@ -2056,7 +2101,8 @@ void android_input_poll(void) {
     if (set_piece_selector_isolated) {
       reset_virtual_surfaces();
       if (set_piece_selector_active) {
-        if (native_pad_lab_active && native_setplay_owner_pad == 1)
+        if (native_pad_lab_active &&
+            pes_controller_set_piece_selector_owner_pad() == 1)
           queue_set_piece_selector_input(
               controller_connected_p2, buttons_p2, previous_hid_buttons_p2,
               axis_x_p2, axis_y_p2, now_ms);
@@ -2105,11 +2151,11 @@ void android_input_poll(void) {
     } else if (penalty_active) {
       reset_virtual_surfaces();
       queue_native_penalty_action(
-          &controller_snapshot, controller_connected, buttons,
+          &controller_snapshot, 0, controller_connected, buttons,
           previous_hid_buttons, penalty_role_p1);
       if (penalty_two_player)
         queue_native_penalty_action(
-            &controller_snapshot, controller_connected_p2, buttons_p2,
+            &controller_snapshot, 1, controller_connected_p2, buttons_p2,
             previous_hid_buttons_p2, penalty_role_p2);
       // Native sessions execute dormant console penalty ThinkUnits only after
       // their exact object-table ABI is verified for this pad and role.  A
@@ -2130,14 +2176,12 @@ void android_input_poll(void) {
       }
     } else {
       if (native_pad_lab_active && gameplay_active) {
-        if (native_setplay_owner_pad == 1)
-          queue_native_lab_setplay_action(
-              &controller_snapshot, controller_connected_p2, buttons_p2,
-              previous_hid_buttons_p2);
-        else
-          queue_native_lab_setplay_action(
-              &controller_snapshot, controller_connected, buttons,
-              previous_hid_buttons);
+        queue_native_lab_setplay_action(
+            &controller_snapshot, 0, controller_connected, buttons,
+            previous_hid_buttons);
+        queue_native_lab_setplay_action(
+            &controller_snapshot, 1, controller_connected_p2, buttons_p2,
+            previous_hid_buttons_p2);
       } else {
         queue_native_setplay_action(&controller_snapshot, have_left_stick,
                                     buttons);
@@ -2148,7 +2192,7 @@ void android_input_poll(void) {
       if (gameplan_cursor_active) {
         if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
             pes_controller_custom_pause_active()) {
-          const u64 pressed = buttons & ~previous_hid_buttons;
+          const u64 pressed = cursor_buttons & ~cursor_previous_buttons;
           if (pressed & HidNpadButton_Up)
             pes_controller_custom_pause_input(PES_PAUSE_INPUT_UP);
           else if (pressed & HidNpadButton_Down)
@@ -2162,16 +2206,34 @@ void android_input_poll(void) {
           else if (pressed & HidNpadButton_B)
             pes_controller_custom_pause_input(PES_PAUSE_INPUT_BACK);
         } else {
-          append_virtual_cursor_controller(&desired, axis_x, axis_y,
-                                           have_left_stick, buttons, now_ms,
-                                           cursor_context);
-        }
+          append_virtual_cursor_controller(
+              &desired, cursor_axis_x, cursor_axis_y, cursor_connected,
+              cursor_buttons, cursor_previous_buttons, now_ms, cursor_context);
       }
     }
-    if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
+  }
+  // +/- is a frontend pause request, not a gameplay PadCommand. Process the
+  // edge independently of synthetic-context transitions so a frame that
+  // enters a native set-play surface cannot swallow it.
+  if (native_pad_lab_active && !penalty_active && !cinematic_active &&
+      (gameplay_active ||
+       controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY))
+    append_native_pause_touch(
+        &desired, controller_connected, buttons, previous_hid_buttons,
+        controller_connected_p2, buttons_p2, previous_hid_buttons_p2,
+        now_ms);
+  if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
         !penalty_active && pause_camera_active) {
-      append_pause_camera_swipe(&desired, have_left_stick, buttons, now_ms);
-      const u64 pressed = buttons & ~previous_hid_buttons;
+      const int pause_input_p2 = pes_controller_pause_owner_pad() == 1u;
+      const int pause_input_connected =
+          pause_input_p2 ? controller_connected_p2 : controller_connected;
+      const u64 pause_input_buttons = pause_input_p2 ? buttons_p2 : buttons;
+      const u64 pause_input_previous =
+          pause_input_p2 ? previous_hid_buttons_p2 : previous_hid_buttons;
+      append_pause_camera_swipe(&desired, pause_input_connected,
+                                pause_input_buttons, pause_input_previous,
+                                now_ms);
+      const u64 pressed = pause_input_buttons & ~pause_input_previous;
       if (pressed & HidNpadButton_Left)
         pes_controller_pause_camera_input(PES_PAUSE_INPUT_LEFT);
       else if (pressed & HidNpadButton_Right)
@@ -2321,7 +2383,8 @@ void android_input_poll(void) {
     emit_replay_pad_input(controller_connected || controller_connected_p2,
                           replay_pad_buttons);
   else if (gameplan_cursor_active)
-    emit_virtual_cursor_pad_input(have_left_stick, buttons, cursor_context);
+    emit_virtual_cursor_pad_input(cursor_connected, cursor_buttons,
+                                  cursor_context);
   else if (pause_camera_active)
     disable_native_pad_bridge();
   else if (custom_prematch_gameplan_active)
@@ -2332,6 +2395,10 @@ void android_input_poll(void) {
   {
     u64 native_buttons = buttons;
     u64 native_buttons_p2 = buttons_p2;
+    // Pause is dispatched as a stock frontend event, not through a gameplay
+    // ThinkUnit. Keep +/- out of Cobra history to prevent duplicate handling.
+    native_buttons &= ~(HidNpadButton_Plus | HidNpadButton_Minus);
+    native_buttons_p2 &= ~(HidNpadButton_Plus | HidNpadButton_Minus);
     if (controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY) {
       // Right opens our horizontal-Joy-Con-friendly taker selector. Minus is
       // deliberately suppressed so the hidden stock picker cannot race it.

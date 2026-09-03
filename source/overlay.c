@@ -619,6 +619,19 @@ static void overlay_render(void) {
       pes_controller_gameplan_cursor_position(&gameplan_cursor_x,
                                               &gameplan_cursor_y);
 
+  const int modal_match_frontend =
+      virtual_cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
+      virtual_cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN ||
+      pause_camera_active;
+  if (modal_match_frontend) {
+    // Pause and its Game Plan/Camera children own the foreground. Keep the
+    // set-play state latched underneath, but suppress its mapper until the
+    // match resumes.
+    setplay_context = PES_SETPLAY_NONE;
+    setplay_options = 0;
+    native_setplay_debug = 0;
+  }
+
   // The custom selector owns the modal presentation. Do not let the
   // underlying match set-play legend bleed through its footer.
   if (set_piece_selector || tutorial_play_active) {
@@ -1701,7 +1714,7 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V8.15.1 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V8.16.7 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
@@ -2024,34 +2037,29 @@ static void overlay_render(void) {
   if (!setplay_helper_count && penalty_helper_active) {
     // A foul penalty keeps ButtonSetplay's native taker action alive.  A
     // shootout/imbalance penalty has no taker selector, so do not expose a
-    // dead Right action there. R1 is a visual-only trajectory toggle and is
-    // deliberately shown for each penalty session, never as a touch helper.
+    // dead Right action there. Penalties have no trajectory preview.
     const int penalty_foul_mode =
         controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY &&
         (controller_snapshot.setplay_button_mask &
          (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER));
     if (penalty_foul_mode && setplay_helper_count < 5) {
       setplay_keys[setplay_helper_count] = ">";
-      setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
-    }
-    if (setplay_helper_count < 5) {
-      setplay_keys[setplay_helper_count] = "R";
-      setplay_labels[setplay_helper_count++] = "TRAJECTORY ON/OFF";
+      setplay_labels[setplay_helper_count++] = "SET PENALTY TAKER";
     }
     if (penalty_role_p1 == PES_PENALTY_KICKER) {
       setplay_keys[setplay_helper_count] = "Y";
-      setplay_labels[setplay_helper_count++] = "P1 KICKER + LS AIM";
+      setplay_labels[setplay_helper_count++] = "P1 KICKER (LS + Y)";
     } else if (penalty_role_p1 == PES_PENALTY_GOALKEEPER) {
       setplay_keys[setplay_helper_count] = "LS";
-      setplay_labels[setplay_helper_count++] = "P1 KEEPER DIVE";
+      setplay_labels[setplay_helper_count++] = "P1 GOALKEEPER (LS)";
     }
     if (penalty_two_player && penalty_role_p2 == PES_PENALTY_KICKER) {
       setplay_keys[setplay_helper_count] = "Y";
-      setplay_labels[setplay_helper_count++] = "P2 KICKER + LS AIM";
+      setplay_labels[setplay_helper_count++] = "P2 KICKER (LS + Y)";
     } else if (penalty_two_player &&
                penalty_role_p2 == PES_PENALTY_GOALKEEPER) {
       setplay_keys[setplay_helper_count] = "LS";
-      setplay_labels[setplay_helper_count++] = "P2 KEEPER DIVE";
+      setplay_labels[setplay_helper_count++] = "P2 GOALKEEPER (LS)";
     }
   }
   // Keep these badges outside the generic white-text batch below. That pass
@@ -2165,8 +2173,7 @@ static void overlay_render(void) {
         bar_y = (float)screen_height - bar_h - padding;
       power_gauge_background_first_quad[pad] = quads;
       power_gauge_background_quads[pad] = emit_rect(
-          bar_x - padding, bar_y - padding,
-          bar_w + padding * 2.0f, bar_h + padding * 2.0f,
+          bar_x, bar_y, bar_w, bar_h,
           verts + quads * 24);
       quads += power_gauge_background_quads[pad];
       power_gauge_segment_first_quad[pad] = quads;

@@ -136,6 +136,8 @@ static uint64_t (*exhibition_get_player_id_by_unique_id)(
     const uint32_t *unique_id);
 static void *(*exhibition_squad_edit_get_squad_data)(void *squad_edit,
                                                       uint32_t home_away);
+static void (*exhibition_squad_edit_set_my_side)(void *squad_edit,
+                                                  const uint32_t *home_away);
 static uint32_t (*exhibition_squad_data_get_player_count)(void *squad_data);
 static void *(*exhibition_squad_data_get_player_by_index)(
     void *squad_data, const uint32_t *index);
@@ -226,6 +228,13 @@ static uint32_t (*match_goal_demo_pad_main_original)(void *unit,
                                                      const void *input,
                                                      uint32_t kind);
 static void (*match_goal_button_update_original)(void *window);
+static void (*match_pause_button_update_original)(void *window);
+static void *(*match_task_manager_get_instance)(void);
+static void (*match_task_manager_push_msg_event)(void *manager,
+                                                  uint32_t message,
+                                                  const void *payload);
+static uint32_t match_pause_request_pending;
+static uint32_t match_pause_owner_pad = UINT32_MAX;
 static uint32_t (*match_penalty_kicker_main_original)(void *unit,
                                                        const void *input,
                                                        uint32_t kind);
@@ -737,6 +746,7 @@ static _Alignas(8) uint64_t match_button_setplay_seen_tick;
 static _Alignas(4) uint32_t match_button_setplay_mask;
 static _Alignas(4) uint32_t match_button_setplay_pending_type;
 static _Alignas(4) uint32_t match_button_setplay_pending_generation;
+static _Alignas(4) uint32_t match_button_setplay_pending_pad;
 static _Alignas(8) uint64_t match_button_setplay_pending_tick;
 // Low 32 bits hold the semantic controller surface; high 32 bits are a
 // transition generation. Heartbeat refreshes intentionally do not advance it.
@@ -758,6 +768,7 @@ static _Alignas(4) uint32_t match_kicker_selector_context;
 static _Alignas(4) uint32_t match_kicker_selector_armed;
 static _Alignas(4) uint32_t match_kicker_selector_open;
 static _Alignas(4) uint32_t match_kicker_selector_pending_action;
+static _Alignas(4) uint32_t match_kicker_selector_owner_pad = UINT32_MAX;
 static _Alignas(8) uintptr_t match_kicker_selector_button_owner;
 static _Alignas(8) uint64_t match_camera_ball_seen_tick;
 static float match_camera_previous_ball[3];
@@ -3188,9 +3199,14 @@ static void *match_gameplan_resolve_squad(uint32_t reload) {
     return NULL;
 
   unsigned char *squad_edit = (unsigned char *)tmpdb_data + 0x18360;
-  uint32_t side = exhibition_get_match_my_side
-                      ? exhibition_get_match_my_side()
-                      : 0;
+  uint32_t side = 0;
+  if (__atomic_load_n(&match_gameplan_pause_route, __ATOMIC_ACQUIRE)) {
+    const uint32_t owner = __atomic_load_n(&match_pause_owner_pad,
+                                            __ATOMIC_ACQUIRE);
+    side = owner == 1u ? 1u : 0u;
+  } else {
+    side = exhibition_get_match_my_side ? exhibition_get_match_my_side() : 0;
+  }
   if (side > 1) {
     memcpy(&side, squad_edit + 5312, sizeof(side));
     if (side > 1)
@@ -5631,6 +5647,25 @@ static void pes_virtual_cursor_activate(uint32_t context, uint32_t x,
   }
 }
 
+// MyClubSquadEdit asks tmpdb::SquadEdit for HomeAway::MY_SIDE while its child
+// pitch/list widgets initialize. Set that native selector from the controller
+// which opened Pause before the Squad Management tile can be confirmed.
+static void match_pause_apply_owner_side(void) {
+  const uint32_t owner = __atomic_load_n(&match_pause_owner_pad,
+                                          __ATOMIC_ACQUIRE);
+  if (owner > 1u || !exhibition_tmpdb_manager_get_instance ||
+      !exhibition_squad_edit_set_my_side)
+    return;
+  void *manager = exhibition_tmpdb_manager_get_instance();
+  void *tmpdb_data = NULL;
+  if (manager)
+    memcpy(&tmpdb_data, (unsigned char *)manager + 72, sizeof(tmpdb_data));
+  if (!tmpdb_data)
+    return;
+  void *squad_edit = (unsigned char *)tmpdb_data + 0x18360;
+  exhibition_squad_edit_set_my_side(squad_edit, &owner);
+}
+
 static void match_result_process_controller_input(void *window);
 
 // MyClubSquadEdit is the authoritative native Game Plan frontend for both
@@ -5649,8 +5684,10 @@ void pes_match_squad_edit_update_entry(void *window, uint32_t pad_status) {
       (pause_seen && armTicksToNs(armGetSystemTick() - pause_seen) <=
                          5000000000ULL) ||
       __atomic_load_n(&match_gameplan_pause_route, __ATOMIC_ACQUIRE);
-  if (from_pause)
+  if (from_pause) {
     __atomic_store_n(&match_gameplan_pause_route, 1u, __ATOMIC_RELEASE);
+    match_pause_apply_owner_side();
+  }
   __atomic_store_n(&match_gameplan_seen_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
   pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_GAMEPLAN, 32768, 29491);
@@ -6125,6 +6162,36 @@ static void pes_match_goal_button_update(void *window) {
     match_node_set_alpha(root, 0.0f);
 }
 
+static void match_pause_dispatch_pending(void) {
+  if (!__atomic_exchange_n(&match_pause_request_pending, 0,
+                           __ATOMIC_ACQ_REL) ||
+      !match_task_manager_get_instance || !match_task_manager_push_msg_event)
+    return;
+  void *manager = match_task_manager_get_instance();
+  if (manager)
+    match_task_manager_push_msg_event(manager, 0x01050062u, NULL);
+}
+
+static void pes_match_pause_button_update(void *window) {
+  if (match_pause_button_update_original)
+    match_pause_button_update_original(window);
+  if (window && match_node_set_alpha && match_setplay_get_root) {
+    // Opacity only: the original PauseButton remains alive for its stock
+    // lifecycle while the custom overlay owns the visible helper.
+    void *root = match_setplay_get_root(window);
+    if (root)
+      match_node_set_alpha(root, 0.0f);
+  }
+
+  // PauseButton::PadEventTouch ultimately emits this exact message.  Queue it
+  // here, on the same UE4 update thread that owns the window, instead of
+  // relying on a hidden hit-test rectangle (which can be absent during short
+  // native match transitions).  This keeps +/- identical for P1 and P2 and
+  // avoids routing either button into the football PadCommand stream.
+  if (window)
+    match_pause_dispatch_pending();
+}
+
 int pes_controller_goal_demo_active(void) {
   const uint64_t seen = __atomic_load_n(&match_goal_demo_seen_tick,
                                          __ATOMIC_ACQUIRE);
@@ -6194,6 +6261,8 @@ static void match_kicker_selector_close(void) {
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_count, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_button_owner, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_kicker_selector_owner_pad, UINT32_MAX,
                    __ATOMIC_RELEASE);
 }
 
@@ -6336,6 +6405,10 @@ static void pes_match_button_setplay_touch_sub(void *window,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_context, context,
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&match_kicker_selector_owner_pad,
+                   __atomic_load_n(&match_button_setplay_pending_pad,
+                                   __ATOMIC_ACQUIRE) & 1u,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_focus, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_count, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_pending_action, 0,
@@ -6464,18 +6537,49 @@ static void pes_match_button_setplay_update(void *window) {
   *(uint32_t *)(touch_info + 20) = index;
   if (match_action_button_pad_event_touch)
     match_action_button_pad_event_touch(window, touch_info);
+  __atomic_store_n(&match_button_setplay_pending_pad, 0,
+                   __ATOMIC_RELEASE);
 }
 
 void pes_controller_setplay_request(uint32_t button_type,
                                     uint32_t generation) {
+  pes_controller_setplay_request_for_pad(button_type, generation, 0);
+}
+
+void pes_controller_setplay_request_for_pad(uint32_t button_type,
+                                            uint32_t generation,
+                                            uint32_t pad) {
   if (button_type > PES_SETPLAY_BUTTON_SWITCH_VIEW)
     return;
+  // Input polling invokes both local pads serially. Preserve the first edge
+  // until ButtonSetplay consumes it so the other controller cannot steal an
+  // overlay while the native UI cooldown is active.
+  if (__atomic_load_n(&match_button_setplay_pending_type, __ATOMIC_ACQUIRE))
+    return;
   __atomic_store_n(&match_button_setplay_pending_generation, generation,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_pending_pad, pad == 1 ? 1u : 0u,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_pending_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_pending_type, button_type,
                    __ATOMIC_RELEASE);
+}
+
+void pes_controller_pause_request(void) {
+  pes_controller_pause_request_for_pad(0);
+}
+
+void pes_controller_pause_request_for_pad(uint32_t pad) {
+  __atomic_store_n(&match_pause_owner_pad, pad == 1 ? 1u : 0u,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_pause_request_pending, 1, __ATOMIC_RELEASE);
+}
+
+uint32_t pes_controller_pause_owner_pad(void) {
+  const uint32_t owner = __atomic_load_n(&match_pause_owner_pad,
+                                         __ATOMIC_ACQUIRE);
+  return owner == 1u ? 1u : 0u;
 }
 
 static void match_native_setplay_publish(uint32_t context) {
@@ -6960,6 +7064,12 @@ static uint32_t pes_match_kicker_select_main(void *unit, const void *input,
   if (!unit || !input || kind != 0x61u)
     return result;
 
+  const uint32_t selector_owner = __atomic_load_n(
+      &match_kicker_selector_owner_pad, __ATOMIC_ACQUIRE);
+  if (selector_owner <= 1u &&
+      match_native_penalty_input_pad(input) != selector_owner)
+    return result;
+
   uint32_t action = __atomic_load_n(
       &match_kicker_selector_pending_action, __ATOMIC_ACQUIRE);
   if (action == PES_PAUSE_INPUT_BACK) {
@@ -7069,6 +7179,12 @@ int pes_controller_set_piece_selector_active(void) {
     return 0;
   }
   return 1;
+}
+
+uint32_t pes_controller_set_piece_selector_owner_pad(void) {
+  const uint32_t owner = __atomic_load_n(&match_kicker_selector_owner_pad,
+                                          __ATOMIC_ACQUIRE);
+  return owner == 1u ? 1u : 0u;
 }
 
 uint32_t pes_controller_set_piece_selector_focus(void) {
@@ -7552,6 +7668,7 @@ static void pes_match_result_update(void *window) {
 uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
   (void)pad_status;
   if (window) {
+    match_pause_apply_owner_side();
     __atomic_store_n(&match_pause_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
     __atomic_store_n(&match_pause_custom_active, 0, __ATOMIC_RELEASE);
@@ -7590,6 +7707,9 @@ static void pes_match_pause_destroyed(void *window) {
   __atomic_store_n(&match_pause_custom_focus, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_page, MATCH_PAUSE_PAGE_ROOT,
                    __ATOMIC_RELEASE);
+  // Preserve ownership across Pause -> MyClubSquadEdit. The native Pause
+  // object is destroyed before the Game Plan child receives its first update;
+  // the next +/- request replaces this value when a new pause flow starts.
   match_gameplan_squad_data = NULL;
   match_gameplan_player_count = 0;
   uint32_t expected = PES_VIRTUAL_CURSOR_PAUSE;
@@ -7786,6 +7906,10 @@ static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
 // Called on cobra's game thread at the end of Pad::Update's clear/touch phase,
 // immediately before the game computes clicked/released/repeated edges.
 uintptr_t cobra_pad_apply_input(void *pad_ptr) {
+  // Cobra::Pad::Update runs on the match game thread every frame, including
+  // frames where PauseButton itself is not scheduled. Consume the frontend
+  // request here first; the PauseButton wrapper remains a UI-thread fallback.
+  match_pause_dispatch_pending();
   unsigned char *pad = pad_ptr;
   if (pad) {
     int32_t pad_id;
@@ -8393,6 +8517,9 @@ void install_ue4_hooks(so_module *module) {
   exhibition_squad_edit_get_squad_data =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadEdit12GetSquadDataE8HomeAway");
+  exhibition_squad_edit_set_my_side =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadEdit9SetMySideERK8HomeAway");
   exhibition_squad_data_get_player_count =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData17GetSquadPlayerNumEv");
@@ -9244,6 +9371,32 @@ void install_ue4_hooks(so_module *module) {
   *button_setplay_update_slot = (uintptr_t)&pes_match_button_setplay_update;
   *button_setplay_touch_sub_slot =
       (uintptr_t)&pes_match_button_setplay_touch_sub;
+
+  // UpdateAllDisplay is non-virtual in this binary. UpdatePreControlWindow is
+  // PauseButton's actual vtable override (slot +0x188), so hook that entry and
+  // hide the root only after the stock frame update has completed.
+  const char *pause_button_update_symbol =
+      "_ZN7match2D6Screen11PauseButton22UpdatePreControlWindowEv";
+  const uintptr_t pause_button_update_runtime =
+      so_find_addr_rx(module, pause_button_update_symbol);
+  uintptr_t *pause_button_update_slot = find_vtable_method_slot(
+      module, "_ZTVN7match2D6Screen11PauseButtonE",
+      pause_button_update_runtime, 128);
+  if (!pause_button_update_slot)
+    fatal_error("PauseButton UpdatePreControlWindow vtable slot not found");
+  match_pause_button_update_original =
+      (void *)pause_button_update_runtime;
+  *pause_button_update_slot =
+      (uintptr_t)&pes_match_pause_button_update;
+  match_task_manager_get_instance =
+      (void *(*)(void))so_find_addr_rx(
+          module, "_ZN3sys11TaskManager11GetInstanceEv");
+  match_task_manager_push_msg_event =
+      (void (*)(void *, uint32_t, const void *))so_find_addr_rx(
+          module, "_ZN3sys11TaskManager12PushMsgEventEjPKc");
+  if (!match_task_manager_get_instance ||
+      !match_task_manager_push_msg_event)
+    fatal_error("PauseButton TaskManager event symbols not found");
   debugPrintf("UE4 input: ButtonSetplay need=%p/%p update=%p/%p "
               "sub=%p/%p touch=%p\n",
               (void *)button_setplay_need_disp_runtime,

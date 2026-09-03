@@ -188,14 +188,22 @@ class NativeGamepadLabTests(unittest.TestCase):
             route, re.S).group(0)
         self.assertIn('(const char *)unit + 0x38', aim)
         self.assertNotIn('(char *)unit + 0x24', aim)
-        self.assertNotIn('native_lab_mobile_filter_angle', aim)
+        self.assertIn('native_lab_mobile_filter_angle_abi(unit, input, desired)',
+                      aim)
         self.assertIn('native_lab_camera_yaw_millirad[pad]', aim)
         self.assertIn('57.2957795131f', aim)
         self.assertIn('native_lab_debug_axis_x', aim)
         self.assertIn('native_lab_debug_axis_y', aim)
-        self.assertIn('atan2f(-left_x, left_y)', aim)
-        self.assertIn('desired -= left_x * 60.0f', aim)
+        self.assertNotIn('atan2f(-left_x, left_y)', aim)
+        self.assertIn('context == PES_SETPLAY_CORNER ? 75.0f : 60.0f', aim)
+        self.assertIn('const float vertical = -left_y * 30.0f', aim)
+        self.assertIn('(char *)unit + 0x44', aim)
+        self.assertIn('(char *)unit + 0x38, &desired', aim)
         self.assertIn('native_lab_command_angle_bits[pad]', aim)
+        self.assertIn('native_lab_base_angle_bits[pad]', route)
+        self.assertIn('native_lab_stable_setplay_base_angle(', aim)
+        self.assertIn('int same_target', aim)
+        self.assertIn('float desired = base_angle + camera_yaw_degrees', aim)
         self.assertIn('native_lab_left_aim_latched_mask', aim)
         self.assertIn('memcpy(&desired, &previous_bits', aim)
         self.assertNotIn('touch_state_append', aim)
@@ -222,7 +230,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.15.1', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.16.7', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = ">";', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)
@@ -340,7 +348,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('index = 11; index <= 12', policy)
         self.assertIn('pes_set_pitch_trajectory(manager, 1', self.hooks)
 
-    def test_penalty_roles_and_trajectory_are_pad_owned(self):
+    def test_penalty_roles_are_pad_owned_without_trajectory_helper(self):
         hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
         route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
@@ -359,9 +367,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('owner_pad != match_native_penalty_input_pad(input)',
                       hooks)
         self.assertIn('!native_ready', hooks)
-        self.assertIn('native_lab_penalty_guide_units[2]', route)
         self.assertIn('native_lab_penalty_action_units[2]', route)
-        self.assertIn('native_lab_penalty_trajectory_enabled_mask', route)
+        self.assertNotIn('native_lab_penalty_trajectory_enabled_mask', route)
         self.assertIn('ThinkUnitPenaltykickGuideE', route)
         self.assertIn('ThinkUnitPenaltykickE', route)
         self.assertIn('ThinkUnitKeeperPenaltykickMoveE', route)
@@ -376,10 +383,20 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('pes_controller_native_penalty_ready', route)
         self.assertIn('native_lab_penalty_press', route)
         self.assertIn('native_lab_penalty_pull', route)
-        self.assertIn('native_lab_draw_shoot_line(0x58u', route)
-        self.assertIn('"P1 KICKER + LS AIM"', overlay)
-        self.assertIn('"P2 KEEPER DIVE"', overlay)
-        self.assertIn('"TRAJECTORY ON/OFF"', overlay)
+        # Penalty still has no trajectory helper. DrawShootLine is deliberately
+        # not used because its cyan mobile command material is not the stock
+        # white set-piece preview.
+        self.assertNotIn('native_lab_draw_shoot_line', route)
+        self.assertNotIn('native_lab_publish_setplay_trajectory(input, screen_2d)',
+                         re.search(r'static void native_lab_penalty_update_2d.*?\n\}',
+                                   route, re.S).group(0))
+        self.assertIn('"SET PENALTY TAKER"', overlay)
+        self.assertIn('"P1 KICKER (LS + Y)"', overlay)
+        self.assertIn('"P2 GOALKEEPER (LS)"', overlay)
+        penalty_block = re.search(
+            r'if \(!setplay_helper_count && penalty_helper_active\).*?\n  \}',
+            overlay, re.S).group(0)
+        self.assertNotIn('TRAJECTORY', penalty_block)
         helper = re.search(
             r'const int penalty_helper_active =.*?;\n'
             r'  if \(!setplay_helper_count', overlay, re.S).group(0)
@@ -414,14 +431,130 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertLess(release.index('(const char *)unit + 0x20'),
                         release.index('native_lab_short_pull_original'))
 
+    def test_setplay_vertical_aim_is_latched_and_rendered_with_world_target(self):
+        route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
+        hid_latch = re.search(
+            r'void pes_controller_native_pad_lab_debug_input.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('port == setplay_pad && trajectory_context', hid_latch)
+        self.assertIn('native_lab_normalize_axis(axis_y)', hid_latch)
+        self.assertIn('native_lab_command_vertical_bits[port]', hid_latch)
+        aim = re.search(
+            r'static void native_lab_apply_native_kick_angle.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('native_lab_command_vertical_bits[pad]', aim)
+        self.assertIn('memcpy((char *)unit + 0x44', aim)
+        self.assertIn('memcpy((char *)unit + 0x38, &desired', aim)
+        trajectory = re.search(
+            r'static void native_lab_publish_setplay_trajectory\('
+            r'const void \*input,\s*void \*screen_2d\) \{.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('native_lab_draw_pass_line(0x50u', trajectory)
+        self.assertIn('const float target_distance', trajectory)
+        self.assertIn('screen_2d + 0x10f8 + index * 12u', trajectory)
+        self.assertIn('target_distance / current_distance', trajectory)
+        self.assertIn('screen_2d + 0x10f4 + index * 12u', trajectory)
+        self.assertIn('y += lift * sinf', trajectory)
+        self.assertIn('-vertical * 0.13333334f', trajectory)
+        self.assertIn('if (y < floor_y)', trajectory)
+
+    def test_visual_trajectory_resolvers_cannot_disable_core_action_hooks(self):
+        route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
+        start = route.index('static int install_native_lab_action_debug')
+        end = route.index('static void install_native_pad_lab', start)
+        install = route[start:end]
+        self.assertNotIn(
+            '_ZN5match8registry13GlobalRegistry15GetInstanceForRetryEv',
+            install)
+        # The white trajectory path now stays entirely on DrawPassLine, so the
+        # previously fragile GlobalRegistry/DrawShootLine visual resolver is
+        # not part of action-hook installation at all.
+        self.assertNotIn('global_registry_get_instance', install)
+        self.assertNotIn('global_registry_get_player_move', install)
+        gate_start = install.index('if (!guide')
+        gate_end = install.index('const uintptr_t set_kick_plt', gate_start)
+        mandatory_gate = install[gate_start:gate_end]
+        # DrawShootLine/GlobalRegistry are only needed for the optional
+        # elevated diagnostic renderer. Their absence must not remove native
+        # set-piece buttons, camera anchoring, or the stock gauge hooks.
+        self.assertNotIn('!draw_shoot_line', mandatory_gate)
+        self.assertNotIn('!global_registry_get_instance', mandatory_gate)
+        self.assertNotIn('!global_registry_get_player_move', mandatory_gate)
+
     def test_second_pad_can_drive_selector_replay_and_title_start(self):
         self.assertIn('previous_hid_buttons_p2', self.shim)
-        self.assertIn('native_setplay_owner_pad == 1', self.shim)
+        self.assertIn('pes_controller_set_piece_selector_owner_pad() == 1',
+                      self.shim)
+        self.assertIn('pes_controller_setplay_request_for_pad', self.shim)
         self.assertIn('(buttons_p2 & ~previous_hid_buttons_p2)', self.shim)
         self.assertIn('controller_connected || controller_connected_p2',
                       self.shim)
         self.assertIn('pes_controller_start_prompt(NULL, NULL)', self.shim)
         self.assertIn('HidNpadButton_AnySL | HidNpadButton_AnySR', self.shim)
+
+    def test_pause_uses_stock_event_for_plus_or_minus_from_either_pad(self):
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        self.assertIn('append_native_pause_touch', self.shim)
+        self.assertIn('HidNpadButton_Plus | HidNpadButton_Minus', self.shim)
+        self.assertIn('controller_connected_p2, buttons_p2', self.shim)
+        self.assertIn('pes_controller_pause_request_for_pad(0)', self.shim)
+        self.assertIn('pes_controller_pause_request(void)', hooks)
+        self.assertIn('0x01050062u', hooks)
+        self.assertIn('match_task_manager_push_msg_event', hooks)
+        self.assertIn('pes_controller_pause_request_for_pad(1)', self.shim)
+        self.assertIn('pes_controller_pause_owner_pad()', self.shim)
+        self.assertIn('match_pause_owner_pad', hooks)
+        cobra = re.search(
+            r'uintptr_t cobra_pad_apply_input.*?\n\}', hooks, re.S).group(0)
+        self.assertIn('match_pause_dispatch_pending()', cobra)
+        self.assertIn('PauseButton22UpdatePreControlWindowEv', hooks)
+        self.assertIn('_ZTVN7match2D6Screen11PauseButtonE', hooks)
+        pause = re.search(
+            r'static void pes_match_pause_button_update.*?\n\}',
+            hooks, re.S).group(0)
+        self.assertIn('match_node_set_alpha(root, 0.0f)', pause)
+
+    def test_pause_cursor_routes_to_requesting_pad_and_gauge_has_no_outer_border(self):
+        shim = self.shim
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('const int pause_cursor_p2', shim)
+        self.assertIn('const int pause_owned_cursor', shim)
+        self.assertIn('pes_controller_gameplan_pause_route()', shim)
+        self.assertIn('cursor_buttons = pause_cursor_p2 ? buttons_p2 : buttons',
+                      shim)
+        self.assertIn('cursor_previous_buttons = pause_cursor_p2', shim)
+        gauge = re.search(
+            r'if \(native_lab && !custom_popup && \(native_debug\.gauge_active_mask & 3u\)\).*?\n  \}',
+            overlay, re.S).group(0)
+        self.assertIn('bar_x, bar_y, bar_w, bar_h', gauge)
+        self.assertNotIn('bar_x - padding, bar_y - padding', gauge)
+
+    def test_pause_modal_hides_setplay_mapper_and_p2_owns_gameplan_team(self):
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
+        self.assertIn('const int modal_match_frontend', overlay)
+        self.assertIn('virtual_cursor_context == PES_VIRTUAL_CURSOR_PAUSE',
+                      overlay)
+        self.assertIn('virtual_cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN',
+                      overlay)
+        self.assertIn('native_setplay_debug = 0;', overlay)
+        self.assertIn('pes_controller_virtual_cursor_context()', route)
+        self.assertIn('_ZN5tmpdb9SquadEdit9SetMySideERK8HomeAway', hooks)
+        self.assertIn('match_pause_apply_owner_side();', hooks)
+        self.assertIn('side = owner == 1u ? 1u : 0u;', hooks)
+        pause_destroy = re.search(
+            r'static void pes_match_pause_destroyed.*?\n\}', hooks,
+            re.S).group(0)
+        self.assertNotIn('match_pause_owner_pad, UINT32_MAX', pause_destroy)
+
+    def test_selector_is_owned_by_requesting_pad(self):
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        self.assertIn('match_button_setplay_pending_pad', hooks)
+        self.assertIn('match_kicker_selector_owner_pad', hooks)
+        self.assertIn('match_native_penalty_input_pad(input) != selector_owner',
+                      hooks)
+        self.assertIn('pes_controller_set_piece_selector_owner_pad', hooks)
 
     def test_goal_and_throw_helpers_preserve_native_actions(self):
         self.assertIn('PES_SETPLAY_BUTTON_SELECT_THROWER', self.shim)

@@ -210,11 +210,22 @@ void pes_controller_surface_cached_snapshot(PesControllerSnapshot *snapshot);
 void pes_controller_demo_skip_request(void);
 void pes_controller_setplay_request(uint32_t button_type,
                                     uint32_t generation);
+void pes_controller_setplay_request_for_pad(uint32_t button_type,
+                                            uint32_t generation,
+                                            uint32_t pad);
+// Queue the stock match pause event from a local controller. The request is
+// consumed on PauseButton's UE4 update thread so TaskManager is never touched
+// from the HID polling thread. The requesting pad remains the owner of the
+// pause cursor until the Pause window is destroyed.
+void pes_controller_pause_request(void);
+void pes_controller_pause_request_for_pad(uint32_t pad);
+uint32_t pes_controller_pause_owner_pad(void);
 void pes_controller_replay_feedback_set(uint32_t feedback);
 uint32_t pes_controller_replay_feedback(void);
 uint32_t pes_controller_setplay_context(void);
 uint32_t pes_controller_setplay_options(void);
 int pes_controller_set_piece_selector_active(void);
+uint32_t pes_controller_set_piece_selector_owner_pad(void);
 uint32_t pes_controller_set_piece_selector_focus(void);
 uint32_t pes_controller_set_piece_selector_count(void);
 const char *pes_controller_set_piece_selector_title(void);

@@ -1,5 +1,6 @@
 // Host tests execute the SAME adapter compiled into the Switch NRO.
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -160,7 +161,6 @@ int main(void) {
   setup(); run(penalty,1);
   assert(*(uint32_t *)list == 3);
   assert(!memcmp(list+4, expected_penalty, sizeof(expected_penalty)));
-  assert(native_lab_penalty_guide_units[0] == (uintptr_t)&objects[27]);
   assert(native_lab_penalty_action_units[0] == (uintptr_t)&objects[37]);
   assert(pes_controller_native_penalty_ready(0, PES_PENALTY_KICKER));
 
@@ -312,7 +312,8 @@ int main(void) {
       PES_SETPLAY_FREE_KICK);
   pes_controller_native_pad_lab_debug_input(1, 1u << 7, 0, 0, 0, 0, 1);
   pes_controller_native_pad_lab_debug_snapshot(&debug);
-  assert(debug.trajectory_enabled == 1); // P2 cannot alter P1's set play.
+  // Far free kicks intentionally expose no trajectory preview at all.
+  assert(debug.trajectory_enabled == 0);
 
   // The close-range free-kick variant omits the tactics/position units. Its
   // semantic ButtonSetplay context is a guarded fallback only while kind 90
@@ -330,6 +331,24 @@ int main(void) {
   assert(debug.context == PES_SETPLAY_FREE_KICK);
   assert(debug.stock_mask == (PES_NATIVE_LAB_STOCK_MOBILE_KICK |
                               PES_NATIVE_LAB_STOCK_MOBILE_CAMERA));
+
+  // MobileSetplayKick +0x38 contains our previous frame after write-back.
+  // Holding a small LS-X offset must therefore reuse the separately captured
+  // stock baseline instead of accumulating the offset and spinning each tick.
+  const float stock_angle = 90.0f;
+  int same_target = 0;
+  const float first_base = native_lab_stable_setplay_base_angle(
+      0, 4, stock_angle, &same_target);
+  assert(!same_target && fabsf(first_base - stock_angle) < 0.0001f);
+  native_lab_command_angle_valid_mask = 1u;
+  const float overwritten_previous_frame = 12.5f;
+  const float second_base = native_lab_stable_setplay_base_angle(
+      0, 4, overwritten_previous_frame, &same_target);
+  assert(same_target && fabsf(second_base - stock_angle) < 0.0001f);
+  const float small_left_x = native_lab_normalize_axis(8192);
+  const float first_angle = first_base - small_left_x * 60.0f;
+  const float second_angle = second_base - small_left_x * 60.0f;
+  assert(fabsf(first_angle - second_angle) < 0.0001f);
 
   // Variants that already contain a guide are normalized as well. A guide
   // before kind 90 could otherwise consume LS and mask the kick release.
