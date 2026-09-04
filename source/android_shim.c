@@ -126,6 +126,21 @@ static float previous_left_axis_x;
 static float previous_left_axis_y;
 static int previous_left_axis_valid;
 
+// The Switch reports the active Npad style independently from the button
+// samples.  Keep the profile separate from the gameplay bridge so a single
+// Joy-Con's physical face/d-pad controls can be translated consistently in
+// menus, match play, set pieces and pause/game-plan screens.
+typedef enum {
+  CONTROLLER_PROFILE_FULL = 0,
+  CONTROLLER_PROFILE_SINGLE_LEFT = 1,
+  CONTROLLER_PROFILE_SINGLE_RIGHT = 2,
+} ControllerProfile;
+
+static int previous_profile_p1 = CONTROLLER_PROFILE_FULL;
+static int previous_profile_p2 = CONTROLLER_PROFILE_FULL;
+static int controller_profiles_initialized;
+static _Alignas(4) uint32_t controller_profile_published[2];
+
 typedef struct {
   FakeMotionPointer pointers[MAX_FAKE_MOTION_POINTERS];
   uint32_t count;
@@ -151,6 +166,8 @@ static VirtualSurfaceState pause_surface;
 static int replay_touch_requested;
 static uint64_t previous_hid_buttons;
 static uint64_t previous_hid_buttons_p2;
+static uint64_t previous_menu_buttons;
+static uint64_t previous_menu_buttons_p2;
 static uint32_t native_setplay_owner_pad;
 static int previous_mobile_context_mode;
 static float physical_touch_start_x;
@@ -696,6 +713,142 @@ static void merge_npad_state(const HidNpadCommonState *state, u64 *buttons,
   }
 }
 
+static ControllerProfile controller_profile_from_style(u32 style_set) {
+  // A JoyDual/FullKey/Handheld style has the normal face-button layout.  The
+  // single-style bits are mutually exclusive in the active style set; check
+  // them only after the full-control styles so a transient capability mask
+  // never turns a paired controller into a single profile.
+  if (style_set & (HidNpadStyleTag_NpadFullKey |
+                   HidNpadStyleTag_NpadHandheld |
+                   HidNpadStyleTag_NpadJoyDual))
+    return CONTROLLER_PROFILE_FULL;
+  if (style_set & HidNpadStyleTag_NpadJoyLeft)
+    return CONTROLLER_PROFILE_SINGLE_LEFT;
+  if (style_set & HidNpadStyleTag_NpadJoyRight)
+    return CONTROLLER_PROFILE_SINGLE_RIGHT;
+  return CONTROLLER_PROFILE_FULL;
+}
+
+// A single Joy-Con is held horizontally, so its physical stick axes need a
+// quarter-turn before they enter the logical LS path.  The two Joy-Con sides
+// face opposite directions when held horizontally:
+//   left Joy-Con:  Up -> Left, Left -> Down, Down -> Right, Right -> Up
+//   right Joy-Con: Down -> Left, Right -> Down, Up -> Right, Left -> Up
+// Apply the side-specific rotation after selecting the one available stick so
+// menu arrows, virtual touch, and the native lab all consume one LS frame.
+static void controller_profile_map_stick(ControllerProfile profile,
+                                         HidAnalogStickState *left_stick,
+                                         int *have_left_stick,
+                                         HidAnalogStickState *right_stick,
+                                         int *have_right_stick) {
+  if (profile == CONTROLLER_PROFILE_FULL)
+    return;
+
+  HidAnalogStickState source = {0};
+  int have_source = 0;
+  if (profile == CONTROLLER_PROFILE_SINGLE_RIGHT) {
+    source = *right_stick;
+    have_source = *have_right_stick;
+  } else {
+    source = *left_stick;
+    have_source = *have_left_stick;
+  }
+  if (have_source) {
+    const int32_t physical_x = source.x;
+    const int32_t physical_y = source.y;
+    // libnx stick Y is positive upward.  The right Joy-Con needs the inverse
+    // quarter-turn from the left Joy-Con because its horizontal grip faces the
+    // opposite direction.
+    if (profile == CONTROLLER_PROFILE_SINGLE_RIGHT) {
+      // (x, y) -> (y, -x): Down -> Left, Right -> Down, Up -> Right, Left -> Up.
+      source.x = physical_y;
+      source.y = -physical_x;
+    } else {
+      // (x, y) -> (-y, x): Up -> Left, Left -> Down, Down -> Right, Right -> Up.
+      source.x = -physical_y;
+      source.y = physical_x;
+    }
+  }
+  *left_stick = source;
+  *have_left_stick = have_source;
+  memset(right_stick, 0, sizeof(*right_stick));
+  *have_right_stick = 0;
+}
+
+static const char *controller_profile_name(ControllerProfile profile) {
+  switch (profile) {
+  case CONTROLLER_PROFILE_SINGLE_LEFT:
+    return "single-left";
+  case CONTROLLER_PROFILE_SINGLE_RIGHT:
+    return "single-right";
+  default:
+    return "full";
+  }
+}
+
+uint32_t android_controller_profile(uint32_t pad) {
+  if (pad > 1)
+    return PES_CONTROLLER_PROFILE_FULL;
+  return __atomic_load_n(&controller_profile_published[pad],
+                         __ATOMIC_ACQUIRE);
+}
+
+// Translate physical single Joy-Con controls to the logical Switch/PES face
+// layout.  Keep shoulder/Start/Minus and sticks untouched.  D-pad bits on a
+// left Joy-Con and face bits on a right Joy-Con are consumed by this alias
+// table rather than leaking as a second action.
+static u64 controller_profile_map_buttons(u64 raw, ControllerProfile profile) {
+  if (profile == CONTROLLER_PROFILE_SINGLE_LEFT) {
+    u64 mapped = raw & ~(HidNpadButton_Up | HidNpadButton_Down |
+                         HidNpadButton_Left | HidNpadButton_Right);
+    if (raw & HidNpadButton_Up)
+      mapped |= HidNpadButton_Y;
+    if (raw & HidNpadButton_Left)
+      mapped |= HidNpadButton_B;
+    if (raw & HidNpadButton_Right)
+      mapped |= HidNpadButton_X;
+    if (raw & HidNpadButton_Down)
+      mapped |= HidNpadButton_A;
+    return mapped;
+  }
+  if (profile == CONTROLLER_PROFILE_SINGLE_RIGHT) {
+    u64 mapped = raw & ~(HidNpadButton_B | HidNpadButton_A |
+                         HidNpadButton_Y | HidNpadButton_X);
+    if (raw & HidNpadButton_B)
+      mapped |= HidNpadButton_Y;
+    if (raw & HidNpadButton_A)
+      mapped |= HidNpadButton_B;
+    if (raw & HidNpadButton_Y)
+      mapped |= HidNpadButton_X;
+    if (raw & HidNpadButton_X)
+      mapped |= HidNpadButton_A;
+    return mapped;
+  }
+  return raw;
+}
+
+// Our custom menu/pause handlers consume the same logical A/B buttons as the
+// match bridge.  Single Joy-Con d-pads are face-button aliases, so use the
+// left stick for menu arrows; this avoids the vertical Joy-Con orientation
+// being interpreted as a native d-pad and keeps both orientations symmetric.
+static u64 controller_profile_menu_buttons(
+    u64 raw, ControllerProfile profile,
+    const HidAnalogStickState *left_stick, int have_left_stick) {
+  u64 mapped = controller_profile_map_buttons(raw, profile);
+  if (profile != CONTROLLER_PROFILE_FULL && have_left_stick) {
+    const int threshold = JOYSTICK_MAX / 3;
+    if (left_stick->y > threshold)
+      mapped |= HidNpadButton_Up;
+    if (left_stick->y < -threshold)
+      mapped |= HidNpadButton_Down;
+    if (left_stick->x < -threshold)
+      mapped |= HidNpadButton_Left;
+    if (left_stick->x > threshold)
+      mapped |= HidNpadButton_Right;
+  }
+  return mapped;
+}
+
 static uint32_t menu_pad_buttons(u64 buttons,
                                  const HidAnalogStickState *left_stick,
                                  int have_left_stick) {
@@ -751,8 +904,11 @@ static void emit_menu_pad_input(const HidAnalogStickState *left_stick,
 }
 
 static void emit_virtual_cursor_pad_input(int connected, u64 buttons,
-                                          int cursor_context) {
+                                          int cursor_context,
+                                          ControllerProfile profile) {
   u64 reserved = HidNpadButton_A | HidNpadButton_ZL | HidNpadButton_ZR;
+  if (profile != CONTROLLER_PROFILE_FULL)
+    reserved |= HidNpadButton_R | HidNpadButton_AnySR;
   if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
       cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN ||
       cursor_context == PES_VIRTUAL_CURSOR_SET_PIECE_TAKER)
@@ -837,6 +993,8 @@ static int synthetic_context_changed(int context) {
   replay_touch_requested = 0;
   previous_hid_buttons = 0;
   previous_hid_buttons_p2 = 0;
+  previous_menu_buttons = 0;
+  previous_menu_buttons_p2 = 0;
   compact_menu_tap_until_ms = 0;
   return 1;
 }
@@ -1157,7 +1315,8 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
                                              float axis_x, float axis_y,
                                              int connected, u64 buttons,
                                              u64 previous_buttons,
-                                             uint64_t now_ms, int cursor_context) {
+                                             uint64_t now_ms, int cursor_context,
+                                             ControllerProfile profile) {
   static uint64_t cursor_previous_ms;
   static uint64_t play_until_ms;
   static uint64_t back_until_ms;
@@ -1196,9 +1355,14 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   const int pre_match_gameplan =
       cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
       !pes_controller_gameplan_pause_route();
+  const u64 single_click_button =
+      profile == CONTROLLER_PROFILE_FULL
+          ? 0
+          : (HidNpadButton_R | HidNpadButton_AnySR);
   const int cursor_held = connected &&
                           ((buttons & (HidNpadButton_ZL |
-                                       HidNpadButton_ZR)) != 0 ||
+                                       HidNpadButton_ZR |
+                                       single_click_button)) != 0 ||
                            ((cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
                              (cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN &&
                               !pre_match_gameplan)) &&
@@ -1290,36 +1454,89 @@ static void append_pause_camera_swipe(FakeTouchState *desired,
   }
 }
 
+static int single_joy_setplay_chord_claim(uint32_t pad,
+                                          ControllerProfile profile,
+                                          int connected, u64 buttons,
+                                          u64 previous_buttons) {
+  static uint32_t generation_seen;
+  static uint8_t fired[2];
+  if (generation_seen != synthetic_input_generation) {
+    generation_seen = synthetic_input_generation;
+    memset(fired, 0, sizeof(fired));
+  }
+  if (pad > 1 || profile == CONTROLLER_PROFILE_FULL || !connected)
+    return 0;
+  const u64 left = HidNpadButton_L | HidNpadButton_AnySL;
+  const u64 right = HidNpadButton_R | HidNpadButton_AnySR;
+  if (!(buttons & left) || !(buttons & right)) {
+    fired[pad] = 0;
+    return 0;
+  }
+  if (fired[pad] ||
+      ((previous_buttons & left) && (previous_buttons & right)))
+    return 0;
+  fired[pad] = 1;
+  return 1;
+}
+
+static int single_joy_setplay_chord_held(ControllerProfile profile, u64 buttons) {
+  if (profile == CONTROLLER_PROFILE_FULL)
+    return 0;
+  const u64 chord = HidNpadButton_L | HidNpadButton_AnySL |
+                    HidNpadButton_R | HidNpadButton_AnySR;
+  const u64 left = HidNpadButton_L | HidNpadButton_AnySL;
+  const u64 right = HidNpadButton_R | HidNpadButton_AnySR;
+  return (buttons & left) && (buttons & right) && (buttons & chord);
+}
+
 static void queue_native_setplay_action(const PesControllerSnapshot *ui,
-                                        int connected, u64 buttons) {
+                                        uint32_t pad,
+                                        ControllerProfile profile,
+                                        int connected, u64 buttons,
+                                        u64 previous_buttons) {
   if (!ui || !connected ||
       ui->surface != PES_CONTROLLER_SURFACE_SETPLAY)
     return;
-  const u64 pressed = buttons & ~previous_hid_buttons;
+  const u64 pressed = buttons & ~previous_buttons;
   uint32_t action = 0;
+  if (single_joy_setplay_chord_claim(pad, profile, connected, buttons,
+                                     previous_buttons)) {
+    if ((ui->setplay_context == PES_SETPLAY_CORNER ||
+         ui->setplay_context == PES_SETPLAY_FREE_KICK) &&
+        (ui->setplay_button_mask &
+         (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER)))
+      action = PES_SETPLAY_BUTTON_SET_PIECE_TAKER;
+    else if (ui->setplay_context == PES_SETPLAY_THROW_IN &&
+             (ui->setplay_button_mask &
+              (1u << PES_SETPLAY_BUTTON_SELECT_THROWER)))
+      action = PES_SETPLAY_BUTTON_SELECT_THROWER;
+  }
   switch (ui->setplay_context) {
   case PES_SETPLAY_GOAL_KICK:
-    if (pressed & HidNpadButton_Y)
+    if (!action && (pressed & HidNpadButton_Y))
       action = PES_SETPLAY_BUTTON_POSITION_SHIFT;
-    else if (pressed & HidNpadButton_X)
+    else if (!action && (pressed & HidNpadButton_X))
       action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
     break;
   case PES_SETPLAY_CORNER:
-    if (pressed & HidNpadButton_ZR)
+    if (!action && profile == CONTROLLER_PROFILE_FULL &&
+        (pressed & HidNpadButton_ZR))
       action = PES_SETPLAY_BUTTON_SET_PIECE_TAKER;
-    else if (pressed & HidNpadButton_X)
+    else if (!action && (pressed & HidNpadButton_X))
       action = PES_SETPLAY_BUTTON_SHORT_CORNER;
-    else if (pressed & HidNpadButton_Y)
+    else if (!action && (pressed & HidNpadButton_Y))
       action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
     break;
   case PES_SETPLAY_FREE_KICK:
-    if (pressed & HidNpadButton_ZR)
+    if (!action && profile == CONTROLLER_PROFILE_FULL &&
+        (pressed & HidNpadButton_ZR))
       action = PES_SETPLAY_BUTTON_SET_PIECE_TAKER;
-    else if (pressed & HidNpadButton_X)
+    else if (!action && (pressed & HidNpadButton_X))
       action = PES_SETPLAY_BUTTON_SWITCH_VIEW;
     break;
   case PES_SETPLAY_THROW_IN:
-    if (pressed & HidNpadButton_ZR)
+    if (!action && profile == CONTROLLER_PROFILE_FULL &&
+        (pressed & HidNpadButton_ZR))
       action = PES_SETPLAY_BUTTON_SELECT_THROWER;
     break;
   default:
@@ -1332,12 +1549,17 @@ static void queue_native_setplay_action(const PesControllerSnapshot *ui,
 static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
                                             uint32_t pad, int connected,
                                             u64 buttons,
-                                            u64 previous_buttons) {
+                                            u64 previous_buttons,
+                                            ControllerProfile profile) {
   if (!ui || !connected ||
       ui->surface != PES_CONTROLLER_SURFACE_SETPLAY)
     return;
   const u64 pressed = buttons & ~previous_buttons;
-  if (!(pressed & HidNpadButton_Right))
+  const int chord = single_joy_setplay_chord_claim(
+      pad, profile, connected, buttons, previous_buttons);
+  const int full_selector =
+      profile == CONTROLLER_PROFILE_FULL && (pressed & HidNpadButton_Right);
+  if (!chord && !full_selector)
     return;
   if ((ui->setplay_context == PES_SETPLAY_CORNER ||
        ui->setplay_context == PES_SETPLAY_FREE_KICK) &&
@@ -1358,11 +1580,16 @@ static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
 // stick/buttons can never open or confirm the kicker selector by accident.
 static void queue_native_penalty_action(const PesControllerSnapshot *ui,
                                         uint32_t pad, int connected, u64 buttons,
-                                        u64 previous_buttons, uint32_t role) {
+                                        u64 previous_buttons, uint32_t role,
+                                        ControllerProfile profile) {
   if (!ui || !connected || role != PES_PENALTY_KICKER)
     return;
   const u64 pressed = buttons & ~previous_buttons;
-  if (!(pressed & HidNpadButton_Right) ||
+  const int chord = single_joy_setplay_chord_claim(
+      pad, profile, connected, buttons, previous_buttons);
+  const int full_selector =
+      profile == CONTROLLER_PROFILE_FULL && (pressed & HidNpadButton_Right);
+  if ((!chord && !full_selector) ||
       ui->surface != PES_CONTROLLER_SURFACE_SETPLAY ||
       !(ui->setplay_button_mask &
         (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER)))
@@ -1792,6 +2019,9 @@ void android_input_poll(void) {
     previous_left_axis_valid = 0;
     previous_hid_buttons = 0;
     previous_hid_buttons_p2 = 0;
+    previous_menu_buttons = 0;
+    previous_menu_buttons_p2 = 0;
+    controller_profiles_initialized = 0;
     physical_touch_tracking = 0;
     replay_touch_requested = 0;
     pes_controller_native_hid_connection_update(0);
@@ -1810,8 +2040,8 @@ void android_input_poll(void) {
   }
 
   HidNpadCommonState state;
-  u64 buttons = 0;
-  u64 buttons_p2 = 0;
+  u64 raw_buttons = 0;
+  u64 raw_buttons_p2 = 0;
   HidAnalogStickState left_stick = {0};
   HidAnalogStickState right_stick = {0};
   HidAnalogStickState left_stick_p2 = {0};
@@ -1825,58 +2055,58 @@ void android_input_poll(void) {
   if (hidGetNpadStatesFullKey(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected = 1;
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+    merge_npad_state(&state, &raw_buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyDual(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected = 1;
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+    merge_npad_state(&state, &raw_buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyLeft(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected = 1;
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+    merge_npad_state(&state, &raw_buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesJoyRight(HidNpadIdType_No1, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected = 1;
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+    merge_npad_state(&state, &raw_buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected = 1;
-    merge_npad_state(&state, &buttons, &left_stick, &have_left_stick,
+    merge_npad_state(&state, &raw_buttons, &left_stick, &have_left_stick,
                      &right_stick, &have_right_stick);
   }
   if (hidGetNpadStatesFullKey(HidNpadIdType_No2, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected_p2 = 1;
-    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+    merge_npad_state(&state, &raw_buttons_p2, &left_stick_p2,
                      &have_left_stick_p2, &right_stick_p2,
                      &have_right_stick_p2);
   }
   if (hidGetNpadStatesJoyDual(HidNpadIdType_No2, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected_p2 = 1;
-    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+    merge_npad_state(&state, &raw_buttons_p2, &left_stick_p2,
                      &have_left_stick_p2, &right_stick_p2,
                      &have_right_stick_p2);
   }
   if (hidGetNpadStatesJoyLeft(HidNpadIdType_No2, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected_p2 = 1;
-    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+    merge_npad_state(&state, &raw_buttons_p2, &left_stick_p2,
                      &have_left_stick_p2, &right_stick_p2,
                      &have_right_stick_p2);
   }
   if (hidGetNpadStatesJoyRight(HidNpadIdType_No2, &state, 1) &&
       (state.attributes & HidNpadAttribute_IsConnected)) {
     controller_slot_connected_p2 = 1;
-    merge_npad_state(&state, &buttons_p2, &left_stick_p2,
+    merge_npad_state(&state, &raw_buttons_p2, &left_stick_p2,
                      &have_left_stick_p2, &right_stick_p2,
                      &have_right_stick_p2);
   }
@@ -1892,6 +2122,19 @@ void android_input_poll(void) {
   float axis_y_p2 = 0.0f;
   float right_axis_x_p2 = 0.0f;
   float right_axis_y_p2 = 0.0f;
+  u32 style_p1 = hidGetNpadStyleSet(HidNpadIdType_No1);
+  if (!style_p1 && controller_slot_connected)
+    style_p1 = hidGetNpadStyleSet(HidNpadIdType_Handheld);
+  const u32 style_p2 = hidGetNpadStyleSet(HidNpadIdType_No2);
+  const ControllerProfile profile_p1 =
+      controller_profile_from_style(style_p1);
+  const ControllerProfile profile_p2 =
+      controller_profile_from_style(style_p2);
+  controller_profile_map_stick(profile_p1, &left_stick, &have_left_stick,
+                               &right_stick, &have_right_stick);
+  controller_profile_map_stick(profile_p2, &left_stick_p2,
+                               &have_left_stick_p2, &right_stick_p2,
+                               &have_right_stick_p2);
   normalize_stick(&left_stick, have_left_stick, &axis_x, &axis_y);
   normalize_stick(&right_stick, have_right_stick, &right_axis_x,
                   &right_axis_y);
@@ -1899,6 +2142,37 @@ void android_input_poll(void) {
                   &axis_y_p2);
   normalize_stick(&right_stick_p2, have_right_stick_p2,
                   &right_axis_x_p2, &right_axis_y_p2);
+  const u64 buttons = controller_profile_map_buttons(raw_buttons, profile_p1);
+  const u64 buttons_p2 =
+      controller_profile_map_buttons(raw_buttons_p2, profile_p2);
+  const u64 menu_buttons = controller_profile_menu_buttons(
+      raw_buttons, profile_p1, &left_stick, have_left_stick);
+  const u64 menu_buttons_p2 = controller_profile_menu_buttons(
+      raw_buttons_p2, profile_p2, &left_stick_p2, have_left_stick_p2);
+  const int profile_changed =
+      controller_profiles_initialized &&
+      (profile_p1 != previous_profile_p1 || profile_p2 != previous_profile_p2);
+  if (profile_changed) {
+    // A grip/orientation change is a logical input-context transition.  Seed
+    // both edge detectors with the new samples so a held physical button does
+    // not fire a stale action in the new profile.
+    previous_hid_buttons = buttons;
+    previous_hid_buttons_p2 = buttons_p2;
+    previous_menu_buttons = menu_buttons;
+    previous_menu_buttons_p2 = menu_buttons_p2;
+    reset_virtual_surfaces();
+    synthetic_input_generation++;
+    debugPrintf("input: controller profile changed P1=%s P2=%s styles=0x%x/0x%x\n",
+                controller_profile_name(profile_p1),
+                controller_profile_name(profile_p2), style_p1, style_p2);
+  }
+  previous_profile_p1 = profile_p1;
+  previous_profile_p2 = profile_p2;
+  __atomic_store_n(&controller_profile_published[0], (uint32_t)profile_p1,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&controller_profile_published[1], (uint32_t)profile_p2,
+                   __ATOMIC_RELEASE);
+  controller_profiles_initialized = 1;
   const int controller_connected = controller_slot_connected;
   const int controller_connected_p2 = controller_slot_connected_p2;
   const uint64_t now_ms = monotonic_ms();
@@ -2152,11 +2426,11 @@ void android_input_poll(void) {
       reset_virtual_surfaces();
       queue_native_penalty_action(
           &controller_snapshot, 0, controller_connected, buttons,
-          previous_hid_buttons, penalty_role_p1);
+          previous_hid_buttons, penalty_role_p1, profile_p1);
       if (penalty_two_player)
         queue_native_penalty_action(
             &controller_snapshot, 1, controller_connected_p2, buttons_p2,
-            previous_hid_buttons_p2, penalty_role_p2);
+            previous_hid_buttons_p2, penalty_role_p2, profile_p2);
       // Native sessions execute dormant console penalty ThinkUnits only after
       // their exact object-table ABI is verified for this pad and role.  A
       // mismatch falls back locally to the mobile gesture; it must not disable
@@ -2178,13 +2452,14 @@ void android_input_poll(void) {
       if (native_pad_lab_active && gameplay_active) {
         queue_native_lab_setplay_action(
             &controller_snapshot, 0, controller_connected, buttons,
-            previous_hid_buttons);
+            previous_hid_buttons, profile_p1);
         queue_native_lab_setplay_action(
             &controller_snapshot, 1, controller_connected_p2, buttons_p2,
-            previous_hid_buttons_p2);
+            previous_hid_buttons_p2, profile_p2);
       } else {
-        queue_native_setplay_action(&controller_snapshot, have_left_stick,
-                                    buttons);
+        queue_native_setplay_action(&controller_snapshot, 0, profile_p1,
+                                    controller_connected, buttons,
+                                    previous_hid_buttons);
         append_virtual_gamepad_touches(
             &desired, axis_x, axis_y, have_left_stick, buttons,
             gameplay_active, control_mode, &controller_snapshot, now_ms);
@@ -2192,7 +2467,12 @@ void android_input_poll(void) {
       if (gameplan_cursor_active) {
         if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
             pes_controller_custom_pause_active()) {
-          const u64 pressed = cursor_buttons & ~cursor_previous_buttons;
+          const u64 pause_menu_buttons =
+              pause_cursor_p2 ? menu_buttons_p2 : menu_buttons;
+          const u64 pause_menu_previous =
+              pause_cursor_p2 ? previous_menu_buttons_p2
+                              : previous_menu_buttons;
+          const u64 pressed = pause_menu_buttons & ~pause_menu_previous;
           if (pressed & HidNpadButton_Up)
             pes_controller_custom_pause_input(PES_PAUSE_INPUT_UP);
           else if (pressed & HidNpadButton_Down)
@@ -2208,7 +2488,8 @@ void android_input_poll(void) {
         } else {
           append_virtual_cursor_controller(
               &desired, cursor_axis_x, cursor_axis_y, cursor_connected,
-              cursor_buttons, cursor_previous_buttons, now_ms, cursor_context);
+              cursor_buttons, cursor_previous_buttons, now_ms, cursor_context,
+              pause_cursor_p2 ? profile_p2 : profile_p1);
       }
     }
   }
@@ -2243,7 +2524,7 @@ void android_input_poll(void) {
     }
     if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
         !penalty_active && custom_postmatch_active) {
-      const u64 pressed = buttons & ~previous_hid_buttons;
+      const u64 pressed = menu_buttons & ~previous_menu_buttons;
       if (pressed & HidNpadButton_Up)
         pes_controller_custom_postmatch_input(PES_PAUSE_INPUT_UP);
       else if (pressed & HidNpadButton_Down)
@@ -2259,7 +2540,7 @@ void android_input_poll(void) {
     }
     if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
         !penalty_active && custom_prematch_gameplan_active) {
-      const u64 pressed = buttons & ~previous_hid_buttons;
+      const u64 pressed = menu_buttons & ~previous_menu_buttons;
       if (pressed & HidNpadButton_Up)
         pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_UP);
       else if (pressed & HidNpadButton_Down)
@@ -2281,8 +2562,8 @@ void android_input_poll(void) {
         !cinematic_active && !gameplay_active &&
         !gameplan_cursor_active &&
         menu_controller_active) {
-      const u64 pressed_p1 = buttons & ~previous_hid_buttons;
-      const u64 pressed_p2 = buttons_p2 & ~previous_hid_buttons_p2;
+      const u64 pressed_p1 = menu_buttons & ~previous_menu_buttons;
+      const u64 pressed_p2 = menu_buttons_p2 & ~previous_menu_buttons_p2;
       const u64 start_buttons =
           HidNpadButton_A | HidNpadButton_B | HidNpadButton_X |
           HidNpadButton_Y | HidNpadButton_Up | HidNpadButton_Down |
@@ -2292,8 +2573,8 @@ void android_input_poll(void) {
                                 ? ((pressed_p1 | pressed_p2) &
                                    start_buttons) != 0
                                 : (pressed_p1 & HidNpadButton_A) != 0;
-      const int b_pressed = (buttons & HidNpadButton_B) != 0 &&
-                            (previous_hid_buttons & HidNpadButton_B) == 0;
+      const int b_pressed = (menu_buttons & HidNpadButton_B) != 0 &&
+                            (previous_menu_buttons & HidNpadButton_B) == 0;
       append_menu_controller_tap(&desired, a_pressed, now_ms);
       append_menu_controller_back(&desired, b_pressed, now_ms);
       append_menu_controller_scroll(&desired, now_ms);
@@ -2384,7 +2665,8 @@ void android_input_poll(void) {
                           replay_pad_buttons);
   else if (gameplan_cursor_active)
     emit_virtual_cursor_pad_input(cursor_connected, cursor_buttons,
-                                  cursor_context);
+                                  cursor_context,
+                                  pause_cursor_p2 ? profile_p2 : profile_p1);
   else if (pause_camera_active)
     disable_native_pad_bridge();
   else if (custom_prematch_gameplan_active)
@@ -2400,11 +2682,18 @@ void android_input_poll(void) {
     native_buttons &= ~(HidNpadButton_Plus | HidNpadButton_Minus);
     native_buttons_p2 &= ~(HidNpadButton_Plus | HidNpadButton_Minus);
     if (controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY) {
-      // Right opens our horizontal-Joy-Con-friendly taker selector. Minus is
-      // deliberately suppressed so the hidden stock picker cannot race it.
-      const u64 reserved = HidNpadButton_Right | HidNpadButton_Minus;
-      native_buttons &= ~reserved;
-      native_buttons_p2 &= ~reserved;
+      // Full controllers retain D-pad Right for the stock selector.  Single
+      // Joy-Cons use the L1+R1 chord; consume the chord after dispatch so it
+      // cannot also toggle position shift/trajectory in the native bridge.
+      const u64 reserved_full = HidNpadButton_Right | HidNpadButton_Minus;
+      native_buttons &= ~reserved_full;
+      native_buttons_p2 &= ~reserved_full;
+      if (single_joy_setplay_chord_held(profile_p1, buttons))
+        native_buttons &= ~(HidNpadButton_L | HidNpadButton_R |
+                            HidNpadButton_AnySL | HidNpadButton_AnySR);
+      if (single_joy_setplay_chord_held(profile_p2, buttons_p2))
+        native_buttons_p2 &= ~(HidNpadButton_L | HidNpadButton_R |
+                               HidNpadButton_AnySL | HidNpadButton_AnySR);
     }
     emit_native_lab_pad_input(0, &left_stick, &right_stick,
                               controller_connected, native_buttons);
@@ -2412,7 +2701,7 @@ void android_input_poll(void) {
                               controller_connected_p2, native_buttons_p2);
   }
   else if (!gameplay_active && menu_controller_active)
-    emit_menu_pad_input(&left_stick, have_left_stick, buttons,
+    emit_menu_pad_input(&left_stick, have_left_stick, menu_buttons,
                         have_left_stick);
   else
     disable_native_pad_bridge();
@@ -2420,6 +2709,10 @@ void android_input_poll(void) {
       context_changed ? 0 : (controller_connected ? buttons : 0);
   previous_hid_buttons_p2 =
       context_changed ? 0 : (controller_connected_p2 ? buttons_p2 : 0);
+  previous_menu_buttons =
+      context_changed ? 0 : (controller_connected ? menu_buttons : 0);
+  previous_menu_buttons_p2 =
+      context_changed ? 0 : (controller_connected_p2 ? menu_buttons_p2 : 0);
 }
 
 void *ALooper_prepare_fake(int opts) {
@@ -3284,6 +3577,9 @@ void android_runtime_bootstrap(so_module *ue4) {
   debugPrintf("bootstrap: nativeResumeMainInit done\n");
 
   padConfigureInput(2, HidNpadStyleSet_NpadStandard);
+  const Result joy_hold_rc =
+      hidSetNpadJoyHoldType(HidNpadJoyHoldType_Horizontal);
+  debugPrintf("input: single Joy-Con horizontal hold rc=%08x\n", joy_hold_rc);
   debugPrintf("input: HID shared memory=%p\n", hidGetSharedmemAddr());
   debugPrintf("Android NativeActivity bootstrap complete.\n");
 }

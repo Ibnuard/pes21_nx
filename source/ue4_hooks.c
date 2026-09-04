@@ -586,6 +586,10 @@ static _Alignas(4) uint32_t native_gamepad_lab_active;
 static _Alignas(4) uint32_t native_gamepad_lab_autostart;
 static _Alignas(4) uint32_t native_gamepad_lab_two_player;
 static _Alignas(4) uint32_t native_hid_connected_mask;
+// A running 2P lab cannot continue with a missing No1/No2 slot.  The input
+// poller publishes the loss and the game-thread Pad::Update hook opens the
+// native Controller Support applet on the next frame.
+static _Alignas(4) uint32_t native_two_player_recovery_pending;
 static _Alignas(4) uint32_t exhibition_strategy_pending;
 static _Alignas(4) uint32_t exhibition_session_active;
 static _Alignas(4) uint32_t exhibition_team_select_active;
@@ -4452,6 +4456,95 @@ static void main_menu_info_close(void) {
   debugPrintf("UE4 menu: custom info closed type=%u\n", popup);
 }
 
+// The 2P tile is intentionally strict: one Npad slot is not enough to start
+// the local P1-vs-P2 lab.  Use Nintendo's HID LibraryApplet so the user can
+// pair/re-grip controllers with the same Change Grip/Order flow as a native
+// Switch title.  This call is made from the menu-selection path, which is the
+// frontend thread that owns applet transitions; gameplay is not armed until
+// the applet returns and both No1/No2 slots are present.
+static int main_menu_require_two_controller_slots(int preserve_match_ui) {
+  uint32_t connected = pes_controller_native_hid_connected_mask();
+  if ((connected & 3u) == 3u)
+    return 1;
+
+  HidLaControllerSupportArg arg;
+  hidLaCreateControllerSupportArg(&arg);
+  arg.hdr.player_count_min = 2;
+  arg.hdr.player_count_max = 2;
+  arg.hdr.enable_take_over_connection = 1;
+  arg.hdr.enable_left_justify = 1;
+  // Permit a paired Joy-Con set for either player, while still requiring two
+  // player slots.  Single-mode Joy-Con remains available for each slot.
+  arg.hdr.enable_permit_joy_dual = 1;
+  arg.hdr.enable_single_mode = 0;
+  arg.hdr.enable_identification_color = 1;
+  arg.identification_color[0] = (HidLaControllerSupportArgColor){0x18, 0x62,
+                                                                  0xff, 0xff};
+  arg.identification_color[1] = (HidLaControllerSupportArgColor){0xff, 0x38,
+                                                                  0x38, 0xff};
+
+  HidLaControllerSupportResultInfo result = {0};
+  const Result rc = hidLaShowControllerSupport(&result, &arg);
+  connected = pes_controller_native_hid_connected_mask();
+  // The input-poll thread may not have sampled the new Npad assignments yet;
+  // the applet result is authoritative at this boundary and prevents a
+  // successful two-player pairing from being rejected for one stale frame.
+  if (result.player_count >= 2) {
+    connected |= 3u;
+    pes_controller_native_hid_connection_update(connected);
+  }
+  if (!preserve_match_ui) {
+    __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                     __ATOMIC_RELEASE);
+    main_menu_apply_focus(2);
+  }
+  debugPrintf("UE4 menu: native Change Grip/Order returned rc=%08x players=%d "
+              "selected=%u HID=0x%x recovery=%d\n",
+              rc, (int)result.player_count, result.selected_id, connected,
+              preserve_match_ui != 0);
+  return (connected & 3u) == 3u;
+}
+
+// Called from the game-thread Pad::Update hook rather than the HID polling
+// thread.  hidLaShowControllerSupport is a synchronous frontend transition,
+// so keeping it on the thread that owns the running match avoids racing the
+// UE4 input/window state.  A cancelled/under-populated applet result leaves
+// the flag set and is reopened on the next frame; the match therefore cannot
+// resume until both No1 and No2 are present.
+static int native_two_player_recovery_tick(void) {
+  if (!__atomic_load_n(&native_gamepad_lab_active, __ATOMIC_ACQUIRE) ||
+      !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE))
+    return 0;
+  const uint32_t connected =
+      __atomic_load_n(&native_hid_connected_mask, __ATOMIC_ACQUIRE);
+  if ((connected & 3u) == 3u) {
+    __atomic_store_n(&native_two_player_recovery_pending, 0,
+                     __ATOMIC_RELEASE);
+    return 0;
+  }
+  if (!__atomic_load_n(&native_two_player_recovery_pending,
+                       __ATOMIC_ACQUIRE))
+    return 0;
+
+  debugPrintf("native 2P recovery: controller slot missing HID=0x%x; "
+              "opening Change Grip/Order\n",
+              connected);
+  const int recovered = main_menu_require_two_controller_slots(1);
+  if (recovered) {
+    __atomic_store_n(&native_two_player_recovery_pending, 0,
+                     __ATOMIC_RELEASE);
+    debugPrintf("native 2P recovery: both controller slots restored\n");
+  } else {
+    // Keep this armed so Back/cancel cannot fall through to gameplay.  The
+    // next Pad::Update opens the native applet again until two slots exist.
+    __atomic_store_n(&native_two_player_recovery_pending, 1,
+                     __ATOMIC_RELEASE);
+    debugPrintf("native 2P recovery: still waiting for No1+No2\n");
+  }
+  return 1;
+}
+
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
   if (!__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE))
     return;
@@ -4573,6 +4666,8 @@ void pes_main_menu_simplify(void *window) {
   __atomic_store_n(&native_gamepad_lab_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_autostart, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_two_player, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_two_player_recovery_pending, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_info_popup, MAIN_MENU_INFO_CLOSED,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
@@ -4646,14 +4741,14 @@ uintptr_t pes_main_menu_selected_entry(void *window,
   }
 
   if (choice == 2) {
-    const uint32_t connected =
-        pes_controller_native_hid_connected_mask();
-    if ((connected & 3u) != 3u) {
-      main_menu_info_open(MAIN_MENU_INFO_TWO_PLAYER);
-      debugPrintf("native 2P lab: blocked; HID mask=0x%x requires No1+No2\n",
-                  connected);
+    if (!main_menu_require_two_controller_slots(0)) {
+      // B/back from the native applet (or closing it without a second slot)
+      // leaves the four-tile Match page focused on 2P.  Do not arm a partial
+      // session and do not fall back to the old custom/touch-only popup.
+      debugPrintf("native 2P lab: not armed; two controller slots required\n");
       return 0;
     }
+    const uint32_t connected = pes_controller_native_hid_connected_mask();
     // Use the same TutorialMatch bootstrap as local Exhibition, but do not
     // mutate the const native touch event or execute tile zero's handler.
     // This DirectSet and every native-input flag remain scoped to tile 2.
@@ -5485,8 +5580,25 @@ int cobra_pad_prime_native_port(uint32_t port) {
 }
 
 void pes_controller_native_hid_connection_update(uint32_t connected_mask) {
-  __atomic_store_n(&native_hid_connected_mask, connected_mask & 3u,
-                   __ATOMIC_RELEASE);
+  const uint32_t next = connected_mask & 3u;
+  const uint32_t previous = __atomic_exchange_n(
+      &native_hid_connected_mask, next, __ATOMIC_ACQ_REL);
+  if (__atomic_load_n(&native_gamepad_lab_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE)) {
+    if ((previous & 3u) == 3u && next != 3u) {
+      __atomic_store_n(&native_two_player_recovery_pending, 1,
+                       __ATOMIC_RELEASE);
+      debugPrintf("native 2P recovery: detected HID disconnect "
+                  "previous=0x%x next=0x%x\n",
+                  previous, next);
+    } else if ((next & 3u) == 3u) {
+      __atomic_store_n(&native_two_player_recovery_pending, 0,
+                       __ATOMIC_RELEASE);
+    }
+  } else {
+    __atomic_store_n(&native_two_player_recovery_pending, 0,
+                     __ATOMIC_RELEASE);
+  }
 }
 
 uint32_t pes_controller_native_hid_connected_mask(void) {
@@ -7910,6 +8022,18 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   // frames where PauseButton itself is not scheduled. Consume the frontend
   // request here first; the PauseButton wrapper remains a UI-thread fallback.
   match_pause_dispatch_pending();
+  if (native_two_player_recovery_tick()) {
+    // The Controller Support applet owns the foreground while pairing.  Do
+    // not let the stale frame that opened it reach Cobra as a gameplay press.
+    unsigned char *recovery_pad = pad_ptr;
+    if (recovery_pad) {
+      const uint32_t zero = 0;
+      memcpy(recovery_pad + 16, &zero, sizeof(zero));
+      for (int index = 0; index < 24; index++)
+        memcpy(recovery_pad + 140 + index * 4, &zero, sizeof(zero));
+    }
+    return cobra_pad_update_resume;
+  }
   unsigned char *pad = pad_ptr;
   if (pad) {
     int32_t pad_id;

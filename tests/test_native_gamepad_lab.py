@@ -16,15 +16,123 @@ class NativeGamepadLabTests(unittest.TestCase):
     def test_tile_requires_two_hid_slots_then_starts_fixed_2p_match(self):
         choice = re.search(r'if \(choice == 2\) \{(.*?)\n  \}',
                            self.hooks, re.S).group(1)
-        self.assertIn('pes_controller_native_hid_connected_mask()', choice)
-        self.assertIn('(connected & 3u) != 3u', choice)
-        self.assertIn('MAIN_MENU_INFO_TWO_PLAYER', choice)
+        gate = re.search(
+            r'static int main_menu_require_two_controller_slots\(int preserve_match_ui\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('pes_controller_native_hid_connected_mask()', gate)
+        self.assertIn('hidLaCreateControllerSupportArg', gate)
+        self.assertIn('hidLaShowControllerSupport', gate)
+        self.assertIn('player_count_min = 2', gate)
+        self.assertIn('player_count_max = 2', gate)
+        self.assertIn('main_menu_apply_focus(2)', gate)
+        self.assertIn('main_menu_require_two_controller_slots(0)', choice)
+        self.assertNotIn('MAIN_MENU_INFO_TWO_PLAYER', choice)
         self.assertIn('native_gamepad_lab_active', choice)
         self.assertIn('native_gamepad_lab_two_player', choice)
         self.assertIn('exhibition_home_team_id, 108', choice)
         self.assertIn('exhibition_away_team_id, 114', choice)
         self.assertIn('MyClub/TutorialMatch', choice)
         self.assertIn('exhibition_flow_direct_set', choice)
+
+    def test_midmatch_disconnect_reopens_native_grip_order_until_two_slots(self):
+        gate = re.search(
+            r'static int main_menu_require_two_controller_slots\(int preserve_match_ui\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        recovery = re.search(
+            r'static int native_two_player_recovery_tick\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        update = re.search(
+            r'void pes_controller_native_hid_connection_update\(uint32_t connected_mask\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        apply = re.search(
+            r'uintptr_t cobra_pad_apply_input\(void \*pad_ptr\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('preserve_match_ui', gate)
+        self.assertIn('player_count_min = 2', gate)
+        self.assertIn('player_count_max = 2', gate)
+        self.assertIn('connected & 3u', recovery)
+        self.assertIn('main_menu_require_two_controller_slots(1)', recovery)
+        self.assertIn('still waiting for No1+No2', recovery)
+        self.assertIn('previous & 3u) == 3u && next != 3u', update)
+        self.assertIn('native_two_player_recovery_pending', update)
+        self.assertIn('native_two_player_recovery_tick()', apply)
+        self.assertIn('return cobra_pad_update_resume;', apply)
+
+    def test_single_joycon_alias_profiles_are_detected_before_global_routing(self):
+        self.assertIn('hidGetNpadStyleSet(HidNpadIdType_No1)', self.shim)
+        self.assertIn('HidNpadStyleTag_NpadJoyLeft', self.shim)
+        self.assertIn('HidNpadStyleTag_NpadJoyRight', self.shim)
+        mapping = re.search(
+            r'static u64 controller_profile_map_buttons\(.*?\n\}',
+            self.shim, re.S).group(0)
+        for physical, logical in (('HidNpadButton_Up', 'HidNpadButton_Y'),
+                                  ('HidNpadButton_Left', 'HidNpadButton_B'),
+                                  ('HidNpadButton_Right', 'HidNpadButton_X'),
+                                  ('HidNpadButton_Down', 'HidNpadButton_A'),
+                                  ('HidNpadButton_B', 'HidNpadButton_Y'),
+                                  ('HidNpadButton_A', 'HidNpadButton_B'),
+                                  ('HidNpadButton_Y', 'HidNpadButton_X'),
+                                  ('HidNpadButton_X', 'HidNpadButton_A')):
+            with self.subTest(physical=physical):
+                self.assertIn(f'raw & {physical}', mapping)
+                self.assertIn(f'mapped |= {logical}', mapping)
+        self.assertIn('previous_menu_buttons', self.shim)
+        self.assertIn('controller_profile_menu_buttons', self.shim)
+
+    def test_single_joycon_set_piece_selector_uses_l1_r1_chord(self):
+        chord = re.search(
+            r'static int single_joy_setplay_chord_claim\(.*?\n\}',
+            self.shim, re.S).group(0)
+        self.assertIn('HidNpadButton_L', chord)
+        self.assertIn('HidNpadButton_R', chord)
+        self.assertIn('HidNpadButton_AnySL', chord)
+        self.assertIn('HidNpadButton_AnySR', chord)
+        route = re.search(
+            r'static void queue_native_lab_setplay_action\(.*?\n\}',
+            self.shim, re.S).group(0)
+        self.assertIn('single_joy_setplay_chord_claim', route)
+        self.assertIn('profile == CONTROLLER_PROFILE_FULL', route)
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('android_controller_profile', overlay)
+        self.assertIn('"L1+R1"', overlay)
+        self.assertIn('setplay_taker_key', overlay)
+
+    def test_single_joycon_startup_uses_horizontal_hold_and_gameplan_r1_click(self):
+        self.assertIn('hidSetNpadJoyHoldType(HidNpadJoyHoldType_Horizontal)',
+                      self.shim)
+        cursor = re.search(
+            r'static void append_virtual_cursor_controller\(.*?\n\}',
+            self.shim, re.S).group(0)
+        self.assertIn('single_click_button', cursor)
+        self.assertIn('HidNpadButton_R | HidNpadButton_AnySR', cursor)
+
+    def test_single_joycon_stick_is_rotated_and_routed_as_ls_for_both_sides(self):
+        mapper = re.search(
+            r'static void controller_profile_map_stick\(.*?\n\}',
+            self.shim, re.S).group(0)
+        self.assertIn('profile == CONTROLLER_PROFILE_SINGLE_RIGHT', mapper)
+        self.assertIn('source = *right_stick', mapper)
+        self.assertIn('source = *left_stick', mapper)
+        self.assertIn('if (profile == CONTROLLER_PROFILE_SINGLE_RIGHT)', mapper)
+        self.assertIn('source.x = physical_y', mapper)
+        self.assertIn('source.y = -physical_x', mapper)
+        self.assertIn('source.x = -physical_y', mapper)
+        self.assertIn('source.y = physical_x', mapper)
+        self.assertIn('*left_stick = source', mapper)
+        self.assertIn('memset(right_stick, 0', mapper)
+        poll = self.shim[self.shim.index('void android_input_poll(void)'):]
+        first_map = poll.index('controller_profile_map_stick(profile_p1')
+        first_normalize = poll.index('normalize_stick(&left_stick')
+        self.assertLess(first_map, first_normalize)
+        self.assertIn('controller_profile_map_stick(profile_p2', poll)
+
+    def test_single_joycon_chord_helper_draws_two_badges(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('setplay_has_chord', overlay)
+        self.assertIn('chord_second_x', overlay)
+        self.assertRegex(overlay, r'emit_line\(\s*"R1", 2')
+        self.assertRegex(overlay, r'emit_line\(\s*"\+", 1')
+        self.assertRegex(overlay, r'emit_line\(\s*"L1", 2')
 
     def test_exhibition_and_lab_share_native_gameplay_path_after_play(self):
         self.assertIn('if (native_pad_lab_active && gameplay_active)',
@@ -230,9 +338,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.16.8', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.16.11', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
-        self.assertIn('setplay_keys[1] = ">";', overlay)
+        self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)
         self.assertIn('"TRAJECTORY ON"', overlay)
         self.assertIn('setplay_keys[4] = "R";', overlay)
@@ -247,7 +355,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         far_helper = re.search(
             r'else if \(native_far_free_kick\).*?'
             r'setplay_helper_count = 1;', overlay, re.S).group(0)
-        self.assertIn('setplay_keys[0] = ">";', far_helper)
+        self.assertIn('setplay_keys[0] = setplay_taker_key;', far_helper)
         self.assertIn('"SET PIECE TAKER"', far_helper)
         self.assertNotIn('"ZR"', far_helper)
         self.assertIn('!native_setplay_debug && !native_lab', overlay)

@@ -10,6 +10,11 @@
 void android_runtime_bootstrap(so_module *ue4);
 void android_input_poll(void);
 
+#define PES_CONTROLLER_PROFILE_FULL 0u
+#define PES_CONTROLLER_PROFILE_SINGLE_LEFT 1u
+#define PES_CONTROLLER_PROFILE_SINGLE_RIGHT 2u
+uint32_t android_controller_profile(uint32_t pad);
+
 void *AConfiguration_new_fake(void);
 void AConfiguration_delete_fake(void *config);
 void AConfiguration_fromAssetManager_fake(void *config, void *mgr);

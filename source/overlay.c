@@ -18,6 +18,7 @@
 #include <GLES2/gl2.h>
 
 #include "config.h"
+#include "android_shim.h"
 #include "overlay.h"
 #include "badge_atlas.h"
 #include "font_atlas.h"
@@ -611,6 +612,12 @@ static void overlay_render(void) {
     setplay_context = native_debug.context;
     setplay_options = 0;
   }
+  const uint32_t setplay_owner_pad =
+      native_setplay_debug && native_debug.setplay_pad == 1 ? 1u : 0u;
+  const int single_joy_setplay =
+      android_controller_profile(setplay_owner_pad) !=
+      PES_CONTROLLER_PROFILE_FULL;
+  const char *setplay_taker_key = single_joy_setplay ? "L1+R1" : ">";
   float gameplan_cursor_x = 0.0f;
   float gameplan_cursor_y = 0.0f;
   const int virtual_cursor_context = pes_controller_virtual_cursor_context();
@@ -1714,7 +1721,7 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V8.16.8 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V8.16.11 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
@@ -1795,13 +1802,16 @@ static void overlay_render(void) {
                          verts + quads * 24);
       if (native_debug.context == PES_SETPLAY_FREE_KICK)
         snprintf(debug_line, sizeof(debug_line),
-                 "B=PASS   A=LOB/CROSS   Y=SHOOT   RIGHT=KICKER");
+                 "B=PASS   A=LOB/CROSS   Y=SHOOT   %s=KICKER",
+                 single_joy_setplay ? "L1+R1" : "RIGHT");
       else if (native_debug.context == PES_SETPLAY_CORNER)
         snprintf(debug_line, sizeof(debug_line),
-                 "B=SHORT PASS   A=LONG KICK   L=SHORT CORNER   RIGHT=KICKER");
+                 "B=SHORT PASS   A=LONG KICK   L=SHORT CORNER   %s=KICKER",
+                 single_joy_setplay ? "L1+R1" : "RIGHT");
       else if (native_debug.context == PES_SETPLAY_THROW_IN)
         snprintf(debug_line, sizeof(debug_line),
-                 "B=NORMAL THROW   Y=LONG THROW   RIGHT=THROWER");
+                 "B=NORMAL THROW   Y=LONG THROW   %s=THROWER",
+                 single_joy_setplay ? "L1+R1" : "RIGHT");
       else
         snprintf(debug_line, sizeof(debug_line),
                  "B=SHORT PASS   A=LONG KICK   L=POSITION SHIFT");
@@ -1939,7 +1949,7 @@ static void overlay_render(void) {
              setplay_context == PES_SETPLAY_CORNER) {
     setplay_keys[0] = "L";
     setplay_labels[0] = "SHORT CORNER";
-    setplay_keys[1] = ">";
+    setplay_keys[1] = setplay_taker_key;
     setplay_labels[1] = "SET PIECE TAKER";
     setplay_keys[2] = "LS";
     setplay_labels[2] = "KICK AIM";
@@ -1953,12 +1963,12 @@ static void overlay_render(void) {
   } else if (native_far_free_kick) {
     // Far free kicks retain the stock overhead camera, but taker selection is
     // still our native-controller action rather than the old ZR touch legend.
-    setplay_keys[0] = ">";
+    setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_helper_count = 1;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_FREE_KICK) {
-    setplay_keys[0] = ">";
+    setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "LS";
     setplay_labels[1] = "KICK AIM + HEIGHT";
@@ -1971,7 +1981,7 @@ static void overlay_render(void) {
     setplay_helper_count = 4;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_THROW_IN) {
-    setplay_keys[0] = ">";
+    setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET THROWER";
     setplay_helper_count = 1;
   } else if (!native_setplay_debug && !native_lab &&
@@ -1998,7 +2008,7 @@ static void overlay_render(void) {
     setplay_labels[1] = "SWITCH VIEW";
     setplay_helper_count = 2;
   } else if (setplay_context == PES_SETPLAY_THROW_IN) {
-    setplay_keys[0] = ">";
+    setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET THROWER";
     setplay_helper_count = 1;
   } else if (setplay_options) {
@@ -2006,7 +2016,8 @@ static void overlay_render(void) {
     // frames before the semantic set-piece context has settled.
     if ((setplay_options & PES_SETPLAY_OPTION_KICKER) &&
         setplay_helper_count < 3) {
-      setplay_keys[setplay_helper_count] = "ZR";
+      setplay_keys[setplay_helper_count] =
+          single_joy_setplay ? "L1+R1" : "ZR";
       setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
     }
     if ((setplay_options & PES_SETPLAY_OPTION_TEAM_UP) &&
@@ -2043,7 +2054,13 @@ static void overlay_render(void) {
         (controller_snapshot.setplay_button_mask &
          (1u << PES_SETPLAY_BUTTON_SET_PIECE_TAKER));
     if (penalty_foul_mode && setplay_helper_count < 5) {
-      setplay_keys[setplay_helper_count] = ">";
+      const uint32_t penalty_owner_pad =
+          penalty_role_p1 == PES_PENALTY_KICKER ? 0u : 1u;
+      const int penalty_single_joy =
+          android_controller_profile(penalty_owner_pad) !=
+          PES_CONTROLLER_PROFILE_FULL;
+      setplay_keys[setplay_helper_count] =
+          penalty_single_joy ? "L1+R1" : ">";
       setplay_labels[setplay_helper_count++] = "SET PENALTY TAKER";
     }
     if (penalty_role_p1 == PES_PENALTY_KICKER) {
@@ -2076,13 +2093,32 @@ static void overlay_render(void) {
          : setplay_helper_count == 2 ? 0.855f
                                      : 0.925f) *
         (float)screen_height;
+    int setplay_has_chord = 0;
+    for (unsigned int index = 0; index < setplay_helper_count; index++) {
+      if (strcmp(setplay_keys[index], "L1+R1") == 0) {
+        setplay_has_chord = 1;
+        break;
+      }
+    }
+    const float chord_second_x = helper_x + helper_radius * 2.85f;
+    const float chord_plus_x = helper_x + helper_radius * 1.425f;
+    const float helper_label_x =
+        helper_x + helper_radius * (setplay_has_chord ? 4.25f : 1.55f);
     setplay_helper_circle_first_quad = quads;
     for (unsigned int index = 0; index < setplay_helper_count; index++) {
-      const int circle_quads = emit_filled_circle(
+      int circle_quads = emit_filled_circle(
           helper_x, helper_start_y + (float)index * helper_step,
           helper_radius, verts + quads * 24);
       setplay_helper_circle_quads += circle_quads;
       quads += circle_quads;
+      if (strcmp(setplay_keys[index], "L1+R1") == 0) {
+        circle_quads = emit_filled_circle(
+            chord_second_x,
+            helper_start_y + (float)index * helper_step,
+            helper_radius, verts + quads * 24);
+        setplay_helper_circle_quads += circle_quads;
+        quads += circle_quads;
+      }
     }
 
     // The font atlas does not contain the Switch D-pad Right glyph. Draw its
@@ -2110,17 +2146,39 @@ static void overlay_render(void) {
       const int key_len = (int)strlen(setplay_keys[index]);
       setplay_key_first_quads[index] = quads;
       int line_quads = 0;
-      if (strcmp(setplay_keys[index], ">") != 0)
+      if (strcmp(setplay_keys[index], "L1+R1") == 0) {
+        const float chord_gw = gw * 0.82f;
+        line_quads += emit_line(
+            "R1", 2, helper_x - chord_gw,
+            y - gh * 0.5f, chord_gw, gh,
+            verts + quads * 24);
+        quads += line_quads;
+        int part_quads = emit_line(
+            "+", 1, chord_plus_x - gw * 0.5f,
+            y - gh * 0.5f, gw, gh,
+            verts + quads * 24);
+        line_quads += part_quads;
+        quads += part_quads;
+        part_quads = emit_line(
+            "L1", 2, chord_second_x - chord_gw,
+            y - gh * 0.5f, chord_gw, gh,
+            verts + quads * 24);
+        line_quads += part_quads;
+        quads += part_quads;
+      } else if (strcmp(setplay_keys[index], ">") != 0) {
         line_quads = emit_line(
             setplay_keys[index], key_len,
-            helper_x - (float)key_len * gw * 0.5f, y - gh * 0.5f, gw, gh,
+            helper_x - (float)key_len *
+                           (key_len > 2 ? gw * 0.58f : gw) * 0.5f,
+            y - gh * 0.5f, key_len > 2 ? gw * 0.58f : gw, gh,
             verts + quads * 24);
+        quads += line_quads;
+      }
       setplay_key_quads[index] = line_quads;
       setplay_helper_text_quads += line_quads;
-      quads += line_quads;
       const int label_len = (int)strlen(setplay_labels[index]);
       line_quads = emit_line(
-          setplay_labels[index], label_len, helper_x + helper_radius * 1.55f,
+          setplay_labels[index], label_len, helper_label_x,
           y - gh * 0.5f, gw * 0.72f, gh, verts + quads * 24);
       setplay_helper_text_quads += line_quads;
       quads += line_quads;
