@@ -274,6 +274,29 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
 int pes_main_menu_controller_active(void);
 uint32_t pes_main_menu_focus_index(void);
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons);
+#define PES_2P_TEAM_SELECTOR_PHASE_CLOSED 0u
+#define PES_2P_TEAM_SELECTOR_PHASE_LEAGUE 1u
+#define PES_2P_TEAM_SELECTOR_PHASE_TEAM 2u
+int pes_controller_2p_team_selector_active(void);
+uint32_t pes_controller_2p_team_selector_phase(uint32_t pad);
+uint32_t pes_controller_2p_team_selector_focus(uint32_t pad);
+uint32_t pes_controller_2p_team_selector_scroll(uint32_t pad);
+uint32_t pes_controller_2p_team_selector_visible_count(uint32_t pad);
+const char *pes_controller_2p_team_selector_title(uint32_t pad);
+const char *pes_controller_2p_team_selector_label(uint32_t pad,
+                                                  uint32_t index);
+uint32_t pes_controller_2p_team_selector_badge(uint32_t pad,
+                                                uint32_t index);
+uint32_t pes_controller_2p_team_selector_selected_team(uint32_t pad);
+int pes_controller_2p_team_selector_confirmed(uint32_t pad);
+int pes_controller_2p_team_selector_team_stats(uint32_t pad,
+                                               uint32_t *forward,
+                                               uint32_t *midfield,
+                                               uint32_t *defence,
+                                               uint32_t *grade_half_steps);
+void pes_controller_2p_team_selector_pad_event(uint32_t pad,
+                                                uint32_t buttons,
+                                                uint32_t previous_buttons);
 void pes_exhibition_search_pad_event(uint32_t buttons,
                                      uint32_t previous_buttons);
 int pes_controller_menu_touch_target(float *normalized_x,

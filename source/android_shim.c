@@ -168,6 +168,7 @@ static uint64_t previous_hid_buttons;
 static uint64_t previous_hid_buttons_p2;
 static uint64_t previous_menu_buttons;
 static uint64_t previous_menu_buttons_p2;
+static uint32_t previous_team_selector_buttons[2];
 static uint32_t native_setplay_owner_pad;
 static int previous_mobile_context_mode;
 static float physical_touch_start_x;
@@ -849,6 +850,29 @@ static u64 controller_profile_menu_buttons(
   return mapped;
 }
 
+// The full-screen two-player selector is not a native touch menu. Translate
+// its logical controls explicitly instead of passing raw HidNpadButton bits to
+// a compact 0..15 pad mask. This also makes the already-rotated LS the arrow
+// source for both horizontal Joy-Con sides.
+static uint32_t controller_team_selector_buttons(
+    u64 buttons, const HidAnalogStickState *left_stick, int have_left_stick) {
+  uint32_t mapped = 0;
+  if (buttons & HidNpadButton_B) mapped |= 1u << 0;
+  if (buttons & HidNpadButton_A) mapped |= 1u << 1;
+  if (buttons & HidNpadButton_Up) mapped |= 1u << 10;
+  if (buttons & HidNpadButton_Down) mapped |= 1u << 11;
+  if (buttons & HidNpadButton_Left) mapped |= 1u << 12;
+  if (buttons & HidNpadButton_Right) mapped |= 1u << 13;
+  if (have_left_stick) {
+    const int threshold = JOYSTICK_MAX / 3;
+    if (left_stick->y > threshold) mapped |= 1u << 10;
+    if (left_stick->y < -threshold) mapped |= 1u << 11;
+    if (left_stick->x < -threshold) mapped |= 1u << 12;
+    if (left_stick->x > threshold) mapped |= 1u << 13;
+  }
+  return mapped;
+}
+
 static uint32_t menu_pad_buttons(u64 buttons,
                                  const HidAnalogStickState *left_stick,
                                  int have_left_stick) {
@@ -995,6 +1019,8 @@ static int synthetic_context_changed(int context) {
   previous_hid_buttons_p2 = 0;
   previous_menu_buttons = 0;
   previous_menu_buttons_p2 = 0;
+  previous_team_selector_buttons[0] = 0;
+  previous_team_selector_buttons[1] = 0;
   compact_menu_tap_until_ms = 0;
   return 1;
 }
@@ -2149,6 +2175,12 @@ void android_input_poll(void) {
       raw_buttons, profile_p1, &left_stick, have_left_stick);
   const u64 menu_buttons_p2 = controller_profile_menu_buttons(
       raw_buttons_p2, profile_p2, &left_stick_p2, have_left_stick_p2);
+  const uint32_t team_selector_buttons[2] = {
+      controller_team_selector_buttons(buttons, &left_stick,
+                                       have_left_stick),
+      controller_team_selector_buttons(buttons_p2, &left_stick_p2,
+                                       have_left_stick_p2),
+  };
   const int profile_changed =
       controller_profiles_initialized &&
       (profile_p1 != previous_profile_p1 || profile_p2 != previous_profile_p2);
@@ -2160,6 +2192,8 @@ void android_input_poll(void) {
     previous_hid_buttons_p2 = buttons_p2;
     previous_menu_buttons = menu_buttons;
     previous_menu_buttons_p2 = menu_buttons_p2;
+    previous_team_selector_buttons[0] = team_selector_buttons[0];
+    previous_team_selector_buttons[1] = team_selector_buttons[1];
     reset_virtual_surfaces();
     synthetic_input_generation++;
     debugPrintf("input: controller profile changed P1=%s P2=%s styles=0x%x/0x%x\n",
@@ -2215,6 +2249,8 @@ void android_input_poll(void) {
   const int custom_postmatch_active =
       pes_controller_custom_postmatch_active();
   const int main_menu_controller_active = pes_main_menu_controller_active();
+  const int two_player_team_selector_active =
+      pes_controller_2p_team_selector_active();
   const int menu_controller_active = pes_controller_menu_active();
   if (gameplay_active || main_menu_controller_active)
     pes_controller_result_cursor_clear();
@@ -2316,7 +2352,7 @@ void android_input_poll(void) {
   const int physical_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
   const int compact_main_menu_active = main_menu_controller_active;
-  if (set_piece_selector_isolated) {
+  if (set_piece_selector_isolated || two_player_team_selector_active) {
     physical_touch_tracking = 0;
   } else if (physical_active) {
     physical_touch_last_x = touch_x;
@@ -2331,7 +2367,8 @@ void android_input_poll(void) {
     physical_touch_last_y = touch_y;
   }
 
-  if (!set_piece_selector_isolated && compact_main_menu_active &&
+  if (!set_piece_selector_isolated && !two_player_team_selector_active &&
+      compact_main_menu_active &&
       physical_touch_tracking &&
       !physical_active && screen_width > 0 && screen_height > 0) {
     const float dx = physical_touch_last_x - physical_touch_start_x;
@@ -2363,7 +2400,8 @@ void android_input_poll(void) {
   }
 
   FakeTouchState desired = {0};
-  if (!set_piece_selector_isolated && physical_active &&
+  if (!set_piece_selector_isolated && !two_player_team_selector_active &&
+      physical_active &&
       !compact_main_menu_active)
     touch_state_append(&desired, FAKE_POINTER_PHYSICAL, touch_x, touch_y);
   uint32_t replay_pad_buttons = 0;
@@ -2562,22 +2600,35 @@ void android_input_poll(void) {
         !cinematic_active && !gameplay_active &&
         !gameplan_cursor_active &&
         menu_controller_active) {
-      const u64 pressed_p1 = menu_buttons & ~previous_menu_buttons;
-      const u64 pressed_p2 = menu_buttons_p2 & ~previous_menu_buttons_p2;
-      const u64 start_buttons =
-          HidNpadButton_A | HidNpadButton_B | HidNpadButton_X |
-          HidNpadButton_Y | HidNpadButton_Up | HidNpadButton_Down |
-          HidNpadButton_Left | HidNpadButton_Right |
-          HidNpadButton_AnySL | HidNpadButton_AnySR;
-      const int a_pressed = pes_controller_start_prompt(NULL, NULL)
-                                ? ((pressed_p1 | pressed_p2) &
-                                   start_buttons) != 0
-                                : (pressed_p1 & HidNpadButton_A) != 0;
-      const int b_pressed = (menu_buttons & HidNpadButton_B) != 0 &&
-                            (previous_menu_buttons & HidNpadButton_B) == 0;
-      append_menu_controller_tap(&desired, a_pressed, now_ms);
-      append_menu_controller_back(&desired, b_pressed, now_ms);
-      append_menu_controller_scroll(&desired, now_ms);
+      if (two_player_team_selector_active) {
+        // The custom 2P team screen is a two-cursor surface: each local pad
+        // owns its own league/team focus and confirm state. Do not synthesize
+        // a single P1 touch into the compact menu underneath it.
+        reset_virtual_surfaces();
+        pes_controller_2p_team_selector_pad_event(
+            0, team_selector_buttons[0],
+            previous_team_selector_buttons[0]);
+        pes_controller_2p_team_selector_pad_event(
+            1, team_selector_buttons[1],
+            previous_team_selector_buttons[1]);
+      } else {
+        const u64 pressed_p1 = menu_buttons & ~previous_menu_buttons;
+        const u64 pressed_p2 = menu_buttons_p2 & ~previous_menu_buttons_p2;
+        const u64 start_buttons =
+            HidNpadButton_A | HidNpadButton_B | HidNpadButton_X |
+            HidNpadButton_Y | HidNpadButton_Up | HidNpadButton_Down |
+            HidNpadButton_Left | HidNpadButton_Right |
+            HidNpadButton_AnySL | HidNpadButton_AnySR;
+        const int a_pressed = pes_controller_start_prompt(NULL, NULL)
+                                  ? ((pressed_p1 | pressed_p2) &
+                                     start_buttons) != 0
+                                  : (pressed_p1 & HidNpadButton_A) != 0;
+        const int b_pressed = (menu_buttons & HidNpadButton_B) != 0 &&
+                              (previous_menu_buttons & HidNpadButton_B) == 0;
+        append_menu_controller_tap(&desired, a_pressed, now_ms);
+        append_menu_controller_back(&desired, b_pressed, now_ms);
+        append_menu_controller_scroll(&desired, now_ms);
+      }
     }
   }
   const int menu_back_was_active =
@@ -2594,6 +2645,7 @@ void android_input_poll(void) {
   if (menu_was_active >= 0 &&
       !context_changed &&
       !set_piece_selector_isolated &&
+      !two_player_team_selector_active &&
       !cinematic_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU) < 0 &&
       screen_width > 0 && screen_height > 0)
@@ -2602,13 +2654,15 @@ void android_input_poll(void) {
   if (menu_back_was_active >= 0 &&
       !context_changed &&
       !set_piece_selector_isolated &&
+      !two_player_team_selector_active &&
       !cinematic_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK) < 0)
     pes_controller_menu_back_pressed();
 
   const int physical_is_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
-  if (!set_piece_selector_isolated && !compact_main_menu_active &&
+  if (!set_piece_selector_isolated && !two_player_team_selector_active &&
+      !compact_main_menu_active &&
       physical_was_active &&
       !physical_is_active &&
       physical_touch_tracking && screen_width > 0 && screen_height > 0) {
@@ -2700,6 +2754,8 @@ void android_input_poll(void) {
     emit_native_lab_pad_input(1, &left_stick_p2, &right_stick_p2,
                               controller_connected_p2, native_buttons_p2);
   }
+  else if (two_player_team_selector_active)
+    disable_native_pad_bridge();
   else if (!gameplay_active && menu_controller_active)
     emit_menu_pad_input(&left_stick, have_left_stick, menu_buttons,
                         have_left_stick);
@@ -2713,6 +2769,16 @@ void android_input_poll(void) {
       context_changed ? 0 : (controller_connected ? menu_buttons : 0);
   previous_menu_buttons_p2 =
       context_changed ? 0 : (controller_connected_p2 ? menu_buttons_p2 : 0);
+  previous_team_selector_buttons[0] =
+      context_changed || !two_player_team_selector_active ||
+              !controller_connected
+          ? 0
+          : team_selector_buttons[0];
+  previous_team_selector_buttons[1] =
+      context_changed || !two_player_team_selector_active ||
+              !controller_connected_p2
+          ? 0
+          : team_selector_buttons[1];
 }
 
 void *ALooper_prepare_fake(int opts) {

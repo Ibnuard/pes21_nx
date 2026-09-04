@@ -14,7 +14,11 @@ OUTPUT_PATH = ROOT / "source" / "badge_atlas.h"
 DEFAULT_SYMBOL_ROOT = (
     ROOT / "local-debug" / "cpk-emblem-check" / "common" / "render" / "symbol"
 )
-CELL = 64
+DEFAULT_OVERRIDE_ROOT = ROOT / "assets" / "badges"
+# The original 64px cells downsampled PES' available 256px emblems to 56px,
+# then enlarged them again for the focused team card. 128px cells preserve a
+# crisp 120px source while staying within the Switch's texture limits.
+CELL = 128
 COLS = 16
 CATEGORY_IMAGES = (
     "emblemLc/emb_0009.png",                  # English League
@@ -54,7 +58,7 @@ def badge_tile() -> Image.Image:
 
 def fit_image(path: Path) -> Image.Image:
     image = Image.open(path).convert("RGBA")
-    padding = CELL // 8
+    padding = CELL // 16
     image.thumbnail((CELL - padding, CELL - padding), Image.Resampling.LANCZOS)
     tile = badge_tile()
     tile.alpha_composite(
@@ -92,6 +96,23 @@ def team_image(symbol_root: Path, team_id: int) -> Path | None:
         flag_root / f"e_{team_id:06d}_f.png",
         flag_root / f"e_{team_id:06d}_r_w.png",
         flag_root / f"flag_{team_id}.png",
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def custom_team_image(override_root: Path, team_id: int) -> Path | None:
+    candidates = (
+        override_root / "teams" / f"{team_id}.png",
+        override_root / f"team_{team_id}.png",
+        override_root / f"{team_id}.png",
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def custom_category_image(override_root: Path, index: int) -> Path | None:
+    candidates = (
+        override_root / "categories" / f"{index}.png",
+        override_root / f"category_{index}.png",
     )
     return next((path for path in candidates if path.is_file()), None)
 
@@ -147,20 +168,29 @@ def main() -> None:
         default=OUTPUT_PATH,
         help="generated C header path",
     )
+    parser.add_argument(
+        "--override-root",
+        type=Path,
+        default=DEFAULT_OVERRIDE_ROOT,
+        help="optional HD PNG overrides (teams/<id>.png, categories/<index>.png)",
+    )
     args = parser.parse_args()
     symbol_root = args.symbol_root.resolve()
+    override_root = args.override_root.resolve()
     if not symbol_root.is_dir():
         raise SystemExit(f"Extracted symbol directory not found: {symbol_root}")
 
     atlas = Image.new("RGBA", (COLS * CELL, ROWS * CELL), (0, 0, 0, 0))
     for team_id in range(140):
-        source = team_image(symbol_root, team_id)
+        source = (custom_team_image(override_root, team_id) or
+                  team_image(symbol_root, team_id))
         badge = fit_image(source) if source else fallback_badge(team_id)
         atlas.paste(badge, ((team_id % COLS) * CELL, (team_id // COLS) * CELL))
 
     for index, relative_path in enumerate(CATEGORY_IMAGES):
         slot = 140 + index
-        source = large_variant(symbol_root / relative_path)
+        source = (custom_category_image(override_root, index) or
+                  large_variant(symbol_root / relative_path))
         badge = fit_image(source) if source.is_file() else fallback_badge(slot)
         atlas.paste(badge, ((slot % COLS) * CELL, (slot // COLS) * CELL))
 
@@ -168,7 +198,8 @@ def main() -> None:
     # the exact PES21 native emblem images for the migrated high team IDs.
     for index, team_id in enumerate(EXTRA_TEAM_IDS):
         slot = EXTRA_TEAM_SLOT_BASE + index
-        source = team_image(symbol_root, team_id)
+        source = (custom_team_image(override_root, team_id) or
+                  team_image(symbol_root, team_id))
         badge = fit_image(source) if source else fallback_badge(slot)
         atlas.paste(badge, ((slot % COLS) * CELL, (slot // COLS) * CELL))
 

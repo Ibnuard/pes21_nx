@@ -146,6 +146,9 @@ static void (*exhibition_squad_edit_update_player)(
     uint32_t parameter_type);
 static uint32_t (*exhibition_get_player_overall)(
     const void *player, const uint32_t *position, uint32_t condition);
+static uint32_t (*exhibition_get_position_overall)(
+    const uint32_t *team_id, uint32_t broad_role);
+static float (*exhibition_overall_to_grade)(uint32_t overall);
 static void (*exhibition_set_test_match_team_id)(uint32_t team_id);
 static void (*exhibition_set_test_match_cpu_level)(uint32_t level);
 static uint32_t (*exhibition_get_test_match_cpu_level)(void);
@@ -639,6 +642,29 @@ static _Alignas(4) uint32_t exhibition_nested_popup_kind;
 static _Alignas(4) uint32_t exhibition_nested_back_pending;
 static _Alignas(8) uint64_t exhibition_nested_back_started_ms;
 static _Alignas(4) uint32_t main_menu_controller_active;
+// Two-player team selection is a frontend-only surface.  It deliberately
+// lives beside the compact Match menu state instead of reusing the Exhibition
+// matchmaking popup, because each local pad needs an independent focus,
+// league/team phase, and confirm flag.
+static _Alignas(4) uint32_t main_menu_2p_team_selector_active;
+static _Alignas(4) uint32_t main_menu_2p_team_selector_phase[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_focus[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_scroll[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_league[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_team[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_confirmed[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_input_armed[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_start_pending;
+// Ratings are evaluated on Cobra's game thread because the native tmpdb
+// helpers walk CommonWork. The render thread only consumes this published
+// cache, so moving quickly through the carousel never races the database.
+static _Alignas(4) uint32_t main_menu_2p_team_selector_rating_team[2] = {
+    UINT32_MAX, UINT32_MAX};
+static _Alignas(4) uint32_t main_menu_2p_team_selector_rating_forward[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_rating_midfield[2];
+static _Alignas(4) uint32_t main_menu_2p_team_selector_rating_defence[2];
+static _Alignas(4) uint32_t
+    main_menu_2p_team_selector_rating_grade_half_steps[2];
 static _Alignas(4) uint32_t main_menu_graphics_active;
 static _Alignas(4) uint32_t main_menu_video_settings_open;
 static _Alignas(4) uint32_t main_menu_info_popup;
@@ -815,6 +841,17 @@ enum {
 };
 
 enum {
+  MAIN_MENU_2P_TEAM_SELECTOR_CLOSED =
+      PES_2P_TEAM_SELECTOR_PHASE_CLOSED,
+  MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE =
+      PES_2P_TEAM_SELECTOR_PHASE_LEAGUE,
+  MAIN_MENU_2P_TEAM_SELECTOR_TEAM = PES_2P_TEAM_SELECTOR_PHASE_TEAM,
+};
+
+#define MAIN_MENU_2P_LEAGUE_COUNT EXHIBITION_TEAM_CATEGORY_COUNT
+#define MAIN_MENU_2P_TEAM_VISIBLE_ROWS 5u
+
+enum {
   MATCH_PAUSE_PAGE_ROOT = 0,
   MATCH_PAUSE_PAGE_GAMEPLAN = 1,
   MATCH_PAUSE_PAGE_SUBSTITUTION = 2,
@@ -848,6 +885,11 @@ static void main_menu_video_apply_current(void);
 static void main_menu_video_close(void);
 static void main_menu_info_close(void);
 static void main_menu_apply_focus(uint32_t index);
+static void main_menu_2p_team_selector_open(void);
+static void main_menu_2p_team_selector_close(void);
+static int main_menu_start_two_player_match(void);
+static void main_menu_2p_team_selector_process_pending(void);
+static void main_menu_2p_team_selector_refresh_ratings(void);
 static void *exhibition_find_root_node(void *root, const char *name);
 static void pes_virtual_cursor_activate(uint32_t context, uint32_t x,
                                         uint32_t y);
@@ -939,6 +981,8 @@ static const ExhibitionTeamCategory *exhibition_team_category(void) {
              : NULL;
 }
 
+static const char *exhibition_team_name(uint32_t team_id);
+
 static uint32_t exhibition_custom_team_item_count(void) {
   if (__atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE) ==
       EXHIBITION_TEAM_POPUP_TEAM) {
@@ -946,6 +990,479 @@ static uint32_t exhibition_custom_team_item_count(void) {
     return category ? category->team_count : 0;
   }
   return EXHIBITION_TEAM_CATEGORY_COUNT;
+}
+
+static uint32_t main_menu_2p_team_selector_item_count(uint32_t pad) {
+  if (pad > 1)
+    return 0;
+  const uint32_t phase = main_menu_2p_team_selector_phase[pad];
+  if (phase == MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE)
+    return MAIN_MENU_2P_LEAGUE_COUNT;
+  if (phase == MAIN_MENU_2P_TEAM_SELECTOR_TEAM) {
+    const uint32_t league = main_menu_2p_team_selector_league[pad];
+    return league < MAIN_MENU_2P_LEAGUE_COUNT
+               ? exhibition_team_categories[league].team_count
+               : 0;
+  }
+  return 0;
+}
+
+static const ExhibitionTeamCategory *main_menu_2p_team_selector_category(
+    uint32_t pad) {
+  if (pad > 1 || main_menu_2p_team_selector_league[pad] >=
+                     MAIN_MENU_2P_LEAGUE_COUNT)
+    return NULL;
+  return &exhibition_team_categories[main_menu_2p_team_selector_league[pad]];
+}
+
+static uint32_t main_menu_2p_team_selector_badge_for_team(uint32_t team_id) {
+  if (team_id < 140u)
+    return team_id;
+  switch (team_id) {
+  case 173u: return 153u;
+  case 177u: return 154u;
+  case 179u: return 155u;
+  case 191u: return 156u;
+  case 192u: return 157u;
+  case 193u: return 158u;
+  case 234u: return 159u;
+  case 327u: return 160u;
+  case 333u: return 161u;
+  case 377u: return 162u;
+  default: return 0;
+  }
+}
+
+static uint32_t main_menu_2p_team_selector_team_index(uint32_t league,
+                                                       uint32_t team_id) {
+  if (league >= MAIN_MENU_2P_LEAGUE_COUNT)
+    return 0;
+  const ExhibitionTeamCategory *category = &exhibition_team_categories[league];
+  for (uint32_t index = 0; index < category->team_count; index++) {
+    if (category->teams[index] == team_id)
+      return index;
+  }
+  return 0;
+}
+
+static uint32_t main_menu_2p_team_selector_centered_scroll(uint32_t count,
+                                                            uint32_t focus) {
+  if (count <= MAIN_MENU_2P_TEAM_VISIBLE_ROWS)
+    return 0;
+  const uint32_t half = MAIN_MENU_2P_TEAM_VISIBLE_ROWS / 2u;
+  if (focus <= half)
+    return 0;
+  if (focus + half >= count)
+    return count - MAIN_MENU_2P_TEAM_VISIBLE_ROWS;
+  return focus - half;
+}
+
+static uint32_t main_menu_2p_team_selector_focused_team(uint32_t pad) {
+  if (pad > 1 || main_menu_2p_team_selector_phase[pad] !=
+                     MAIN_MENU_2P_TEAM_SELECTOR_TEAM)
+    return 0;
+  const ExhibitionTeamCategory *category =
+      main_menu_2p_team_selector_category(pad);
+  const uint32_t focus = main_menu_2p_team_selector_focus[pad];
+  return category && focus < category->team_count
+             ? category->teams[focus]
+             : 0;
+}
+
+static uint32_t main_menu_2p_team_selector_grade_half_steps(
+    uint32_t overall) {
+  if (exhibition_overall_to_grade) {
+    const float grade = exhibition_overall_to_grade(overall);
+    if (isfinite(grade) && grade >= 1.0f && grade <= 5.0f)
+      return (uint32_t)(grade * 2.0f + 0.5f);
+  }
+  // Exact mobile convOverallToGrade thresholds. Keep this fallback local so
+  // the selector remains usable if a compatible binary hides that symbol.
+  if (overall > 87u)
+    return 10u;
+  if (overall > 82u)
+    return 9u;
+  if (overall > 79u)
+    return 8u;
+  if (overall > 76u)
+    return 7u;
+  if (overall > 73u)
+    return 6u;
+  if (overall > 71u)
+    return 5u;
+  if (overall > 69u)
+    return 4u;
+  if (overall > 66u)
+    return 3u;
+  return 2u;
+}
+
+static void main_menu_2p_team_selector_invalidate_rating(uint32_t pad) {
+  if (pad > 1)
+    return;
+  __atomic_store_n(&main_menu_2p_team_selector_rating_forward[pad], 0,
+                   __ATOMIC_RELAXED);
+  __atomic_store_n(&main_menu_2p_team_selector_rating_midfield[pad], 0,
+                   __ATOMIC_RELAXED);
+  __atomic_store_n(&main_menu_2p_team_selector_rating_defence[pad], 0,
+                   __ATOMIC_RELAXED);
+  __atomic_store_n(
+      &main_menu_2p_team_selector_rating_grade_half_steps[pad], 0,
+      __ATOMIC_RELAXED);
+  __atomic_store_n(&main_menu_2p_team_selector_rating_team[pad], UINT32_MAX,
+                   __ATOMIC_RELEASE);
+}
+
+static void main_menu_2p_team_selector_refresh_ratings(void) {
+  if (!__atomic_load_n(&main_menu_2p_team_selector_active,
+                       __ATOMIC_ACQUIRE))
+    return;
+  for (uint32_t pad = 0; pad < 2; pad++) {
+    const uint32_t team_id =
+        main_menu_2p_team_selector_focused_team(pad);
+    if (__atomic_load_n(&main_menu_2p_team_selector_rating_team[pad],
+                        __ATOMIC_ACQUIRE) == team_id)
+      continue;
+
+    uint32_t forward = 0;
+    uint32_t midfield = 0;
+    uint32_t defence = 0;
+    uint32_t grade_half_steps = 0;
+    if (team_id && exhibition_get_position_overall) {
+      // BroadRoleKind in this PES21 mobile database is ordered DEF/MF/FW.
+      // Selector data stores the compact master ID (100 = Arsenal), whereas
+      // common::TeamId stores that value in bits 14+. Passing the compact ID
+      // resolves the same fallback record for every club (39/39/39).
+      const uint32_t native_team_id = team_id << 14;
+      defence = exhibition_get_position_overall(&native_team_id, 0u);
+      midfield = exhibition_get_position_overall(&native_team_id, 1u);
+      forward = exhibition_get_position_overall(&native_team_id, 2u);
+      if (forward <= 100u && midfield <= 100u && defence <= 100u &&
+          forward && midfield && defence) {
+        const uint32_t overall = (forward + midfield + defence + 1u) / 3u;
+        grade_half_steps =
+            main_menu_2p_team_selector_grade_half_steps(overall);
+      } else {
+        forward = 0;
+        midfield = 0;
+        defence = 0;
+      }
+    }
+
+    __atomic_store_n(&main_menu_2p_team_selector_rating_forward[pad],
+                     forward, __ATOMIC_RELAXED);
+    __atomic_store_n(&main_menu_2p_team_selector_rating_midfield[pad],
+                     midfield, __ATOMIC_RELAXED);
+    __atomic_store_n(&main_menu_2p_team_selector_rating_defence[pad],
+                     defence, __ATOMIC_RELAXED);
+    __atomic_store_n(
+        &main_menu_2p_team_selector_rating_grade_half_steps[pad],
+        grade_half_steps, __ATOMIC_RELAXED);
+    // Publish the key last. Readers accept the values only when this cached
+    // ID still matches the currently focused club.
+    __atomic_store_n(&main_menu_2p_team_selector_rating_team[pad], team_id,
+                     __ATOMIC_RELEASE);
+    if (team_id && grade_half_steps)
+      debugPrintf("UE4 menu: team rating pad=%u team=%u FW=%u MF=%u DF=%u "
+                  "stars=%u/2\n",
+                  pad, team_id, forward, midfield, defence,
+                  grade_half_steps);
+  }
+}
+
+static void main_menu_2p_team_selector_open(void) {
+  __atomic_store_n(&main_menu_2p_team_selector_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
+                   __ATOMIC_RELEASE);
+  for (uint32_t pad = 0; pad < 2; pad++) {
+    // Opening 2P always starts a new selection session. Do not inherit the
+    // last exhibition HOME/AWAY ids or the league visited before cancelling.
+    main_menu_2p_team_selector_league[pad] = 0;
+    main_menu_2p_team_selector_team[pad] = 0;
+    main_menu_2p_team_selector_phase[pad] =
+        MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE;
+    main_menu_2p_team_selector_focus[pad] = 0;
+    main_menu_2p_team_selector_scroll[pad] = 0;
+    main_menu_2p_team_selector_confirmed[pad] = 0;
+    main_menu_2p_team_selector_input_armed[pad] = 0;
+    main_menu_2p_team_selector_invalidate_rating(pad);
+  }
+  // The stock page remains behind the full-screen overlay as a safe render
+  // host, but it must not receive the selector's A/B or directional input.
+  __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
+  debugPrintf("UE4 menu: opened custom 2P team selector leagues=%u\n",
+              MAIN_MENU_2P_LEAGUE_COUNT);
+}
+
+static void main_menu_2p_team_selector_close(void) {
+  __atomic_store_n(&main_menu_2p_team_selector_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
+                   __ATOMIC_RELEASE);
+  for (uint32_t pad = 0; pad < 2; pad++) {
+    main_menu_2p_team_selector_phase[pad] =
+        MAIN_MENU_2P_TEAM_SELECTOR_CLOSED;
+    main_menu_2p_team_selector_focus[pad] = 0;
+    main_menu_2p_team_selector_scroll[pad] = 0;
+    main_menu_2p_team_selector_league[pad] = 0;
+    main_menu_2p_team_selector_team[pad] = 0;
+    main_menu_2p_team_selector_confirmed[pad] = 0;
+    main_menu_2p_team_selector_input_armed[pad] = 0;
+    main_menu_2p_team_selector_invalidate_rating(pad);
+  }
+  __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                   __ATOMIC_RELEASE);
+  main_menu_apply_focus(2);
+  debugPrintf("UE4 menu: custom 2P team selector cancelled\n");
+}
+
+static void main_menu_2p_team_selector_move(uint32_t pad, int direction) {
+  if (pad > 1 || !direction)
+    return;
+  const uint32_t count = main_menu_2p_team_selector_item_count(pad);
+  if (!count)
+    return;
+  uint32_t focus = main_menu_2p_team_selector_focus[pad];
+  if (focus >= count)
+    focus = count - 1;
+  const uint32_t old = focus;
+  if (direction == 1 && focus > 0)
+    focus--;
+  else if (direction == 2 && focus + 1 < count)
+    focus++;
+  if (focus != old)
+    main_menu_2p_team_selector_confirmed[pad] = 0;
+  main_menu_2p_team_selector_focus[pad] = focus;
+  main_menu_2p_team_selector_scroll[pad] =
+      main_menu_2p_team_selector_centered_scroll(count, focus);
+}
+
+static int main_menu_2p_team_selector_confirm(uint32_t pad) {
+  if (pad > 1)
+    return 0;
+  const uint32_t count = main_menu_2p_team_selector_item_count(pad);
+  uint32_t focus = main_menu_2p_team_selector_focus[pad];
+  if (!count || focus >= count)
+    return 0;
+  const uint32_t phase = main_menu_2p_team_selector_phase[pad];
+  if (phase == MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE) {
+    main_menu_2p_team_selector_league[pad] = focus;
+    main_menu_2p_team_selector_phase[pad] =
+        MAIN_MENU_2P_TEAM_SELECTOR_TEAM;
+    const uint32_t team_focus = main_menu_2p_team_selector_team_index(
+        focus, main_menu_2p_team_selector_team[pad]);
+    main_menu_2p_team_selector_focus[pad] = team_focus;
+    main_menu_2p_team_selector_scroll[pad] =
+        main_menu_2p_team_selector_centered_scroll(
+            exhibition_team_categories[focus].team_count, team_focus);
+    main_menu_2p_team_selector_confirmed[pad] = 0;
+    return 1;
+  }
+  if (phase != MAIN_MENU_2P_TEAM_SELECTOR_TEAM)
+    return 0;
+  const ExhibitionTeamCategory *category =
+      main_menu_2p_team_selector_category(pad);
+  if (!category || focus >= category->team_count)
+    return 0;
+  const uint32_t selected_team = category->teams[focus];
+  const uint32_t other_pad = pad ^ 1u;
+  if (main_menu_2p_team_selector_confirmed[other_pad] &&
+      main_menu_2p_team_selector_team[other_pad] == selected_team) {
+    // The current TutorialMatch bootstrap expects distinct home/away teams.
+    // Leave this side unconfirmed instead of silently changing the other
+    // player's already confirmed choice.
+    main_menu_2p_team_selector_confirmed[pad] = 0;
+    return 0;
+  }
+  main_menu_2p_team_selector_team[pad] = selected_team;
+  main_menu_2p_team_selector_confirmed[pad] = 1;
+  if (main_menu_2p_team_selector_confirmed[0] &&
+      main_menu_2p_team_selector_confirmed[1]) {
+    __atomic_store_n(&exhibition_home_team_id,
+                     main_menu_2p_team_selector_team[0], __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_away_team_id,
+                     main_menu_2p_team_selector_team[1], __ATOMIC_RELEASE);
+    // Keep the selector alive until the game-thread transition succeeds.  If
+    // the final controller vanishes here, its overlay and input isolation stay
+    // intact while Change Grip/Order is shown and the selection is retried.
+    __atomic_store_n(&main_menu_2p_team_selector_start_pending, 1,
+                     __ATOMIC_RELEASE);
+    debugPrintf("UE4 menu: custom 2P teams confirmed HOME=%u AWAY=%u\n",
+                __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE),
+                __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+  }
+  return 1;
+}
+
+void pes_controller_2p_team_selector_pad_event(uint32_t pad,
+                                                uint32_t buttons,
+                                                uint32_t previous_buttons) {
+  if (!__atomic_load_n(&main_menu_2p_team_selector_active, __ATOMIC_ACQUIRE) ||
+      pad > 1)
+    return;
+  // The A press and stick direction used to activate the 2P tile may still be
+  // held when this modal becomes active. Require one fully neutral sample per
+  // controller before accepting selector edges, otherwise reopening can jump
+  // straight back into the previously highlighted-looking league.
+  if (!main_menu_2p_team_selector_input_armed[pad]) {
+    if (!buttons)
+      main_menu_2p_team_selector_input_armed[pad] = 1;
+    return;
+  }
+  const uint32_t pressed = buttons & ~previous_buttons;
+  if (!pressed)
+    return;
+  if (main_menu_2p_team_selector_confirmed[pad]) {
+    // PES PC locks a side after team confirmation. B returns that side to the
+    // same carousel/focus; every other input is ignored until it is unlocked.
+    if (pressed & (1u << 0))
+      main_menu_2p_team_selector_confirmed[pad] = 0;
+    return;
+  }
+  if (pressed & (1u << 10))
+    main_menu_2p_team_selector_move(pad, 1);
+  else if (pressed & (1u << 11))
+    main_menu_2p_team_selector_move(pad, 2);
+  else if (pressed & (1u << 12))
+    main_menu_2p_team_selector_move(pad, 3);
+  else if (pressed & (1u << 13))
+    main_menu_2p_team_selector_move(pad, 4);
+  else if (pressed & (1u << 1))
+    main_menu_2p_team_selector_confirm(pad);
+  else if (pressed & (1u << 0)) {
+    if (main_menu_2p_team_selector_phase[pad] ==
+        MAIN_MENU_2P_TEAM_SELECTOR_TEAM) {
+      main_menu_2p_team_selector_phase[pad] =
+          MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE;
+      main_menu_2p_team_selector_focus[pad] =
+          main_menu_2p_team_selector_league[pad];
+      main_menu_2p_team_selector_scroll[pad] =
+          main_menu_2p_team_selector_centered_scroll(
+              MAIN_MENU_2P_LEAGUE_COUNT,
+              main_menu_2p_team_selector_focus[pad]);
+      main_menu_2p_team_selector_confirmed[pad] = 0;
+    } else {
+      main_menu_2p_team_selector_close();
+    }
+  }
+}
+
+int pes_controller_2p_team_selector_active(void) {
+  return __atomic_load_n(&main_menu_2p_team_selector_active,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_2p_team_selector_phase(uint32_t pad) {
+  return pad < 2 ? main_menu_2p_team_selector_phase[pad]
+                 : MAIN_MENU_2P_TEAM_SELECTOR_CLOSED;
+}
+
+uint32_t pes_controller_2p_team_selector_focus(uint32_t pad) {
+  return pad < 2 ? main_menu_2p_team_selector_focus[pad] : 0;
+}
+
+uint32_t pes_controller_2p_team_selector_scroll(uint32_t pad) {
+  return pad < 2 ? main_menu_2p_team_selector_scroll[pad] : 0;
+}
+
+uint32_t pes_controller_2p_team_selector_visible_count(uint32_t pad) {
+  const uint32_t count = main_menu_2p_team_selector_item_count(pad);
+  const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
+  if (scroll >= count)
+    return 0;
+  const uint32_t remaining = count - scroll;
+  return remaining < MAIN_MENU_2P_TEAM_VISIBLE_ROWS
+             ? remaining
+             : MAIN_MENU_2P_TEAM_VISIBLE_ROWS;
+}
+
+const char *pes_controller_2p_team_selector_title(uint32_t pad) {
+  if (pad > 1)
+    return "SELECT TEAM";
+  if (main_menu_2p_team_selector_phase[pad] ==
+      MAIN_MENU_2P_TEAM_SELECTOR_TEAM) {
+    const ExhibitionTeamCategory *category =
+        main_menu_2p_team_selector_category(pad);
+    return category ? category->label : "SELECT TEAM";
+  }
+  return "SELECT LEAGUE";
+}
+
+const char *pes_controller_2p_team_selector_label(uint32_t pad,
+                                                  uint32_t index) {
+  if (pad > 1)
+    return "";
+  if (main_menu_2p_team_selector_phase[pad] ==
+      MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE)
+    return index < MAIN_MENU_2P_LEAGUE_COUNT
+               ? exhibition_team_categories[index].label
+               : "";
+  const ExhibitionTeamCategory *category =
+      main_menu_2p_team_selector_category(pad);
+  return category && index < category->team_count
+             ? exhibition_team_name(category->teams[index])
+             : "";
+}
+
+uint32_t pes_controller_2p_team_selector_badge(uint32_t pad,
+                                                uint32_t index) {
+  if (pad > 1)
+    return 0;
+  if (main_menu_2p_team_selector_phase[pad] ==
+      MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE)
+    return index < MAIN_MENU_2P_LEAGUE_COUNT ? 140u + index : 0;
+  const ExhibitionTeamCategory *category =
+      main_menu_2p_team_selector_category(pad);
+  return category && index < category->team_count
+             ? main_menu_2p_team_selector_badge_for_team(category->teams[index])
+             : 0;
+}
+
+uint32_t pes_controller_2p_team_selector_selected_team(uint32_t pad) {
+  if (pad > 1)
+    return 0;
+  return main_menu_2p_team_selector_team[pad];
+}
+
+int pes_controller_2p_team_selector_confirmed(uint32_t pad) {
+  return pad < 2 && main_menu_2p_team_selector_confirmed[pad] != 0;
+}
+
+int pes_controller_2p_team_selector_team_stats(uint32_t pad,
+                                               uint32_t *forward,
+                                               uint32_t *midfield,
+                                               uint32_t *defence,
+                                               uint32_t *grade_half_steps) {
+  if (pad > 1 || main_menu_2p_team_selector_phase[pad] !=
+                     MAIN_MENU_2P_TEAM_SELECTOR_TEAM)
+    return 0;
+  const uint32_t focused_team =
+      main_menu_2p_team_selector_focused_team(pad);
+  if (!focused_team ||
+      __atomic_load_n(&main_menu_2p_team_selector_rating_team[pad],
+                      __ATOMIC_ACQUIRE) != focused_team)
+    return 0;
+  const uint32_t cached_forward = __atomic_load_n(
+      &main_menu_2p_team_selector_rating_forward[pad], __ATOMIC_RELAXED);
+  const uint32_t cached_midfield = __atomic_load_n(
+      &main_menu_2p_team_selector_rating_midfield[pad], __ATOMIC_RELAXED);
+  const uint32_t cached_defence = __atomic_load_n(
+      &main_menu_2p_team_selector_rating_defence[pad], __ATOMIC_RELAXED);
+  const uint32_t cached_grade = __atomic_load_n(
+      &main_menu_2p_team_selector_rating_grade_half_steps[pad],
+      __ATOMIC_RELAXED);
+  if (!cached_forward || !cached_midfield || !cached_defence ||
+      !cached_grade)
+    return 0;
+  if (forward)
+    *forward = cached_forward;
+  if (midfield)
+    *midfield = cached_midfield;
+  if (defence)
+    *defence = cached_defence;
+  if (grade_half_steps)
+    *grade_half_steps = cached_grade;
+  return 1;
 }
 
 #define EXHIBITION_CPU_LEVEL_COUNT 7u
@@ -2712,6 +3229,15 @@ int pes_controller_menu_touch_target(float *normalized_x,
       *normalized_y = 0.18f;
     return 1;
   }
+  if (__atomic_load_n(&main_menu_2p_team_selector_active, __ATOMIC_ACQUIRE)) {
+    // Keep the stock menu inert while the two-pad selector consumes A/B
+    // directly from each controller.
+    if (normalized_x)
+      *normalized_x = 0.50f;
+    if (normalized_y)
+      *normalized_y = 0.05f;
+    return 1;
+  }
   if (pes_main_menu_controller_active()) {
     const uint32_t index = pes_main_menu_focus_index();
     if (index >= 4)
@@ -2797,6 +3323,13 @@ int pes_controller_menu_back_target(float *normalized_x,
       *normalized_y = 0.18f;
     return 1;
   }
+  if (__atomic_load_n(&main_menu_2p_team_selector_active, __ATOMIC_ACQUIRE)) {
+    if (normalized_x)
+      *normalized_x = 0.90f;
+    if (normalized_y)
+      *normalized_y = 0.92f;
+    return 1;
+  }
   if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return 0;
 
@@ -2837,6 +3370,10 @@ void pes_controller_menu_back_pressed(void) {
   }
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     main_menu_video_close();
+    return;
+  }
+  if (__atomic_load_n(&main_menu_2p_team_selector_active, __ATOMIC_ACQUIRE)) {
+    main_menu_2p_team_selector_close();
     return;
   }
   const uint32_t custom_team_phase =
@@ -4515,6 +5052,54 @@ static int main_menu_require_two_controller_slots(int preserve_match_ui) {
   return (connected & 3u) == 3u;
 }
 
+// Start the proven TutorialMatch bootstrap after the custom selector has
+// committed both teams.  This runs on the game/frontend thread (from the
+// Pad::Update hook), not from the HID polling thread where the selector reads
+// controller edges.
+static int main_menu_start_two_player_match(void) {
+  if (!main_menu_require_two_controller_slots(0))
+    return 0;
+  void *listener = exhibition_flow_listener_instance
+                       ? *exhibition_flow_listener_instance
+                       : NULL;
+  if (!listener || !exhibition_flow_direct_set)
+    return 0;
+  const uint32_t connected = pes_controller_native_hid_connected_mask();
+  native_pad_lab_reset();
+  __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_autostart, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_two_player, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_session_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
+  static const char tutorial_flow[] = "MyClub/TutorialMatch";
+  exhibition_flow_direct_set((unsigned char *)listener + 0x118,
+                             tutorial_flow);
+  debugPrintf("native 2P lab: armed custom teams HOME=%u AWAY=%u HID=0x%x\n",
+              __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE),
+              __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE),
+              connected);
+  return 1;
+}
+
+static void main_menu_2p_team_selector_process_pending(void) {
+  if (!__atomic_exchange_n(&main_menu_2p_team_selector_start_pending, 0,
+                           __ATOMIC_ACQ_REL))
+    return;
+  if (!main_menu_start_two_player_match()) {
+    // Keep the user on the selector if the frontend listener is not ready or
+    // a controller disappeared between the final confirm and this tick.
+    __atomic_store_n(&main_menu_2p_team_selector_active, 1,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
+    debugPrintf("native 2P lab: custom selector start deferred\n");
+  }
+}
+
 // Called from the game-thread Pad::Update hook rather than the HID polling
 // thread.  hidLaShowControllerSupport is a synchronous frontend transition,
 // so keeping it on the thread that owns the running match avoids racing the
@@ -4675,6 +5260,9 @@ void pes_main_menu_simplify(void *window) {
   __atomic_store_n(&native_gamepad_lab_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_autostart, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_two_player, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&native_two_player_recovery_pending, 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_info_popup, MAIN_MENU_INFO_CLOSED,
@@ -4757,32 +5345,13 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       debugPrintf("native 2P lab: not armed; two controller slots required\n");
       return 0;
     }
-    const uint32_t connected = pes_controller_native_hid_connected_mask();
-    // Use the same TutorialMatch bootstrap as local Exhibition, but do not
-    // mutate the const native touch event or execute tile zero's handler.
-    // This DirectSet and every native-input flag remain scoped to tile 2.
-    void *listener = exhibition_flow_listener_instance
-                         ? *exhibition_flow_listener_instance
-                         : NULL;
-    if (!listener || !exhibition_flow_direct_set)
-      return 0;
-    static const char tutorial_flow[] = "MyClub/TutorialMatch";
-    native_pad_lab_reset();
-    __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
-    __atomic_store_n(&native_gamepad_lab_autostart, 1, __ATOMIC_RELEASE);
-    __atomic_store_n(&native_gamepad_lab_two_player, 1, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_session_active, 1, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_home_team_id, 108, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_away_team_id, 114, __ATOMIC_RELEASE);
-    __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
-    exhibition_flow_direct_set((unsigned char *)listener + 0x118,
-                               tutorial_flow);
-    debugPrintf("native 2P lab: armed Barcelona(108) HOME/No1 vs "
-                "PSG(114) AWAY/No2 HID=0x%x\n", connected);
+    // Keep the stable two-controller gate, then let both pads choose their
+    // own league and club before arming TutorialMatch.
+    if (!__atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE))
+      __atomic_store_n(&exhibition_home_team_id, 108, __ATOMIC_RELEASE);
+    if (!__atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE))
+      __atomic_store_n(&exhibition_away_team_id, 114, __ATOMIC_RELEASE);
+    main_menu_2p_team_selector_open();
     return 0;
   }
 
@@ -5643,6 +6212,8 @@ int pes_controller_menu_active(void) {
              MAIN_MENU_INFO_CLOSED ||
          __atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE) ||
+         __atomic_load_n(&main_menu_2p_team_selector_active,
+                         __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_team_picker_open, __ATOMIC_ACQUIRE) ||
          __atomic_load_n(&exhibition_cpu_level_popup_open, __ATOMIC_ACQUIRE) ||
@@ -8109,6 +8680,8 @@ static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
 // Called on cobra's game thread at the end of Pad::Update's clear/touch phase,
 // immediately before the game computes clicked/released/repeated edges.
 uintptr_t cobra_pad_apply_input(void *pad_ptr) {
+  main_menu_2p_team_selector_refresh_ratings();
+  main_menu_2p_team_selector_process_pending();
   // Cobra::Pad::Update runs on the match game thread every frame, including
   // frames where PauseButton itself is not scheduled. Consume the frontend
   // request here first; the PauseButton wrapper remains a UI-thread fallback.
@@ -8747,6 +9320,12 @@ void install_ue4_hooks(so_module *module) {
   exhibition_get_player_overall =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb11utilitycore16GetPlayerOverAllERKNS_6PlayerERK8PositionNS1_13ConditionTypeE");
+  exhibition_get_position_overall =
+      (void *)so_try_find_addr_rx(module,
+          "_ZN5tmpdb4util18GetPositionOverAllERKN6common6TeamIdE13BroadRoleKind");
+  exhibition_overall_to_grade =
+      (void *)so_try_find_addr_rx(module,
+          "_ZN9game_mode18convOverallToGradeEh");
   exhibition_strategy_main_resume = strategy_main_runtime + 0x10;
   hook_arm64(strategy_main,
              (uintptr_t)&pes_exhibition_strategy_main_hook);
@@ -8814,7 +9393,8 @@ void install_ue4_hooks(so_module *module) {
                pes_exhibition_strategy_footer);
   debugPrintf("UE4 hook: Exhibition master roster manager=%p updateTeam=%p "
               "updatePlayer=%p getPlayerId=%p getMatchTeam=%p "
-              "setUser=%p getOnlineParam=%p getUser=%p getSide=%p\n",
+              "setUser=%p getOnlineParam=%p getUser=%p getSide=%p "
+              "positionOVR=%p grade=%p\n",
               exhibition_tmpdb_manager_get_instance,
               exhibition_commonwork_update_team,
               exhibition_commonwork_update_player,
@@ -8823,7 +9403,9 @@ void install_ue4_hooks(so_module *module) {
               exhibition_tmpdb_match_set_user_id,
               exhibition_online_parameter_get_instance,
               exhibition_parameter_common_get_user_id,
-              exhibition_get_match_my_side);
+              exhibition_get_match_my_side,
+              exhibition_get_position_overall,
+              exhibition_overall_to_grade);
   debugPrintf("UE4 hook: Exhibition uniforms check=%p getUni=%p\n",
               exhibition_check_uniform, exhibition_match_get_uni_id);
 

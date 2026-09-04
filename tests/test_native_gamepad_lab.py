@@ -13,7 +13,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         cls.hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
         cls.shim = (ROOT/'source/android_shim.c').read_text(encoding='utf-8')
 
-    def test_tile_requires_two_hid_slots_then_starts_fixed_2p_match(self):
+    def test_tile_requires_two_hid_slots_then_opens_custom_2p_team_selector(self):
         choice = re.search(r'if \(choice == 2\) \{(.*?)\n  \}',
                            self.hooks, re.S).group(1)
         gate = re.search(
@@ -27,12 +27,131 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('main_menu_apply_focus(2)', gate)
         self.assertIn('main_menu_require_two_controller_slots(0)', choice)
         self.assertNotIn('MAIN_MENU_INFO_TWO_PLAYER', choice)
-        self.assertIn('native_gamepad_lab_active', choice)
-        self.assertIn('native_gamepad_lab_two_player', choice)
-        self.assertIn('exhibition_home_team_id, 108', choice)
-        self.assertIn('exhibition_away_team_id, 114', choice)
-        self.assertIn('MyClub/TutorialMatch', choice)
-        self.assertIn('exhibition_flow_direct_set', choice)
+        self.assertIn('main_menu_2p_team_selector_open()', choice)
+        self.assertNotIn('native_gamepad_lab_active', choice)
+        self.assertNotIn('MyClub/TutorialMatch', choice)
+
+    def test_custom_2p_selector_has_independent_pad_phase_focus_and_confirm(self):
+        selector = re.search(
+            r'void pes_controller_2p_team_selector_pad_event\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('pad > 1', selector)
+        self.assertIn('main_menu_2p_team_selector_phase[pad]', selector)
+        self.assertIn('main_menu_2p_team_selector_confirm(pad)', selector)
+        self.assertIn('main_menu_2p_team_selector_close()', selector)
+        self.assertIn('main_menu_2p_team_selector_start_pending', self.hooks)
+        starter = re.search(
+            r'static void main_menu_2p_team_selector_process_pending\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('main_menu_start_two_player_match()', starter)
+        self.assertIn('pes_controller_2p_team_selector_pad_event', self.shim)
+
+    def test_custom_2p_selector_is_pc_style_carousel_and_touch_isolated(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        selector = re.search(
+            r'if \(custom_2p_team_selector\) \{(.*?)'
+            r'\} else if \(custom_team_popup\)', overlay, re.S).group(1)
+        self.assertIn('PES-PC-style dual carousel', selector)
+        self.assertIn('Deliberately no side-container layer', selector)
+        self.assertIn('const float small_row_h = row_h * 0.25f;', selector)
+        self.assertIn('const float row_confirm_y = panel_y + header_h;',
+                      selector)
+        self.assertIn('custom_confirm_bar_quads += emit_rect(', selector)
+        self.assertIn('custom_focus_text_quads', selector)
+        self.assertIn('custom_ok_text_quads', selector)
+        self.assertIn('team_selector_confirm_progress[pad]', overlay)
+        self.assertIn('240000000.0f', overlay)
+        self.assertIn('custom_selected_quads += emit_rect(', selector)
+        self.assertIn('custom_backdrop_quads = emit_image_rect(', selector)
+        self.assertNotIn('custom_selected_quads += emit_round_rect_quad(',
+                         selector)
+        self.assertIn('const int relative = (int)index - (int)focus;',
+                      selector)
+        self.assertIn('feature_size', selector)
+        self.assertIn('custom_white_text_first_quad', selector)
+        self.assertIn('pad == 0 ? "HOME" : "AWAY"', selector)
+        self.assertIn('EFOOTBALL_FONT_STENCIL', selector)
+        self.assertIn('small_text_gh, EFOOTBALL_FONT_BOLD', selector)
+        self.assertIn('"B", 1, 0.745f', selector)
+        self.assertIn('"A", 1, 0.875f', selector)
+        self.assertIn('controller_team_selector_buttons', self.shim)
+        self.assertIn('previous_team_selector_buttons[0]', self.shim)
+        self.assertIn('#include "team_select_background.h"', overlay)
+        self.assertIn('gl.team_select_bg_tex', overlay)
+        self.assertIn('GL_UNSIGNED_SHORT_5_6_5', overlay)
+        background = (ROOT/'source/team_select_background.h').read_text(
+            encoding='ascii', errors='strict')
+        self.assertIn('#define TEAM_SELECT_BG_W 1280', background)
+        self.assertIn('#define TEAM_SELECT_BG_H 720', background)
+        self.assertIn('!two_player_team_selector_active &&\n'
+                      '      physical_active', self.shim)
+        self.assertIn('else if (two_player_team_selector_active)\n'
+                      '    disable_native_pad_bridge();', self.shim)
+
+    def test_custom_2p_selector_locks_ready_side_and_exposes_all_groups(self):
+        self.assertIn(
+            '#define MAIN_MENU_2P_LEAGUE_COUNT EXHIBITION_TEAM_CATEGORY_COUNT',
+            self.hooks)
+        handler = re.search(
+            r'void pes_controller_2p_team_selector_pad_event\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('main_menu_2p_team_selector_confirmed[pad]', handler)
+        self.assertIn('if (pressed & (1u << 0))', handler)
+        self.assertIn('return;', handler)
+        atlas = (ROOT/'source/badge_atlas.h').read_text(
+            encoding='ascii', errors='strict')
+        self.assertIn('#define BADGE_CELL_SIZE 128', atlas)
+
+    def test_custom_2p_selector_renders_native_team_ovr_bars_and_stars(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        header = (ROOT/'source/ue4_hooks.h').read_text(encoding='utf-8')
+        self.assertIn(
+            '_ZN5tmpdb4util18GetPositionOverAllERKN6common6TeamIdE13BroadRoleKind',
+            self.hooks)
+        self.assertIn('_ZN9game_mode18convOverallToGradeEh', self.hooks)
+        self.assertIn('main_menu_2p_team_selector_refresh_ratings();',
+                      self.hooks)
+        self.assertIn('const uint32_t native_team_id = team_id << 14;',
+                      self.hooks)
+        self.assertIn('defence = exhibition_get_position_overall(&native_team_id, 0u);',
+                      self.hooks)
+        self.assertIn('midfield = exhibition_get_position_overall(&native_team_id, 1u);',
+                      self.hooks)
+        self.assertIn('forward = exhibition_get_position_overall(&native_team_id, 2u);',
+                      self.hooks)
+        self.assertIn('pes_controller_2p_team_selector_team_stats', header)
+        self.assertIn('team_stat_colors[3][3]', overlay)
+        self.assertIn('{"FW", "MF", "DF"}', overlay)
+        self.assertIn('custom_team_stat_track_first_quad', overlay)
+        self.assertIn('custom_team_stat_fill_first_quad', overlay)
+        self.assertIn('#include "team_rating_star.h"', overlay)
+        self.assertIn('gl.team_rating_star_tex', overlay)
+        self.assertIn('GL_LINEAR_MIPMAP_LINEAR', overlay)
+        self.assertIn('emit_star_mask(', overlay)
+        self.assertIn('team_selector_grade_half_steps', overlay)
+
+    def test_custom_2p_selector_reopens_as_a_fresh_league_session(self):
+        opener = re.search(
+            r'static void main_menu_2p_team_selector_open\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        closer = re.search(
+            r'static void main_menu_2p_team_selector_close\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        for body in (opener, closer):
+            self.assertIn('main_menu_2p_team_selector_league[pad] = 0;', body)
+            self.assertIn('main_menu_2p_team_selector_team[pad] = 0;', body)
+            self.assertIn('main_menu_2p_team_selector_focus[pad] = 0;', body)
+            self.assertIn('main_menu_2p_team_selector_scroll[pad] = 0;', body)
+        self.assertNotIn('main_menu_2p_team_selector_sync_team_leagues',
+                         self.hooks)
+        self.assertIn('main_menu_2p_team_selector_input_armed[pad] = 0;',
+                      opener)
+        handler = re.search(
+            r'void pes_controller_2p_team_selector_pad_event\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('if (!main_menu_2p_team_selector_input_armed[pad])',
+                      handler)
+        self.assertIn('if (!buttons)', handler)
 
     def test_midmatch_disconnect_reopens_native_grip_order_until_two_slots(self):
         gate = re.search(
@@ -338,7 +457,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.16.21', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.17.12', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)

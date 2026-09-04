@@ -23,6 +23,8 @@
 #include "badge_atlas.h"
 #include "efootball_font_atlas.h"
 #include "font_atlas.h"
+#include "team_rating_star.h"
+#include "team_select_background.h"
 #include "ue4_hooks.h"
 
 // text-overlay GL objects, created lazily on first draw
@@ -32,6 +34,8 @@ static struct {
   GLuint tex;
   GLuint efootball_tex;
   GLuint badge_tex;
+  GLuint team_rating_star_tex;
+  GLuint team_select_bg_tex;
   GLuint vbo;
   GLint loc_pos, loc_uv, loc_tex, loc_off, loc_color, loc_solid, loc_image;
   GLint loc_circle, loc_circle_feather;
@@ -163,6 +167,8 @@ static int gl_init(void) {
   glGenTextures(1, &gl.tex);
   glGenTextures(1, &gl.efootball_tex);
   glGenTextures(1, &gl.badge_tex);
+  glGenTextures(1, &gl.team_rating_star_tex);
+  glGenTextures(1, &gl.team_select_bg_tex);
   glGenBuffers(1, &gl.vbo);
   return 1;
 }
@@ -205,6 +211,25 @@ static void atlas_ready(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, BADGE_ATLAS_W, BADGE_ATLAS_H, 0,
                GL_RGBA, GL_UNSIGNED_BYTE, badge_atlas_rgba8);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, gl.team_rating_star_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, TEAM_RATING_STAR_W,
+               TEAM_RATING_STAR_H, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+               team_rating_star_luminance);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, TEAM_SELECT_BG_W,
+               TEAM_SELECT_BG_H, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5,
+               team_select_background_rgb565);
   glGenerateMipmap(GL_TEXTURE_2D);
   glPixelStorei(GL_UNPACK_ALIGNMENT, prev_align);
   gl.uploaded = 1;
@@ -376,6 +401,24 @@ static int emit_rect(float x, float y, float width, float height,
   return 1;
 }
 
+// Solid rectangles intentionally pin every UV to the atlas origin. A
+// full-screen image needs its own quad so the complete texture is sampled
+// instead of stretching the top-left pixel across the screen.
+static int emit_image_rect(float x, float y, float width, float height,
+                           GLfloat *verts) {
+  const float x0 = x * 2.0f / (float)screen_width - 1.0f;
+  const float x1 = (x + width) * 2.0f / (float)screen_width - 1.0f;
+  const float y0 = 1.0f - y * 2.0f / (float)screen_height;
+  const float y1 = 1.0f - (y + height) * 2.0f / (float)screen_height;
+  const GLfloat quad[24] = {
+      x0, y0, 0.0f, 0.0f, x1, y0, 1.0f, 0.0f,
+      x0, y1, 0.0f, 1.0f, x1, y0, 1.0f, 0.0f,
+      x1, y1, 1.0f, 1.0f, x0, y1, 0.0f, 1.0f,
+  };
+  memcpy(verts, quad, sizeof(quad));
+  return 1;
+}
+
 static int emit_segment(float x0, float y0, float x1, float y1,
                         float thickness, GLfloat *verts) {
   const float dx = x1 - x0;
@@ -450,6 +493,28 @@ static int emit_triangle(float x0, float y0, float x1, float y1, float x2,
       1.0f - y0 * 2.0f / (float)screen_height, 0.0f, 0.0f,
   };
   memcpy(verts, triangle, sizeof(triangle));
+  return 1;
+}
+
+// The source mask is supersampled and downscaled offline. Drawing it as one
+// linearly filtered quad gives the small Switch UI stars clean edges; u_limit
+// also lets a half-star crop both geometry and UVs without a hard center seam.
+static int emit_star_mask(float center_x, float center_y, float outer_radius,
+                          float u_limit, GLfloat *verts) {
+  const float size = outer_radius * 2.0f / 0.91f;
+  const float x = center_x - size * 0.5f;
+  const float y = center_y - size * 0.5f;
+  const float width = size * u_limit;
+  const float x0 = x * 2.0f / (float)screen_width - 1.0f;
+  const float x1 = (x + width) * 2.0f / (float)screen_width - 1.0f;
+  const float y0 = 1.0f - y * 2.0f / (float)screen_height;
+  const float y1 = 1.0f - (y + size) * 2.0f / (float)screen_height;
+  const GLfloat quad[24] = {
+      x0, y0, 0.0f, 0.0f, x1, y0, u_limit, 0.0f,
+      x0, y1, 0.0f, 1.0f, x1, y0, u_limit, 0.0f,
+      x1, y1, u_limit, 1.0f, x0, y1, 0.0f, 1.0f,
+  };
+  memcpy(verts, quad, sizeof(quad));
   return 1;
 }
 
@@ -707,9 +772,60 @@ static void overlay_render(void) {
   const int custom_video_settings_popup =
       pes_controller_custom_video_settings_active();
   const int custom_info_popup = pes_controller_custom_info_popup_active();
+  const int custom_2p_team_selector =
+      pes_controller_2p_team_selector_active();
   const int custom_popup =
       custom_team_popup || custom_cpu_popup || custom_settings_popup ||
-      custom_video_settings_popup || custom_info_popup || set_piece_selector;
+      custom_video_settings_popup || custom_info_popup || set_piece_selector ||
+      custom_2p_team_selector;
+  // Keep the ready transition entirely presentation-side. The controller
+  // state remains a simple lock while the focused card eases toward its
+  // header for the PES-style confirmed layout.
+  static int team_selector_was_active = 0;
+  static int team_selector_previous_confirmed[2] = {0, 0};
+  static u64 team_selector_confirm_started_tick[2] = {0, 0};
+  float team_selector_confirm_progress[2] = {0.0f, 0.0f};
+  uint32_t team_selector_ratings[2][3] = {{0}}; // FW, MF, DF
+  uint32_t team_selector_grade_half_steps[2] = {0, 0};
+  int team_selector_stats_valid[2] = {0, 0};
+  if (custom_2p_team_selector) {
+    const u64 now = armGetSystemTick();
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      const int confirmed =
+          pes_controller_2p_team_selector_confirmed(pad);
+      if (confirmed &&
+          (!team_selector_was_active ||
+           !team_selector_previous_confirmed[pad]))
+        team_selector_confirm_started_tick[pad] = now;
+      if (!confirmed)
+        team_selector_confirm_started_tick[pad] = 0;
+      if (confirmed) {
+        float t = team_selector_confirm_started_tick[pad]
+                      ? (float)armTicksToNs(
+                            now - team_selector_confirm_started_tick[pad]) /
+                            240000000.0f
+                      : 1.0f;
+        if (t > 1.0f)
+          t = 1.0f;
+        // Smoothstep avoids the mechanical stop of a linear slide.
+        team_selector_confirm_progress[pad] = t * t * (3.0f - 2.0f * t);
+      }
+      team_selector_previous_confirmed[pad] = confirmed;
+      team_selector_stats_valid[pad] =
+          pes_controller_2p_team_selector_team_stats(
+              pad, &team_selector_ratings[pad][0],
+              &team_selector_ratings[pad][1],
+              &team_selector_ratings[pad][2],
+              &team_selector_grade_half_steps[pad]);
+    }
+    team_selector_was_active = 1;
+  } else {
+    team_selector_was_active = 0;
+    memset(team_selector_previous_confirmed, 0,
+           sizeof(team_selector_previous_confirmed));
+    memset(team_selector_confirm_started_tick, 0,
+           sizeof(team_selector_confirm_started_tick));
+  }
   float prompt_x = 0.0f;
   float prompt_y = 0.0f;
   const int start_prompt =
@@ -790,7 +906,21 @@ static void overlay_render(void) {
   int custom_header_round_quads = 0;
   int custom_header_fill_quads = 0;
   int custom_selected_quads = 0;
+  int custom_confirm_bar_quads = 0;
   int custom_rule_quads = 0;
+  int custom_team_stat_track_first_quad[2][3] = {{0}};
+  int custom_team_stat_track_quads[2][3] = {{0}};
+  int custom_team_stat_fill_first_quad[2][3] = {{0}};
+  int custom_team_stat_fill_quads[2][3] = {{0}};
+  RoundedRectStyle custom_team_stat_track_style = {0};
+  RoundedRectStyle custom_team_stat_fill_style[2][3] = {{{0}}};
+  int custom_team_star_border_first_quad = 0;
+  int custom_team_star_border_quads = 0;
+  int custom_team_star_empty_first_quad = 0;
+  int custom_team_star_empty_quads = 0;
+  int custom_team_star_fill_first_quad = 0;
+  int custom_team_star_fill_quads = 0;
+  int custom_team_stat_shape_quads = 0;
   int custom_value_plate_quads = 0;
   int custom_arrow_quads = 0;
   int custom_badge_plate_quads = 0;
@@ -801,6 +931,10 @@ static void overlay_render(void) {
   int custom_icon_quads = 0;
   int custom_dark_text_first_quad = 0;
   int custom_dark_text_quads = 0;
+  int custom_focus_text_first_quad = 0;
+  int custom_focus_text_quads = 0;
+  int custom_ok_text_first_quad = 0;
+  int custom_ok_text_quads = 0;
   int custom_rating_first_quad[10] = {0};
   int custom_rating_quads[10] = {0};
   int selector_position_first_quad[4] = {0};
@@ -841,7 +975,440 @@ static void overlay_render(void) {
   RoundedRectStyle custom_value_plate_style = {0};
   RoundedRectStyle custom_action_button_style = {0};
   RoundedRectStyle custom_back_button_style = {0};
-  if (custom_team_popup) {
+  if (custom_2p_team_selector) {
+    // PES-PC-style dual carousel: the focused entry expands into the large
+    // centre card, with its two neighbours above and below. Each controller
+    // owns one half and the opaque backdrop fully replaces the stock page.
+    const float panel_y = 0.040f * (float)screen_height;
+    const float panel_w = 0.430f * (float)screen_width;
+    const float panel_x[2] = {0.035f * (float)screen_width,
+                              0.535f * (float)screen_width};
+    const float header_h = 0.120f * (float)screen_height;
+    const float row_x_inset = 0.0f;
+    const float row_w = panel_w - row_x_inset * 2.0f;
+    const float row_h = 0.340f * (float)screen_height;
+    const float row_y0 = 0.350f * (float)screen_height;
+    const float row_confirm_y = panel_y + header_h;
+    const float confirm_bar_h = 0.085f * (float)screen_height;
+    float focused_y[2] = {row_y0, row_y0};
+    for (uint32_t pad = 0; pad < 2; pad++)
+      focused_y[pad] =
+          row_y0 + (row_confirm_y - row_y0) *
+                        team_selector_confirm_progress[pad];
+    // Four compact neighbours use exactly one quarter of the focused card.
+    const float small_row_h = row_h * 0.25f;
+    const float team_badge_size = 0.185f * (float)screen_height;
+    const float team_badge_x_offset = 0.030f * (float)screen_width;
+    const float team_badge_y_offset = 0.100f * (float)screen_height;
+    const float team_stat_x_offset = 0.170f * (float)screen_width;
+    const float team_stat_y_offset = 0.090f * (float)screen_height;
+    const float team_stat_row_step = 0.066f * (float)screen_height;
+    const float team_stat_bar_w = 0.225f * (float)screen_width;
+    const float team_stat_track_h = 0.012f * (float)screen_height;
+    const float team_stat_fill_h = 0.0075f * (float)screen_height;
+    const float team_stat_bar_y_offset = 0.026f * (float)screen_height;
+    const float team_star_y_offset = 0.302f * (float)screen_height;
+    const float team_star_outer_radius = 0.0180f * (float)screen_height;
+    const float team_star_fill_outer = team_star_outer_radius * 0.82f;
+
+    custom_backdrop_quads = emit_image_rect(
+        0.0f, 0.0f, (float)screen_width, (float)screen_height,
+        verts + quads * 24);
+    quads += custom_backdrop_quads;
+    // Deliberately no side-container layer: backdrop -> header -> carousel.
+    custom_panel_style = (RoundedRectStyle){0};
+    custom_header_style = (RoundedRectStyle){0};
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      int header_quads = emit_rect(
+          panel_x[pad], panel_y, panel_w, header_h, verts + quads * 24);
+      custom_header_round_quads += header_quads;
+      quads += header_quads;
+    }
+    // A plain rectangle keeps the five carousel blocks perfectly joined.
+    custom_selected_style = (RoundedRectStyle){0};
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      custom_selected_quads += emit_rect(
+          panel_x[pad] + row_x_inset, focused_y[pad], row_w, row_h,
+          verts + quads * 24);
+      quads++;
+    }
+    // The ready state gets its own full-width strip. It is deliberately not
+    // painted over the badge card, matching the detached OK row in PES PC.
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (!pes_controller_2p_team_selector_confirmed(pad))
+        continue;
+      custom_confirm_bar_quads += emit_rect(
+          panel_x[pad] + row_x_inset, focused_y[pad] + row_h, row_w,
+          confirm_bar_h, verts + quads * 24);
+      quads++;
+    }
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (pes_controller_2p_team_selector_confirmed(pad))
+        continue;
+      const uint32_t focus = pes_controller_2p_team_selector_focus(pad);
+      const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
+      const uint32_t visible =
+          pes_controller_2p_team_selector_visible_count(pad);
+      for (uint32_t item = 0; item < visible; item++) {
+        const int relative = (int)(scroll + item) - (int)focus;
+        if (!relative || relative < -2 || relative > 2)
+          continue;
+        const float small_y =
+            (relative < 0 ? 0.180f + (float)(relative + 2) * 0.085f
+                          : 0.690f + (float)(relative - 1) * 0.085f) *
+            (float)screen_height;
+        custom_rule_quads += emit_rect(
+            panel_x[pad] + row_x_inset, small_y, row_w, small_row_h,
+            verts + quads * 24);
+        quads++;
+      }
+    }
+
+    // Team cards use the mobile database's positional OVR values. Tracks and
+    // fills remain separate rounded quads so FW/MF/DF can keep the PC color
+    // language without baking another texture atlas.
+    custom_team_stat_track_style = (RoundedRectStyle){
+        team_stat_bar_w, team_stat_track_h, team_stat_track_h * 0.5f};
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (pes_controller_2p_team_selector_phase(pad) !=
+              PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
+          !team_selector_stats_valid[pad])
+        continue;
+      const float stat_x = panel_x[pad] + team_stat_x_offset;
+      for (uint32_t role = 0; role < 3; role++) {
+        const float stat_y = focused_y[pad] + team_stat_y_offset +
+                             (float)role * team_stat_row_step;
+        const float track_y = stat_y + team_stat_bar_y_offset;
+        custom_team_stat_track_first_quad[pad][role] = quads;
+        const int track_quads = emit_round_rect_quad(
+            stat_x, track_y, team_stat_bar_w, team_stat_track_h,
+            verts + quads * 24);
+        custom_team_stat_track_quads[pad][role] = track_quads;
+        custom_team_stat_shape_quads += track_quads;
+        quads += track_quads;
+
+        float fill_w = team_stat_bar_w *
+                       (float)team_selector_ratings[pad][role] / 100.0f;
+        if (fill_w < team_stat_fill_h)
+          fill_w = team_stat_fill_h;
+        if (fill_w > team_stat_bar_w)
+          fill_w = team_stat_bar_w;
+        const float fill_y =
+            track_y + (team_stat_track_h - team_stat_fill_h) * 0.5f;
+        custom_team_stat_fill_first_quad[pad][role] = quads;
+        const int fill_quads = emit_round_rect_quad(
+            stat_x, fill_y, fill_w, team_stat_fill_h,
+            verts + quads * 24);
+        custom_team_stat_fill_quads[pad][role] = fill_quads;
+        custom_team_stat_fill_style[pad][role] = (RoundedRectStyle){
+            fill_w, team_stat_fill_h, team_stat_fill_h * 0.5f};
+        custom_team_stat_shape_quads += fill_quads;
+        quads += fill_quads;
+      }
+    }
+
+    custom_team_star_border_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (pes_controller_2p_team_selector_phase(pad) !=
+              PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
+          !team_selector_stats_valid[pad])
+        continue;
+      const float stat_x = panel_x[pad] + team_stat_x_offset;
+      const float star_y = focused_y[pad] + team_star_y_offset;
+      for (uint32_t star = 0; star < 5; star++) {
+        const float star_x = stat_x +
+            team_stat_bar_w * ((float)star + 0.5f) / 5.0f;
+        const int star_quads = emit_star_mask(
+            star_x, star_y, team_star_outer_radius, 1.0f,
+            verts + quads * 24);
+        custom_team_star_border_quads += star_quads;
+        custom_team_stat_shape_quads += star_quads;
+        quads += star_quads;
+      }
+    }
+    custom_team_star_empty_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (pes_controller_2p_team_selector_phase(pad) !=
+              PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
+          !team_selector_stats_valid[pad])
+        continue;
+      const float stat_x = panel_x[pad] + team_stat_x_offset;
+      const float star_y = focused_y[pad] + team_star_y_offset;
+      for (uint32_t star = 0; star < 5; star++) {
+        const float star_x = stat_x +
+            team_stat_bar_w * ((float)star + 0.5f) / 5.0f;
+        const int star_quads = emit_star_mask(
+            star_x, star_y, team_star_fill_outer, 1.0f,
+            verts + quads * 24);
+        custom_team_star_empty_quads += star_quads;
+        custom_team_stat_shape_quads += star_quads;
+        quads += star_quads;
+      }
+    }
+    custom_team_star_fill_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (pes_controller_2p_team_selector_phase(pad) !=
+              PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
+          !team_selector_stats_valid[pad])
+        continue;
+      const uint32_t full_stars =
+          team_selector_grade_half_steps[pad] / 2u;
+      const uint32_t half_star =
+          team_selector_grade_half_steps[pad] & 1u;
+      const float stat_x = panel_x[pad] + team_stat_x_offset;
+      const float star_y = focused_y[pad] + team_star_y_offset;
+      for (uint32_t star = 0; star < 5; star++) {
+        const float star_x = stat_x +
+            team_stat_bar_w * ((float)star + 0.5f) / 5.0f;
+        int star_quads = 0;
+        if (star < full_stars)
+          star_quads = emit_star_mask(
+              star_x, star_y, team_star_fill_outer, 1.0f,
+              verts + quads * 24);
+        else if (star == full_stars && half_star)
+          star_quads = emit_star_mask(
+              star_x, star_y, team_star_fill_outer, 0.5f,
+              verts + quads * 24);
+        custom_team_star_fill_quads += star_quads;
+        custom_team_stat_shape_quads += star_quads;
+        quads += star_quads;
+      }
+    }
+
+    // Emit footer key circles before badge textures because
+    // the shared draw pass renders those categories in that order.
+    const float helper_y = 0.958f * (float)screen_height;
+    const float helper_r = 0.021f * (float)screen_height;
+    custom_action_key_bg_quads += emit_circle_quad(
+        0.745f * (float)screen_width, helper_y, helper_r,
+        verts + quads * 24);
+    quads++;
+    custom_action_key_bg_quads += emit_circle_quad(
+        0.875f * (float)screen_width, helper_y, helper_r,
+        verts + quads * 24);
+    quads++;
+
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      const uint32_t focus = pes_controller_2p_team_selector_focus(pad);
+      const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
+      const uint32_t visible =
+          pes_controller_2p_team_selector_visible_count(pad);
+      const int team_phase =
+          pes_controller_2p_team_selector_phase(pad) ==
+          PES_2P_TEAM_SELECTOR_PHASE_TEAM;
+      const float feature_size = team_phase
+                                     ? team_badge_size
+                                     : 0.205f * (float)screen_height;
+      const float feature_x = team_phase
+                                  ? panel_x[pad] + team_badge_x_offset
+                                  : panel_x[pad] + panel_w * 0.5f -
+                                        feature_size * 0.5f;
+      const float feature_y = team_phase
+                                  ? focused_y[pad] + team_badge_y_offset
+                                  : focused_y[pad] +
+                                        0.105f * (float)screen_height;
+      custom_icon_quads += emit_badge(
+          pes_controller_2p_team_selector_badge(pad, focus),
+          feature_x, feature_y, feature_size, feature_size,
+          verts + quads * 24);
+      quads++;
+      if (pes_controller_2p_team_selector_confirmed(pad))
+        continue;
+      for (uint32_t item = 0; item < visible; item++) {
+        const int relative = (int)(scroll + item) - (int)focus;
+        if (!relative || relative < -2 || relative > 2)
+          continue;
+        const float small_y =
+            (relative < 0 ? 0.180f + (float)(relative + 2) * 0.085f
+                          : 0.690f + (float)(relative - 1) * 0.085f) *
+            (float)screen_height;
+        const float icon_size = 0.055f * (float)screen_height;
+        const float x = panel_x[pad] + row_x_inset +
+                        0.010f * (float)screen_width;
+        const float y = small_y + (small_row_h - icon_size) * 0.5f;
+        custom_icon_quads += emit_badge(
+            pes_controller_2p_team_selector_badge(pad, scroll + item), x, y,
+            icon_size, icon_size, verts + quads * 24);
+        quads++;
+      }
+    }
+
+    const float text_gh = (float)screen_height / 52.0f;
+    const float small_text_gh = (float)screen_height / 57.0f;
+    const float feature_text_gh = (float)screen_height / 31.0f;
+    const float stat_text_gh = (float)screen_height / 43.0f;
+    custom_dark_text_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      const float left = panel_x[pad];
+      const uint32_t focus = pes_controller_2p_team_selector_focus(pad);
+      const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
+      const uint32_t visible =
+          pes_controller_2p_team_selector_visible_count(pad);
+      const char *feature =
+          pes_controller_2p_team_selector_label(pad, focus);
+      int line_quads = 0;
+      if (pes_controller_2p_team_selector_confirmed(pad)) {
+        line_quads = emit_efootball_line(
+            feature, (int)strlen(feature), left + row_x_inset +
+                                                0.015f * (float)screen_width,
+            focused_y[pad] + 0.020f * (float)screen_height,
+            feature_text_gh, EFOOTBALL_FONT_STENCIL,
+            verts + quads * 24);
+        custom_dark_text_quads += line_quads;
+        quads += line_quads;
+        line_quads = emit_efootball_line(
+            feature, (int)strlen(feature), left + row_x_inset +
+                                                0.0158f * (float)screen_width,
+            focused_y[pad] + 0.020f * (float)screen_height,
+            feature_text_gh, EFOOTBALL_FONT_STENCIL,
+            verts + quads * 24);
+        custom_dark_text_quads += line_quads;
+        quads += line_quads;
+      }
+      if (pes_controller_2p_team_selector_phase(pad) ==
+              PES_2P_TEAM_SELECTOR_PHASE_TEAM &&
+          team_selector_stats_valid[pad]) {
+        static const char *const role_labels[3] = {"FW", "MF", "DF"};
+        const float stat_x = left + team_stat_x_offset;
+        for (uint32_t role = 0; role < 3; role++) {
+          const float stat_y = focused_y[pad] + team_stat_y_offset +
+                               (float)role * team_stat_row_step;
+          line_quads = emit_efootball_line(
+              role_labels[role], 2, stat_x, stat_y, stat_text_gh,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          custom_dark_text_quads += line_quads;
+          quads += line_quads;
+          char rating_text[4];
+          snprintf(rating_text, sizeof(rating_text), "%u",
+                   team_selector_ratings[pad][role]);
+          const int rating_length = (int)strlen(rating_text);
+          const float rating_width = measure_efootball_line(
+              rating_text, rating_length, stat_text_gh,
+              EFOOTBALL_FONT_BOLD);
+          line_quads = emit_efootball_line(
+              rating_text, rating_length,
+              stat_x + team_stat_bar_w - rating_width, stat_y,
+              stat_text_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          custom_dark_text_quads += line_quads;
+          quads += line_quads;
+        }
+      }
+      for (uint32_t item = 0;
+           !pes_controller_2p_team_selector_confirmed(pad) && item < visible;
+           item++) {
+        const uint32_t index = scroll + item;
+        const int relative = (int)index - (int)focus;
+        if (!relative || relative < -2 || relative > 2)
+          continue;
+        const float small_y =
+            (relative < 0 ? 0.180f + (float)(relative + 2) * 0.085f
+                          : 0.690f + (float)(relative - 1) * 0.085f) *
+            (float)screen_height;
+        const char *label =
+            pes_controller_2p_team_selector_label(pad, index);
+        line_quads = emit_efootball_line(
+            label, (int)strlen(label), left + row_x_inset +
+                                            0.052f * (float)screen_width,
+            small_y + (small_row_h - small_text_gh) * 0.5f,
+            small_text_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        custom_dark_text_quads += line_quads;
+        quads += line_quads;
+      }
+    }
+
+    // While browsing, the focused team/league name is the red accent. Once
+    // confirmed it moves back into the neutral text pass above.
+    custom_focus_text_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (pes_controller_2p_team_selector_confirmed(pad))
+        continue;
+      const char *feature = pes_controller_2p_team_selector_label(
+          pad, pes_controller_2p_team_selector_focus(pad));
+      const float feature_x = panel_x[pad] + row_x_inset +
+                              0.015f * (float)screen_width;
+      int line_quads = emit_efootball_line(
+          feature, (int)strlen(feature), feature_x,
+          focused_y[pad] + 0.020f * (float)screen_height,
+          feature_text_gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      custom_focus_text_quads += line_quads;
+      quads += line_quads;
+      line_quads = emit_efootball_line(
+          feature, (int)strlen(feature),
+          feature_x + 0.0008f * (float)screen_width,
+          focused_y[pad] + 0.020f * (float)screen_height,
+          feature_text_gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      custom_focus_text_quads += line_quads;
+      quads += line_quads;
+    }
+
+    custom_ok_text_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      if (!pes_controller_2p_team_selector_confirmed(pad))
+        continue;
+      static const char ok[] = "OK";
+      const float ok_width = measure_efootball_line(
+          ok, 2, feature_text_gh, EFOOTBALL_FONT_BOLD);
+      const int line_quads = emit_efootball_line(
+          ok, 2, panel_x[pad] + panel_w * 0.5f - ok_width * 0.5f,
+          focused_y[pad] + row_h +
+              (confirm_bar_h - feature_text_gh) * 0.5f,
+          feature_text_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      custom_ok_text_quads += line_quads;
+      quads += line_quads;
+    }
+
+    custom_white_text_first_quad = quads;
+    for (uint32_t pad = 0; pad < 2; pad++) {
+      const float left = panel_x[pad];
+      const char *player = pad == 0 ? "HOME" : "AWAY";
+      const float player_gh = (float)screen_height / 29.0f;
+      float line_width = measure_efootball_line(
+          player, (int)strlen(player), player_gh, EFOOTBALL_FONT_BOLD);
+      int line_quads = emit_efootball_line(
+          player, (int)strlen(player), left + panel_w * 0.5f -
+                                         line_width * 0.5f,
+          panel_y + 0.018f * (float)screen_height, player_gh,
+          EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      custom_white_text_quads += line_quads;
+      quads += line_quads;
+      const char *title = pes_controller_2p_team_selector_title(pad);
+      line_width = measure_efootball_line(
+          title, (int)strlen(title), text_gh, EFOOTBALL_FONT_BOLD);
+      line_quads = emit_efootball_line(
+          title, (int)strlen(title), left + panel_w * 0.5f -
+                                       line_width * 0.5f,
+          panel_y + 0.078f * (float)screen_height, text_gh,
+          EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      custom_white_text_quads += line_quads;
+      quads += line_quads;
+    }
+    // Global footer mirrors PES: B backs out, A confirms the focused entry.
+    int line_quads = emit_efootball_line(
+        "CANCEL", 6, 0.770f * (float)screen_width,
+        helper_y - text_gh * 0.5f, text_gh, EFOOTBALL_FONT_BOLD,
+        verts + quads * 24);
+    custom_white_text_quads += line_quads;
+    quads += line_quads;
+    line_quads = emit_efootball_line(
+        "CONFIRM", 7, 0.900f * (float)screen_width,
+        helper_y - text_gh * 0.5f, text_gh, EFOOTBALL_FONT_BOLD,
+        verts + quads * 24);
+    custom_white_text_quads += line_quads;
+    quads += line_quads;
+    custom_key_text_first_quad = quads;
+    line_quads = emit_efootball_line(
+        "B", 1, 0.745f * (float)screen_width - text_gh * 0.30f,
+        helper_y - text_gh * 0.5f, text_gh, EFOOTBALL_FONT_BOLD,
+        verts + quads * 24);
+    custom_key_text_quads += line_quads;
+    quads += line_quads;
+    line_quads = emit_efootball_line(
+        "A", 1, 0.875f * (float)screen_width - text_gh * 0.30f,
+        helper_y - text_gh * 0.5f, text_gh, EFOOTBALL_FONT_BOLD,
+        verts + quads * 24);
+    custom_key_text_quads += line_quads;
+    quads += line_quads;
+  } else if (custom_team_popup) {
     const float panel_x = 0.15f * (float)screen_width;
     const float panel_y = 0.055f * (float)screen_height;
     const float panel_w = 0.70f * (float)screen_width;
@@ -1870,7 +2437,7 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V8.16.21 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V8.17.12 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
@@ -2475,18 +3042,35 @@ static void overlay_render(void) {
   glUniform1f(gl.loc_cursor_border, 0.0f);
   if (custom_popup) {
     int custom_offset = 0;
-    glUniform1f(gl.loc_solid, 1.0f);
-    glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f,
-                set_piece_selector ? 0.46f : 0.56f);
-    glDrawArrays(GL_TRIANGLES, custom_offset * 6,
-                 custom_backdrop_quads * 6);
+    if (custom_2p_team_selector) {
+      glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+      glUniform1f(gl.loc_solid, 0.0f);
+      glUniform1f(gl.loc_image, 1.0f);
+      glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, custom_offset * 6,
+                   custom_backdrop_quads * 6);
+      glUniform1f(gl.loc_image, 0.0f);
+      glBindTexture(GL_TEXTURE_2D, gl.tex);
+      glUniform1f(gl.loc_solid, 1.0f);
+    } else {
+      glUniform1f(gl.loc_solid, 1.0f);
+      glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f,
+                  set_piece_selector ? 0.46f : 0.56f);
+      glDrawArrays(GL_TRIANGLES, custom_offset * 6,
+                   custom_backdrop_quads * 6);
+    }
     custom_offset += custom_backdrop_quads;
-    glUniform4f(gl.loc_color, 0.98f, 0.98f, 0.98f, 1.0f);
+    if (custom_2p_team_selector)
+      glUniform4f(gl.loc_color, 0.20f, 0.015f, 0.025f, 1.0f);
+    else
+      glUniform4f(gl.loc_color, 0.98f, 0.98f, 0.98f, 1.0f);
     use_rounded_rect(&custom_panel_style);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_panel_quads * 6);
     custom_offset += custom_panel_quads;
-    if (set_piece_selector)
+    if (custom_2p_team_selector)
+      glUniform4f(gl.loc_color, 0.035f, 0.035f, 0.038f, 1.0f);
+    else if (set_piece_selector)
       glUniform4f(gl.loc_color, 0.98f, 0.98f, 0.98f, 1.0f);
     else
       glUniform4f(gl.loc_color, 0.78f, 0.88f, 0.96f, 1.0f);
@@ -2498,24 +3082,85 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_header_fill_quads * 6);
     custom_offset += custom_header_fill_quads;
-    glUniform4f(gl.loc_color,
-                set_piece_selector ? 0.55f : 0.25f,
-                set_piece_selector ? 0.82f : 0.78f,
-                set_piece_selector ? 0.98f : 0.96f,
-                set_piece_selector ? 0.48f : 0.42f);
+    if (custom_2p_team_selector)
+      glUniform4f(gl.loc_color, 0.94f, 0.93f, 0.93f, 0.96f);
+    else
+      glUniform4f(gl.loc_color,
+                  set_piece_selector ? 0.55f : 0.25f,
+                  set_piece_selector ? 0.82f : 0.78f,
+                  set_piece_selector ? 0.98f : 0.96f,
+                  set_piece_selector ? 0.48f : 0.42f);
     use_rounded_rect(&custom_selected_style);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_selected_quads * 6);
     custom_offset += custom_selected_quads;
     use_rounded_rect(NULL);
-    glUniform4f(gl.loc_color,
-                set_piece_selector ? 0.84f : 0.70f,
-                set_piece_selector ? 0.86f : 0.74f,
-                set_piece_selector ? 0.88f : 0.78f,
-                set_piece_selector ? 0.72f : 0.85f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, custom_offset * 6,
+                 custom_confirm_bar_quads * 6);
+    custom_offset += custom_confirm_bar_quads;
+    if (custom_2p_team_selector)
+      glUniform4f(gl.loc_color, 0.86f, 0.84f, 0.84f, 0.88f);
+    else
+      glUniform4f(gl.loc_color,
+                  set_piece_selector ? 0.84f : 0.70f,
+                  set_piece_selector ? 0.86f : 0.74f,
+                  set_piece_selector ? 0.88f : 0.78f,
+                  set_piece_selector ? 0.72f : 0.85f);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_rule_quads * 6);
     custom_offset += custom_rule_quads;
+    if (custom_2p_team_selector && custom_team_stat_shape_quads) {
+      glUniform1f(gl.loc_solid, 1.0f);
+      glUniform1f(gl.loc_image, 0.0f);
+      glUniform4f(gl.loc_color, 0.055f, 0.050f, 0.052f, 1.0f);
+      for (uint32_t pad = 0; pad < 2; pad++) {
+        for (uint32_t role = 0; role < 3; role++) {
+          if (!custom_team_stat_track_quads[pad][role])
+            continue;
+          use_rounded_rect(&custom_team_stat_track_style);
+          glDrawArrays(
+              GL_TRIANGLES,
+              custom_team_stat_track_first_quad[pad][role] * 6,
+              custom_team_stat_track_quads[pad][role] * 6);
+        }
+      }
+      static const float team_stat_colors[3][3] = {
+          {0.96f, 0.04f, 0.36f}, // FW: PES magenta
+          {0.24f, 0.83f, 0.14f}, // MF: pitch green
+          {0.10f, 0.75f, 0.90f}, // DF: cyan blue
+      };
+      for (uint32_t role = 0; role < 3; role++) {
+        glUniform4f(gl.loc_color, team_stat_colors[role][0],
+                    team_stat_colors[role][1],
+                    team_stat_colors[role][2], 1.0f);
+        for (uint32_t pad = 0; pad < 2; pad++) {
+          if (!custom_team_stat_fill_quads[pad][role])
+            continue;
+          use_rounded_rect(&custom_team_stat_fill_style[pad][role]);
+          glDrawArrays(
+              GL_TRIANGLES,
+              custom_team_stat_fill_first_quad[pad][role] * 6,
+              custom_team_stat_fill_quads[pad][role] * 6);
+        }
+      }
+      use_rounded_rect(NULL);
+      glBindTexture(GL_TEXTURE_2D, gl.team_rating_star_tex);
+      glUniform1f(gl.loc_solid, 0.0f);
+      glUniform1f(gl.loc_image, 0.0f);
+      glUniform4f(gl.loc_color, 0.035f, 0.030f, 0.025f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, custom_team_star_border_first_quad * 6,
+                   custom_team_star_border_quads * 6);
+      glUniform4f(gl.loc_color, 0.68f, 0.68f, 0.65f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, custom_team_star_empty_first_quad * 6,
+                   custom_team_star_empty_quads * 6);
+      glUniform4f(gl.loc_color, 0.98f, 0.94f, 0.04f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, custom_team_star_fill_first_quad * 6,
+                   custom_team_star_fill_quads * 6);
+      glBindTexture(GL_TEXTURE_2D, gl.tex);
+      glUniform1f(gl.loc_solid, 1.0f);
+    }
+    custom_offset += custom_team_stat_shape_quads;
     glUniform4f(gl.loc_color, 0.02f, 0.42f, 0.72f, 1.0f);
     use_rounded_rect(&custom_value_plate_style);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
@@ -2688,7 +3333,7 @@ static void overlay_render(void) {
                  gameplan_cursor_quads * 6);
     glUniform1f(gl.loc_cursor, 0.0f);
   }
-  if (set_piece_selector)
+  if (set_piece_selector || custom_2p_team_selector)
     glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
   if (custom_dark_text_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
@@ -2696,6 +3341,20 @@ static void overlay_render(void) {
     glUniform4f(gl.loc_color, 0.025f, 0.075f, 0.12f, 1.0f);
     glDrawArrays(GL_TRIANGLES, custom_dark_text_first_quad * 6,
                  custom_dark_text_quads * 6);
+  }
+  if (custom_focus_text_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 0.72f, 0.025f, 0.055f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, custom_focus_text_first_quad * 6,
+                 custom_focus_text_quads * 6);
+  }
+  if (custom_ok_text_quads) {
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 0.02f, 0.68f, 0.52f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, custom_ok_text_first_quad * 6,
+                 custom_ok_text_quads * 6);
   }
   static const float position_colors[4][3] = {
       {0.96f, 0.55f, 0.10f}, // goalkeeper: orange
@@ -2731,20 +3390,28 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_rating_first_quad[band] * 6,
                  custom_rating_quads[band] * 6);
   }
-  if (set_piece_selector)
+  if (set_piece_selector || custom_2p_team_selector)
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   if (custom_white_text_quads) {
+    if (custom_2p_team_selector)
+      glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, custom_white_text_first_quad * 6,
                  custom_white_text_quads * 6);
+    if (custom_2p_team_selector)
+      glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (custom_key_text_quads) {
+    if (custom_2p_team_selector)
+      glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
     glDrawArrays(GL_TRIANGLES, custom_key_text_first_quad * 6,
                  custom_key_text_quads * 6);
+    if (custom_2p_team_selector)
+      glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   const int text_quads = generic_text_end_quad - text_first_quad;
   if (text_quads) {
