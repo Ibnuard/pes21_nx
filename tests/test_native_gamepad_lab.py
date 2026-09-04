@@ -130,9 +130,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
         self.assertIn('setplay_has_chord', overlay)
         self.assertIn('chord_second_x', overlay)
-        self.assertRegex(overlay, r'emit_line\(\s*"R1", 2')
-        self.assertRegex(overlay, r'emit_line\(\s*"\+", 1')
-        self.assertRegex(overlay, r'emit_line\(\s*"L1", 2')
+        self.assertRegex(overlay, r'emit_efootball_line\(\s*"R1", 2')
+        self.assertRegex(overlay, r'emit_efootball_line\(\s*"\+", 1')
+        self.assertRegex(overlay, r'emit_efootball_line\(\s*"L1", 2')
 
     def test_exhibition_and_lab_share_native_gameplay_path_after_play(self):
         self.assertIn('if (native_pad_lab_active && gameplay_active)',
@@ -338,7 +338,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.16.15', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.16.21', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)
@@ -721,6 +721,49 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('match_native_penalty_input_pad(input) != selector_owner',
                       hooks)
         self.assertIn('pes_controller_set_piece_selector_owner_pad', hooks)
+
+    def test_set_piece_selector_uses_controller_scrolling_native_skin(self):
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        header = (ROOT/'source/ue4_hooks.h').read_text(encoding='utf-8')
+        selector = re.search(
+            r'\} else if \(set_piece_selector\) \{.*?'
+            r'\} else if \(custom_cpu_popup\) \{', overlay, re.S).group(0)
+        self.assertIn('PES_SET_PIECE_SELECTOR_VISIBLE_ROWS 8u', header)
+        self.assertIn('focus - PES_SET_PIECE_SELECTOR_VISIBLE_ROWS + 1u',
+                      selector)
+        self.assertIn('first_visible + slot', selector)
+        self.assertIn('thumb_y', selector)
+        self.assertNotIn('PAGE %u / %u', selector)
+        self.assertNotIn('"SELECT"', selector)
+        self.assertNotIn('"BACK"', selector)
+        self.assertIn('return "Thrower";', hooks)
+        self.assertIn('return "PK Taker";', hooks)
+        self.assertIn('return "Corner Kick";', hooks)
+        self.assertIn('return "Free Kick";', hooks)
+        self.assertIn('PES_SETPLAY_PENALTY', hooks)
+        self.assertIn('context != PES_SETPLAY_PENALTY', hooks)
+        self.assertIn('match_tmpdb_get_analyze_parameter', hooks)
+        self.assertIn('pes_controller_set_piece_selector_ability_at',
+                      selector)
+        self.assertIn('match_global_registry_get_team_ai_info', hooks)
+        self.assertIn('match_team_parameter_get_role', hooks)
+        self.assertIn('pes_controller_set_piece_selector_position_at',
+                      selector)
+        self.assertNotIn('player_index + 1u', selector)
+        self.assertIn('custom_rating_quads[10]', overlay)
+        self.assertIn('rating_colors[10][3]', overlay)
+        self.assertIn('emit_segment(', selector)
+        self.assertNotIn('current_label', selector)
+        self.assertIn('emit_efootball_line(', selector)
+        self.assertIn('EFOOTBALL_FONT_BOLD', selector)
+        self.assertIn('EFOOTBALL_FONT_REGULAR', selector)
+        self.assertIn('EFOOTBALL_FONT_STENCIL', selector)
+        self.assertIn('selector_position_color_band', selector)
+        self.assertIn('position_colors[4][3]', overlay)
+        self.assertIn('gl.efootball_tex', overlay)
+        self.assertIn('EFOOTBALL_FONT_REGULAR', overlay)
+        self.assertIn('EFOOTBALL_FONT_BOLD', overlay)
 
     def test_goal_and_throw_helpers_preserve_native_actions(self):
         self.assertIn('PES_SETPLAY_BUTTON_SELECT_THROWER', self.shim)

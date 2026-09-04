@@ -172,6 +172,13 @@ static const char *(*match_tmpdb_player_get_name)(const void *player);
 static uint32_t (*match_tmpdb_player_get_data)(const void *player,
                                                 uint32_t key,
                                                 uint32_t *value);
+static uint32_t (*match_tmpdb_get_analyze_parameter)(const void *player,
+                                                      uint32_t kind);
+static const void *(*match_global_registry_get_team_ai_info)(
+    const void *registry, uint32_t side);
+static uint32_t (*match_team_parameter_get_role)(
+    const void *team_parameter, uint32_t order_no, uint32_t formation_type,
+    uint32_t tactics_plan_kind);
 static uint32_t (*match_squad_data_get_order_no)(void *squad_data,
                                                  const void *player_id);
 static uint32_t (*match_squad_data_get_member_id)(void *squad_data,
@@ -760,7 +767,9 @@ typedef struct {
   uint32_t order_no;
   uint32_t player_id;
   uint32_t current;
+  uint32_t ability;
   char name[48];
+  char position[8];
   char foot[16];
 } MatchKickerSelectorPlayer;
 static MatchKickerSelectorPlayer
@@ -6497,11 +6506,21 @@ static void pes_match_button_setplay_touch_sub(void *window,
   }
 
   const uint32_t mask = match_button_setplay_read_mask(window);
+  const uint32_t request_pad =
+      __atomic_load_n(&match_button_setplay_pending_pad,
+                      __ATOMIC_ACQUIRE) & 1u;
   uint32_t context = type == PES_SETPLAY_BUTTON_SELECT_THROWER
                          ? PES_SETPLAY_THROW_IN
                          : match_button_setplay_context_from_mask(mask);
+  // Penalties reuse ButtonSetplay's generic taker action and therefore have
+  // the same mask as an ordinary free kick. The requesting pad's live role
+  // is the authoritative discriminator while this callback is dispatched.
+  if (type == PES_SETPLAY_BUTTON_SET_PIECE_TAKER &&
+      pes_controller_penalty_role_for_pad(request_pad) ==
+          PES_PENALTY_KICKER)
+    context = PES_SETPLAY_PENALTY;
   if (context != PES_SETPLAY_CORNER && context != PES_SETPLAY_FREE_KICK &&
-      context != PES_SETPLAY_THROW_IN)
+      context != PES_SETPLAY_THROW_IN && context != PES_SETPLAY_PENALTY)
     context = type == PES_SETPLAY_BUTTON_SELECT_THROWER
                   ? PES_SETPLAY_THROW_IN
                   : PES_SETPLAY_FREE_KICK;
@@ -6518,8 +6537,7 @@ static void pes_match_button_setplay_touch_sub(void *window,
   __atomic_store_n(&match_kicker_selector_context, context,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_owner_pad,
-                   __atomic_load_n(&match_button_setplay_pending_pad,
-                                   __ATOMIC_ACQUIRE) & 1u,
+                   request_pad,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_focus, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_count, 0, __ATOMIC_RELEASE);
@@ -7060,6 +7078,18 @@ static uint32_t pes_match_freekick_is_disp(const void *unit) {
   return result;
 }
 
+static const char *match_kicker_selector_position_label(uint32_t position) {
+  // tmpdb/match Position follows the same compact role order used by the
+  // stock formation and TouchKickerSelect screens.
+  static const char *const labels[] = {
+      "GK", "CB", "LB", "RB", "DMF", "CMF", "LMF",
+      "RMF", "AMF", "LWF", "RWF", "SS", "CF",
+  };
+  return position < sizeof(labels) / sizeof(labels[0])
+             ? labels[position]
+             : "-";
+}
+
 static int match_kicker_selector_build(const void *input) {
   if (!input || !match_global_registry_get_instance ||
       !match_global_registry_get_order_info ||
@@ -7088,12 +7118,42 @@ static int match_kicker_selector_build(const void *input) {
   if (!registry || !order_info || !match)
     return 0;
 
+  const void *team_ai_info =
+      match_global_registry_get_team_ai_info
+          ? match_global_registry_get_team_ai_info(registry, side)
+          : NULL;
+  // TouchKickerSelect::SetupSwf_PlayerPortrait obtains the live formation
+  // role from TeamAIInfo's embedded TeamParameter at this exact offset.
+  const void *team_parameter =
+      team_ai_info ? (const uint8_t *)team_ai_info + 0x8e08 : NULL;
+
   void *live = NULL;
   memcpy(&live, (const uint8_t *)registry + 1264, sizeof(live));
   MatchKickerSelectorPlayer valid[MATCH_KICKER_SELECTOR_MAX_PLAYERS];
   uint8_t eligible[MATCH_KICKER_SELECTOR_MAX_PLAYERS] = {0};
   uint32_t valid_count = 0;
   uint32_t eligible_count = 0;
+  const uint32_t selector_context = __atomic_load_n(
+      &match_kicker_selector_context, __ATOMIC_ACQUIRE);
+  // The stock TouchKickerSelect uses these event-specific
+  // ANALYZE_PARA_KIND values for the number shown at the row's right edge.
+  uint32_t ability_kind = UINT32_MAX;
+  switch (selector_context) {
+  case PES_SETPLAY_CORNER:
+    ability_kind = 13u;
+    break;
+  case PES_SETPLAY_FREE_KICK:
+    ability_kind = 20u;
+    break;
+  case PES_SETPLAY_PENALTY:
+    ability_kind = 21u;
+    break;
+  case PES_SETPLAY_THROW_IN:
+    ability_kind = 22u;
+    break;
+  default:
+    break;
+  }
   for (uint32_t order = 0; order < 11u; order++) {
     const uint32_t member =
         match_order_info_get_member_id(order_info, order);
@@ -7112,11 +7172,20 @@ static int match_kicker_selector_build(const void *input) {
     memcpy(&entry->player_id, (const uint8_t *)player + 48,
            sizeof(entry->player_id));
     match_kicker_selector_copy_name(entry->name, sizeof(entry->name), name);
+    const uint32_t position =
+        team_parameter && match_team_parameter_get_role
+            ? match_team_parameter_get_role(team_parameter, order, 0u, 3u)
+            : UINT32_MAX;
+    snprintf(entry->position, sizeof(entry->position), "%s",
+             match_kicker_selector_position_label(position));
     uint32_t preferred_foot = 0;
     if (match_tmpdb_player_get_data)
       match_tmpdb_player_get_data(player, 42u, &preferred_foot);
     snprintf(entry->foot, sizeof(entry->foot), "%s FOOT",
              preferred_foot ? "LEFT" : "RIGHT");
+    if (match_tmpdb_get_analyze_parameter && ability_kind != UINT32_MAX)
+      entry->ability =
+          match_tmpdb_get_analyze_parameter(player, ability_kind) & 0xffu;
 
     const int can_select =
         !live || *((const uint8_t *)live + 0x1708 + side * 11u + order) != 0;
@@ -7311,13 +7380,15 @@ const char *pes_controller_set_piece_selector_title(void) {
   switch (__atomic_load_n(&match_kicker_selector_context,
                           __ATOMIC_ACQUIRE)) {
   case PES_SETPLAY_CORNER:
-    return "CORNER KICK TAKER";
+    return "Corner Kick";
   case PES_SETPLAY_THROW_IN:
-    return "THROW-IN TAKER";
+    return "Thrower";
   case PES_SETPLAY_FREE_KICK:
-    return "FREE KICK TAKER";
+    return "Free Kick";
+  case PES_SETPLAY_PENALTY:
+    return "PK Taker";
   default:
-    return "SET PIECE TAKER";
+    return "Set Piece Taker";
   }
 }
 
@@ -7341,6 +7412,16 @@ const char *pes_controller_set_piece_selector_foot_at(uint32_t index) {
   return match_kicker_selector_players[bank][index].foot;
 }
 
+const char *pes_controller_set_piece_selector_position_at(uint32_t index) {
+  const uint32_t count = __atomic_load_n(&match_kicker_selector_count,
+                                          __ATOMIC_ACQUIRE);
+  if (index >= count)
+    return "";
+  const uint32_t bank =
+      __atomic_load_n(&match_kicker_selector_bank, __ATOMIC_ACQUIRE) & 1u;
+  return match_kicker_selector_players[bank][index].position;
+}
+
 int pes_controller_set_piece_selector_current_at(uint32_t index) {
   const uint32_t count = __atomic_load_n(&match_kicker_selector_count,
                                           __ATOMIC_ACQUIRE);
@@ -7349,6 +7430,16 @@ int pes_controller_set_piece_selector_current_at(uint32_t index) {
   const uint32_t bank =
       __atomic_load_n(&match_kicker_selector_bank, __ATOMIC_ACQUIRE) & 1u;
   return match_kicker_selector_players[bank][index].current != 0;
+}
+
+uint32_t pes_controller_set_piece_selector_ability_at(uint32_t index) {
+  const uint32_t count = __atomic_load_n(&match_kicker_selector_count,
+                                          __ATOMIC_ACQUIRE);
+  if (index >= count)
+    return 0;
+  const uint32_t bank =
+      __atomic_load_n(&match_kicker_selector_bank, __ATOMIC_ACQUIRE) & 1u;
+  return match_kicker_selector_players[bank][index].ability;
 }
 
 const char *pes_controller_set_piece_selector_name(void) {
@@ -9835,6 +9926,14 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(
           module,
           "_ZNK5match8registry14GlobalRegistry12GetOrderInfoE8HomeAway");
+  match_global_registry_get_team_ai_info =
+      (void *)so_find_addr_rx(
+          module,
+          "_ZNK5match8registry14GlobalRegistry13GetTeamAIInfoE8HomeAway");
+  match_team_parameter_get_role =
+      (void *)so_find_addr_rx(
+          module,
+          "_ZNK5match5input13TeamParameter7GetRoleE7OrderNoNS0_13FormationTypeENS0_19TeamTacticsPlanKindE");
   match_order_info_get_member_id =
       (void *)so_find_addr_rx(
           module,
@@ -9937,6 +10036,10 @@ void install_ue4_hooks(so_module *module) {
   match_tmpdb_player_get_data =
       (void *)so_find_addr_rx(
           module, "_ZNK5tmpdb10PlayerBase7GetDataEjRj");
+  match_tmpdb_get_analyze_parameter =
+      (void *)so_find_addr_rx(
+          module,
+          "_ZN5tmpdb4util19GetAnalyzeParameterERKNS_6PlayerENS0_17ANALYZE_PARA_KINDE");
   match_squad_data_get_order_no =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData15GetSquadOrderNoERKNS_8PlayerIdE");

@@ -16,7 +16,7 @@
 #define PES_VIRTUAL_CURSOR_TUTORIAL 6
 #define PES_VIRTUAL_CURSOR_SET_PIECE_TAKER 7
 
-#define PES_SET_PIECE_SELECTOR_PAGE_SIZE 5u
+#define PES_SET_PIECE_SELECTOR_VISIBLE_ROWS 8u
 
 #define PES_REPLAY_FEEDBACK_NONE 0
 #define PES_REPLAY_FEEDBACK_SKIP 1
@@ -29,6 +29,7 @@
 #define PES_SETPLAY_CORNER 2u
 #define PES_SETPLAY_FREE_KICK 3u
 #define PES_SETPLAY_THROW_IN 4u
+#define PES_SETPLAY_PENALTY 5u
 
 #define PES_SETPLAY_OPTION_TEAM_UP (1u << 0)
 #define PES_SETPLAY_OPTION_CAMERA (1u << 1)
@@ -233,7 +234,9 @@ const char *pes_controller_set_piece_selector_name(void);
 const char *pes_controller_set_piece_selector_foot(void);
 const char *pes_controller_set_piece_selector_name_at(uint32_t index);
 const char *pes_controller_set_piece_selector_foot_at(uint32_t index);
+const char *pes_controller_set_piece_selector_position_at(uint32_t index);
 int pes_controller_set_piece_selector_current_at(uint32_t index);
+uint32_t pes_controller_set_piece_selector_ability_at(uint32_t index);
 void pes_controller_set_piece_selector_move(int direction);
 void pes_controller_set_piece_selector_input(uint32_t action);
 void pes_controller_pause_back_request(void);

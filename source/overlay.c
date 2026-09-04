@@ -21,6 +21,7 @@
 #include "android_shim.h"
 #include "overlay.h"
 #include "badge_atlas.h"
+#include "efootball_font_atlas.h"
 #include "font_atlas.h"
 #include "ue4_hooks.h"
 
@@ -29,6 +30,7 @@ static struct {
   int ready;
   GLuint prog;
   GLuint tex;
+  GLuint efootball_tex;
   GLuint badge_tex;
   GLuint vbo;
   GLint loc_pos, loc_uv, loc_tex, loc_off, loc_color, loc_solid, loc_image;
@@ -159,6 +161,7 @@ static int gl_init(void) {
   gl.loc_cursor = glGetUniformLocation(gl.prog, "uCursor");
   gl.loc_cursor_border = glGetUniformLocation(gl.prog, "uCursorBorder");
   glGenTextures(1, &gl.tex);
+  glGenTextures(1, &gl.efootball_tex);
   glGenTextures(1, &gl.badge_tex);
   glGenBuffers(1, &gl.vbo);
   return 1;
@@ -185,6 +188,15 @@ static void atlas_ready(void) {
                font_atlas_alpha);
   // Nouveau needs mipmap generation here to finalize the uploaded texture,
   // even though the direct overlay draw uses the base level with GL_LINEAR.
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, EFOOTBALL_FONT_ATLAS_W,
+               EFOOTBALL_FONT_ATLAS_H, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+               efootball_font_atlas_alpha);
   glGenerateMipmap(GL_TEXTURE_2D);
   glBindTexture(GL_TEXTURE_2D, gl.badge_tex);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -243,6 +255,83 @@ static int emit_line(const char *text, int len, float x, float y,
   return emit_line_advance(text, len, x, y, gw, gh, gw, verts);
 }
 
+static float measure_efootball_line(const char *text, int len, float gh,
+                                    uint32_t weight) {
+  if (weight >= EFOOTBALL_FONT_WEIGHTS)
+    weight = EFOOTBALL_FONT_REGULAR;
+  float width = 0.0f;
+  for (int index = 0; index < len; index++) {
+    if (text[index] == ' ') {
+      width += gh * 0.34f;
+      continue;
+    }
+    const int glyph = efootball_font_glyph_index(text[index]);
+    if (glyph < 0)
+      continue;
+    width += (float)efootball_font_advance[weight][glyph] * gh /
+             (float)EFOOTBALL_FONT_CELL_H;
+  }
+  return width;
+}
+
+static int emit_efootball_line(const char *text, int len, float x, float y,
+                               float gh, uint32_t weight, GLfloat *verts) {
+  if (weight >= EFOOTBALL_FONT_WEIGHTS)
+    weight = EFOOTBALL_FONT_REGULAR;
+  const float gw = gh * (float)EFOOTBALL_FONT_CELL_W /
+                   (float)EFOOTBALL_FONT_CELL_H;
+  float pen_x = x;
+  int quads = 0;
+  for (int index = 0; index < len; index++) {
+    const char c = text[index];
+    if (c == ' ') {
+      pen_x += gh * 0.34f;
+      continue;
+    }
+    const int glyph = efootball_font_glyph_index(c);
+    if (glyph < 0)
+      continue;
+    const float u0 =
+        ((float)(glyph * EFOOTBALL_FONT_CELL_W) + 0.5f) /
+        (float)EFOOTBALL_FONT_ATLAS_W;
+    const float u1 =
+        ((float)((glyph + 1) * EFOOTBALL_FONT_CELL_W) - 0.5f) /
+        (float)EFOOTBALL_FONT_ATLAS_W;
+    const float v0 =
+        ((float)(weight * EFOOTBALL_FONT_CELL_H) + 0.5f) /
+        (float)EFOOTBALL_FONT_ATLAS_H;
+    const float v1 =
+        ((float)((weight + 1u) * EFOOTBALL_FONT_CELL_H) - 0.5f) /
+        (float)EFOOTBALL_FONT_ATLAS_H;
+    const float px0 = pen_x * 2.0f / (float)screen_width - 1.0f;
+    const float px1 = (pen_x + gw) * 2.0f / (float)screen_width - 1.0f;
+    const float py0 = 1.0f - y * 2.0f / (float)screen_height;
+    const float py1 = 1.0f - (y + gh) * 2.0f / (float)screen_height;
+    const GLfloat quad[24] = {
+        px0, py0, u0, v0, px1, py0, u1, v0, px0, py1, u0, v1,
+        px1, py0, u1, v0, px1, py1, u1, v1, px0, py1, u0, v1,
+    };
+    memcpy(verts + quads * 24, quad, sizeof(quad));
+    quads++;
+    pen_x += (float)efootball_font_advance[weight][glyph] * gh /
+             (float)EFOOTBALL_FONT_CELL_H;
+  }
+  return quads;
+}
+
+static uint32_t selector_position_color_band(const char *position) {
+  if (strcmp(position, "GK") == 0)
+    return 0u;
+  if (strcmp(position, "CB") == 0 || strcmp(position, "LB") == 0 ||
+      strcmp(position, "RB") == 0)
+    return 1u;
+  if (strcmp(position, "DMF") == 0 || strcmp(position, "CMF") == 0 ||
+      strcmp(position, "LMF") == 0 || strcmp(position, "RMF") == 0 ||
+      strcmp(position, "AMF") == 0)
+    return 2u;
+  return 3u;
+}
+
 static int emit_rect(float x, float y, float width, float height,
                      GLfloat *verts);
 
@@ -282,6 +371,32 @@ static int emit_rect(float x, float y, float width, float height,
       x0, y0, 0.0f, 0.0f, x1, y0, 0.0f, 0.0f,
       x0, y1, 0.0f, 0.0f, x1, y0, 0.0f, 0.0f,
       x1, y1, 0.0f, 0.0f, x0, y1, 0.0f, 0.0f,
+  };
+  memcpy(verts, quad, sizeof(quad));
+  return 1;
+}
+
+static int emit_segment(float x0, float y0, float x1, float y1,
+                        float thickness, GLfloat *verts) {
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float length = sqrtf(dx * dx + dy * dy);
+  if (length <= 0.001f)
+    return 0;
+  const float px = -dy * thickness * 0.5f / length;
+  const float py = dx * thickness * 0.5f / length;
+  const float ax = (x0 + px) * 2.0f / (float)screen_width - 1.0f;
+  const float ay = 1.0f - (y0 + py) * 2.0f / (float)screen_height;
+  const float bx = (x1 + px) * 2.0f / (float)screen_width - 1.0f;
+  const float by = 1.0f - (y1 + py) * 2.0f / (float)screen_height;
+  const float cx = (x0 - px) * 2.0f / (float)screen_width - 1.0f;
+  const float cy = 1.0f - (y0 - py) * 2.0f / (float)screen_height;
+  const float dx2 = (x1 - px) * 2.0f / (float)screen_width - 1.0f;
+  const float dy2 = 1.0f - (y1 - py) * 2.0f / (float)screen_height;
+  const GLfloat quad[24] = {
+      ax, ay, 0.0f, 0.0f, bx, by, 0.0f, 0.0f,
+      cx, cy, 0.0f, 0.0f, bx, by, 0.0f, 0.0f,
+      dx2, dy2, 0.0f, 0.0f, cx, cy, 0.0f, 0.0f,
   };
   memcpy(verts, quad, sizeof(quad));
   return 1;
@@ -686,6 +801,10 @@ static void overlay_render(void) {
   int custom_icon_quads = 0;
   int custom_dark_text_first_quad = 0;
   int custom_dark_text_quads = 0;
+  int custom_rating_first_quad[10] = {0};
+  int custom_rating_quads[10] = {0};
+  int selector_position_first_quad[4] = {0};
+  int selector_position_quads[4] = {0};
   int custom_white_text_first_quad = 0;
   int custom_white_text_quads = 0;
   int custom_key_text_first_quad = 0;
@@ -989,51 +1108,37 @@ static void overlay_render(void) {
         verts + quads * 24);
     quads += custom_key_text_quads;
   } else if (set_piece_selector) {
-    // Keep TouchKickerSelect completely controller-owned, but present the
-    // roster as a compact modal instead of replacing the whole result view.
-    // Five one-column rows keep NAME and FOOT TYPE readable from docked mode.
-    const float panel_x = 0.205f * (float)screen_width;
-    const float panel_y = 0.055f * (float)screen_height;
-    const float panel_w = 0.590f * (float)screen_width;
-    const float panel_h = 0.890f * (float)screen_height;
-    const float panel_radius = 0.025f * (float)screen_height;
-    const float header_h = 0.110f * (float)screen_height;
-    const float row_x = panel_x + 0.030f * (float)screen_width;
-    const float row_y0 = panel_y + 0.145f * (float)screen_height;
-    const float row_w = panel_w - 0.060f * (float)screen_width;
-    const float row_gap = 0.012f * (float)screen_height;
-    const float row_h = 0.098f * (float)screen_height;
-    const float footer_y = panel_y + 0.735f * (float)screen_height;
-    const float button_y = panel_y + 0.785f * (float)screen_height;
-    const float button_h = 0.068f * (float)screen_height;
-    const float button_w = 0.205f * (float)screen_width;
-    const float button_gap = 0.020f * (float)screen_width;
-    const float back_x = panel_x + panel_w -
-                         0.030f * (float)screen_width - button_w;
-    const float action_x = back_x - button_gap - button_w;
-    const float key_radius = 0.019f * (float)screen_height;
-    const float action_key_x = action_x + 0.028f * (float)screen_width;
-    const float back_key_x = back_x + 0.028f * (float)screen_width;
-    const float key_y = button_y + button_h * 0.5f;
+    // Mirror TouchKickerSelect's compact list, but retain our stable native
+    // controller state machine. The viewport follows focus by one row instead
+    // of snapping between pages, so no touchscreen swipe is required.
+    const float panel_x = 0.160f * (float)screen_width;
+    const float panel_y = 0.060f * (float)screen_height;
+    const float panel_w = 0.680f * (float)screen_width;
+    const float panel_h = 0.880f * (float)screen_height;
+    const float panel_radius = 0.012f * (float)screen_height;
+    const float header_h = 0.100f * (float)screen_height;
+    const float row_x = panel_x + 0.020f * (float)screen_width;
+    const float row_y0 = panel_y + 0.120f * (float)screen_height;
+    const float row_w = panel_w - 0.050f * (float)screen_width;
+    const float row_h = 0.077f * (float)screen_height;
+    const float row_step = 0.085f * (float)screen_height;
+    const float divider_h = fmaxf(1.0f, (float)screen_height / 720.0f);
     const uint32_t count = pes_controller_set_piece_selector_count();
     uint32_t focus = pes_controller_set_piece_selector_focus();
     if (count && focus >= count)
       focus = count - 1u;
-    const uint32_t page = focus / PES_SET_PIECE_SELECTOR_PAGE_SIZE;
-    const uint32_t page_start = page * PES_SET_PIECE_SELECTOR_PAGE_SIZE;
-    const uint32_t page_count =
-        count ? (count + PES_SET_PIECE_SELECTOR_PAGE_SIZE - 1u) /
-                    PES_SET_PIECE_SELECTOR_PAGE_SIZE
-              : 1u;
+    const uint32_t first_visible =
+        focus < PES_SET_PIECE_SELECTOR_VISIBLE_ROWS
+            ? 0u
+            : focus - PES_SET_PIECE_SELECTOR_VISIBLE_ROWS + 1u;
     const uint32_t visible_count =
-        count > page_start
-            ? ((count - page_start) < PES_SET_PIECE_SELECTOR_PAGE_SIZE
-                   ? count - page_start
-                   : PES_SET_PIECE_SELECTOR_PAGE_SIZE)
+        count > first_visible
+            ? ((count - first_visible) < PES_SET_PIECE_SELECTOR_VISIBLE_ROWS
+                   ? count - first_visible
+                   : PES_SET_PIECE_SELECTOR_VISIBLE_ROWS)
             : 0u;
-    const uint32_t local_focus = focus - page_start;
-    const float selected_y =
-        row_y0 + (float)local_focus * (row_h + row_gap);
+    const uint32_t local_focus = focus - first_visible;
+    const float selected_y = row_y0 + (float)local_focus * row_step;
 
     custom_backdrop_quads = emit_rect(
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
@@ -1050,157 +1155,200 @@ static void overlay_render(void) {
         panel_x, panel_y, panel_w, header_h, verts + quads * 24);
     quads += custom_header_round_quads;
     custom_selected_style = (RoundedRectStyle){
-        row_w, row_h, 0.014f * (float)screen_height};
+        row_w, row_h, 0.006f * (float)screen_height};
     if (count) {
       custom_selected_quads = emit_round_rect_quad(
           row_x, selected_y, row_w, row_h, verts + quads * 24);
       quads += custom_selected_quads;
     }
-    for (uint32_t slot = 0; slot < visible_count; slot++) {
-      const float card_y = row_y0 + (float)slot * (row_h + row_gap);
-      const int outline_quads = emit_outline(
-          row_x, card_y, row_w, row_h,
-          fmaxf(1.5f, (float)screen_height / 480.0f),
-          verts + quads * 24);
-      custom_rule_quads += outline_quads;
-      quads += outline_quads;
-    }
-    const int footer_rule_quads = emit_rect(
-        row_x, footer_y, row_w, (float)screen_height / 600.0f,
+    custom_rule_quads += emit_rect(
+        panel_x, panel_y + header_h, panel_w, divider_h,
         verts + quads * 24);
-    custom_rule_quads += footer_rule_quads;
-    quads += footer_rule_quads;
-    custom_action_button_style =
-        (RoundedRectStyle){button_w, button_h, 0.017f * (float)screen_height};
-    custom_action_button_quads = emit_round_rect_quad(
-        action_x, button_y, button_w, button_h, verts + quads * 24);
-    quads += custom_action_button_quads;
-    custom_back_button_style =
-        (RoundedRectStyle){button_w, button_h, 0.017f * (float)screen_height};
-    custom_back_button_quads = emit_round_rect_quad(
-        back_x, button_y, button_w, button_h, verts + quads * 24);
-    quads += custom_back_button_quads;
-    custom_action_key_bg_quads = emit_circle_quad(
-        action_key_x, key_y, key_radius, verts + quads * 24);
-    quads += custom_action_key_bg_quads;
-    custom_back_key_bg_quads = emit_circle_quad(
-        back_key_x, key_y, key_radius, verts + quads * 24);
-    quads += custom_back_key_bg_quads;
+    quads++;
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const float rule_y = row_y0 + (float)(slot + 1u) * row_step -
+                           (row_step - row_h) * 0.5f;
+      custom_rule_quads += emit_rect(
+          row_x, rule_y, row_w, divider_h, verts + quads * 24);
+      quads++;
+    }
+    if (count > PES_SET_PIECE_SELECTOR_VISIBLE_ROWS) {
+      const float rail_x = panel_x + panel_w -
+                           0.013f * (float)screen_width;
+      const float rail_y = row_y0;
+      const float rail_w = fmaxf(2.0f, 0.0022f * (float)screen_width);
+      const float rail_h =
+          row_step * (float)PES_SET_PIECE_SELECTOR_VISIBLE_ROWS;
+      custom_rule_quads += emit_rect(
+          rail_x, rail_y, rail_w, rail_h, verts + quads * 24);
+      quads++;
+      const float thumb_h = rail_h *
+                            (float)PES_SET_PIECE_SELECTOR_VISIBLE_ROWS /
+                            (float)count;
+      const uint32_t max_first =
+          count - PES_SET_PIECE_SELECTOR_VISIBLE_ROWS;
+      const float thumb_y = rail_y +
+                            (rail_h - thumb_h) *
+                                (float)first_visible / (float)max_first;
+      custom_value_plate_style =
+          (RoundedRectStyle){rail_w, thumb_h, rail_w * 0.5f};
+      custom_value_plate_quads = emit_round_rect_quad(
+          rail_x, thumb_y, rail_w, thumb_h, verts + quads * 24);
+      quads += custom_value_plate_quads;
+    }
 
-    const float title_gh = (float)screen_height / 29.0f;
-    const float title_gw =
-        title_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    const float text_gh = (float)screen_height / 42.0f;
-    const float text_gw = text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    // Use the stock selector's checkmark language instead of spelling a
+    // debug-style V. Two vector strokes remain sharp without an extra atlas.
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const uint32_t player_index = first_visible + slot;
+      if (!pes_controller_set_piece_selector_current_at(player_index))
+        continue;
+      const float card_y = row_y0 + (float)slot * row_step;
+      const float check_x = row_x + row_w - 0.020f * (float)screen_width;
+      const float check_y = card_y + row_h * 0.5f;
+      const float check_thickness =
+          fmaxf(2.0f, 0.0042f * (float)screen_height);
+      custom_arrow_quads += emit_segment(
+          check_x - 0.009f * (float)screen_width,
+          check_y - 0.001f * (float)screen_height,
+          check_x - 0.003f * (float)screen_width,
+          check_y + 0.008f * (float)screen_height, check_thickness,
+          verts + quads * 24);
+      quads++;
+      custom_arrow_quads += emit_segment(
+          check_x - 0.003f * (float)screen_width,
+          check_y + 0.008f * (float)screen_height,
+          check_x + 0.010f * (float)screen_width,
+          check_y - 0.010f * (float)screen_height, check_thickness,
+          verts + quads * 24);
+      quads++;
+    }
+
+    // The stock mobile list represents preferred foot with a compact glyph.
+    // Use a neutral circular plate plus R/L in our atlas-backed renderer so it
+    // stays legible at every Switch resolution without introducing a new
+    // texture dependency.
+    const float foot_badge_x =
+        row_x + row_w - 0.120f * (float)screen_width;
+    const float foot_badge_radius = 0.017f * (float)screen_height;
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const float card_y = row_y0 + (float)slot * row_step;
+      custom_badge_plate_quads += emit_circle_quad(
+          foot_badge_x, card_y + row_h * 0.5f, foot_badge_radius,
+          verts + quads * 24);
+      quads++;
+    }
+
+    const float title_gh = (float)screen_height / 31.0f;
+    const float text_gh = (float)screen_height / 44.0f;
     const char *title = pes_controller_set_piece_selector_title();
-    int line_quads = emit_line(
+    int line_quads = emit_efootball_line(
         title, (int)strlen(title),
-        panel_x + panel_w * 0.5f -
-            (float)strlen(title) * title_gw * 0.5f,
-        panel_y + (header_h - title_gh) * 0.5f, title_gw, title_gh,
+        panel_x + 0.022f * (float)screen_width,
+        panel_y + (header_h - title_gh) * 0.5f, title_gh,
+        EFOOTBALL_FONT_BOLD,
         verts + quads * 24);
     custom_dark_text_first_quad = quads;
     custom_dark_text_quads += line_quads;
     quads += line_quads;
-    char page_label[24];
-    snprintf(page_label, sizeof(page_label), "PAGE %u / %u", page + 1u,
-             page_count);
-    line_quads = emit_line(
-        page_label, (int)strlen(page_label),
-        panel_x + panel_w - 0.022f * (float)screen_width -
-            (float)strlen(page_label) * text_gw,
-        panel_y + (header_h - text_gh) * 0.5f, text_gw, text_gh,
-        verts + quads * 24);
-    custom_dark_text_quads += line_quads;
-    quads += line_quads;
     if (!count) {
       const char *loading = "LOADING PLAYERS...";
-      line_quads = emit_line(
+      const float loading_width = measure_efootball_line(
+          loading, (int)strlen(loading), text_gh, EFOOTBALL_FONT_REGULAR);
+      line_quads = emit_efootball_line(
           loading, (int)strlen(loading),
-          panel_x + panel_w * 0.5f -
-              (float)strlen(loading) * text_gw * 0.5f,
-          panel_y + panel_h * 0.46f, text_gw, text_gh,
+          panel_x + panel_w * 0.5f - loading_width * 0.5f,
+          panel_y + panel_h * 0.46f, text_gh, EFOOTBALL_FONT_REGULAR,
           verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
     }
     for (uint32_t slot = 0; slot < visible_count; slot++) {
-      const uint32_t player_index = page_start + slot;
-      const float card_y = row_y0 + (float)slot * (row_h + row_gap);
+      const uint32_t player_index = first_visible + slot;
+      const float card_y = row_y0 + (float)slot * row_step;
       const char *player_name =
           pes_controller_set_piece_selector_name_at(player_index);
       const char *player_foot =
           pes_controller_set_piece_selector_foot_at(player_index);
-      const int current_player =
-          pes_controller_set_piece_selector_current_at(player_index);
-      const float name_gh = (float)screen_height / 32.0f;
-      const float name_gw =
-          name_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-      const float foot_gh = (float)screen_height / 45.0f;
-      const float foot_gw =
-          foot_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+      const float name_gh = (float)screen_height / 37.0f;
+      const float foot_gh = (float)screen_height / 44.0f;
       char display_name[25];
       snprintf(display_name, sizeof(display_name), "%.24s", player_name);
-      line_quads = emit_line(
+      line_quads = emit_efootball_line(
           display_name, (int)strlen(display_name),
-          row_x + 0.022f * (float)screen_width,
-          card_y + (row_h - name_gh) * 0.5f, name_gw, name_gh,
+          row_x + 0.065f * (float)screen_width,
+          card_y + (row_h - name_gh) * 0.5f, name_gh,
+          EFOOTBALL_FONT_REGULAR,
           verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
-      char display_foot[25];
-      snprintf(display_foot, sizeof(display_foot), "%.24s", player_foot);
+      char display_foot[2] = {player_foot[0] ? player_foot[0] : '-', '\0'};
       const int foot_len = (int)strlen(display_foot);
-      const float foot_x =
-          row_x + row_w - 0.022f * (float)screen_width -
-          (float)foot_len * foot_gw;
-      line_quads = emit_line(
+      const float foot_width = measure_efootball_line(
+          display_foot, foot_len, foot_gh, EFOOTBALL_FONT_BOLD);
+      const float foot_x = foot_badge_x - foot_width * 0.5f;
+      line_quads = emit_efootball_line(
           display_foot, foot_len, foot_x,
-          card_y + (row_h - foot_gh) * 0.5f, foot_gw, foot_gh,
+          card_y + (row_h - foot_gh) * 0.5f, foot_gh,
+          EFOOTBALL_FONT_BOLD,
           verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
-      if (current_player) {
-        const char *current_label = "CURRENT";
-        const int current_len = 7;
-        const float current_gh = (float)screen_height / 50.0f;
-        const float current_gw =
-            current_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-        line_quads = emit_line(
-            current_label, current_len,
-            foot_x - 0.020f * (float)screen_width -
-                (float)current_len * current_gw,
-            card_y + (row_h - current_gh) * 0.5f, current_gw, current_gh,
-            verts + quads * 24);
-        custom_dark_text_quads += line_quads;
+    }
+    // Console-style role coding: the stencil label identifies each line at a
+    // glance while names remain neutral. Emit by category so each batch can
+    // receive its own color without another texture or shader branch.
+    for (uint32_t role_band = 0; role_band < 4u; role_band++) {
+      selector_position_first_quad[role_band] = quads;
+      for (uint32_t slot = 0; slot < visible_count; slot++) {
+        const uint32_t player_index = first_visible + slot;
+        const char *player_position =
+            pes_controller_set_piece_selector_position_at(player_index);
+        if (selector_position_color_band(player_position) != role_band)
+          continue;
+        const float card_y = row_y0 + (float)slot * row_step;
+        const float position_gh = (float)screen_height / 42.0f;
+        line_quads = emit_efootball_line(
+            player_position, (int)strlen(player_position),
+            row_x + 0.014f * (float)screen_width,
+            card_y + (row_h - position_gh) * 0.5f, position_gh,
+            EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+        selector_position_quads[role_band] += line_quads;
         quads += line_quads;
       }
     }
-
-    custom_white_text_first_quad = quads;
-    line_quads = emit_line(
-        "SELECT", 6, action_key_x + 0.026f * (float)screen_width,
-        button_y + (button_h - text_gh) * 0.5f, text_gw, text_gh,
-        verts + quads * 24);
-    custom_white_text_quads += line_quads;
-    quads += line_quads;
-    line_quads = emit_line(
-        "BACK", 4, back_key_x + 0.026f * (float)screen_width,
-        button_y + (button_h - text_gh) * 0.5f, text_gw, text_gh,
-        verts + quads * 24);
-    custom_white_text_quads += line_quads;
-    quads += line_quads;
-    custom_key_text_first_quad = quads;
-    line_quads = emit_line(
-        "A", 1, action_key_x - text_gw * 0.5f, key_y - text_gh * 0.5f,
-        text_gw, text_gh, verts + quads * 24);
-    custom_key_text_quads += line_quads;
-    quads += line_quads;
-    line_quads = emit_line(
-        "B", 1, back_key_x - text_gw * 0.5f, key_y - text_gh * 0.5f,
-        text_gw, text_gh, verts + quads * 24);
-    custom_key_text_quads += line_quads;
-    quads += line_quads;
+    // Emit ratings grouped into ten contiguous color bands. The spectrum
+    // moves from green through yellow/orange to red as shot power approaches
+    // 100, matching the visual range requested for the selector.
+    for (uint32_t band = 0; band < 10u; band++) {
+      custom_rating_first_quad[band] = quads;
+      for (uint32_t slot = 0; slot < visible_count; slot++) {
+        const uint32_t player_index = first_visible + slot;
+        const uint32_t player_ability =
+            pes_controller_set_piece_selector_ability_at(player_index);
+        if (!player_ability)
+          continue;
+        const uint32_t player_band =
+            player_ability >= 100u ? 9u : player_ability / 10u;
+        if (player_band != band)
+          continue;
+        const float card_y = row_y0 + (float)slot * row_step;
+        const float ability_gh = (float)screen_height / 39.0f;
+        char ability_text[4];
+        snprintf(ability_text, sizeof(ability_text), "%u", player_ability);
+        const int ability_len = (int)strlen(ability_text);
+        const float ability_width = measure_efootball_line(
+            ability_text, ability_len, ability_gh,
+            EFOOTBALL_FONT_REGULAR);
+        line_quads = emit_efootball_line(
+            ability_text, ability_len,
+            row_x + row_w - 0.048f * (float)screen_width - ability_width,
+            card_y + (row_h - ability_gh) * 0.5f, ability_gh,
+            EFOOTBALL_FONT_REGULAR, verts + quads * 24);
+        custom_rating_quads[band] += line_quads;
+        quads += line_quads;
+      }
+    }
   } else if (custom_cpu_popup) {
     const float panel_x = 0.22f * (float)screen_width;
     const float panel_y = 0.08f * (float)screen_height;
@@ -1668,12 +1816,13 @@ static void overlay_render(void) {
     quads += gameplan_cursor_quads;
 
     const float helper_gh = (float)screen_height / 43.0f;
-    const float helper_gw =
-        helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const char *helper_key = back_only_cursor ? "B" : "A";
+    const float helper_key_w = measure_efootball_line(
+        helper_key, 1, helper_gh, EFOOTBALL_FONT_BOLD);
     gameplan_helper_text_first_quad = quads;
-    gameplan_helper_text_quads = emit_line(
-        back_only_cursor ? "B" : "A", 1, helper_x - helper_gw * 0.5f,
-        helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
+    gameplan_helper_text_quads = emit_efootball_line(
+        helper_key, 1, helper_x - helper_key_w * 0.5f,
+        helper_y - helper_gh * 0.5f, helper_gh, EFOOTBALL_FONT_BOLD,
         verts + quads * 24);
     quads += gameplan_helper_text_quads;
   } else if (pause_camera_active) {
@@ -1687,12 +1836,12 @@ static void overlay_render(void) {
         helper_x, helper_y, helper_radius, verts + quads * 24);
     quads += gameplan_helper_circle_quads;
     const float helper_gh = (float)screen_height / 43.0f;
-    const float helper_gw =
-        helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float helper_key_w = measure_efootball_line(
+        "B", 1, helper_gh, EFOOTBALL_FONT_BOLD);
     gameplan_helper_text_first_quad = quads;
-    gameplan_helper_text_quads = emit_line(
-        "B", 1, helper_x - helper_gw * 0.5f,
-        helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
+    gameplan_helper_text_quads = emit_efootball_line(
+        "B", 1, helper_x - helper_key_w * 0.5f,
+        helper_y - helper_gh * 0.5f, helper_gh, EFOOTBALL_FONT_BOLD,
         verts + quads * 24);
     quads += gameplan_helper_text_quads;
   } else if (tutorial_play_active) {
@@ -1707,12 +1856,12 @@ static void overlay_render(void) {
         helper_x, helper_y, helper_radius, verts + quads * 24);
     quads += gameplan_helper_circle_quads;
     const float helper_gh = (float)screen_height / 43.0f;
-    const float helper_gw =
-        helper_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float helper_key_w = measure_efootball_line(
+        "A", 1, helper_gh, EFOOTBALL_FONT_BOLD);
     gameplan_helper_text_first_quad = quads;
-    gameplan_helper_text_quads = emit_line(
-        "A", 1, helper_x - helper_gw * 0.5f,
-        helper_y - helper_gh * 0.5f, helper_gw, helper_gh,
+    gameplan_helper_text_quads = emit_efootball_line(
+        "A", 1, helper_x - helper_key_w * 0.5f,
+        helper_y - helper_gh * 0.5f, helper_gh, EFOOTBALL_FONT_BOLD,
         verts + quads * 24);
     quads += gameplan_helper_text_quads;
   }
@@ -1721,7 +1870,7 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V8.16.15 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V8.16.21 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
@@ -1871,6 +2020,7 @@ static void overlay_render(void) {
     quads += emit_line(fps.text, (int)strlen(fps.text), 10.0f, 8.0f,
                        gw, gh, verts + quads * 24);
   }
+  const int generic_text_end_quad = quads;
   if (cinematic_helper_active) {
     const float helper_radius = 0.022f * (float)screen_height;
     const float helper_x = 0.825f * (float)screen_width;
@@ -1889,36 +2039,43 @@ static void overlay_render(void) {
     }
 
     const float gh = (float)screen_height / 43.0f;
-    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     cinematic_helper_text_first_quad = quads;
     const float generic_y = 0.925f * (float)screen_height;
-    const int key_quads = emit_line(
-        (cinematic_goal_actions || cinematic_goal_skip_only) ? "B" : "A", 1,
-        helper_x - gw * 0.5f,
-        (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f, gw, gh,
+    const char *cinematic_key =
+        (cinematic_goal_actions || cinematic_goal_skip_only) ? "B" : "A";
+    const float cinematic_key_w = measure_efootball_line(
+        cinematic_key, 1, gh, EFOOTBALL_FONT_BOLD);
+    const int key_quads = emit_efootball_line(
+        cinematic_key, 1, helper_x - cinematic_key_w * 0.5f,
+        (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f,
+        gh, EFOOTBALL_FONT_BOLD,
         verts + quads * 24);
     cinematic_helper_text_quads += key_quads;
     quads += key_quads;
     const float label_x = helper_x + helper_radius * 1.55f;
-    const int skip_label_quads = emit_line(
+    const int skip_label_quads = emit_efootball_line(
         (cinematic_goal_actions || cinematic_goal_skip_only)
             ? "SKIP"
             : "ANY BUTTON - SKIP",
         (cinematic_goal_actions || cinematic_goal_skip_only) ? 4 : 17,
         label_x,
         (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f,
-        gw * 0.78f, gh,
+        gh, EFOOTBALL_FONT_REGULAR,
         verts + quads * 24);
     cinematic_helper_text_quads += skip_label_quads;
     quads += skip_label_quads;
     if (cinematic_goal_actions) {
-      const int celebrate_key_quads = emit_line(
-          "A", 1, helper_x - gw * 0.5f, celebrate_y - gh * 0.5f, gw, gh,
+      const float celebrate_key_w = measure_efootball_line(
+          "A", 1, gh, EFOOTBALL_FONT_BOLD);
+      const int celebrate_key_quads = emit_efootball_line(
+          "A", 1, helper_x - celebrate_key_w * 0.5f,
+          celebrate_y - gh * 0.5f, gh, EFOOTBALL_FONT_BOLD,
           verts + quads * 24);
       cinematic_helper_text_quads += celebrate_key_quads;
       quads += celebrate_key_quads;
-      const int celebrate_label_quads = emit_line(
-          "CELEBRATE", 9, label_x, celebrate_y - gh * 0.5f, gw * 0.78f, gh,
+      const int celebrate_label_quads = emit_efootball_line(
+          "CELEBRATE", 9, label_x, celebrate_y - gh * 0.5f, gh,
+          EFOOTBALL_FONT_REGULAR,
           verts + quads * 24);
       cinematic_helper_text_quads += celebrate_label_quads;
       quads += celebrate_label_quads;
@@ -2081,7 +2238,6 @@ static void overlay_render(void) {
   }
   // Keep these badges outside the generic white-text batch below. That pass
   // used to repaint both the colored key glyphs and their circle geometry.
-  const int generic_text_end_quad = quads;
   if (setplay_helper_count) {
     const float helper_radius = 0.021f * (float)screen_height;
     const float helper_x = 0.815f * (float)screen_width;
@@ -2139,7 +2295,6 @@ static void overlay_render(void) {
     }
 
     const float gh = (float)screen_height / 43.0f;
-    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     setplay_helper_text_first_quad = quads;
     for (unsigned int index = 0; index < setplay_helper_count; index++) {
       const float y = helper_start_y + (float)index * helper_step;
@@ -2147,39 +2302,46 @@ static void overlay_render(void) {
       setplay_key_first_quads[index] = quads;
       int line_quads = 0;
       if (strcmp(setplay_keys[index], "L1+R1") == 0) {
-        const float chord_gw = gw * 0.82f;
-        line_quads += emit_line(
-            "R1", 2, helper_x - chord_gw,
-            y - gh * 0.5f, chord_gw, gh,
+        const float r1_width = measure_efootball_line(
+            "R1", 2, gh, EFOOTBALL_FONT_BOLD);
+        line_quads += emit_efootball_line(
+            "R1", 2, helper_x - r1_width * 0.5f,
+            y - gh * 0.5f, gh, EFOOTBALL_FONT_BOLD,
             verts + quads * 24);
         quads += line_quads;
-        int part_quads = emit_line(
-            "+", 1, chord_plus_x - gw * 0.5f,
-            y - gh * 0.5f, gw, gh,
+        const float plus_width = measure_efootball_line(
+            "+", 1, gh, EFOOTBALL_FONT_BOLD);
+        int part_quads = emit_efootball_line(
+            "+", 1, chord_plus_x - plus_width * 0.5f,
+            y - gh * 0.5f, gh, EFOOTBALL_FONT_BOLD,
             verts + quads * 24);
         line_quads += part_quads;
         quads += part_quads;
-        part_quads = emit_line(
-            "L1", 2, chord_second_x - chord_gw,
-            y - gh * 0.5f, chord_gw, gh,
+        const float l1_width = measure_efootball_line(
+            "L1", 2, gh, EFOOTBALL_FONT_BOLD);
+        part_quads = emit_efootball_line(
+            "L1", 2, chord_second_x - l1_width * 0.5f,
+            y - gh * 0.5f, gh, EFOOTBALL_FONT_BOLD,
             verts + quads * 24);
         line_quads += part_quads;
         quads += part_quads;
       } else if (strcmp(setplay_keys[index], ">") != 0) {
-        line_quads = emit_line(
+        const float key_width = measure_efootball_line(
+            setplay_keys[index], key_len, gh, EFOOTBALL_FONT_BOLD);
+        line_quads = emit_efootball_line(
             setplay_keys[index], key_len,
-            helper_x - (float)key_len *
-                           (key_len > 2 ? gw * 0.58f : gw) * 0.5f,
-            y - gh * 0.5f, key_len > 2 ? gw * 0.58f : gw, gh,
+            helper_x - key_width * 0.5f, y - gh * 0.5f, gh,
+            EFOOTBALL_FONT_BOLD,
             verts + quads * 24);
         quads += line_quads;
       }
       setplay_key_quads[index] = line_quads;
       setplay_helper_text_quads += line_quads;
       const int label_len = (int)strlen(setplay_labels[index]);
-      line_quads = emit_line(
+      line_quads = emit_efootball_line(
           setplay_labels[index], label_len, helper_label_x,
-          y - gh * 0.5f, gw * 0.72f, gh, verts + quads * 24);
+          y - gh * 0.5f, gh, EFOOTBALL_FONT_REGULAR,
+          verts + quads * 24);
       setplay_helper_text_quads += line_quads;
       quads += line_quads;
     }
@@ -2314,7 +2476,8 @@ static void overlay_render(void) {
   if (custom_popup) {
     int custom_offset = 0;
     glUniform1f(gl.loc_solid, 1.0f);
-    glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f, 0.56f);
+    glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f,
+                set_piece_selector ? 0.46f : 0.56f);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_backdrop_quads * 6);
     custom_offset += custom_backdrop_quads;
@@ -2323,7 +2486,10 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_panel_quads * 6);
     custom_offset += custom_panel_quads;
-    glUniform4f(gl.loc_color, 0.78f, 0.88f, 0.96f, 1.0f);
+    if (set_piece_selector)
+      glUniform4f(gl.loc_color, 0.98f, 0.98f, 0.98f, 1.0f);
+    else
+      glUniform4f(gl.loc_color, 0.78f, 0.88f, 0.96f, 1.0f);
     use_rounded_rect(&custom_header_style);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_header_round_quads * 6);
@@ -2332,13 +2498,21 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_header_fill_quads * 6);
     custom_offset += custom_header_fill_quads;
-    glUniform4f(gl.loc_color, 0.25f, 0.78f, 0.96f, 0.42f);
+    glUniform4f(gl.loc_color,
+                set_piece_selector ? 0.55f : 0.25f,
+                set_piece_selector ? 0.82f : 0.78f,
+                set_piece_selector ? 0.98f : 0.96f,
+                set_piece_selector ? 0.48f : 0.42f);
     use_rounded_rect(&custom_selected_style);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_selected_quads * 6);
     custom_offset += custom_selected_quads;
     use_rounded_rect(NULL);
-    glUniform4f(gl.loc_color, 0.70f, 0.74f, 0.78f, 0.85f);
+    glUniform4f(gl.loc_color,
+                set_piece_selector ? 0.84f : 0.70f,
+                set_piece_selector ? 0.86f : 0.74f,
+                set_piece_selector ? 0.88f : 0.78f,
+                set_piece_selector ? 0.72f : 0.85f);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_rule_quads * 6);
     custom_offset += custom_rule_quads;
@@ -2354,7 +2528,11 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform1f(gl.loc_circle, 1.0f);
     glUniform1f(gl.loc_circle_feather, 0.020f);
-    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+    glUniform4f(gl.loc_color,
+                set_piece_selector ? 0.82f : 0.98f,
+                set_piece_selector ? 0.84f : 0.99f,
+                set_piece_selector ? 0.86f : 1.0f,
+                1.0f);
     glDrawArrays(GL_TRIANGLES, custom_offset * 6,
                  custom_badge_plate_quads * 6);
     custom_offset += custom_badge_plate_quads;
@@ -2422,11 +2600,13 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_circle, 0.0f);
   }
   if (gameplan_helper_text_quads) {
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
     glDrawArrays(GL_TRIANGLES, gameplan_helper_text_first_quad * 6,
                  gameplan_helper_text_quads * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (setplay_helper_circle_quads) {
     glUniform1f(gl.loc_solid, 1.0f);
@@ -2485,11 +2665,13 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_circle, 0.0f);
   }
   if (cinematic_helper_text_quads) {
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
     glDrawArrays(GL_TRIANGLES, cinematic_helper_text_first_quad * 6,
                  cinematic_helper_text_quads * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (gameplan_cursor_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
@@ -2506,6 +2688,8 @@ static void overlay_render(void) {
                  gameplan_cursor_quads * 6);
     glUniform1f(gl.loc_cursor, 0.0f);
   }
+  if (set_piece_selector)
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
   if (custom_dark_text_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
@@ -2513,6 +2697,42 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_dark_text_first_quad * 6,
                  custom_dark_text_quads * 6);
   }
+  static const float position_colors[4][3] = {
+      {0.96f, 0.55f, 0.10f}, // goalkeeper: orange
+      {0.08f, 0.45f, 0.88f}, // backs: blue
+      {0.05f, 0.68f, 0.36f}, // midfielders: green
+      {0.88f, 0.18f, 0.20f}, // forwards: red
+  };
+  for (uint32_t role_band = 0; role_band < 4u; role_band++) {
+    if (!selector_position_quads[role_band])
+      continue;
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, position_colors[role_band][0],
+                position_colors[role_band][1],
+                position_colors[role_band][2], 1.0f);
+    glDrawArrays(GL_TRIANGLES, selector_position_first_quad[role_band] * 6,
+                 selector_position_quads[role_band] * 6);
+  }
+  static const float rating_colors[10][3] = {
+      {0.09f, 0.78f, 0.52f}, {0.18f, 0.80f, 0.44f},
+      {0.33f, 0.84f, 0.36f}, {0.49f, 0.87f, 0.27f},
+      {0.68f, 0.90f, 0.18f}, {0.88f, 0.87f, 0.13f},
+      {0.95f, 0.75f, 0.12f}, {0.95f, 0.56f, 0.11f},
+      {0.94f, 0.37f, 0.12f}, {0.90f, 0.22f, 0.21f},
+  };
+  for (uint32_t band = 0; band < 10u; band++) {
+    if (!custom_rating_quads[band])
+      continue;
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, rating_colors[band][0],
+                rating_colors[band][1], rating_colors[band][2], 1.0f);
+    glDrawArrays(GL_TRIANGLES, custom_rating_first_quad[band] * 6,
+                 custom_rating_quads[band] * 6);
+  }
+  if (set_piece_selector)
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
   if (custom_white_text_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
@@ -2539,6 +2759,7 @@ static void overlay_render(void) {
   }
 
   if (setplay_helper_text_quads) {
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 2.0f / (float)screen_width,
                 -2.0f / (float)screen_height);
@@ -2554,6 +2775,7 @@ static void overlay_render(void) {
     for (unsigned int i = 0; i < setplay_helper_count; i++)
       glDrawArrays(GL_TRIANGLES, setplay_key_first_quads[i] * 6,
                    setplay_key_quads[i] * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
 
   // restore the two attrib arrays to whatever the engine had (it uses the same
