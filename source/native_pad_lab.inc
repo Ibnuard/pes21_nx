@@ -57,6 +57,12 @@ static float native_lab_normalize_axis(int32_t raw) {
   const float normalized = (clamped - 0.18f) / 0.82f;
   return axis < 0.0f ? -normalized : normalized;
 }
+
+// Keep the set-piece preview and the close-free-kick flight solver within a
+// useful gameplay envelope.  The previous 30-degree/4-unit ceiling made a
+// fully raised stick produce an exaggerated, almost vertical arc.
+#define NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES 18.0f
+#define NATIVE_LAB_TRAJECTORY_MAX_LIFT 2.4f
 // One ThinkUnitList exists per local cursor.  Keep the real unit objects for
 // each pad so MobileSetplayKick can delegate to the console press/release
 // implementations without adding dormant units to the active list.
@@ -144,6 +150,16 @@ static uint32_t native_lab_base_angle_player[2];
 static uint32_t native_lab_command_vertical_bits[2];
 static uint32_t native_lab_command_angle_valid_mask;
 static uint32_t native_lab_left_aim_latched_mask;
+// DrawPassLine derives every preview point from the live player/model state.
+// During the kick run-up that state moves and rotates, which made an already
+// selected trajectory slide or spin even though the command angle was latched.
+// Keep a pad-owned snapshot of the nine world-space points and restore it until
+// the ball/action completion clears the cache.
+#define NATIVE_LAB_TRAJECTORY_POINT_COUNT 9u
+static uint32_t native_lab_trajectory_freeze_mask;
+static uint32_t native_lab_trajectory_cache_valid_mask;
+static uint32_t native_lab_trajectory_cache_bits
+    [2][NATIVE_LAB_TRAJECTORY_POINT_COUNT][3];
 // Close free-kick elevation is consumed by the ball-injection pipeline, not
 // by PadCommand::SetKick. Keep a short pad-owned token from the shoot release
 // until GetBallInjectionSpeedAndRotation has produced the first flight vector.
@@ -151,6 +167,66 @@ static uint32_t native_lab_left_aim_latched_mask;
 static uint32_t native_lab_free_kick_elevation_bits[2];
 static uint32_t native_lab_free_kick_elevation_mask;
 static uint32_t native_lab_free_kick_elevation_linger[2];
+
+static void native_lab_clear_trajectory_cache(uint32_t pad) {
+  if (pad > 1)
+    return;
+  __atomic_fetch_and(&native_lab_trajectory_freeze_mask, ~(1u << pad),
+                     __ATOMIC_ACQ_REL);
+  __atomic_fetch_and(&native_lab_trajectory_cache_valid_mask, ~(1u << pad),
+                     __ATOMIC_ACQ_REL);
+  for (uint32_t index = 0; index < NATIVE_LAB_TRAJECTORY_POINT_COUNT;
+       ++index) {
+    for (uint32_t axis = 0; axis < 3; ++axis)
+      __atomic_store_n(&native_lab_trajectory_cache_bits[pad][index][axis], 0,
+                       __ATOMIC_RELEASE);
+  }
+}
+
+static void native_lab_clear_trajectory_cache_all(void) {
+  native_lab_clear_trajectory_cache(0);
+  native_lab_clear_trajectory_cache(1);
+}
+
+static void native_lab_cache_trajectory_points(uint32_t pad, void *screen_2d) {
+  if (pad > 1 || !screen_2d)
+    return;
+  // Invalidate first so a concurrent renderer never consumes a half-written
+  // point set. Publish valid only after all 27 float bit patterns are stored.
+  __atomic_fetch_and(&native_lab_trajectory_cache_valid_mask, ~(1u << pad),
+                     __ATOMIC_ACQ_REL);
+  for (uint32_t index = 0; index < NATIVE_LAB_TRAJECTORY_POINT_COUNT;
+       ++index) {
+    for (uint32_t axis = 0; axis < 3; ++axis) {
+      uint32_t bits = 0;
+      memcpy(&bits,
+             (const char *)screen_2d + 0x10f0 + index * 12u + axis * 4u,
+             sizeof(bits));
+      __atomic_store_n(&native_lab_trajectory_cache_bits[pad][index][axis],
+                       bits, __ATOMIC_RELEASE);
+    }
+  }
+  __atomic_fetch_or(&native_lab_trajectory_cache_valid_mask, 1u << pad,
+                    __ATOMIC_RELEASE);
+}
+
+static int native_lab_restore_trajectory_points(uint32_t pad, void *screen_2d) {
+  if (pad > 1 || !screen_2d ||
+      !(__atomic_load_n(&native_lab_trajectory_cache_valid_mask,
+                        __ATOMIC_ACQUIRE) & (1u << pad)))
+    return 0;
+  for (uint32_t index = 0; index < NATIVE_LAB_TRAJECTORY_POINT_COUNT;
+       ++index) {
+    for (uint32_t axis = 0; axis < 3; ++axis) {
+      const uint32_t bits = __atomic_load_n(
+          &native_lab_trajectory_cache_bits[pad][index][axis],
+          __ATOMIC_ACQUIRE);
+      memcpy((char *)screen_2d + 0x10f0 + index * 12u + axis * 4u, &bits,
+             sizeof(bits));
+    }
+  }
+  return 1;
+}
 
 static void native_lab_clear_free_kick_elevation(void) {
   __atomic_store_n(&native_lab_free_kick_elevation_mask, 0,
@@ -353,6 +429,7 @@ static void native_pad_lab_reset(void) {
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_left_aim_latched_mask, 0,
                    __ATOMIC_RELEASE);
+  native_lab_clear_trajectory_cache_all();
   native_lab_clear_free_kick_elevation();
   __atomic_store_n(&native_lab_debug_buttons_p2, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_native_keys_p2, 0, __ATOMIC_RELEASE);
@@ -389,6 +466,9 @@ static void native_pad_lab_reset(void) {
 static void native_lab_gauge_clear_pad(uint32_t pad) {
   if (pad > 1)
     return;
+  // BallInfo/action completion (or the cancellation safety timeout) releases
+  // the trajectory snapshot along with the pad-owned gauge state.
+  native_lab_clear_trajectory_cache(pad);
   __atomic_store_n(&native_lab_gauge_power_milli_by_pad[pad], 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad], 0,
@@ -643,10 +723,14 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
   // mobile kick ThinkUnit is idle. Neutral does not overwrite the value: the
   // selected height stays frozen through the wind-up and is cleared only on
   // a real context transition/completion.
-  if (connected && port == setplay_pad && trajectory_context) {
+  const uint32_t active_action = __atomic_load_n(
+      &native_lab_active_action[port], __ATOMIC_ACQUIRE);
+  if (connected && port == setplay_pad && trajectory_context &&
+      !active_action) {
     const float left_y = native_lab_normalize_axis(axis_y);
     if (left_y != 0.0f) {
-      const float vertical = -left_y * 30.0f;
+      const float vertical =
+          -left_y * NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES;
       uint32_t vertical_bits = 0;
       memcpy(&vertical_bits, &vertical, sizeof(vertical_bits));
       __atomic_store_n(&native_lab_command_vertical_bits[port],
@@ -687,6 +771,12 @@ void pes_controller_native_pad_lab_publish_setplay_context(uint32_t context) {
   const uint32_t previous = __atomic_exchange_n(
       &native_lab_published_setplay_context, context, __ATOMIC_ACQ_REL);
   if (context != previous) {
+    // A new set-play must never inherit the previous action's frozen spline.
+    // Do not clear on the first transient NONE sample: ButtonSetplay can emit
+    // it during a live run-up, and the existing linger/gauge completion paths
+    // will clear the cache once the action has genuinely ended.
+    if (context != PES_SETPLAY_NONE)
+      native_lab_clear_trajectory_cache_all();
     native_lab_clear_free_kick_elevation();
     const uint32_t show_trajectory =
         context == PES_SETPLAY_GOAL_KICK ||
@@ -1022,6 +1112,14 @@ static void native_lab_note_action(const void *input, uint32_t event,
   if (event == PES_NATIVE_LAB_EVENT_SHORT_PRESS ||
       event == PES_NATIVE_LAB_EVENT_LONG_PRESS ||
       event == PES_NATIVE_LAB_EVENT_SHOOT_PRESS) {
+    // Freeze the last idle preview for this action. Do not clear/rebuild the
+    // cache here: by the first post-press 2D update the stock engine may have
+    // already rotated the model and raised its spline for the run-up.
+    if (!(__atomic_load_n(&native_lab_trajectory_freeze_mask,
+                          __ATOMIC_ACQUIRE) & pad_bit)) {
+      __atomic_fetch_or(&native_lab_trajectory_freeze_mask, pad_bit,
+                        __ATOMIC_ACQ_REL);
+    }
     __atomic_fetch_or(&native_lab_gauge_active_mask, pad_bit,
                       __ATOMIC_ACQ_REL);
     __atomic_fetch_or(&native_lab_gauge_charging_mask, pad_bit,
@@ -1822,6 +1920,13 @@ static void native_lab_publish_setplay_trajectory(const void *input,
       &native_lab_command_angle_valid_mask, __ATOMIC_ACQUIRE);
   if (pad != owner || !(valid & (1u << pad)))
     return;
+  const uint32_t pad_bit = 1u << pad;
+  const uint32_t freeze_mask = __atomic_load_n(
+      &native_lab_trajectory_freeze_mask, __ATOMIC_ACQUIRE);
+  const int restore_frozen =
+      (freeze_mask & pad_bit) &&
+      (__atomic_load_n(&native_lab_trajectory_cache_valid_mask,
+                       __ATOMIC_ACQUIRE) & pad_bit);
   uint32_t player = 0;
   memcpy(&player, (const char *)input + 0x24, sizeof(player));
   const void *registry = *(void *const *)input;
@@ -1840,6 +1945,9 @@ static void native_lab_publish_setplay_trajectory(const void *input,
   // This is the stock white renderer used by the mobile set-piece preview.
   native_lab_draw_pass_line(0x50u, 0u, player, 0xffu, angle, registry,
                             screen_2d);
+  if (restore_frozen &&
+      native_lab_restore_trajectory_points(pad, screen_2d))
+    return;
 
   // The 0xff angle-only path in DrawPassLine stops after roughly 15 metres.
   // Preserve its stock nine-point curve, but extend X/Z about the ball so the
@@ -1878,36 +1986,43 @@ static void native_lab_publish_setplay_trajectory(const void *input,
     }
   }
 
-  if (vertical == 0.0f)
-    return;
-
-  // DrawPassLine has no elevation parameter, but it publishes the same nine
-  // world-space spline points that the stock renderer consumes at +0x10f0.
-  // Bend only the interior points with a sine envelope: the ball and endpoint
-  // stay on the ground while LS-Y raises/lowers the white trajectory. This
-  // preserves the native colour/material and avoids the cyan DrawShootLine
-  // variant, whose command kind is intended for a different mobile action.
-  // Mobile swipe elevation uses screen-space Y (up is negative), whereas the
-  // white spline stores world-space Y (up is positive). Invert it here so a
-  // physical LS-up raises both the native kick command and its preview.
-  const float lift = fmaxf(-4.0f, fminf(4.0f, -vertical * 0.13333334f));
-  float start_y = 0.0f;
-  float end_y = 0.0f;
-  memcpy(&start_y, (char *)screen_2d + 0x10f4, sizeof(start_y));
-  memcpy(&end_y, (char *)screen_2d + 0x1154, sizeof(end_y));
-  const float pi = 3.14159265358979323846f;
-  for (uint32_t index = 1; index < 8; ++index) {
-    const float t = (float)index / 8.0f;
-    float y = 0.0f;
-    memcpy(&y, (char *)screen_2d + 0x10f4 + index * 12u, sizeof(y));
-    y += lift * sinf(pi * t);
-    // LS-down may flatten the stock arc, but never push its preview below the
-    // straight ground line between the ball and the target.
-    const float floor_y = start_y + (end_y - start_y) * t;
-    if (y < floor_y)
-      y = floor_y;
-    memcpy((char *)screen_2d + 0x10f4 + index * 12u, &y, sizeof(y));
+  if (vertical != 0.0f) {
+    // DrawPassLine has no elevation parameter, but it publishes the same nine
+    // world-space spline points that the stock renderer consumes at +0x10f0.
+    // Bend only the interior points with a sine envelope: the ball and endpoint
+    // stay on the ground while LS-Y raises/lowers the white trajectory. This
+    // preserves the native colour/material and avoids the cyan DrawShootLine
+    // variant, whose command kind is intended for a different mobile action.
+    // Mobile swipe elevation uses screen-space Y (up is negative), whereas the
+    // white spline stores world-space Y (up is positive). Invert it here so a
+    // physical LS-up raises both the native kick command and its preview.
+    const float lift_scale = NATIVE_LAB_TRAJECTORY_MAX_LIFT /
+                             NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES;
+    const float lift = fmaxf(-NATIVE_LAB_TRAJECTORY_MAX_LIFT,
+                             fminf(NATIVE_LAB_TRAJECTORY_MAX_LIFT,
+                                   -vertical * lift_scale));
+    float start_y = 0.0f;
+    float end_y = 0.0f;
+    memcpy(&start_y, (char *)screen_2d + 0x10f4, sizeof(start_y));
+    memcpy(&end_y, (char *)screen_2d + 0x1154, sizeof(end_y));
+    const float pi = 3.14159265358979323846f;
+    for (uint32_t index = 1; index < 8; ++index) {
+      const float t = (float)index / 8.0f;
+      float y = 0.0f;
+      memcpy(&y, (char *)screen_2d + 0x10f4 + index * 12u, sizeof(y));
+      y += lift * sinf(pi * t);
+      // LS-down may flatten the stock arc, but never push its preview below the
+      // straight ground line between the ball and the target.
+      const float floor_y = start_y + (end_y - start_y) * t;
+      if (y < floor_y)
+        y = floor_y;
+      memcpy((char *)screen_2d + 0x10f4 + index * 12u, &y, sizeof(y));
+    }
   }
+  // While idle this continuously records the final, user-selected preview.
+  // If an action begins before any idle frame was available, the same write
+  // provides a one-frame fallback; subsequent active frames restore it.
+  native_lab_cache_trajectory_points(pad, screen_2d);
 }
 
 #define NATIVE_LAB_GAUGE_WRAPPER(name, original)                         \
@@ -2106,10 +2221,10 @@ static void native_lab_ball_injection(const void *input, void *speed,
   memcpy(&elevation_degrees, &elevation_bits, sizeof(elevation_degrees));
   if (!isfinite(elevation_degrees))
     return;
-  if (elevation_degrees > 30.0f)
-    elevation_degrees = 30.0f;
-  else if (elevation_degrees < -30.0f)
-    elevation_degrees = -30.0f;
+  if (elevation_degrees > NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES)
+    elevation_degrees = NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES;
+  else if (elevation_degrees < -NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES)
+    elevation_degrees = -NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES;
   float *velocity = (float *)speed;
   const float horizontal =
       sqrtf(velocity[0] * velocity[0] + velocity[2] * velocity[2]);
@@ -2237,7 +2352,8 @@ static void native_lab_apply_native_kick_angle(void *unit, const void *input,
   if (context == PES_SETPLAY_CORNER && native_lab_mobile_filter_angle_abi)
     desired = native_lab_mobile_filter_angle_abi(unit, input, desired);
   if (left_y != 0.0f) {
-    const float vertical = -left_y * 30.0f;
+    const float vertical =
+        -left_y * NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES;
     uint32_t vertical_bits = 0;
     memcpy(&vertical_bits, &vertical, sizeof(vertical_bits));
     __atomic_store_n(&native_lab_command_vertical_bits[pad], vertical_bits,
@@ -2285,7 +2401,6 @@ static uint32_t native_lab_mobile_kick_main(void *unit, const void *input,
   if (context == PES_SETPLAY_NONE)
     return stock;
   const uint32_t pad = native_lab_input_pad(input);
-  native_lab_apply_native_kick_angle(unit, input, pad, context);
   const uint32_t buttons = __atomic_load_n(
       pad == 1 ? &native_lab_debug_buttons_p2 : &native_lab_debug_buttons,
       __ATOMIC_ACQUIRE);
@@ -2295,8 +2410,18 @@ static uint32_t native_lab_mobile_kick_main(void *unit, const void *input,
 
   if (previous && previous != action) {
     __atomic_store_n(&native_lab_active_action[pad], 0, __ATOMIC_RELEASE);
+    // Keep the final aim/elevation captured during the press through the
+    // release command.  The automatic run-up may rotate the player's model,
+    // but it must not rewrite the selected trajectory.
     return native_lab_exec_setplay_action(pad, previous, 0, input);
   }
+  if (previous && action)
+    return native_lab_exec_setplay_action(pad, action, 1, input);
+
+  // Idle frames and the first press frame are the only times the stick may
+  // change the command.  Once `previous` is active, the angle and height stay
+  // frozen until the native release has completed.
+  native_lab_apply_native_kick_angle(unit, input, pad, context);
   if (action) {
     __atomic_store_n(&native_lab_active_action[pad], action,
                      __ATOMIC_RELEASE);

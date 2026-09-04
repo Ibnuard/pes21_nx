@@ -304,7 +304,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('native_lab_debug_axis_y', aim)
         self.assertNotIn('atan2f(-left_x, left_y)', aim)
         self.assertIn('context == PES_SETPLAY_CORNER ? 75.0f : 60.0f', aim)
-        self.assertIn('const float vertical = -left_y * 30.0f', aim)
+        self.assertIn('NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES', aim)
         self.assertIn('(char *)unit + 0x44', aim)
         self.assertIn('(char *)unit + 0x38, &desired', aim)
         self.assertIn('native_lab_command_angle_bits[pad]', aim)
@@ -338,7 +338,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.16.11', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.16.15', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)
@@ -578,8 +578,51 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('target_distance / current_distance', trajectory)
         self.assertIn('screen_2d + 0x10f4 + index * 12u', trajectory)
         self.assertIn('y += lift * sinf', trajectory)
-        self.assertIn('-vertical * 0.13333334f', trajectory)
+        self.assertIn('NATIVE_LAB_TRAJECTORY_MAX_LIFT', trajectory)
+        self.assertIn('const float lift_scale', trajectory)
         self.assertIn('if (y < floor_y)', trajectory)
+
+    def test_setplay_aim_height_is_clamped_and_freezes_after_action_press(self):
+        route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
+        self.assertIn('#define NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES 18.0f',
+                      route)
+        self.assertIn('#define NATIVE_LAB_TRAJECTORY_MAX_LIFT 2.4f', route)
+        self.assertIn('#define NATIVE_LAB_TRAJECTORY_POINT_COUNT 9u', route)
+        self.assertIn('native_lab_trajectory_freeze_mask', route)
+        self.assertIn('native_lab_trajectory_cache_bits', route)
+        note_action = re.search(
+            r'static void native_lab_note_action\(.*?\n\}', route, re.S).group(0)
+        self.assertIn('if (!(__atomic_load_n(&native_lab_trajectory_freeze_mask',
+                      note_action)
+        self.assertNotIn('native_lab_clear_trajectory_cache(pad)', note_action)
+        hid_latch = re.search(
+            r'void pes_controller_native_pad_lab_debug_input.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('active_action', hid_latch)
+        self.assertIn('!active_action', hid_latch)
+        bridge = re.search(
+            r'static uint32_t native_lab_mobile_kick_main.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('if (previous && action)', bridge)
+        self.assertIn('native_lab_apply_native_kick_angle(unit, input, pad, context)',
+                      bridge)
+        self.assertLess(bridge.index('const uint32_t buttons'),
+                        bridge.index('native_lab_apply_native_kick_angle'))
+        injection = re.search(
+            r'static void native_lab_ball_injection\(.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES', injection)
+        trajectory = re.search(
+            r'static void native_lab_publish_setplay_trajectory\('
+            r'const void \*input,\s*void \*screen_2d\) \{.*?\n\}',
+            route, re.S).group(0)
+        self.assertIn('native_lab_restore_trajectory_points(pad, screen_2d)',
+                      trajectory)
+        self.assertIn('native_lab_cache_trajectory_points(pad, screen_2d)',
+                      trajectory)
+        self.assertIn('const int restore_frozen', trajectory)
+        self.assertLess(trajectory.index('native_lab_draw_pass_line(0x50u'),
+                        trajectory.index('native_lab_restore_trajectory_points'))
 
     def test_visual_trajectory_resolvers_cannot_disable_core_action_hooks(self):
         route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
