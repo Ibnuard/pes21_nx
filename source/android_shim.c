@@ -2251,6 +2251,13 @@ void android_input_poll(void) {
   const int main_menu_controller_active = pes_main_menu_controller_active();
   const int two_player_team_selector_active =
       pes_controller_2p_team_selector_active();
+  const int two_player_prematch_hub_active =
+      pes_controller_2p_prematch_hub_active();
+  const int two_player_transition_active =
+      pes_controller_2p_transition_active();
+  const int two_player_custom_frontend_active =
+      two_player_team_selector_active || two_player_prematch_hub_active ||
+      two_player_transition_active;
   const int menu_controller_active = pes_controller_menu_active();
   if (gameplay_active || main_menu_controller_active)
     pes_controller_result_cursor_clear();
@@ -2352,7 +2359,7 @@ void android_input_poll(void) {
   const int physical_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
   const int compact_main_menu_active = main_menu_controller_active;
-  if (set_piece_selector_isolated || two_player_team_selector_active) {
+  if (set_piece_selector_isolated || two_player_custom_frontend_active) {
     physical_touch_tracking = 0;
   } else if (physical_active) {
     physical_touch_last_x = touch_x;
@@ -2367,7 +2374,7 @@ void android_input_poll(void) {
     physical_touch_last_y = touch_y;
   }
 
-  if (!set_piece_selector_isolated && !two_player_team_selector_active &&
+  if (!set_piece_selector_isolated && !two_player_custom_frontend_active &&
       compact_main_menu_active &&
       physical_touch_tracking &&
       !physical_active && screen_width > 0 && screen_height > 0) {
@@ -2400,7 +2407,7 @@ void android_input_poll(void) {
   }
 
   FakeTouchState desired = {0};
-  if (!set_piece_selector_isolated && !two_player_team_selector_active &&
+  if (!set_piece_selector_isolated && !two_player_custom_frontend_active &&
       physical_active &&
       !compact_main_menu_active)
     touch_state_append(&desired, FAKE_POINTER_PHYSICAL, touch_x, touch_y);
@@ -2600,7 +2607,11 @@ void android_input_poll(void) {
         !cinematic_active && !gameplay_active &&
         !gameplan_cursor_active &&
         menu_controller_active) {
-      if (two_player_team_selector_active) {
+      if (two_player_transition_active) {
+        // Consume the release edge as well as the press that initiated the
+        // flow change. Nothing may reach the native page under the cover.
+        reset_virtual_surfaces();
+      } else if (two_player_team_selector_active) {
         // The custom 2P team screen is a two-cursor surface: each local pad
         // owns its own league/team focus and confirm state. Do not synthesize
         // a single P1 touch into the compact menu underneath it.
@@ -2611,6 +2622,13 @@ void android_input_poll(void) {
         pes_controller_2p_team_selector_pad_event(
             1, team_selector_buttons[1],
             previous_team_selector_buttons[1]);
+      } else if (two_player_prematch_hub_active) {
+        // The dual selector ends here.  Every shared pre-match option belongs
+        // exclusively to P1; P2 stays isolated until live match ownership.
+        reset_virtual_surfaces();
+        pes_controller_2p_prematch_hub_pad_event(
+            0, team_selector_buttons[0],
+            previous_team_selector_buttons[0]);
       } else {
         const u64 pressed_p1 = menu_buttons & ~previous_menu_buttons;
         const u64 pressed_p2 = menu_buttons_p2 & ~previous_menu_buttons_p2;
@@ -2645,7 +2663,7 @@ void android_input_poll(void) {
   if (menu_was_active >= 0 &&
       !context_changed &&
       !set_piece_selector_isolated &&
-      !two_player_team_selector_active &&
+      !two_player_custom_frontend_active &&
       !cinematic_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU) < 0 &&
       screen_width > 0 && screen_height > 0)
@@ -2654,14 +2672,14 @@ void android_input_poll(void) {
   if (menu_back_was_active >= 0 &&
       !context_changed &&
       !set_piece_selector_isolated &&
-      !two_player_team_selector_active &&
+      !two_player_custom_frontend_active &&
       !cinematic_active && !replay_pointer_was_active &&
       touch_state_find(&active_touch_state, FAKE_POINTER_MENU_BACK) < 0)
     pes_controller_menu_back_pressed();
 
   const int physical_is_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
-  if (!set_piece_selector_isolated && !two_player_team_selector_active &&
+  if (!set_piece_selector_isolated && !two_player_custom_frontend_active &&
       !compact_main_menu_active &&
       physical_was_active &&
       !physical_is_active &&
@@ -2727,6 +2745,11 @@ void android_input_poll(void) {
     disable_native_pad_bridge();
   else if (custom_postmatch_active)
     disable_native_pad_bridge();
+  else if (two_player_custom_frontend_active)
+    // Team selection and the pre-match hub consume their own frontend input.
+    // Do this before the native lab/gameplay branch so P2 can never leak a
+    // pad event into the bootstrap while P1 is navigating the hub.
+    disable_native_pad_bridge();
   else if (native_pad_lab_active && gameplay_active)
   {
     u64 native_buttons = buttons;
@@ -2754,8 +2777,6 @@ void android_input_poll(void) {
     emit_native_lab_pad_input(1, &left_stick_p2, &right_stick_p2,
                               controller_connected_p2, native_buttons_p2);
   }
-  else if (two_player_team_selector_active)
-    disable_native_pad_bridge();
   else if (!gameplay_active && menu_controller_active)
     emit_menu_pad_input(&left_stick, have_left_stick, menu_buttons,
                         have_left_stick);
@@ -2770,12 +2791,12 @@ void android_input_poll(void) {
   previous_menu_buttons_p2 =
       context_changed ? 0 : (controller_connected_p2 ? menu_buttons_p2 : 0);
   previous_team_selector_buttons[0] =
-      context_changed || !two_player_team_selector_active ||
+      context_changed || !two_player_custom_frontend_active ||
               !controller_connected
           ? 0
           : team_selector_buttons[0];
   previous_team_selector_buttons[1] =
-      context_changed || !two_player_team_selector_active ||
+      context_changed || !two_player_custom_frontend_active ||
               !controller_connected_p2
           ? 0
           : team_selector_buttons[1];

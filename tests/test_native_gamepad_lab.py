@@ -38,11 +38,12 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('pad > 1', selector)
         self.assertIn('main_menu_2p_team_selector_phase[pad]', selector)
         self.assertIn('main_menu_2p_team_selector_confirm(pad)', selector)
-        self.assertIn('main_menu_2p_team_selector_close()', selector)
+        self.assertIn('main_menu_2p_team_selector_close_pending', selector)
         self.assertIn('main_menu_2p_team_selector_start_pending', self.hooks)
         starter = re.search(
             r'static void main_menu_2p_team_selector_process_pending\(void\) \{.*?\n\}',
             self.hooks, re.S).group(0)
+        self.assertIn('main_menu_2p_team_selector_close()', starter)
         self.assertIn('main_menu_start_two_player_match()', starter)
         self.assertIn('pes_controller_2p_team_selector_pad_event', self.shim)
 
@@ -83,10 +84,9 @@ class NativeGamepadLabTests(unittest.TestCase):
             encoding='ascii', errors='strict')
         self.assertIn('#define TEAM_SELECT_BG_W 1280', background)
         self.assertIn('#define TEAM_SELECT_BG_H 720', background)
-        self.assertIn('!two_player_team_selector_active &&\n'
-                      '      physical_active', self.shim)
-        self.assertIn('else if (two_player_team_selector_active)\n'
-                      '    disable_native_pad_bridge();', self.shim)
+        self.assertIn('two_player_custom_frontend_active', self.shim)
+        self.assertIn('else if (two_player_custom_frontend_active)',
+                      self.shim)
 
     def test_custom_2p_selector_locks_ready_side_and_exposes_all_groups(self):
         self.assertIn(
@@ -152,6 +152,230 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('if (!main_menu_2p_team_selector_input_armed[pad])',
                       handler)
         self.assertIn('if (!buttons)', handler)
+
+    def test_prematch_back_bypasses_onboarding_and_kits_use_native_table(self):
+        closer = re.search(
+            r'static void main_menu_2p_team_selector_close\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('"MyClub/MainMenu/MenuMain"', closer)
+        self.assertNotIn('"MyClub/MainMenu/PreMainMenuCheck"', closer)
+
+        refresh = re.search(
+            r'static void exhibition_gameplan_refresh_uniform_choices\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('exhibition_commonwork_get_team', refresh)
+        self.assertIn('(unsigned char *)team + 0x52a', refresh)
+        self.assertIn('exhibition_get_valid_uniform_regulation', refresh)
+        self.assertIn('exhibition_uniform_get_index', refresh)
+        self.assertIn('kind < 9', refresh)
+        self.assertIn('==\n              10u', refresh)
+        self.assertIn('((regulation & 0x1fu) << 9) | kind', refresh)
+        self.assertIn('& 0x7fu) + 1u', self.hooks)
+
+    def test_prematch_setting_rows_keep_balanced_horizontal_margins(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        settings = re.search(
+            r'\} else if \(custom_hub_settings_popup\) \{(.*?)'
+            r'\} else if \(custom_hub_choice_page\)', overlay, re.S).group(1)
+        choices = re.search(
+            r'\} else if \(custom_hub_choice_page\) \{(.*?)'
+            r'\} else if \(custom_2p_prematch_hub\)', overlay, re.S).group(1)
+        for page in (settings, choices):
+            self.assertIn(
+                'const float row_w = panel_w - 0.080f * (float)screen_width;',
+                page)
+            self.assertIn(
+                '0.070f * (float)screen_width - value_w;', page)
+        self.assertIn(
+            'const float row_y0 = panel_y + header_h +',
+            settings)
+        self.assertIn(
+            'const float content_y = panel_y + header_h +',
+            choices)
+        self.assertIn(
+            'const float preview_y = content_y;',
+            choices)
+        self.assertNotIn('CHOOSE GENERAL SETTINGS', settings)
+        self.assertNotIn('CHOOSE HOME AND AWAY KITS', choices)
+        self.assertNotIn('CHOOSE STADIUM AND MATCH TIME', choices)
+
+    def test_prematch_hub_uses_console_order_and_kickoff_starts_centered(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn(
+            '"STADIUM", "KITS", "KICK OFF", "GAME PLAN", "GENERAL SETTING"',
+            overlay)
+        self.assertIn('main_menu_2p_prematch_hub_focus, 2', self.hooks)
+        pending = re.search(
+            r'static void main_menu_2p_prematch_hub_process_pending\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        self.assertIn('if (action == 1)', pending)
+        self.assertIn('MAIN_MENU_2P_PREMATCH_PAGE_STADIUM', pending)
+        self.assertIn('if (action == 2)', pending)
+        self.assertIn('MAIN_MENU_2P_PREMATCH_PAGE_KITS', pending)
+        self.assertIn('if (action == 5)', pending)
+        self.assertIn('exhibition_open_match_settings', pending)
+        self.assertIn('const int game_plan = action == 4;', pending)
+        self.assertIn(
+            'const float action_label_gh = (float)screen_height / 46.0f;',
+            overlay)
+        self.assertNotIn(
+            'const float label_gh = (float)screen_height / 58.0f;',
+            overlay)
+
+    def test_prematch_choice_pages_use_screen_edge_helpers(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        settings = re.search(
+            r'\} else if \(custom_hub_settings_popup\) \{(.*?)'
+            r'\} else if \(custom_hub_choice_page\)', overlay, re.S).group(1)
+        choices = re.search(
+            r'\} else if \(custom_hub_choice_page\) \{(.*?)'
+            r'\} else if \(custom_2p_prematch_hub\)', overlay, re.S).group(1)
+        for page in (settings, choices):
+            self.assertNotIn('custom_action_button_quads =', page)
+            self.assertNotIn('custom_back_button_quads =', page)
+            self.assertIn('const float key_y = 0.958f', page)
+            self.assertIn('0.745f * (float)screen_width', page)
+            self.assertIn('0.875f * (float)screen_width', page)
+
+    def test_prematch_kits_load_stock_jersey_thumbnails_and_survive_refresh(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        makefile = (ROOT/'Makefile').read_text(encoding='utf-8')
+        decoder = re.search(
+            r'static int decode_uniform_thumbnail\(.*?\n\}',
+            overlay, re.S).group(0)
+        thumbnail = re.search(
+            r'static void prepare_uniform_thumbnail_preview\(int active\) \{'
+            r'(.*?)\n\}\n\nstatic int emit_segment',
+            overlay, re.S).group(1)
+        choices = re.search(
+            r'\} else if \(custom_hub_choice_page\) \{(.*?)'
+            r'\} else if \(custom_2p_prematch_hub\)', overlay, re.S).group(1)
+        pending = re.search(
+            r'static void main_menu_2p_prematch_hub_process_pending\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        open_kits = re.search(
+            r'if \(action == 2\) \{(.*?)\n  \}', pending, re.S).group(1)
+
+        self.assertIn('#include <png.h>', overlay)
+        self.assertIn('-lpng -lz', makefile)
+        self.assertIn('png_image_begin_read_from_memory(', decoder)
+        self.assertIn('image.format = PNG_FORMAT_RGBA;', decoder)
+        self.assertIn('png_image_finish_read(', decoder)
+        self.assertIn('glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA', thumbnail)
+        self.assertNotIn('glReadPixels(', thumbnail)
+        self.assertIn('prepare_uniform_thumbnail_preview(custom_hub_kits_page);',
+                      overlay)
+        self.assertRegex(
+            overlay,
+            r'if \(!gl_init\(\)\)\s*return;\s*'
+            r'prepare_uniform_thumbnail_preview\(custom_hub_kits_page\);')
+        self.assertNotRegex(
+            overlay,
+            r'if \(!gl_init\(\)\)\s*return;\s*'
+            r'prepare_native_uniform_preview\(')
+
+        self.assertIn('"common/render/thumbnail/uniform/uni%u.png"',
+                      self.hooks)
+        self.assertNotIn('_full.png', self.hooks)
+        for symbol in (
+                '_ZN3sys4File6CreateEPKci', '_ZN3sys4File8SyncReadEv',
+                '_ZN3sys4File7GetBodyEv', '_ZN3sys4File7GetSizeEv',
+                '_ZN3sys4File7ReleaseEv'):
+            self.assertIn(symbol, self.hooks)
+        self.assertIn('file && exhibition_sys_file_sync_read(file)',
+                      self.hooks)
+        self.assertIn('main_menu_2p_uniform_preview_load(side);', pending)
+        self.assertIn('main_menu_2p_uniform_preview_load(0);', open_kits)
+        self.assertIn('main_menu_2p_uniform_preview_load(1);', open_kits)
+        self.assertNotIn('main_menu_2p_native_uniform_open();', open_kits)
+
+        self.assertIn(
+            'custom_kit_preview_side_quads[side] = emit_image_rect(', choices)
+        self.assertIn('custom_kit_preview_first_quad', choices)
+        self.assertIn('const float shirt_size = 0.20f', choices)
+        self.assertIn('shirt_size, shirt_size', choices)
+        self.assertIn('gl.native_uniform_valid_mask & (1u << side)',
+                      choices)
+        self.assertNotIn('model_h', choices)
+        self.assertNotIn('capture_aspect', choices)
+        self.assertNotIn('0.0f, 1.0f, 1.0f, 0.0f', choices)
+        self.assertNotIn('custom_confirm_bar_quads += emit_rect(\n'
+                         '            preview_x[side]', choices)
+        self.assertGreater(
+            choices.index('const char *team ='),
+            choices.index('custom_white_text_first_quad = quads;'))
+        self.assertIn('(preview_w - team_w) * 0.5f', choices)
+        self.assertNotIn('emit_badge(', choices)
+        self.assertNotIn('custom_kit_shape_first_quad', overlay)
+        self.assertNotIn('pes_controller_2p_prematch_hub_kit_color',
+                          overlay + self.hooks)
+        self.assertNotIn('preview_value', choices)
+        self.assertIn('GLuint native_uniform_texture[2];', overlay)
+        self.assertIn(
+            'glBindTexture(GL_TEXTURE_2D, gl.native_uniform_texture[side]);',
+            overlay)
+        self.assertIn('if (!custom_kit_preview_side_quads[side] ||', overlay)
+        self.assertIn('gl.bind_sampler(0, 0);', overlay)
+        self.assertNotIn('glUniform1f(gl.loc_image_curve, 1.0f);', overlay)
+        self.assertIn('custom_hub_choice_page ? 1.0f : 0.92f', overlay)
+        self.assertIn('custom_hub_choice_page ? 1.0f : 0.97f', overlay)
+        self.assertIn('main_menu_2p_prematch_kit_input_pending', self.hooks)
+        self.assertIn('exhibition_selected_uniform_id', self.hooks)
+        refresh = re.search(
+            r'static void exhibition_gameplan_refresh_uniform_choices\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        self.assertIn('(persisted >> 14) == selected_team[side]', refresh)
+        self.assertIn('exhibition_match_set_uni_id(match, side, selected);',
+                      refresh)
+        self.assertGreaterEqual(
+            self.hooks.count('exhibition_apply_selected_uniforms(tmpdb_match)'),
+            2)
+        setup = re.search(
+            r'uintptr_t pes_exhibition_match_setup_data_entry\(void\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('exhibition_apply_selected_uniforms(NULL);', setup)
+
+    def test_kickoff_loading_cover_stops_at_native_match_setup(self):
+        pending = re.search(
+            r'static void main_menu_2p_prematch_hub_process_pending\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        screen_tap = re.search(
+            r'uintptr_t pes_mobile_screen_tap_entry\(void \*control_mode_ptr\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        match_setup = re.search(
+            r'uintptr_t pes_exhibition_match_setup_data_entry\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        transition = re.search(
+            r'\} else if \(custom_2p_transition\) \{(.*?)'
+            r'\} else if \(custom_hub_settings_popup\)',
+            overlay, re.S).group(1)
+        self.assertIn('if (!game_plan)', pending)
+        self.assertIn('&main_menu_2p_transition_active, 1', pending)
+        self.assertIn('&main_menu_2p_transition_active, 0', match_setup)
+        self.assertNotIn('main_menu_2p_transition_active', screen_tap)
+        self.assertNotIn('"LOADING MATCH"', transition)
+        self.assertNotIn('custom_panel_quads =', transition)
+        self.assertIn('pes_controller_2p_prematch_hub_badge(side)',
+                      transition)
+        self.assertIn('pes_controller_2p_prematch_hub_team_name(side)',
+                      transition)
+        self.assertIn('const char *versus = "VS";', transition)
+        self.assertRegex(
+            overlay,
+            r'const int gameplan_cursor =\s*!custom_2p_transition')
+        self.assertRegex(
+            overlay,
+            r'const int cinematic_helper_active =\s*!custom_2p_transition')
+        self.assertRegex(
+            overlay,
+            r'const int pause_camera_active =\s*!custom_2p_transition')
+        self.assertIn(
+            '} else if (tutorial_play_active && !custom_2p_transition) {',
+            overlay)
+        self.assertIn(
+            'const float lineup_gh = (float)screen_height / 50.0f;',
+            overlay)
 
     def test_midmatch_disconnect_reopens_native_grip_order_until_two_slots(self):
         gate = re.search(
@@ -282,7 +506,8 @@ class NativeGamepadLabTests(unittest.TestCase):
     def test_matchplan_uses_stock_pad_port_ownership_for_both_sides(self):
         self.assertIn('_ZN9matchPlan4Data10SetPadPortE8HomeAwayj', self.hooks)
         helper = re.search(
-            r'static void native_lab_assign_matchplan_pads.*?\n\}',
+            r'static void native_lab_assign_matchplan_pads\(void \*data\) \{'
+            r'.*?\n\}',
             self.hooks, re.S).group(0)
         self.assertIn('exhibition_matchplan_set_pad_port(data, 0, 0)', helper)
         self.assertIn('exhibition_matchplan_set_pad_port(data, 1, 1)', helper)

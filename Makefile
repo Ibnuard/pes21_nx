@@ -79,7 +79,7 @@ LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,-Map
 			-Wl,--build-id=sha1
 
 LIBS	:= -lopenal -lSDL2 -lmpg123 \
-			-lEGL -lGLESv2 -lglapi -ldrm_nouveau -lz -lnx -lm
+			-lEGL -lGLESv2 -lglapi -ldrm_nouveau -lpng -lz -lnx -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing

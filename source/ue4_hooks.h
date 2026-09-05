@@ -295,8 +295,38 @@ int pes_controller_2p_team_selector_team_stats(uint32_t pad,
                                                uint32_t *defence,
                                                uint32_t *grade_half_steps);
 void pes_controller_2p_team_selector_pad_event(uint32_t pad,
-                                                uint32_t buttons,
-                                                uint32_t previous_buttons);
+                                               uint32_t buttons,
+                                               uint32_t previous_buttons);
+
+#define PES_2P_PREMATCH_HUB_BUTTON_COUNT 5u
+#define PES_2P_PREMATCH_HUB_PAGE_MAIN 0u
+#define PES_2P_PREMATCH_HUB_PAGE_KITS 1u
+#define PES_2P_PREMATCH_HUB_PAGE_STADIUM 2u
+int pes_controller_2p_prematch_hub_active(void);
+int pes_controller_2p_transition_active(void);
+uint32_t pes_controller_2p_prematch_hub_focus(void);
+uint32_t pes_controller_2p_prematch_hub_page(void);
+uint32_t pes_controller_2p_prematch_hub_page_focus(void);
+const char *pes_controller_2p_prematch_hub_team_name(uint32_t side);
+uint32_t pes_controller_2p_prematch_hub_badge(uint32_t side);
+uint32_t pes_controller_2p_prematch_hub_lineup_count(uint32_t side);
+const char *pes_controller_2p_prematch_hub_lineup_name(uint32_t side,
+                                                       uint32_t index);
+uint32_t pes_controller_2p_prematch_hub_kit_count(uint32_t side);
+uint32_t pes_controller_2p_prematch_hub_kit_index(uint32_t side);
+uint32_t pes_controller_2p_prematch_hub_kit_number(uint32_t side);
+typedef struct {
+  uint32_t uniform_id;
+  uint32_t byte_count;
+  unsigned char bytes[];
+} PesUniformPreviewPng;
+PesUniformPreviewPng *pes_controller_2p_take_uniform_preview_png(
+    uint32_t side);
+int pes_controller_2p_native_uniform_preview_active(void);
+uint32_t pes_controller_2p_prematch_hub_stadium_index(void);
+void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
+                                               uint32_t buttons,
+                                               uint32_t previous_buttons);
 void pes_exhibition_search_pad_event(uint32_t buttons,
                                      uint32_t previous_buttons);
 int pes_controller_menu_touch_target(float *normalized_x,
