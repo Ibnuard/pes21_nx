@@ -314,6 +314,8 @@ int pes_controller_custom_prematch_gameplan_position_picker_active(
 int pes_controller_custom_prematch_gameplan_waiting(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_position_picker_focus(
     uint32_t pad);
+int pes_controller_custom_prematch_gameplan_position_picker_assigned(
+    uint32_t pad, uint32_t index);
 uint32_t pes_controller_custom_prematch_gameplan_position_picker_count(
     uint32_t pad);
 const char *pes_controller_custom_prematch_gameplan_position_picker_name(
@@ -362,6 +364,9 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons);
 #define PES_2P_TEAM_SELECTOR_PHASE_LEAGUE 1u
 #define PES_2P_TEAM_SELECTOR_PHASE_TEAM 2u
 int pes_controller_2p_team_selector_active(void);
+int pes_controller_2p_team_selector_exhibition_mode(void);
+uint32_t pes_controller_2p_team_selector_active_side(void);
+int pes_controller_exhibition_single_controller_mode(void);
 uint32_t pes_controller_2p_team_selector_phase(uint32_t pad);
 uint32_t pes_controller_2p_team_selector_focus(uint32_t pad);
 uint32_t pes_controller_2p_team_selector_scroll(uint32_t pad);
@@ -445,6 +450,9 @@ int pes_controller_custom_match_settings_active(void);
 #define PES_MATCH_SETTINGS_COUNT 5u
 #define PES_MATCH_SETTINGS_ROW_Y 0.225f
 #define PES_MATCH_SETTINGS_ROW_STEP 0.105f
+// The prematch hub has a taller header than the native settings popup.
+#define PES_HUB_MATCH_SETTINGS_ROW_Y 0.265f
+#define PES_HUB_MATCH_SETTINGS_ROW_STEP 0.105f
 uint32_t pes_controller_custom_match_settings_focus(void);
 const char *pes_controller_custom_match_settings_label(uint32_t index);
 const char *pes_controller_custom_match_settings_value(uint32_t index);

@@ -775,6 +775,9 @@ static _Alignas(4) uint32_t exhibition_settings_match_time = 10;
 static _Alignas(4) uint32_t exhibition_settings_extra_time;
 static _Alignas(4) uint32_t exhibition_settings_penalties;
 static _Alignas(4) uint32_t exhibition_match_settings_armed;
+// Match Settings is shared by the matchmaking page and the custom prematch
+// hub. The hub replaces the native TIME row with COM LEVEL.
+static _Alignas(4) uint32_t exhibition_settings_hub_mode;
 static void *exhibition_settings_match;
 // A settings child can open another list without closing menuMatchSetting.
 // Keep that child separate so the controller focus follows the visible list.
@@ -791,6 +794,10 @@ static _Alignas(4) uint32_t main_menu_controller_active;
 // matchmaking popup, because each local pad needs an independent focus,
 // league/team phase, and confirm flag.
 static _Alignas(4) uint32_t main_menu_2p_team_selector_active;
+// Exhibition reuses the two-panel selector with one physical controller:
+// HOME is confirmed first, then the same cursor moves to COM/AWAY.
+static _Alignas(4) uint32_t main_menu_2p_team_selector_exhibition_mode;
+static _Alignas(4) uint32_t main_menu_2p_team_selector_active_side;
 static _Alignas(4) uint32_t main_menu_2p_team_selector_phase[2];
 static _Alignas(4) uint32_t main_menu_2p_team_selector_focus[2];
 static _Alignas(4) uint32_t main_menu_2p_team_selector_scroll[2];
@@ -1079,6 +1086,7 @@ static void main_menu_apply_focus(uint32_t index);
 static void main_menu_2p_team_selector_open(void);
 static void main_menu_2p_team_selector_close(void);
 static int main_menu_start_two_player_match(void);
+static int main_menu_start_exhibition_match(void);
 static void main_menu_2p_team_selector_process_pending(void);
 static void main_menu_2p_team_selector_refresh_ratings(void);
 static void main_menu_2p_prematch_hub_process_pending(void);
@@ -1334,6 +1342,8 @@ static void main_menu_2p_team_selector_open(void) {
   __atomic_store_n(&main_menu_2p_transition_kind,
                    MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_active_side, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_close_pending, 0,
@@ -1353,6 +1363,14 @@ static void main_menu_2p_team_selector_open(void) {
     __atomic_store_n(&exhibition_selected_uniform_valid[pad], 0,
                      __ATOMIC_RELEASE);
   }
+  // In Exhibition mode the second panel is a staged COM target.  Keep both
+  // panels visible, but only the HOME cursor is live until its confirmation.
+  if (__atomic_load_n(&main_menu_2p_team_selector_exhibition_mode,
+                      __ATOMIC_ACQUIRE)) {
+    main_menu_2p_team_selector_active_side = 0;
+    main_menu_2p_team_selector_confirmed[0] = 0;
+    main_menu_2p_team_selector_confirmed[1] = 0;
+  }
   // The stock page remains behind the full-screen overlay as a safe render
   // host, but it must not receive the selector's A/B or directional input.
   __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
@@ -1364,6 +1382,8 @@ static void main_menu_2p_team_selector_close(void) {
   main_menu_2p_uniform_preview_clear_pending();
   exhibition_discard_pre_strategy_squad_snapshot();
   exhibition_gameplan_reset();
+  const int exhibition_mode = __atomic_exchange_n(
+      &main_menu_2p_team_selector_exhibition_mode, 0, __ATOMIC_ACQ_REL);
   const int postbootstrap = __atomic_exchange_n(
       &main_menu_2p_selector_postbootstrap_host, 0, __ATOMIC_ACQ_REL);
   if (postbootstrap) {
@@ -1373,6 +1393,10 @@ static void main_menu_2p_team_selector_close(void) {
                      MAIN_MENU_2P_TRANSITION_LOADING, __ATOMIC_RELEASE);
   }
   __atomic_store_n(&main_menu_2p_team_selector_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_active_side, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_close_pending, 0,
@@ -1422,8 +1446,9 @@ static void main_menu_2p_team_selector_close(void) {
     // visible and defer repainting focus until the rebuilt Match page calls
     // pes_main_menu_simplify; touching main_menu_tiles here caused the
     // hub -> selector -> tiles crash.
-    __atomic_store_n(&main_menu_restore_focus_pending, 3,
-                     __ATOMIC_RELEASE); // encoded tile index 2 + 1
+    __atomic_store_n(&main_menu_restore_focus_pending,
+                     exhibition_mode ? 1u : 3u,
+                     __ATOMIC_RELEASE); // encoded tile index + 1
     main_menu_match_page = NULL;
     memset(main_menu_tiles, 0, sizeof(main_menu_tiles));
     native_pad_lab_reset();
@@ -1447,7 +1472,7 @@ static void main_menu_2p_team_selector_close(void) {
                                  main_menu_flow);
     }
   } else {
-    main_menu_apply_focus(2);
+    main_menu_apply_focus(exhibition_mode ? 0u : 2u);
   }
   debugPrintf("UE4 menu: custom 2P team selector cancelled\n");
 }
@@ -1512,6 +1537,14 @@ static int main_menu_2p_team_selector_confirm(uint32_t pad) {
   }
   main_menu_2p_team_selector_team[pad] = selected_team;
   main_menu_2p_team_selector_confirmed[pad] = 1;
+  if (__atomic_load_n(&main_menu_2p_team_selector_exhibition_mode,
+                      __ATOMIC_ACQUIRE) && pad == 0) {
+    // The single Exhibition cursor advances to COM only after HOME is locked.
+    __atomic_store_n(&main_menu_2p_team_selector_active_side, 1,
+                     __ATOMIC_RELEASE);
+    main_menu_2p_team_selector_input_armed[1] = 0;
+    return 1;
+  }
   if (main_menu_2p_team_selector_confirmed[0] &&
       main_menu_2p_team_selector_confirmed[1]) {
     __atomic_store_n(&exhibition_home_team_id,
@@ -1538,6 +1571,17 @@ void pes_controller_2p_team_selector_pad_event(uint32_t pad,
   if (!__atomic_load_n(&main_menu_2p_team_selector_active, __ATOMIC_ACQUIRE) ||
       pad > 1)
     return;
+  const int exhibition_mode =
+      __atomic_load_n(&main_menu_2p_team_selector_exhibition_mode,
+                      __ATOMIC_ACQUIRE) != 0;
+  if (exhibition_mode) {
+    // Physical pad 0 owns the staged cursor.  Pad 1 is intentionally ignored
+    // even when a second controller is connected for another task.
+    if (pad != 0)
+      return;
+    pad = __atomic_load_n(&main_menu_2p_team_selector_active_side,
+                          __ATOMIC_ACQUIRE) & 1u;
+  }
   // The A press and stick direction used to activate the 2P tile may still be
   // held when this modal becomes active. Require one fully neutral sample per
   // controller before accepting selector edges, otherwise reopening can jump
@@ -1550,6 +1594,36 @@ void pes_controller_2p_team_selector_pad_event(uint32_t pad,
   const uint32_t pressed = buttons & ~previous_buttons;
   if (!pressed)
     return;
+  if (exhibition_mode && pad == 1 && (pressed & (1u << 0))) {
+    // Exhibition follows the console's staged selector history. B first
+    // unlocks a confirmed COM choice, then backs from COM's team carousel to
+    // its league carousel, and only then hands the cursor back to HOME.
+    if (main_menu_2p_team_selector_confirmed[1]) {
+      main_menu_2p_team_selector_confirmed[1] = 0;
+      main_menu_2p_team_selector_input_armed[1] = 0;
+      return;
+    }
+    if (main_menu_2p_team_selector_phase[1] ==
+        MAIN_MENU_2P_TEAM_SELECTOR_TEAM) {
+      main_menu_2p_team_selector_phase[1] =
+          MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE;
+      main_menu_2p_team_selector_focus[1] =
+          main_menu_2p_team_selector_league[1];
+      main_menu_2p_team_selector_scroll[1] =
+          main_menu_2p_team_selector_centered_scroll(
+              MAIN_MENU_2P_LEAGUE_COUNT,
+              main_menu_2p_team_selector_focus[1]);
+      main_menu_2p_team_selector_input_armed[1] = 0;
+      return;
+    }
+    // COM is at its league root. Preserve its selected club/focus and let
+    // HOME be edited without throwing away the staged COM choice.
+    main_menu_2p_team_selector_confirmed[0] = 0;
+    __atomic_store_n(&main_menu_2p_team_selector_active_side, 0,
+                     __ATOMIC_RELEASE);
+    main_menu_2p_team_selector_input_armed[0] = 0;
+    return;
+  }
   if (main_menu_2p_team_selector_confirmed[pad]) {
     // PES PC locks a side after team confirmation. B returns that side to the
     // same carousel/focus; every other input is ignored until it is unlocked.
@@ -1592,6 +1666,25 @@ void pes_controller_2p_team_selector_pad_event(uint32_t pad,
 int pes_controller_2p_team_selector_active(void) {
   return __atomic_load_n(&main_menu_2p_team_selector_active,
                          __ATOMIC_ACQUIRE) != 0;
+}
+
+int pes_controller_2p_team_selector_exhibition_mode(void) {
+  return __atomic_load_n(&main_menu_2p_team_selector_exhibition_mode,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_2p_team_selector_active_side(void) {
+  return __atomic_load_n(&main_menu_2p_team_selector_active_side,
+                         __ATOMIC_ACQUIRE) & 1u;
+}
+
+int pes_controller_exhibition_single_controller_mode(void) {
+  return __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+         !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE) &&
+         (__atomic_load_n(&main_menu_2p_prematch_hub_active,
+                          __ATOMIC_ACQUIRE) ||
+          __atomic_load_n(&exhibition_gameplan_custom_active,
+                          __ATOMIC_ACQUIRE));
 }
 
 uint32_t pes_controller_2p_team_selector_phase(uint32_t pad) {
@@ -1686,9 +1779,7 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
 
   if (__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE)) {
     if (pressed & (1u << 10)) {
-      // TIME (day/night) lives on the Stadium page in the 2P hub. Native
-      // setting indices 1..4 map to the four rows shown here.
-      if (exhibition_popup_focus_index > 1)
+      if (exhibition_popup_focus_index > 0)
         exhibition_popup_focus_index--;
     } else if (pressed & (1u << 11)) {
       if (exhibition_popup_focus_index + 1 < PES_MATCH_SETTINGS_COUNT)
@@ -1699,6 +1790,8 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
       exhibition_adjust_match_setting(1);
     } else if (pressed & (1u << 0)) {
       __atomic_store_n(&exhibition_settings_popup_open, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&exhibition_settings_hub_mode, 0,
                        __ATOMIC_RELEASE);
       exhibition_settings_match = NULL;
       exhibition_popup_focus_index = 0;
@@ -1783,6 +1876,18 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
     __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&main_menu_2p_team_selector_active, 1,
                      __ATOMIC_RELEASE);
+    if (__atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+        !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE)) {
+      // Returning from the Exhibition hub re-enters the staged selector,
+      // rather than resetting through the tile page. HOME is the first live
+      // side; selected clubs and carousel phases remain intact.
+      __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 1,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&main_menu_2p_team_selector_active_side, 0,
+                       __ATOMIC_RELEASE);
+      main_menu_2p_team_selector_confirmed[0] = 0;
+      main_menu_2p_team_selector_confirmed[1] = 0;
+    }
     __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
                      __ATOMIC_RELEASE);
     for (uint32_t index = 0; index < 2; index++) {
@@ -1921,26 +2026,34 @@ static void exhibition_discard_pre_strategy_squad_snapshot(void) {
 }
 
 static int exhibition_capture_pre_strategy_squad_snapshot(void) {
-  exhibition_discard_pre_strategy_squad_snapshot();
   if (!__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) ||
       !match_squad_data_copy_construct || !match_squad_data_copy_assign ||
       !match_squad_data_destruct || !exhibition_squad_edit_get_squad_data)
     return 0;
 
   unsigned char *squad_edit = exhibition_get_squad_edit();
-  if (!squad_edit)
-    return 0;
+  void *squad_data[2] = {NULL, NULL};
+  for (uint32_t side = 0; side < 2; side++) {
+    if (squad_edit)
+      squad_data[side] = exhibition_squad_edit_get_squad_data(squad_edit,
+                                                               side);
+    // Keep a second route for the short window where the manager has not yet
+    // published its Match object, but the custom page still owns live squads.
+    if (!squad_data[side])
+      squad_data[side] = exhibition_gameplan_sides[side].squad_data;
+    if (!squad_data[side])
+      return 0;
+  }
+
+  // Do not destroy a valid earlier capture until both replacement sources have
+  // been resolved. A transient manager gap must not remove the last fallback.
+  exhibition_discard_pre_strategy_squad_snapshot();
 
   for (uint32_t side = 0; side < 2; side++) {
-    void *squad_data = exhibition_squad_edit_get_squad_data(squad_edit, side);
-    if (!squad_data) {
-      exhibition_discard_pre_strategy_squad_snapshot();
-      return 0;
-    }
     memset(exhibition_pre_strategy_squad_snapshot[side], 0,
            EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES);
     match_squad_data_copy_construct(
-        exhibition_pre_strategy_squad_snapshot[side], squad_data);
+        exhibition_pre_strategy_squad_snapshot[side], squad_data[side]);
     __atomic_store_n(&exhibition_pre_strategy_squad_snapshot_valid[side], 1,
                      __ATOMIC_RELEASE);
   }
@@ -1950,18 +2063,28 @@ static int exhibition_capture_pre_strategy_squad_snapshot(void) {
 }
 
 static uint32_t exhibition_restore_pre_strategy_squad_snapshot(void) {
-  if (!match_squad_data_copy_assign || !exhibition_squad_edit_get_squad_data)
+  if (!match_squad_data_copy_assign)
     return 0;
   unsigned char *squad_edit = exhibition_get_squad_edit();
-  if (!squad_edit)
-    return 0;
 
   uint32_t restored = 0;
+  uint32_t fallback = 0;
   for (uint32_t side = 0; side < 2; side++) {
     if (!__atomic_load_n(&exhibition_pre_strategy_squad_snapshot_valid[side],
                          __ATOMIC_ACQUIRE))
       continue;
-    void *squad_data = exhibition_squad_edit_get_squad_data(squad_edit, side);
+    void *squad_data = NULL;
+    if (squad_edit && exhibition_squad_edit_get_squad_data)
+      squad_data = exhibition_squad_edit_get_squad_data(squad_edit, side);
+    // During the first Strategy frames the manager can briefly expose no
+    // SquadEdit even though the custom page still owns both live SquadData
+    // objects. Restore into that fallback so HOME edits cannot be replaced by
+    // the stock default before the manager publishes its object.
+    if (!squad_data) {
+      squad_data = exhibition_gameplan_sides[side].squad_data;
+      if (squad_data)
+        fallback++;
+    }
     if (!squad_data)
       continue;
     match_squad_data_copy_assign(
@@ -1970,8 +2093,8 @@ static uint32_t exhibition_restore_pre_strategy_squad_snapshot(void) {
   }
   if (restored)
     debugPrintf("native 2P Game Plan: restored %u pre-Strategy squad "
-                "snapshot(s)\n",
-                restored);
+                "snapshot(s)%s\n",
+                restored, fallback ? " via live fallback" : "");
   return restored;
 }
 
@@ -2095,12 +2218,21 @@ static void exhibition_adjust_match_setting(int direction) {
   const uint32_t focus = exhibition_popup_focus_index;
   uint32_t value = 0;
   if (focus == 0) {
-    value = !__atomic_load_n(&exhibition_settings_time_zone,
-                             __ATOMIC_ACQUIRE);
-    if (exhibition_match_set_time_zone)
-      exhibition_match_set_time_zone(match, value);
-    __atomic_store_n(&exhibition_settings_time_zone, value,
-                     __ATOMIC_RELEASE);
+    if (__atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE)) {
+      value = __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE);
+      if (direction < 0)
+        value = value ? value - 1u : EXHIBITION_CPU_LEVEL_COUNT - 1u;
+      else
+        value = (value + 1u) % EXHIBITION_CPU_LEVEL_COUNT;
+      exhibition_apply_cpu_level(value, match);
+    } else {
+      value = !__atomic_load_n(&exhibition_settings_time_zone,
+                               __ATOMIC_ACQUIRE);
+      if (exhibition_match_set_time_zone)
+        exhibition_match_set_time_zone(match, value);
+      __atomic_store_n(&exhibition_settings_time_zone, value,
+                       __ATOMIC_RELEASE);
+    }
   } else if (focus == 1) {
     value = __atomic_load_n(&exhibition_settings_match_time,
                             __ATOMIC_ACQUIRE);
@@ -3529,7 +3661,9 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
             &main_menu_2p_prematch_bootstrap_mode,
             MAIN_MENU_2P_PREMATCH_BOOT_NONE, __ATOMIC_ACQ_REL);
         const int open_prematch_hub =
-            native_lab && bootstrap_mode == MAIN_MENU_2P_PREMATCH_BOOT_HUB;
+            bootstrap_mode == MAIN_MENU_2P_PREMATCH_BOOT_HUB &&
+            (native_lab || __atomic_load_n(&exhibition_session_active,
+                                           __ATOMIC_ACQUIRE));
         if (!native_lab) {
           __atomic_store_n(&exhibition_home_team_id, 0, __ATOMIC_RELEASE);
           __atomic_store_n(&exhibition_away_team_id, 0, __ATOMIC_RELEASE);
@@ -4148,6 +4282,7 @@ void pes_controller_menu_back_pressed(void) {
   }
   if (__atomic_exchange_n(&exhibition_settings_popup_open, 0,
                           __ATOMIC_ACQ_REL)) {
+    __atomic_store_n(&exhibition_settings_hub_mode, 0, __ATOMIC_RELEASE);
     exhibition_settings_match = NULL;
     exhibition_popup_focus_index = 0;
     exhibition_popup_focus_direction = 0;
@@ -4241,12 +4376,19 @@ int pes_controller_selector_rect(float *x, float *y, float *width,
       rect_height = 0.102f;
     } else if (__atomic_load_n(&exhibition_settings_popup_open,
                                __ATOMIC_ACQUIRE)) {
-      static const float settings_y[5] = {0.320f, 0.540f, 0.645f, 0.750f,
-                                          0.915f};
-      rect_x = exhibition_popup_focus_index >= 2 ? 0.875f : 0.050f;
-      rect_y = settings_y[exhibition_popup_focus_index];
-      rect_width = exhibition_popup_focus_index >= 2 ? 0.075f : 0.900f;
-      rect_height = 0.100f;
+      if (__atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE)) {
+        rect_x = 0.205f;
+        rect_y = 0.258f + 0.105f * exhibition_popup_focus_index;
+        rect_width = 0.590f;
+        rect_height = 0.080f;
+      } else {
+        static const float settings_y[5] = {0.320f, 0.540f, 0.645f,
+                                            0.750f, 0.915f};
+        rect_x = exhibition_popup_focus_index >= 2 ? 0.875f : 0.050f;
+        rect_y = settings_y[exhibition_popup_focus_index];
+        rect_width = exhibition_popup_focus_index >= 2 ? 0.075f : 0.900f;
+        rect_height = 0.100f;
+      }
     } else {
     const uint32_t index = exhibition_search_focus_index;
     if (index < 2) {
@@ -4406,12 +4548,23 @@ uint32_t pes_controller_custom_match_settings_focus(void) {
 const char *pes_controller_custom_match_settings_label(uint32_t index) {
   static const char *const labels[] = {
       "TIME", "MATCH TIME", "OVERTIME", "PENALTIES", "PLAYER CURSOR"};
+  static const char *const hub_labels[] = {
+      "COM LEVEL", "MATCH TIME", "OVERTIME", "PENALTIES", "PLAYER CURSOR"};
+  if (__atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE))
+    return index < PES_MATCH_SETTINGS_COUNT ? hub_labels[index] : "";
   return index < PES_MATCH_SETTINGS_COUNT ? labels[index] : "";
 }
 
 const char *pes_controller_custom_match_settings_value(uint32_t index) {
   static const char *const match_time_labels[] = {
       "5 MIN", "6 MIN", "7 MIN", "8 MIN", "9 MIN", "10 MIN"};
+  if (index == 0 &&
+      __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE)) {
+    const uint32_t level = __atomic_load_n(&exhibition_cpu_level_value,
+                                           __ATOMIC_ACQUIRE);
+    return level < EXHIBITION_CPU_LEVEL_COUNT ? exhibition_cpu_level_labels[level]
+                                               : exhibition_cpu_level_labels[2];
+  }
   if (index == 0)
     return __atomic_load_n(&exhibition_settings_time_zone,
                            __ATOMIC_ACQUIRE)
@@ -5430,6 +5583,10 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
     state->root_focus =
         (state->root_focus + 1) % PES_PREMATCH_GAMEPLAN_ACTION_COUNT;
   } else if (action == PES_PAUSE_INPUT_BACK && side == 0) {
+    // Commit both sides before handing the hub back to the frontend. Stock
+    // Strategy only reloads the local HOME side on some Exhibition builds.
+    exhibition_save_matchplan_sides(3u);
+    exhibition_publish_prepared_matchplan();
     __atomic_store_n(&exhibition_gameplan_custom_active, 0,
                      __ATOMIC_RELEASE);
     main_menu_2p_prematch_hub_input_armed[0] = 0;
@@ -5600,6 +5757,8 @@ static void exhibition_gameplan_process_pending(void) {
     }
     const uint32_t action = __atomic_exchange_n(
         &exhibition_gameplan_custom_action[side], 0, __ATOMIC_ACQ_REL);
+    if (side == 1 && pes_controller_exhibition_single_controller_mode())
+      continue;
     if (!action)
       continue;
     PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
@@ -5811,6 +5970,19 @@ int pes_controller_custom_prematch_gameplan_waiting(uint32_t pad) {
 uint32_t pes_controller_custom_prematch_gameplan_position_picker_focus(
     uint32_t pad) {
   return pad < 2 ? exhibition_gameplan_sides[pad].position_picker_focus : 0;
+}
+
+int pes_controller_custom_prematch_gameplan_position_picker_assigned(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return 0;
+  const PrematchGameplanSide *state = &exhibition_gameplan_sides[pad];
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_picker_player(state, index);
+  if (!player)
+    return 0;
+  return player->member_id ==
+         prematch_gameplan_position_member(state, state->position_focus);
 }
 
 uint32_t pes_controller_custom_prematch_gameplan_position_picker_count(
@@ -6323,6 +6495,13 @@ int pes_controller_menu_physical_tap(float normalized_x,
   if (!__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
     return 0;
 
+  const int hub_mode =
+      __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE) != 0;
+  const float settings_row_y =
+      hub_mode ? PES_HUB_MATCH_SETTINGS_ROW_Y : PES_MATCH_SETTINGS_ROW_Y;
+  const float settings_row_step = hub_mode
+                                      ? PES_HUB_MATCH_SETTINGS_ROW_STEP
+                                      : PES_MATCH_SETTINGS_ROW_STEP;
   if (normalized_y >= 0.81f && normalized_y <= 0.91f) {
     if (normalized_x >= 0.55f && normalized_x <= 0.80f)
       pes_controller_menu_back_pressed();
@@ -6331,9 +6510,11 @@ int pes_controller_menu_physical_tap(float normalized_x,
     return 1;
   }
   if (normalized_x >= 0.18f && normalized_x <= 0.82f &&
-      normalized_y >= PES_MATCH_SETTINGS_ROW_Y &&
-      normalized_y < PES_MATCH_SETTINGS_ROW_Y + PES_MATCH_SETTINGS_ROW_STEP * PES_MATCH_SETTINGS_COUNT) {
-    int index = (int)floorf((normalized_y - PES_MATCH_SETTINGS_ROW_Y) / PES_MATCH_SETTINGS_ROW_STEP);
+      normalized_y >= settings_row_y &&
+      normalized_y < settings_row_y +
+                          settings_row_step * PES_MATCH_SETTINGS_COUNT) {
+    int index = (int)floorf((normalized_y - settings_row_y) /
+                            settings_row_step);
     if (index < 0)
       index = 0;
     if (index >= (int)PES_MATCH_SETTINGS_COUNT)
@@ -6550,6 +6731,7 @@ void pes_exhibition_search_child(void *window, const void *child_name,
     }
     __atomic_store_n(&exhibition_settings_popup_open, 0,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_settings_hub_mode, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
     exhibition_set_matchmaking_visible(window, 1);
     debugPrintf("exhibition: Match Settings closed\n");
@@ -7050,6 +7232,10 @@ static void exhibition_open_match_settings(void *window) {
   if (__atomic_exchange_n(&exhibition_settings_popup_open, 1,
                           __ATOMIC_ACQ_REL))
     return;
+  __atomic_store_n(&exhibition_settings_hub_mode,
+                   __atomic_load_n(&main_menu_2p_prematch_hub_active,
+                                   __ATOMIC_ACQUIRE),
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_nested_popup_open, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
                    __ATOMIC_RELEASE);
@@ -7061,6 +7247,7 @@ static void exhibition_open_match_settings(void *window) {
   if (!exhibition_refresh_match_settings()) {
     __atomic_store_n(&exhibition_settings_popup_open, 0,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_settings_hub_mode, 0, __ATOMIC_RELEASE);
     exhibition_settings_match = NULL;
     debugPrintf("exhibition: custom Match Settings missing tmpdb match\n");
     return;
@@ -7416,6 +7603,45 @@ static int main_menu_start_two_player_match(void) {
   return 1;
 }
 
+// Exhibition uses the same TutorialMatch data bootstrap as the 2P lab, but
+// only P1 owns a physical pad and the opponent is COM.  Keeping this arm
+// separate avoids invoking the two-slot Change Grip applet for a normal
+// single-controller Exhibition session.
+static int main_menu_start_exhibition_match(void) {
+  void *listener = exhibition_flow_listener_instance
+                       ? *exhibition_flow_listener_instance
+                       : NULL;
+  if (!listener || !exhibition_flow_direct_set)
+    return 0;
+
+  exhibition_discard_pre_strategy_squad_snapshot();
+  native_pad_lab_reset();
+  __atomic_store_n(&main_menu_2p_transition_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_transition_kind,
+                   MAIN_MENU_2P_TRANSITION_LOADING, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_autostart, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_gamepad_lab_two_player, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_requested, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_session_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_prematch_bootstrap_mode,
+                   MAIN_MENU_2P_PREMATCH_BOOT_HUB, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
+  static const char tutorial_flow[] = "MyClub/TutorialMatch";
+  exhibition_flow_direct_set((unsigned char *)listener + 0x118,
+                             tutorial_flow);
+  debugPrintf("native Exhibition: armed custom teams HOME=%u COM=%u\n",
+              __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE),
+              __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE));
+  return 1;
+}
+
 static void main_menu_2p_team_selector_process_pending(void) {
   if (__atomic_exchange_n(&main_menu_2p_team_selector_close_pending, 0,
                           __ATOMIC_ACQ_REL)) {
@@ -7425,7 +7651,12 @@ static void main_menu_2p_team_selector_process_pending(void) {
   if (!__atomic_exchange_n(&main_menu_2p_team_selector_start_pending, 0,
                            __ATOMIC_ACQ_REL))
     return;
-  if (!main_menu_start_two_player_match()) {
+  const int exhibition_mode =
+      __atomic_load_n(&main_menu_2p_team_selector_exhibition_mode,
+                      __ATOMIC_ACQUIRE) != 0;
+  const int started = exhibition_mode ? main_menu_start_exhibition_match()
+                                      : main_menu_start_two_player_match();
+  if (!started) {
     // Keep the user on the selector if the frontend listener is not ready or
     // a controller disappeared between the final confirm and this tick.
     __atomic_store_n(&main_menu_2p_team_selector_active, 1,
@@ -7435,7 +7666,8 @@ static void main_menu_2p_team_selector_process_pending(void) {
                      __ATOMIC_RELEASE);
     __atomic_store_n(&main_menu_2p_transition_kind,
                      MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
-    debugPrintf("native 2P lab: custom selector start deferred\n");
+    debugPrintf("native %s selector start deferred\n",
+                exhibition_mode ? "Exhibition" : "2P lab");
   }
 }
 
@@ -7504,7 +7736,7 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
   if (action == 5) {
     exhibition_open_match_settings(exhibition_search_window);
-    exhibition_popup_focus_index = 1;
+    exhibition_popup_focus_index = 0;
     return;
   }
   const int game_plan = action == 4;
@@ -7753,6 +7985,7 @@ void pes_main_menu_simplify(void *window) {
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_match_settings_armed, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_hub_mode, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_postmatch_custom_action, 0, __ATOMIC_RELEASE);
   match_postmatch_window = NULL;
@@ -7815,8 +8048,12 @@ uintptr_t pes_main_menu_selected_entry(void *window,
   uint32_t choice = UINT32_MAX;
   memcpy(&choice, (const unsigned char *)touch_info + 8, sizeof(choice));
   if (choice == 0) {
-    __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
-    return main_menu_selected_resume;
+    // Exhibition now shares the two-panel selector with the local 2P flow,
+    // but stages HOME then COM on one controller before entering the hub.
+    __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 1,
+                     __ATOMIC_RELEASE);
+    main_menu_2p_team_selector_open();
+    return 0;
   }
 
   if (choice == 1) {
@@ -7832,6 +8069,8 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       debugPrintf("native 2P lab: not armed; two controller slots required\n");
       return 0;
     }
+    __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 0,
+                     __ATOMIC_RELEASE);
     // Keep the stable two-controller gate, then let both pads choose their
     // own league and club before arming TutorialMatch.
     if (!__atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE))
@@ -8320,6 +8559,8 @@ int pes_controller_custom_prematch_gameplan_active(void) {
 
 void pes_controller_custom_prematch_gameplan_input(uint32_t pad,
                                                     uint32_t action) {
+  if (pad == 1 && pes_controller_exhibition_single_controller_mode())
+    return;
   if (pad < 2 && pes_controller_custom_prematch_gameplan_active() && action)
     __atomic_store_n(&exhibition_gameplan_custom_action[pad], action,
                      __ATOMIC_RELEASE);
@@ -8336,6 +8577,15 @@ static uint32_t pes_exhibition_strategy_update(void *window,
       __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) &&
       __atomic_exchange_n(&native_gamepad_lab_autostart, 0,
                           __ATOMIC_ACQ_REL)) {
+    // Strategy's first Update can load its stock HOME squad after the child
+    // is created. Reassert the hub snapshot after that load and immediately
+    // before the automatic Play hand-off, so P1 cannot fall back to defaults.
+    if (__atomic_load_n(&exhibition_pre_strategy_squad_snapshot_valid[0],
+                        __ATOMIC_ACQUIRE) &&
+        exhibition_restore_pre_strategy_squad_snapshot()) {
+      exhibition_save_matchplan_sides(3u);
+      exhibition_publish_prepared_matchplan();
+    }
     debugPrintf("native gamepad lab: auto Play from prepared Strategy\n");
     pes_exhibition_strategy_footer(window, 0);
   }
@@ -8361,6 +8611,7 @@ static void pes_exhibition_strategy_footer(void *window,
   if (starting_match && footer_key == 1) {
     exhibition_restore_pre_strategy_squad_snapshot();
     exhibition_save_matchplan_sides(3u);
+    exhibition_publish_prepared_matchplan();
     __atomic_store_n(&exhibition_strategy_action,
                      EXHIBITION_STRATEGY_EDIT, __ATOMIC_RELEASE);
   }
@@ -8370,6 +8621,7 @@ static void pes_exhibition_strategy_footer(void *window,
     // two snapshots before the stock footer saves and advances to MatchSetup.
     exhibition_restore_pre_strategy_squad_snapshot();
     exhibition_save_matchplan_sides(3u);
+    exhibition_publish_prepared_matchplan();
     exhibition_apply_cpu_level(
         __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
     exhibition_apply_match_settings(NULL);

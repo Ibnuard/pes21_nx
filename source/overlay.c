@@ -1377,6 +1377,9 @@ static void overlay_render(void) {
   float selector_height = 0.0f;
   const int custom_2p_team_selector =
       pes_controller_2p_team_selector_active();
+  const int custom_selector_exhibition =
+      custom_2p_team_selector &&
+      pes_controller_2p_team_selector_exhibition_mode();
   const int custom_2p_prematch_hub_raw =
       pes_controller_2p_prematch_hub_active();
   const int custom_settings_popup =
@@ -1409,6 +1412,8 @@ static void overlay_render(void) {
       pes_controller_custom_video_settings_active();
   const int custom_gameplan =
       pes_controller_custom_prematch_gameplan_active();
+  const int custom_gameplan_exhibition =
+      custom_gameplan && pes_controller_exhibition_single_controller_mode();
   const int custom_info_popup = pes_controller_custom_info_popup_active();
   // Match Settings is a modal child of the hub.  Let the existing settings
   // renderer own the foreground while retaining the hub as its visual host.
@@ -1679,6 +1684,8 @@ static void overlay_render(void) {
   uint32_t prematch_gameplan_picker_metric_value[2][7];
   int prematch_gameplan_picker_foot_first_quad[2] = {0};
   int prematch_gameplan_picker_foot_quads[2] = {0};
+  int prematch_gameplan_picker_check_first_quad[2] = {0};
+  int prematch_gameplan_picker_check_quads[2] = {0};
   int prematch_gameplan_auto_gain_first[2][2];
   int prematch_gameplan_auto_gain_quads[2][2];
   memset(prematch_gameplan_field_metric_first, -1,
@@ -2034,9 +2041,9 @@ static void overlay_render(void) {
           }
           prematch_gameplan_picker_start[side] = start;
           prematch_gameplan_picker_visible[side] = visible;
-          const float row_x = half_x[side] + 0.040f * (float)screen_width;
-          const float row_w = half_w - 0.080f * (float)screen_width;
-          const float row_y = content_y + 0.105f * (float)screen_height;
+          const float row_x = half_x[side] + 0.060f * (float)screen_width;
+          const float row_w = half_w - 0.100f * (float)screen_width;
+          const float row_y = content_y + 0.125f * (float)screen_height;
           const float row_step = 0.067f * (float)screen_height;
           for (uint32_t slot = 0; slot < visible; slot++) {
             const float y = row_y + row_step * (float)slot;
@@ -2054,7 +2061,7 @@ static void overlay_render(void) {
         }
       }
 
-      if (!waiting) {
+      if (!waiting && (!custom_gameplan_exhibition || side == 0)) {
         prematch_gameplan_action_first_quad[side] = quads;
         prematch_gameplan_action_style = (RoundedRectStyle){
             action_w, action_h, 0.012f * (float)screen_height};
@@ -2345,6 +2352,47 @@ static void overlay_render(void) {
         prematch_gameplan_picker_foot_quads[side] += emit_circle_quad(
             center_x, rect[1] + rect[3] * 0.5f,
             0.016f * (float)screen_height, verts + quads * 24);
+        quads++;
+      }
+    }
+
+    // Mark the player currently assigned to the selected set-piece slot.  The
+    // native picker uses a blue active marker; keep NONE rows deliberately
+    // unmarked so an empty slot is never mistaken for an assignment.
+    for (uint32_t side = 0; side < 2; side++) {
+      prematch_gameplan_picker_check_first_quad[side] = quads;
+      if (pes_controller_custom_prematch_gameplan_waiting(side) ||
+          pes_controller_custom_prematch_gameplan_page(side) !=
+              PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS ||
+          !pes_controller_custom_prematch_gameplan_position_picker_active(
+              side))
+        continue;
+      for (uint32_t slot = 0;
+           slot < prematch_gameplan_picker_visible[side]; slot++) {
+        const uint32_t index =
+            prematch_gameplan_picker_start[side] + slot;
+        const char *name =
+            pes_controller_custom_prematch_gameplan_position_picker_name(
+                side, index);
+        if (!name || strcmp(name, "NONE") == 0 ||
+            !pes_controller_custom_prematch_gameplan_position_picker_assigned(
+                side, index))
+          continue;
+        const float *rect = prematch_gameplan_picker_rect[side][slot];
+        // Keep the marker before the role plate so it never collides with the
+        // position abbreviation or the player's name.
+        const float center_x = rect[0] + 0.006f * (float)screen_width;
+        const float center_y = rect[1] + rect[3] * 0.5f;
+        const float size = 0.012f * (float)screen_height;
+        prematch_gameplan_picker_check_quads[side] += emit_segment(
+            center_x - size * 0.62f, center_y,
+            center_x - size * 0.14f, center_y + size * 0.52f,
+            0.0045f * (float)screen_height, verts + quads * 24);
+        quads++;
+        prematch_gameplan_picker_check_quads[side] += emit_segment(
+            center_x - size * 0.14f, center_y + size * 0.52f,
+            center_x + size * 0.72f, center_y - size * 0.55f,
+            0.0045f * (float)screen_height, verts + quads * 24);
         quads++;
       }
     }
@@ -2727,12 +2775,14 @@ static void overlay_render(void) {
             pes_controller_custom_prematch_gameplan_position_picker_active(
                 side);
         const char *title = picker ? "SELECT PLAYER" : "POSITION SETTINGS";
-        const float title_y =
-            content_y +
-            (picker ? 0.040f : 0.015f) * (float)screen_height;
+        const float title_base_offset = (picker ? 0.040f : 0.015f);
+        const float title_y = content_y +
+                              (title_base_offset +
+                               (picker ? 0.022f : 0.0f)) *
+                                  (float)screen_height;
         line_quads = emit_efootball_line(
             title, (int)strlen(title),
-            half_x[side] + 0.025f * (float)screen_width,
+            half_x[side] + (picker ? 0.060f : 0.025f) * (float)screen_width,
             title_y, title_gh,
             EFOOTBALL_FONT_STENCIL, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
@@ -2839,7 +2889,7 @@ static void overlay_render(void) {
       prematch_gameplan_body_text_quads[side] =
           quads - prematch_gameplan_body_text_first_quad[side];
       prematch_gameplan_action_text_first_quad[side] = quads;
-      if (!waiting)
+      if (!waiting && (!custom_gameplan_exhibition || side == 0))
         for (uint32_t action = 0;
              action < PES_PREMATCH_GAMEPLAN_ACTION_COUNT; action++) {
           const float width = measure_efootball_line(
@@ -2861,7 +2911,7 @@ static void overlay_render(void) {
       // tile. Normal tabs stay dark on their translucent white buttons.
       prematch_gameplan_focus_text_first_quad[side] = quads;
       line_quads = 0;
-      if (!waiting) {
+      if (!waiting && (!custom_gameplan_exhibition || side == 0)) {
         const char *focused_action = action_labels[root_focus];
         const float focused_action_w = measure_efootball_line(
             focused_action, (int)strlen(focused_action), action_gh,
@@ -2940,6 +2990,8 @@ static void overlay_render(void) {
 
     prematch_gameplan_muted_text_first_quad = quads;
     for (uint32_t side = 0; side < 2; side++) {
+      if (custom_gameplan_exhibition && side == 1)
+        continue;
       const uint32_t page =
           pes_controller_custom_prematch_gameplan_page(side);
       if (pes_controller_custom_prematch_gameplan_waiting(side))
@@ -2969,6 +3021,8 @@ static void overlay_render(void) {
     for (uint32_t side = 0; side < 2; side++) {
       prematch_gameplan_accent_text_first_quad[side] = quads;
       const char *owner = side ? "P2  AWAY" : "P1  HOME";
+      if (custom_gameplan_exhibition && side == 1)
+        owner = "COM  AWAY";
       line_quads = emit_efootball_line(
           owner, (int)strlen(owner),
           half_x[side] + 0.013f * (float)screen_width +
@@ -3014,6 +3068,10 @@ static void overlay_render(void) {
     const float team_star_y_offset = 0.302f * (float)screen_height;
     const float team_star_outer_radius = 0.0180f * (float)screen_height;
     const float team_star_fill_outer = team_star_outer_radius * 0.82f;
+    const uint32_t selector_active_side =
+        custom_selector_exhibition
+            ? pes_controller_2p_team_selector_active_side()
+            : UINT32_MAX;
 
     custom_backdrop_quads = emit_image_rect(
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
@@ -3251,7 +3309,11 @@ static void overlay_render(void) {
       const char *feature =
           pes_controller_2p_team_selector_label(pad, focus);
       int line_quads = 0;
-      if (pes_controller_2p_team_selector_confirmed(pad)) {
+      const int inactive_exhibition_side =
+          custom_selector_exhibition && pad != selector_active_side &&
+          !pes_controller_2p_team_selector_confirmed(pad);
+      if (pes_controller_2p_team_selector_confirmed(pad) ||
+          inactive_exhibition_side) {
         line_quads = emit_efootball_line(
             feature, (int)strlen(feature), left + row_x_inset +
                                                 0.015f * (float)screen_width,
@@ -3324,6 +3386,9 @@ static void overlay_render(void) {
     // confirmed it moves back into the neutral text pass above.
     custom_focus_text_first_quad = quads;
     for (uint32_t pad = 0; pad < 2; pad++) {
+      if (custom_selector_exhibition &&
+          pad != selector_active_side)
+        continue;
       if (pes_controller_2p_team_selector_confirmed(pad))
         continue;
       const char *feature = pes_controller_2p_team_selector_label(
@@ -3365,6 +3430,8 @@ static void overlay_render(void) {
     for (uint32_t pad = 0; pad < 2; pad++) {
       const float left = panel_x[pad];
       const char *player = pad == 0 ? "HOME" : "AWAY";
+      if (custom_selector_exhibition && pad == 1)
+        player = "COM";
       const float player_gh = (float)screen_height / 29.0f;
       float line_width = measure_efootball_line(
           player, (int)strlen(player), player_gh, EFOOTBALL_FONT_BOLD);
@@ -3420,7 +3487,12 @@ static void overlay_render(void) {
     if (custom_2p_transition_kind == PES_2P_TRANSITION_VS) {
       // The matchup card belongs exclusively to Kick Off.
       const float badge_size = 0.215f * (float)screen_height;
-      const float badge_y = 0.345f * (float)screen_height;
+      // Center the complete badge/name group rather than centering the badge
+      // alone; the old baseline left the matchup visibly high on screen.
+      const float team_name_gh = (float)screen_height / 31.0f;
+      const float name_gap = 0.030f * (float)screen_height;
+      const float badge_y =
+          ((float)screen_height - badge_size - name_gap - team_name_gh) * 0.5f;
       static const float team_center_x[2] = {0.325f, 0.675f};
       for (uint32_t side = 0; side < 2; side++) {
         const float badge_x =
@@ -3437,7 +3509,7 @@ static void overlay_render(void) {
       for (uint32_t side = 0; side < 2; side++) {
         const char *team = pes_controller_2p_prematch_hub_team_name(side);
         const int team_len = (int)strlen(team);
-        float team_gh = (float)screen_height / 31.0f;
+        float team_gh = team_name_gh;
         float team_w = measure_efootball_line(
             team, team_len, team_gh, EFOOTBALL_FONT_STENCIL);
         if (team_w > max_name_w && team_w > 0.0f) {
@@ -3503,12 +3575,10 @@ static void overlay_render(void) {
     // Match Settings is a child of the pre-match hub, but it gets its own
     // console-style page: dark title band, light selected row, blue value
     // capsules and eFootball typography over the same custom background.
-    // TIME (DAY/NIGHT) has moved to Stadium. The hub therefore maps its four
-    // visible rows to native Match Settings indices 1..4.
-    const uint32_t item_count = PES_MATCH_SETTINGS_COUNT - 1u;
-    const uint32_t native_focus =
-        pes_controller_custom_match_settings_focus();
-    const uint32_t focus = native_focus > 0 ? native_focus - 1u : 0u;
+    // TIME (DAY/NIGHT) has moved to Stadium. The hub uses that freed row for
+    // COM LEVEL while retaining the native five-row settings state machine.
+    const uint32_t item_count = PES_MATCH_SETTINGS_COUNT;
+    const uint32_t focus = pes_controller_custom_match_settings_focus();
     const float panel_x = 0.17f * (float)screen_width;
     const float panel_y = 0.095f * (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
@@ -3615,7 +3685,7 @@ static void overlay_render(void) {
     custom_focus_text_first_quad = quads;
     if (focus < item_count) {
       const char *label =
-          pes_controller_custom_match_settings_label(focus + 1u);
+          pes_controller_custom_match_settings_label(focus);
       line_quads = emit_efootball_line(
           label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
           row_y0 + row_step * (float)focus +
@@ -3629,7 +3699,7 @@ static void overlay_render(void) {
       if (item == focus)
         continue;
       const char *label =
-          pes_controller_custom_match_settings_label(item + 1u);
+          pes_controller_custom_match_settings_label(item);
       line_quads = emit_efootball_line(
           label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
           row_y0 + row_step * (float)item +
@@ -3649,7 +3719,7 @@ static void overlay_render(void) {
     quads += line_quads;
     for (uint32_t item = 0; item < item_count; item++) {
       const char *value =
-          pes_controller_custom_match_settings_value(item + 1u);
+          pes_controller_custom_match_settings_value(item);
       const float width = measure_efootball_line(
           value, (int)strlen(value), value_gh, EFOOTBALL_FONT_BOLD);
       const float value_y = row_y0 + row_step * (float)item +
@@ -5918,11 +5988,16 @@ static void overlay_render(void) {
     // white buttons and a side-colored active button.
     use_rounded_rect(&prematch_gameplan_action_style);
     glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.80f);
-    for (uint32_t side = 0; side < 2; side++)
+    for (uint32_t side = 0; side < 2; side++) {
+      if (custom_gameplan_exhibition && side == 1)
+        continue;
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_action_first_quad[side] * 6,
                    prematch_gameplan_action_quads[side] * 6);
+    }
     for (uint32_t side = 0; side < 2; side++) {
+      if (custom_gameplan_exhibition && side == 1)
+        continue;
       glUniform4f(gl.loc_color, side_accent[side][0],
                   side_accent[side][1], side_accent[side][2], 0.92f);
       glDrawArrays(GL_TRIANGLES,
@@ -6008,6 +6083,18 @@ static void overlay_render(void) {
                    prematch_gameplan_picker_foot_quads[side] * 6);
     glUniform1f(gl.loc_circle, 0.0f);
 
+    // Assigned-player checkmarks are always the P1-style blue accent, even
+    // when the right-hand game-plan pane is rendered in red.
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform4f(gl.loc_color, 0.04f, 0.46f, 0.96f, 1.0f);
+    for (uint32_t side = 0; side < 2; side++) {
+      if (!prematch_gameplan_picker_check_quads[side])
+        continue;
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_picker_check_first_quad[side] * 6,
+                   prematch_gameplan_picker_check_quads[side] * 6);
+    }
+
     for (uint32_t side = 0; side < 2; side++) {
       glUniform4f(gl.loc_color, side_accent[side][0],
                   side_accent[side][1], side_accent[side][2], 0.62f);
@@ -6043,9 +6130,10 @@ static void overlay_render(void) {
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_body_text_first_quad[side] * 6,
                    prematch_gameplan_body_text_quads[side] * 6);
-      glDrawArrays(GL_TRIANGLES,
-                   prematch_gameplan_action_text_first_quad[side] * 6,
-                   prematch_gameplan_action_text_quads[side] * 6);
+      if (!custom_gameplan_exhibition || side == 0)
+        glDrawArrays(GL_TRIANGLES,
+                     prematch_gameplan_action_text_first_quad[side] * 6,
+                     prematch_gameplan_action_text_quads[side] * 6);
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_waiting_text_first_quad[side] * 6,
                    prematch_gameplan_waiting_text_quads[side] * 6);

@@ -79,6 +79,21 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('previous_team_selector_buttons[0]', self.shim)
         self.assertIn('#include "team_select_background.h"', overlay)
         self.assertIn('gl.team_select_bg_tex', overlay)
+
+    def test_exhibition_selector_keeps_com_preview_visible_before_focus(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        selector = re.search(
+            r'else if \(custom_2p_team_selector\) \{(.*?)'
+            r'\} else if \(custom_team_popup\)', overlay, re.S).group(1)
+        self.assertIn('custom_selector_exhibition', selector)
+        self.assertIn('const int inactive_exhibition_side', selector)
+        self.assertIn(
+            'pes_controller_2p_team_selector_confirmed(pad) ||'
+            '\n          inactive_exhibition_side', selector)
+        # The inactive COM pane must not be skipped from badge/list emission.
+        self.assertNotIn(
+            'pad != selector_active_side &&\n          !pes_controller_2p_team_selector_confirmed(pad))\n'
+            '        continue;', selector)
         self.assertIn('GL_UNSIGNED_SHORT_5_6_5', overlay)
         background = (ROOT/'source/team_select_background.h').read_text(
             encoding='ascii', errors='strict')
@@ -394,7 +409,10 @@ class NativeGamepadLabTests(unittest.TestCase):
             r'\{.*?\n\}', self.hooks, re.S).group(0)
 
         self.assertIn('match_squad_data_copy_construct(', capture)
+        self.assertIn('exhibition_pre_strategy_squad_snapshot[side], squad_data[side])',
+                      capture)
         self.assertIn('match_squad_data_copy_assign(', restore)
+        self.assertIn('exhibition_gameplan_sides[side].squad_data', restore)
         self.assertLess(
             kickoff.index('exhibition_capture_pre_strategy_squad_snapshot();'),
             kickoff.index('exhibition_save_matchplan_sides(3u);'))
@@ -560,7 +578,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('MAIN_MENU_2P_TRANSITION_LOADING', self.hooks)
         self.assertIn('MAIN_MENU_2P_TRANSITION_VS', pending)
         self.assertIn(
-            'const float badge_y = 0.345f * (float)screen_height;',
+            '((float)screen_height - badge_size - name_gap - team_name_gh) * 0.5f',
             transition)
         self.assertRegex(
             overlay,
@@ -622,6 +640,10 @@ class NativeGamepadLabTests(unittest.TestCase):
                 self.assertIn(f'mapped |= {logical}', mapping)
         self.assertIn('previous_menu_buttons', self.shim)
         self.assertIn('controller_profile_menu_buttons', self.shim)
+        menu_mapping = re.search(
+            r'static u64 controller_profile_menu_buttons\(.*?\n\}',
+            self.shim, re.S).group(0)
+        self.assertIn('if (have_left_stick)', menu_mapping)
 
     def test_single_joycon_set_piece_selector_uses_l1_r1_chord(self):
         chord = re.search(

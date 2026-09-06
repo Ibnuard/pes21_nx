@@ -829,14 +829,15 @@ static u64 controller_profile_map_buttons(u64 raw, ControllerProfile profile) {
 }
 
 // Our custom menu/pause handlers consume the same logical A/B buttons as the
-// match bridge.  Single Joy-Con d-pads are face-button aliases, so use the
-// left stick for menu arrows; this avoids the vertical Joy-Con orientation
-// being interpreted as a native d-pad and keeps both orientations symmetric.
+// match bridge. Use the already profile-adjusted LS as an alternate arrow pad
+// for every controller: full pads keep their natural axes, while horizontal
+// Joy-Con L/R have already received their side-specific quarter-turn above.
+// This keeps Game Plan focus navigation identical across controller profiles.
 static u64 controller_profile_menu_buttons(
     u64 raw, ControllerProfile profile,
     const HidAnalogStickState *left_stick, int have_left_stick) {
   u64 mapped = controller_profile_map_buttons(raw, profile);
-  if (profile != CONTROLLER_PROFILE_FULL && have_left_stick) {
+  if (have_left_stick) {
     const int threshold = JOYSTICK_MAX / 3;
     if (left_stick->y > threshold)
       mapped |= HidNpadButton_Up;
