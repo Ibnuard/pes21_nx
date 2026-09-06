@@ -6,11 +6,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
-$allowedBinary = "data/silent.bin"
-$allowedLargeFiles = @(
-  # Generated compile-time RGBA atlas used by the controller overlay.
-  "source/badge_atlas.h"
+$allowedBinaries = @(
+  "data/silent.bin",
+  # Generated RGBA atlas linked into the controller overlay by bin2o.
+  "data/badge_atlas.bin"
 )
+$allowedLargeFiles = @()
 $allowedPlaceholders = @(
   "runtime-template/assets/responses/.donotdelete",
   "runtime-template/download/.donotdelete",
@@ -80,17 +81,17 @@ foreach ($file in $files) {
   }
 
   if ($forbiddenExtensions -contains $extension -and
-      $relativeLower -ne $allowedBinary) {
+      $allowedBinaries -notcontains $relativeLower) {
     $failures.Add("forbidden file type: $relative")
   }
 
   if ($file.Length -gt $MaxFileBytes -and
-      $relativeLower -ne $allowedBinary -and
+      $allowedBinaries -notcontains $relativeLower -and
       $allowedLargeFiles -notcontains $relativeLower) {
     $failures.Add("unexpected large file ($($file.Length) bytes): $relative")
   }
 
-  if ($relativeLower -eq $allowedBinary) {
+  if ($allowedBinaries -contains $relativeLower) {
     continue
   }
 

@@ -222,6 +222,100 @@ class NativeGamepadLabTests(unittest.TestCase):
             'const float label_gh = (float)screen_height / 58.0f;',
             overlay)
 
+    def test_custom_prematch_gameplan_mutates_native_squads(self):
+        pending = re.search(
+            r'static void main_menu_2p_prematch_hub_process_pending\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        prepare = re.search(
+            r'static int exhibition_gameplan_prepare_matchplan\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        self.assertIn('exhibition_gameplan_open_custom();', pending)
+        self.assertIn('_ZN9matchPlan4Data14CreateInstanceEv', self.hooks)
+        self.assertIn('exhibition_refresh_selected_tmpdb()', prepare)
+        self.assertIn('exhibition_matchplan_create_instance()', prepare)
+        self.assertIn('exhibition_apply_cpu_level(', prepare)
+        self.assertIn('exhibition_apply_selected_uniforms(NULL);', prepare)
+        self.assertLess(
+            prepare.index('prematch_gameplan_refresh_side(1);'),
+            prepare.index('__atomic_store_n(&exhibition_plan_ready, 1'))
+        self.assertIn('prematch_gameplan_refresh_side(0);', self.hooks)
+        self.assertIn('prematch_gameplan_refresh_side(1);', self.hooks)
+        self.assertIn('match_replace_squad_player(', self.hooks)
+        self.assertIn('match_squad_data_set_tactics(', self.hooks)
+        self.assertIn('match_squad_data_set_settings(', self.hooks)
+        self.assertIn('match_squad_data_set_captain(', self.hooks)
+        self.assertIn('match_squad_data_set_piece_taker(', self.hooks)
+        self.assertIn('match_squad_data_set_attacker(', self.hooks)
+        self.assertIn('_Alignas(16) unsigned char preview[2048];',
+                      self.hooks)
+        self.assertIn('match_auto_set_squad(preview, 3, state->tactics, 0);',
+                      self.hooks)
+
+    def test_custom_prematch_gameplan_is_split_screen_and_dual_input(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        page = re.search(
+            r'if \(custom_gameplan\) \{(.*?)'
+            r'\} else if \(custom_2p_team_selector\)',
+            overlay, re.S).group(1)
+        draw = re.search(
+            r'if \(custom_gameplan\) \{(.*?)'
+            r'\} else if \(custom_popup\)',
+            overlay, re.S).group(1)
+        self.assertIn('const float half_x[2]', page)
+        self.assertIn(
+            '"SUBSTITUTE", "FORMATION", "AUTO LINE UP", "POSITIONS"',
+            page)
+        self.assertIn('prematch_gameplan_modal_first_quad[side]', page)
+        self.assertIn('prematch_gameplan_focus_outline_first_quad[side]', page)
+        self.assertIn('prematch_gameplan_selected_outline_first_quad[side]',
+                      page)
+        self.assertIn('prematch_gameplan_badge_first_quad[side]', draw)
+        self.assertIn('prematch_gameplan_white_text_first_quad', draw)
+        self.assertIn('const u64 gameplan_pressed[2]', self.shim)
+        self.assertIn(
+            'pes_controller_custom_prematch_gameplan_input(\n'
+            '              pad, PES_PAUSE_INPUT_DECIDE);', self.shim)
+
+    def test_gameplan_review_uses_console_player_rows_and_persistent_state(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        page = re.search(
+            r'if \(custom_gameplan\) \{(.*?)'
+            r'\} else if \(custom_2p_team_selector\)',
+            overlay, re.S).group(1)
+        draw = re.search(
+            r'if \(custom_gameplan\) \{(.*?)'
+            r'\} else if \(custom_popup\)',
+            overlay, re.S).group(1)
+        prepare = re.search(
+            r'static int exhibition_gameplan_prepare_matchplan\(void\) \{'
+            r'.*?\n\}', self.hooks, re.S).group(0)
+        root_input = re.search(
+            r'static void prematch_gameplan_process_root\(.*?\n\}',
+            self.hooks, re.S).group(0)
+
+        self.assertIn('prematch_gameplan_field_plate_first_quad[side]', page)
+        self.assertIn('emit_efootball_centered_fit_line(', page)
+        self.assertIn('const char *bench_title = "SUBSTITUTES";', page)
+        self.assertNotIn(
+            'pes_controller_custom_prematch_gameplan_position_picker_portrait_id(',
+            overlay)
+        self.assertNotIn(
+            'pes_controller_custom_prematch_gameplan_position_picker_overall(',
+            page)
+        self.assertIn('"SHOT POWER"', page)
+        self.assertIn('gameplan_metric_color(', draw)
+        self.assertIn('prematch_gameplan_bench_metric_first', draw)
+        self.assertIn('prematch_gameplan_picker_metric_first', draw)
+        self.assertIn('prematch_gameplan_stabilize_pitch_layout(state);',
+                      self.hooks)
+        self.assertIn('if (!plan_ready && matchplan_squad_load)', prepare)
+        self.assertIn('exhibition_matchplan_update_tmpdb(plan);', self.hooks)
+        self.assertIn('state->waiting = 1;', root_input)
+        self.assertIn('WAITING FOR OPPONENT', page)
+        self.assertIn('prematch_gameplan_waiting_text_first_quad', draw)
+        for value in ('< ATTACKING >', '< DEFENSIVE >', '< ON >', '< OFF >'):
+            self.assertIn(value, self.hooks)
+
     def test_prematch_choice_pages_use_screen_edge_helpers(self):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
         settings = re.search(
@@ -241,6 +335,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
         makefile = (ROOT/'Makefile').read_text(encoding='utf-8')
         decoder = re.search(
+            r'static int decode_png_memory\(.*?\n\}',
+            overlay, re.S).group(0)
+        uniform_decoder = re.search(
             r'static int decode_uniform_thumbnail\(.*?\n\}',
             overlay, re.S).group(0)
         thumbnail = re.search(
@@ -261,6 +358,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('png_image_begin_read_from_memory(', decoder)
         self.assertIn('image.format = PNG_FORMAT_RGBA;', decoder)
         self.assertIn('png_image_finish_read(', decoder)
+        self.assertIn('decode_png_memory(', uniform_decoder)
         self.assertIn('glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA', thumbnail)
         self.assertNotIn('glReadPixels(', thumbnail)
         self.assertIn('prepare_uniform_thumbnail_preview(custom_hub_kits_page);',
@@ -361,6 +459,11 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('pes_controller_2p_prematch_hub_team_name(side)',
                       transition)
         self.assertIn('const char *versus = "VS";', transition)
+        self.assertIn('PES_2P_TRANSITION_VS', transition)
+        self.assertIn('custom_loading_spinner_first_quad', transition)
+        self.assertIn('custom_loading_spinner_first_quad * 6', overlay)
+        self.assertIn('MAIN_MENU_2P_TRANSITION_LOADING', self.hooks)
+        self.assertIn('MAIN_MENU_2P_TRANSITION_VS', pending)
         self.assertRegex(
             overlay,
             r'const int gameplan_cursor =\s*!custom_2p_transition')

@@ -106,7 +106,9 @@ export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
-BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
+# Only runtime blobs belong in bin2o. JSON files under data/ are generator
+# metadata and must not be linked into the NRO.
+BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.bin)))
 
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C

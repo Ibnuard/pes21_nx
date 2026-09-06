@@ -30,6 +30,7 @@
 *.bin
 
 !data/silent.bin
+!data/badge_atlas.bin
 /assets/
 /Download/
 /PesMobile/

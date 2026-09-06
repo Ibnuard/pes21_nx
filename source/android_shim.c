@@ -2585,20 +2585,31 @@ void android_input_poll(void) {
     }
     if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
         !penalty_active && custom_prematch_gameplan_active) {
-      const u64 pressed = menu_buttons & ~previous_menu_buttons;
-      if (pressed & HidNpadButton_Up)
-        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_UP);
-      else if (pressed & HidNpadButton_Down)
-        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_DOWN);
-      else if (pressed & HidNpadButton_Left)
-        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_LEFT);
-      else if (pressed & HidNpadButton_Right)
-        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_RIGHT);
-      else if (pressed & HidNpadButton_A)
-        pes_controller_custom_prematch_gameplan_input(
-            PES_PAUSE_INPUT_DECIDE);
-      else if (pressed & HidNpadButton_B)
-        pes_controller_custom_prematch_gameplan_input(PES_PAUSE_INPUT_BACK);
+      const u64 gameplan_pressed[2] = {
+          menu_buttons & ~previous_menu_buttons,
+          menu_buttons_p2 & ~previous_menu_buttons_p2,
+      };
+      for (uint32_t pad = 0; pad < 2; pad++) {
+        const u64 pressed = gameplan_pressed[pad];
+        if (pressed & HidNpadButton_Up)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_UP);
+        else if (pressed & HidNpadButton_Down)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_DOWN);
+        else if (pressed & HidNpadButton_Left)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_LEFT);
+        else if (pressed & HidNpadButton_Right)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_RIGHT);
+        else if (pressed & HidNpadButton_A)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_DECIDE);
+        else if (pressed & HidNpadButton_B)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_BACK);
+      }
     }
     if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&
         !penalty_active && !pause_camera_active &&

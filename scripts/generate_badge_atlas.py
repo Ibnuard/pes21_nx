@@ -1,55 +1,33 @@
 #!/usr/bin/env python3
-"""Build the overlay atlas from emblems extracted from dt240_mobile_all.cpk."""
+"""Build the overlay badge atlas from the generated Exhibition catalog."""
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_PATH = ROOT / "source" / "badge_atlas.h"
+sys.path.insert(0, str(ROOT / "tools"))
+
+from exhibition_team_catalog import load_catalog  # noqa: E402
+
+
+HEADER_OUTPUT_PATH = ROOT / "source" / "badge_atlas.h"
+BINARY_OUTPUT_PATH = ROOT / "data" / "badge_atlas.bin"
+DEFAULT_CATALOG_PATH = ROOT / "data" / "exhibition_team_catalog.json"
 DEFAULT_SYMBOL_ROOT = (
     ROOT / "local-debug" / "cpk-emblem-check" / "common" / "render" / "symbol"
 )
 DEFAULT_OVERRIDE_ROOT = ROOT / "assets" / "badges"
-# The original 64px cells downsampled PES' available 256px emblems to 56px,
-# then enlarged them again for the focused team card. 128px cells preserve a
-# crisp 120px source while staying within the Switch's texture limits.
+
+# 128px cells retain the native emblem detail used by the focused team card.
 CELL = 128
 COLS = 16
-CATEGORY_IMAGES = (
-    "emblemLc/emb_0009.png",                  # English League
-    "emblemLc/emb_0011.png",                  # Spanish League
-    "emblemLc/emb_0012_b.png",                # Ligue 1
-    "emblemLc/emb_0010.png",                  # Serie A
-    "emblemLc/emb_0019.png",                  # Eredivisie
-    "flag/e_000014_r.png",                    # German teams
-    "other/emblemOther-clublEurope.png",       # Other Europe
-    "other/emblemOther-clubLatinAmerica.png",  # South America clubs
-    "other/emblemOther-nationalEurope.png",
-    "other/emblemOther-nationalAfrica.png",
-    "other/emblemOther-nationalNorthAmerica.png",
-    "other/emblemOther-nationalLatinAmerica.png",
-    "other/emblemOther-nationalAsia.png",
-)
-EXTRA_TEAM_IDS = (
-    173,  # Manchester B
-    177,  # Everton B
-    179,  # Tottenham WB
-    191,  # Benfica
-    192,  # Porto
-    193,  # Sporting CP
-    234,  # Atalanta
-    327,  # Napoli
-    333,  # Torino
-    377,  # Brighton WB
-)
-EXTRA_TEAM_SLOT_BASE = 140 + len(CATEGORY_IMAGES)
-SLOTS = EXTRA_TEAM_SLOT_BASE + len(EXTRA_TEAM_IDS)
-ROWS = (SLOTS + COLS - 1) // COLS
 
 
 def badge_tile() -> Image.Image:
@@ -57,7 +35,8 @@ def badge_tile() -> Image.Image:
 
 
 def fit_image(path: Path) -> Image.Image:
-    image = Image.open(path).convert("RGBA")
+    with Image.open(path) as source:
+        image = source.convert("RGBA")
     padding = CELL // 16
     image.thumbnail((CELL - padding, CELL - padding), Image.Resampling.LANCZOS)
     tile = badge_tile()
@@ -65,39 +44,6 @@ def fit_image(path: Path) -> Image.Image:
         image, ((CELL - image.width) // 2, (CELL - image.height) // 2)
     )
     return tile
-
-
-def fallback_badge(slot: int) -> Image.Image:
-    tile = badge_tile()
-    draw = ImageDraw.Draw(tile)
-    color = ((slot * 73) & 0xBF, 80 + ((slot * 47) & 0x7F), 150, 255)
-    draw.ellipse(
-        (CELL * 3 // 32, CELL * 3 // 32,
-         CELL - CELL * 3 // 32 - 1, CELL - CELL * 3 // 32 - 1),
-        fill=color,
-        outline=(32, 48, 64, 255),
-        width=max(1, CELL // 32),
-    )
-    inner = CELL * 10 // 32
-    draw.ellipse(
-        (inner, inner, CELL - inner - 1, CELL - inner - 1),
-        fill=(245, 247, 250, 255),
-    )
-    return tile
-
-
-def team_image(symbol_root: Path, team_id: int) -> Path | None:
-    flag_root = symbol_root / "flag"
-    candidates = (
-        flag_root / f"e_{team_id:06d}_r_l.png",
-        flag_root / f"e_{team_id:06d}_r.png",
-        flag_root / f"e_{team_id:06d}_r_b.png",
-        flag_root / f"e_{team_id:06d}_f_l.png",
-        flag_root / f"e_{team_id:06d}_f.png",
-        flag_root / f"e_{team_id:06d}_r_w.png",
-        flag_root / f"flag_{team_id}.png",
-    )
-    return next((path for path in candidates if path.is_file()), None)
 
 
 def custom_team_image(override_root: Path, team_id: int) -> Path | None:
@@ -109,101 +55,170 @@ def custom_team_image(override_root: Path, team_id: int) -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
-def custom_category_image(override_root: Path, index: int) -> Path | None:
+def custom_category_image(
+    override_root: Path, category_key: str, category_index: int
+) -> Path | None:
     candidates = (
-        override_root / "categories" / f"{index}.png",
-        override_root / f"category_{index}.png",
+        override_root / "categories" / f"{category_key}.png",
+        override_root / f"category_{category_key}.png",
+        override_root / "categories" / f"{category_index}.png",
+        override_root / f"category_{category_index}.png",
     )
     return next((path for path in candidates if path.is_file()), None)
 
 
-def large_variant(path: Path) -> Path:
-    candidate = path.with_name(f"{path.stem}_l{path.suffix}")
-    return candidate if candidate.is_file() else path
+def catalog_slot_count(catalog: dict[str, Any]) -> int:
+    slots = [int(team["badge_slot"]) for team in catalog["teams"]]
+    slots.extend(int(category["badge_slot"]) for category in catalog["categories"])
+    if not slots:
+        raise ValueError("team catalog contains no badge slots")
+    if len(slots) != len(set(slots)):
+        raise ValueError("team catalog contains duplicate badge slots")
 
-
-def emit_header(atlas: Image.Image, output_path: Path) -> None:
-    values = [channel for pixel in atlas.getdata() for channel in pixel]
-    lines = []
-    for offset in range(0, len(values), 24):
-        lines.append(
-            "  " + ", ".join(str(value) for value in values[offset : offset + 24])
+    slot_count = max(slots) + 1
+    if sorted(slots) != list(range(1, slot_count)):
+        raise ValueError("team catalog badge slots must be contiguous after slot 0")
+    declared_count = int(catalog.get("counts", {}).get("badge_slots", 0))
+    if declared_count != slot_count:
+        raise ValueError(
+            f"team catalog declares {declared_count} slots, expected {slot_count}"
         )
+    return slot_count
 
-    output = f'''/* Auto-generated by scripts/generate_badge_atlas.py. */
+
+def catalog_badge_path(symbol_root: Path, relative_path: str) -> Path:
+    source = (symbol_root / relative_path).resolve()
+    try:
+        source.relative_to(symbol_root)
+    except ValueError as exc:
+        raise ValueError(f"badge source escapes symbol root: {relative_path}") from exc
+    if not source.is_file():
+        raise FileNotFoundError(f"catalog badge source not found: {source}")
+    return source
+
+
+def paste_badge(atlas: Image.Image, slot: int, source: Path) -> None:
+    atlas.paste(
+        fit_image(source),
+        ((slot % COLS) * CELL, (slot // COLS) * CELL),
+    )
+
+
+def emit_atlas(
+    atlas: Image.Image,
+    header_output_path: Path,
+    binary_output_path: Path,
+    slot_count: int,
+    row_count: int,
+    content_id: str,
+) -> None:
+    header_output_path.parent.mkdir(parents=True, exist_ok=True)
+    binary_output_path.parent.mkdir(parents=True, exist_ok=True)
+    binary_output_path.write_bytes(atlas.tobytes())
+    header = f'''/* Auto-generated by scripts/generate_badge_atlas.py.
+ * Catalog content ID: {content_id}
+ */
 
 #ifndef PES21_BADGE_ATLAS_H
 #define PES21_BADGE_ATLAS_H
 
 #include <stdint.h>
 
+#define BADGE_ATLAS_CONTENT_ID "{content_id}"
 #define BADGE_CELL_SIZE {CELL}
 #define BADGE_ATLAS_COLS {COLS}
-#define BADGE_ATLAS_SLOTS {SLOTS}
-#define BADGE_ATLAS_ROWS {ROWS}
+#define BADGE_ATLAS_SLOTS {slot_count}
+#define BADGE_ATLAS_ROWS {row_count}
 #define BADGE_ATLAS_W (BADGE_CELL_SIZE * BADGE_ATLAS_COLS)
 #define BADGE_ATLAS_H (BADGE_CELL_SIZE * BADGE_ATLAS_ROWS)
+#define BADGE_ATLAS_BYTES (BADGE_ATLAS_W * BADGE_ATLAS_H * 4u)
 
-static const uint8_t badge_atlas_rgba8[BADGE_ATLAS_W * BADGE_ATLAS_H * 4] = {{
-{',\n'.join(lines)}
-}};
+/* data/badge_atlas.bin is converted to this symbol by the devkitPro build. */
+extern const uint8_t badge_atlas_bin[];
+#define badge_atlas_rgba8 badge_atlas_bin
 
 #endif
 '''
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(output, encoding="ascii")
+    header_output_path.write_text(header, encoding="ascii", newline="\n")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=DEFAULT_CATALOG_PATH,
+        help="generated Exhibition team catalog",
+    )
+    parser.add_argument(
         "--symbol-root",
         type=Path,
         default=DEFAULT_SYMBOL_ROOT,
-        help="Extracted common/render/symbol directory from dt240_mobile_all.cpk",
+        help="extracted common/render/symbol directory from dt240_mobile_all.cpk",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=OUTPUT_PATH,
-        help="generated C header path",
+        default=HEADER_OUTPUT_PATH,
+        help="generated metadata C header path",
+    )
+    parser.add_argument(
+        "--binary-output",
+        type=Path,
+        default=BINARY_OUTPUT_PATH,
+        help="generated raw RGBA atlas path",
     )
     parser.add_argument(
         "--override-root",
         type=Path,
         default=DEFAULT_OVERRIDE_ROOT,
-        help="optional HD PNG overrides (teams/<id>.png, categories/<index>.png)",
+        help="optional HD PNG overrides",
     )
     args = parser.parse_args()
+
+    catalog_path = args.catalog.resolve()
     symbol_root = args.symbol_root.resolve()
     override_root = args.override_root.resolve()
     if not symbol_root.is_dir():
-        raise SystemExit(f"Extracted symbol directory not found: {symbol_root}")
+        raise SystemExit(f"extracted symbol directory not found: {symbol_root}")
 
-    atlas = Image.new("RGBA", (COLS * CELL, ROWS * CELL), (0, 0, 0, 0))
-    for team_id in range(140):
-        source = (custom_team_image(override_root, team_id) or
-                  team_image(symbol_root, team_id))
-        badge = fit_image(source) if source else fallback_badge(team_id)
-        atlas.paste(badge, ((team_id % COLS) * CELL, (team_id // COLS) * CELL))
+    catalog = load_catalog(catalog_path)
+    slot_count = catalog_slot_count(catalog)
+    row_count = (slot_count + COLS - 1) // COLS
+    atlas = Image.new(
+        "RGBA", (COLS * CELL, row_count * CELL), (0, 0, 0, 0)
+    )
 
-    for index, relative_path in enumerate(CATEGORY_IMAGES):
-        slot = 140 + index
-        source = (custom_category_image(override_root, index) or
-                  large_variant(symbol_root / relative_path))
-        badge = fit_image(source) if source.is_file() else fallback_badge(slot)
-        atlas.paste(badge, ((slot % COLS) * CELL, (slot // COLS) * CELL))
+    # Slot 0 stays transparent; manifest slots are compact and independent of IDs.
+    for team in catalog["teams"]:
+        team_id = int(team["team_id"])
+        source = custom_team_image(override_root, team_id)
+        if source is None:
+            source = catalog_badge_path(symbol_root, str(team["badge_source"]))
+        paste_badge(atlas, int(team["badge_slot"]), source)
 
-    # Custom selector rows keep their compact overlay slots while sourcing
-    # the exact PES21 native emblem images for the migrated high team IDs.
-    for index, team_id in enumerate(EXTRA_TEAM_IDS):
-        slot = EXTRA_TEAM_SLOT_BASE + index
-        source = (custom_team_image(override_root, team_id) or
-                  team_image(symbol_root, team_id))
-        badge = fit_image(source) if source else fallback_badge(slot)
-        atlas.paste(badge, ((slot % COLS) * CELL, (slot // COLS) * CELL))
+    for index, category in enumerate(catalog["categories"]):
+        source = custom_category_image(
+            override_root, str(category["key"]), index
+        )
+        if source is None:
+            source = catalog_badge_path(
+                symbol_root, str(category["badge_source"])
+            )
+        paste_badge(atlas, int(category["badge_slot"]), source)
 
-    emit_header(atlas, args.output.resolve())
+    emit_atlas(
+        atlas,
+        args.output.resolve(),
+        args.binary_output.resolve(),
+        slot_count,
+        row_count,
+        str(catalog["content_id"]),
+    )
+    print(
+        f"generated {args.output.resolve()} and {args.binary_output.resolve()} "
+        f"({slot_count} slots, {COLS * CELL}x{row_count * CELL})"
+    )
 
 
 if __name__ == "__main__":

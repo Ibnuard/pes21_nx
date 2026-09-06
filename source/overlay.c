@@ -45,6 +45,11 @@ static struct {
   GLuint team_rating_star_tex;
   GLuint team_select_bg_tex;
   GLuint native_uniform_texture[2];
+#define PREMATCH_GAMEPLAN_PORTRAIT_CACHE_SIZE 80
+  GLuint player_portrait_texture[PREMATCH_GAMEPLAN_PORTRAIT_CACHE_SIZE];
+  uint32_t player_portrait_id[PREMATCH_GAMEPLAN_PORTRAIT_CACHE_SIZE];
+  uint32_t player_portrait_stamp[PREMATCH_GAMEPLAN_PORTRAIT_CACHE_SIZE];
+  uint32_t player_portrait_clock;
   GLuint vbo;
   GLint loc_pos, loc_uv, loc_tex, loc_off, loc_color, loc_solid, loc_image;
   GLint loc_image_curve;
@@ -370,6 +375,59 @@ static int emit_efootball_line(const char *text, int len, float x, float y,
   return quads;
 }
 
+static int emit_efootball_fit_line(const char *text, int len, float x, float y,
+                                   float max_width, float max_gh,
+                                   float min_gh, uint32_t weight,
+                                   GLfloat *verts) {
+  if (!text || len <= 0 || max_width <= 0.0f)
+    return 0;
+  float gh = max_gh;
+  float width = measure_efootball_line(text, len, gh, weight);
+  while (width > max_width && gh > min_gh) {
+    gh *= 0.92f;
+    width = measure_efootball_line(text, len, gh, weight);
+  }
+  return emit_efootball_line(text, len, x, y, gh, weight, verts);
+}
+
+static int emit_efootball_centered_fit_line(
+    const char *text, int len, float center_x, float y, float max_width,
+    float max_gh, float min_gh, uint32_t weight, GLfloat *verts) {
+  if (!text || len <= 0 || max_width <= 0.0f)
+    return 0;
+  float gh = max_gh;
+  float width = measure_efootball_line(text, len, gh, weight);
+  while (width > max_width && gh > min_gh) {
+    gh *= 0.92f;
+    width = measure_efootball_line(text, len, gh, weight);
+  }
+  return emit_efootball_line(text, len, center_x - width * 0.5f, y, gh,
+                             weight, verts);
+}
+
+static void compact_player_name(char *destination, size_t capacity,
+                                const char *source) {
+  if (!destination || !capacity)
+    return;
+  destination[0] = '\0';
+  if (!source || !source[0])
+    return;
+  const size_t source_length = strlen(source);
+  const char *start = source;
+  if (source_length >= capacity) {
+    const char *last_space = strrchr(source, ' ');
+    if (last_space && last_space[1])
+      start = last_space + 1;
+  }
+  size_t length = strlen(start);
+  if (length >= capacity)
+    length = capacity - 1;
+  while (length && ((unsigned char)start[length] & 0xc0u) == 0x80u)
+    length--;
+  memcpy(destination, start, length);
+  destination[length] = '\0';
+}
+
 static uint32_t selector_position_color_band(const char *position) {
   if (strcmp(position, "GK") == 0)
     return 0u;
@@ -381,6 +439,25 @@ static uint32_t selector_position_color_band(const char *position) {
       strcmp(position, "AMF") == 0)
     return 2u;
   return 3u;
+}
+
+static void gameplan_metric_color(uint32_t value, float *red, float *green,
+                                  float *blue) {
+  if (value > 100u)
+    value = 100u;
+  const float t = (float)value / 100.0f;
+  const float low[3] = {0.08f, 0.72f, 0.30f};
+  const float middle[3] = {0.96f, 0.78f, 0.08f};
+  const float high[3] = {0.92f, 0.12f, 0.16f};
+  const float local = t < 0.5f ? t * 2.0f : (t - 0.5f) * 2.0f;
+  const float *from = t < 0.5f ? low : middle;
+  const float *to = t < 0.5f ? middle : high;
+  if (red)
+    *red = from[0] + (to[0] - from[0]) * local;
+  if (green)
+    *green = from[1] + (to[1] - from[1]) * local;
+  if (blue)
+    *blue = from[2] + (to[2] - from[2]) * local;
 }
 
 static int emit_rect(float x, float y, float width, float height,
@@ -740,18 +817,16 @@ static void prepare_native_uniform_preview(int active) {
   glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)saved_framebuffer);
 }
 
-static int decode_uniform_thumbnail(const PesUniformPreviewPng *preview,
-                                    unsigned char **pixels_out,
-                                    GLint *width_out, GLint *height_out) {
-  if (!preview || !preview->byte_count || !pixels_out || !width_out ||
-      !height_out)
+static int decode_png_memory(const unsigned char *bytes, uint32_t byte_count,
+                             unsigned char **pixels_out, GLint *width_out,
+                             GLint *height_out) {
+  if (!bytes || !byte_count || !pixels_out || !width_out || !height_out)
     return 0;
 
   png_image image;
   memset(&image, 0, sizeof(image));
   image.version = PNG_IMAGE_VERSION;
-  if (!png_image_begin_read_from_memory(&image, preview->bytes,
-                                        preview->byte_count))
+  if (!png_image_begin_read_from_memory(&image, bytes, byte_count))
     return 0;
   if (!image.width || !image.height || image.width > 2048u ||
       image.height > 2048u) {
@@ -777,6 +852,114 @@ static int decode_uniform_thumbnail(const PesUniformPreviewPng *preview,
   *height_out = (GLint)image.height;
   png_image_free(&image);
   return 1;
+}
+
+static int decode_uniform_thumbnail(const PesUniformPreviewPng *preview,
+                                    unsigned char **pixels_out,
+                                    GLint *width_out, GLint *height_out) {
+  if (!preview || !preview->byte_count || !pixels_out || !width_out ||
+      !height_out)
+    return 0;
+  // decode_png_memory uses libpng's png_image_begin_read_from_memory entry
+  // point, keeping the native uniform and portrait paths identical.
+  return decode_png_memory(preview->bytes, preview->byte_count, pixels_out,
+                           width_out, height_out);
+}
+
+static int gameplan_portrait_cache_slot(uint32_t portrait_id) {
+  if (!portrait_id)
+    return -1;
+  for (int slot = 0; slot < PREMATCH_GAMEPLAN_PORTRAIT_CACHE_SIZE; slot++) {
+    if (gl.player_portrait_id[slot] == portrait_id &&
+        gl.player_portrait_texture[slot]) {
+      gl.player_portrait_stamp[slot] = ++gl.player_portrait_clock;
+      return slot;
+    }
+  }
+  return -1;
+}
+
+static int gameplan_portrait_replacement_slot(uint32_t portrait_id) {
+  int oldest = 0;
+  for (int slot = 0; slot < PREMATCH_GAMEPLAN_PORTRAIT_CACHE_SIZE; slot++) {
+    if (gl.player_portrait_id[slot] == portrait_id)
+      return slot;
+    if (!gl.player_portrait_id[slot])
+      return slot;
+    if (gl.player_portrait_stamp[slot] <
+        gl.player_portrait_stamp[oldest])
+      oldest = slot;
+  }
+  return oldest;
+}
+
+static void prepare_gameplan_portraits(int active) {
+  if (!active)
+    return;
+
+  PesPrematchGameplanPortraitPng *pending[2][40] = {{0}};
+  int have_pending = 0;
+  for (uint32_t side = 0; side < 2; side++) {
+    for (uint32_t index = 0; index < 40; index++) {
+      pending[side][index] =
+          pes_controller_custom_prematch_gameplan_take_portrait_png(side,
+                                                                    index);
+      have_pending |= pending[side][index] != NULL;
+    }
+  }
+  if (!have_pending)
+    return;
+
+  GLint saved_active_texture = GL_TEXTURE0;
+  GLint saved_texture = 0;
+  GLint saved_unpack_alignment = 4;
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &saved_active_texture);
+  glActiveTexture(GL_TEXTURE0);
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved_texture);
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, &saved_unpack_alignment);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+  for (uint32_t side = 0; side < 2; side++) {
+    for (uint32_t index = 0; index < 40; index++) {
+      PesPrematchGameplanPortraitPng *portrait = pending[side][index];
+      if (!portrait)
+        continue;
+      unsigned char *pixels = NULL;
+      GLint width = 0;
+      GLint height = 0;
+      if (decode_png_memory(portrait->bytes, portrait->byte_count, &pixels,
+                            &width, &height)) {
+        const int slot =
+            gameplan_portrait_replacement_slot(portrait->portrait_id);
+        if (!gl.player_portrait_texture[slot])
+          glGenTextures(1, &gl.player_portrait_texture[slot]);
+        if (gl.player_portrait_texture[slot]) {
+          glBindTexture(GL_TEXTURE_2D, gl.player_portrait_texture[slot]);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                          GL_CLAMP_TO_EDGE);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                          GL_CLAMP_TO_EDGE);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                       GL_UNSIGNED_BYTE, pixels);
+          gl.player_portrait_id[slot] = portrait->portrait_id;
+          gl.player_portrait_stamp[slot] = ++gl.player_portrait_clock;
+        }
+      }
+      free(pixels);
+      free(portrait);
+    }
+  }
+
+  glPixelStorei(GL_UNPACK_ALIGNMENT, saved_unpack_alignment);
+  glBindTexture(GL_TEXTURE_2D, (GLuint)saved_texture);
+  glActiveTexture((GLenum)saved_active_texture);
+}
+
+static GLuint gameplan_portrait_texture(uint32_t portrait_id) {
+  const int slot = gameplan_portrait_cache_slot(portrait_id);
+  return slot >= 0 ? gl.player_portrait_texture[slot] : 0;
 }
 
 static void prepare_uniform_thumbnail_preview(int active) {
@@ -1146,6 +1329,9 @@ static void overlay_render(void) {
   // checks and CAS work on the render thread for every eglSwap.
   pes_controller_surface_cached_snapshot(&controller_snapshot);
   const int custom_2p_transition = pes_controller_2p_transition_active();
+  const uint32_t custom_2p_transition_kind =
+      custom_2p_transition ? pes_controller_2p_transition_kind()
+                           : PES_2P_TRANSITION_NONE;
   const int goal_demo_active =
       controller_snapshot.surface == PES_CONTROLLER_SURFACE_GOAL_DEMO;
   const int goal_demo_player =
@@ -1221,17 +1407,20 @@ static void overlay_render(void) {
   const int custom_cpu_popup = pes_controller_custom_cpu_popup_active();
   const int custom_video_settings_popup =
       pes_controller_custom_video_settings_active();
+  const int custom_gameplan =
+      pes_controller_custom_prematch_gameplan_active();
   const int custom_info_popup = pes_controller_custom_info_popup_active();
   // Match Settings is a modal child of the hub.  Let the existing settings
   // renderer own the foreground while retaining the hub as its visual host.
   const int custom_2p_prematch_hub =
       custom_2p_prematch_hub_raw && !custom_settings_popup &&
+      !custom_gameplan &&
       custom_hub_page == PES_2P_PREMATCH_HUB_PAGE_MAIN;
   const int custom_popup =
       custom_team_popup || custom_cpu_popup || custom_settings_popup ||
       custom_video_settings_popup || custom_info_popup || set_piece_selector ||
       custom_2p_team_selector || custom_2p_prematch_hub_raw ||
-      custom_2p_transition;
+      custom_2p_transition || custom_gameplan;
   // Keep the ready transition entirely presentation-side. The controller
   // state remains a simple lock while the focused card eases toward its
   // header for the PES-style confirmed layout.
@@ -1355,6 +1544,7 @@ static void overlay_render(void) {
   if (!gl_init())
     return;
   prepare_uniform_thumbnail_preview(custom_hub_kits_page);
+  prepare_gameplan_portraits(custom_gameplan);
 
   static GLfloat verts[4096 * 24];
   int quads = 0;
@@ -1389,6 +1579,8 @@ static void overlay_render(void) {
   int custom_action_key_bg_quads = 0;
   int custom_back_key_bg_quads = 0;
   int custom_icon_quads = 0;
+  int custom_loading_spinner_first_quad = 0;
+  int custom_loading_spinner_quads = 0;
   int custom_hub_button_text_first_quad = 0;
   int custom_hub_button_text_quads = 0;
   int custom_dark_text_first_quad = 0;
@@ -1431,13 +1623,1287 @@ static void overlay_render(void) {
   int cinematic_helper_text_quads = 0;
   int gameplan_cursor_first_quad = 0;
   int gameplan_cursor_quads = 0;
+  enum {
+    PREMATCH_GAMEPLAN_FIELD_SLOTS = 11,
+    PREMATCH_GAMEPLAN_VISIBLE_BENCH = 8,
+    PREMATCH_GAMEPLAN_VISIBLE_PICKER = 7,
+  };
+  int prematch_gameplan_backdrop_first_quad = 0;
+  int prematch_gameplan_backdrop_quads = 0;
+  int prematch_gameplan_panel_first_quad = 0;
+  int prematch_gameplan_panel_quads = 0;
+  int prematch_gameplan_header_first_quad[2] = {0};
+  int prematch_gameplan_header_quads[2] = {0};
+  int prematch_gameplan_pitch_first_quad[2] = {0};
+  int prematch_gameplan_pitch_quads[2] = {0};
+  int prematch_gameplan_stripe_first_quad[2] = {0};
+  int prematch_gameplan_stripe_quads[2] = {0};
+  int prematch_gameplan_line_first_quad[2] = {0};
+  int prematch_gameplan_line_quads[2] = {0};
+  int prematch_gameplan_neutral_first_quad[2] = {0};
+  int prematch_gameplan_neutral_quads[2] = {0};
+  int prematch_gameplan_modal_first_quad[2] = {0};
+  int prematch_gameplan_modal_quads[2] = {0};
+  int prematch_gameplan_accent_first_quad[2] = {0};
+  int prematch_gameplan_accent_quads[2] = {0};
+  int prematch_gameplan_focus_outline_first_quad[2] = {0};
+  int prematch_gameplan_focus_outline_quads[2] = {0};
+  int prematch_gameplan_selected_outline_first_quad[2] = {0};
+  int prematch_gameplan_selected_outline_quads[2] = {0};
+  int prematch_gameplan_badge_first_quad[2] = {0};
+  int prematch_gameplan_badge_quads[2] = {0};
+  int prematch_gameplan_action_first_quad[2] = {0};
+  int prematch_gameplan_action_quads[2] = {0};
+  int prematch_gameplan_action_selected_first_quad[2] = {0};
+  int prematch_gameplan_action_selected_quads[2] = {0};
+  int prematch_gameplan_portrait_quad[2][2][40];
+  memset(prematch_gameplan_portrait_quad, -1,
+         sizeof(prematch_gameplan_portrait_quad));
+  int prematch_gameplan_field_plate_first_quad[2] = {0};
+  int prematch_gameplan_field_plate_quads[2] = {0};
+  int prematch_gameplan_waiting_first_quad[2] = {0};
+  int prematch_gameplan_waiting_quads[2] = {0};
+  int prematch_gameplan_waiting_text_first_quad[2] = {0};
+  int prematch_gameplan_waiting_text_quads[2] = {0};
+  int prematch_gameplan_field_metric_first[2][11];
+  int prematch_gameplan_field_metric_quads[2][11];
+  uint32_t prematch_gameplan_field_metric_value[2][11];
+  int prematch_gameplan_bench_metric_first[2][8];
+  int prematch_gameplan_bench_metric_quads[2][8];
+  uint32_t prematch_gameplan_bench_metric_value[2][8];
+  int prematch_gameplan_picker_metric_first[2][7];
+  int prematch_gameplan_picker_metric_quads[2][7];
+  uint32_t prematch_gameplan_picker_metric_value[2][7];
+  memset(prematch_gameplan_field_metric_first, -1,
+         sizeof(prematch_gameplan_field_metric_first));
+  memset(prematch_gameplan_bench_metric_first, -1,
+         sizeof(prematch_gameplan_bench_metric_first));
+  memset(prematch_gameplan_picker_metric_first, -1,
+         sizeof(prematch_gameplan_picker_metric_first));
+  memset(prematch_gameplan_field_metric_quads, 0,
+         sizeof(prematch_gameplan_field_metric_quads));
+  memset(prematch_gameplan_field_metric_value, 0,
+         sizeof(prematch_gameplan_field_metric_value));
+  memset(prematch_gameplan_bench_metric_quads, 0,
+         sizeof(prematch_gameplan_bench_metric_quads));
+  memset(prematch_gameplan_bench_metric_value, 0,
+         sizeof(prematch_gameplan_bench_metric_value));
+  memset(prematch_gameplan_picker_metric_quads, 0,
+         sizeof(prematch_gameplan_picker_metric_quads));
+  memset(prematch_gameplan_picker_metric_value, 0,
+         sizeof(prematch_gameplan_picker_metric_value));
+  int prematch_gameplan_role_plate_first_quad[4] = {0};
+  int prematch_gameplan_role_plate_quads[4] = {0};
+  int prematch_gameplan_role_text_first_quad = 0;
+  int prematch_gameplan_role_text_quads = 0;
+  int prematch_gameplan_white_text_first_quad = 0;
+  int prematch_gameplan_white_text_quads = 0;
+  int prematch_gameplan_header_text_first_quad[2] = {0};
+  int prematch_gameplan_header_text_quads[2] = {0};
+  int prematch_gameplan_body_text_first_quad[2] = {0};
+  int prematch_gameplan_body_text_quads[2] = {0};
+  int prematch_gameplan_field_text_first_quad[2] = {0};
+  int prematch_gameplan_field_text_quads[2] = {0};
+  int prematch_gameplan_action_text_first_quad[2] = {0};
+  int prematch_gameplan_action_text_quads[2] = {0};
+  int prematch_gameplan_focus_text_first_quad[2] = {0};
+  int prematch_gameplan_focus_text_quads[2] = {0};
+  int prematch_gameplan_muted_text_first_quad = 0;
+  int prematch_gameplan_muted_text_quads = 0;
+  int prematch_gameplan_accent_text_first_quad[2] = {0};
+  int prematch_gameplan_accent_text_quads[2] = {0};
+  float prematch_gameplan_field_rect[2][PREMATCH_GAMEPLAN_FIELD_SLOTS][4] =
+      {{{0}}};
+  float prematch_gameplan_bench_rect[2][PREMATCH_GAMEPLAN_VISIBLE_BENCH][4] =
+      {{{0}}};
+  uint32_t prematch_gameplan_bench_start[2] = {0};
+  uint32_t prematch_gameplan_bench_visible[2] = {0};
+  float prematch_gameplan_picker_rect[2][PREMATCH_GAMEPLAN_VISIBLE_PICKER][4] =
+      {{{0}}};
+  uint32_t prematch_gameplan_picker_start[2] = {0};
+  uint32_t prematch_gameplan_picker_visible[2] = {0};
   RoundedRectStyle custom_panel_style = {0};
   RoundedRectStyle custom_header_style = {0};
   RoundedRectStyle custom_selected_style = {0};
   RoundedRectStyle custom_value_plate_style = {0};
   RoundedRectStyle custom_action_button_style = {0};
   RoundedRectStyle custom_back_button_style = {0};
-  if (custom_2p_team_selector) {
+  RoundedRectStyle prematch_gameplan_panel_style = {0};
+  RoundedRectStyle prematch_gameplan_action_style = {0};
+  RoundedRectStyle prematch_gameplan_waiting_style = {0};
+  if (custom_gameplan) {
+    const float margin_x = 0.018f * (float)screen_width;
+    const float center_gap = 0.014f * (float)screen_width;
+    const float half_w =
+        ((float)screen_width - margin_x * 2.0f - center_gap) * 0.5f;
+    const float half_x[2] = {margin_x, margin_x + half_w + center_gap};
+    const float header_y = 0.025f * (float)screen_height;
+    const float header_h = 0.120f * (float)screen_height;
+    const float content_y = 0.158f * (float)screen_height;
+    const float content_h = 0.650f * (float)screen_height;
+    const float action_y = 0.838f * (float)screen_height;
+    const float action_h = 0.078f * (float)screen_height;
+    const float action_gap = 0.006f * (float)screen_width;
+    const float action_w = (half_w - action_gap * 3.0f) * 0.25f;
+    const float pitch_x_offset = 0.009f * (float)screen_width;
+    const float pitch_w = 0.278f * (float)screen_width;
+    const float pitch_y = content_y + 0.036f * (float)screen_height;
+    const float pitch_h = content_h - 0.046f * (float)screen_height;
+    const float bench_gap = 0.007f * (float)screen_width;
+    const float bench_x_offset = pitch_x_offset + pitch_w + bench_gap;
+    const float bench_w = half_w - bench_x_offset -
+                          0.009f * (float)screen_width;
+    // Player entries float directly on the pitch. This bounding box reserves
+    // a square portrait, a compact black role/rating plate and one name line.
+    const float player_w = 0.052f * (float)screen_width;
+    const float player_h = 0.094f * (float)screen_height;
+    const float line_thickness = 0.0015f * (float)screen_width;
+    static const char *const action_labels[
+        PES_PREMATCH_GAMEPLAN_ACTION_COUNT] = {
+        "SUBSTITUTE", "FORMATION", "AUTO LINE UP", "POSITIONS"};
+
+    prematch_gameplan_backdrop_first_quad = quads;
+    prematch_gameplan_backdrop_quads = emit_image_rect(
+        0.0f, 0.0f, (float)screen_width, (float)screen_height,
+        verts + quads * 24);
+    quads += prematch_gameplan_backdrop_quads;
+
+    prematch_gameplan_panel_first_quad = quads;
+    prematch_gameplan_panel_style = (RoundedRectStyle){
+        half_w, content_y + content_h - header_y,
+        0.012f * (float)screen_height};
+    for (uint32_t side = 0; side < 2; side++) {
+      prematch_gameplan_panel_quads += emit_round_rect_quad(
+          half_x[side], header_y, half_w,
+          content_y + content_h - header_y, verts + quads * 24);
+      quads++;
+    }
+    for (uint32_t side = 0; side < 2; side++) {
+      prematch_gameplan_header_first_quad[side] = quads;
+      prematch_gameplan_header_quads[side] = emit_rect(
+          half_x[side], header_y, half_w, header_h,
+          verts + quads * 24);
+      quads += prematch_gameplan_header_quads[side];
+    }
+
+    for (uint32_t side = 0; side < 2; side++) {
+      const uint32_t page =
+          pes_controller_custom_prematch_gameplan_page(side);
+      const uint32_t root_focus =
+          pes_controller_custom_prematch_gameplan_root_focus(side);
+      const int waiting =
+          pes_controller_custom_prematch_gameplan_waiting(side);
+      const float pitch_x = half_x[side] + pitch_x_offset;
+      const float bench_x = half_x[side] + bench_x_offset;
+
+      if (!waiting && (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
+                       page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)) {
+        prematch_gameplan_pitch_first_quad[side] = quads;
+        prematch_gameplan_pitch_quads[side] = emit_rect(
+            pitch_x, pitch_y, pitch_w, pitch_h, verts + quads * 24);
+        quads += prematch_gameplan_pitch_quads[side];
+
+        prematch_gameplan_stripe_first_quad[side] = quads;
+        for (uint32_t stripe = 0; stripe < 6; stripe += 2) {
+          prematch_gameplan_stripe_quads[side] += emit_rect(
+              pitch_x, pitch_y + pitch_h * (float)stripe / 6.0f,
+              pitch_w, pitch_h / 6.0f, verts + quads * 24);
+          quads++;
+        }
+
+        prematch_gameplan_line_first_quad[side] = quads;
+        prematch_gameplan_line_quads[side] += emit_rect(
+            pitch_x, pitch_y, pitch_w, line_thickness,
+            verts + quads * 24);
+        quads++;
+        prematch_gameplan_line_quads[side] += emit_rect(
+            pitch_x, pitch_y + pitch_h - line_thickness, pitch_w,
+            line_thickness, verts + quads * 24);
+        quads++;
+        prematch_gameplan_line_quads[side] += emit_rect(
+            pitch_x, pitch_y, line_thickness, pitch_h,
+            verts + quads * 24);
+        quads++;
+        prematch_gameplan_line_quads[side] += emit_rect(
+            pitch_x + pitch_w - line_thickness, pitch_y, line_thickness,
+            pitch_h, verts + quads * 24);
+        quads++;
+        prematch_gameplan_line_quads[side] += emit_rect(
+            pitch_x, pitch_y + pitch_h * 0.5f, pitch_w,
+            line_thickness, verts + quads * 24);
+        quads++;
+        const float box_w = pitch_w * 0.48f;
+        const float box_h = pitch_h * 0.14f;
+        const float box_x = pitch_x + (pitch_w - box_w) * 0.5f;
+        for (uint32_t end = 0; end < 2; end++) {
+          const float box_y = end ? pitch_y + pitch_h - box_h : pitch_y;
+          prematch_gameplan_line_quads[side] += emit_rect(
+              box_x, box_y, line_thickness, box_h,
+              verts + quads * 24);
+          quads++;
+          prematch_gameplan_line_quads[side] += emit_rect(
+              box_x + box_w - line_thickness, box_y, line_thickness,
+              box_h, verts + quads * 24);
+          quads++;
+          prematch_gameplan_line_quads[side] += emit_rect(
+              box_x, end ? box_y : box_y + box_h - line_thickness,
+              box_w, line_thickness, verts + quads * 24);
+          quads++;
+        }
+      }
+
+      if (waiting) {
+        const float waiting_x = half_x[side] + 0.042f * (float)screen_width;
+        const float waiting_y = content_y + 0.150f * (float)screen_height;
+        const float waiting_w = half_w - 0.084f * (float)screen_width;
+        const float waiting_h = 0.315f * (float)screen_height;
+        prematch_gameplan_waiting_first_quad[side] = quads;
+        prematch_gameplan_waiting_style = (RoundedRectStyle){
+            waiting_w, waiting_h, 0.016f * (float)screen_height};
+        prematch_gameplan_waiting_quads[side] = emit_round_rect_quad(
+            waiting_x, waiting_y, waiting_w, waiting_h,
+            verts + quads * 24);
+        quads++;
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP) {
+        const float modal_x = half_x[side] + 0.035f * (float)screen_width;
+        const float modal_y = content_y + 0.065f * (float)screen_height;
+        const float modal_w = half_w - 0.070f * (float)screen_width;
+        const float modal_h = 0.505f * (float)screen_height;
+        prematch_gameplan_modal_first_quad[side] = quads;
+        prematch_gameplan_modal_quads[side] += emit_rect(
+            modal_x, modal_y, modal_w, modal_h, verts + quads * 24);
+        quads++;
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS &&
+                 pes_controller_custom_prematch_gameplan_position_picker_active(
+                     side)) {
+        const float modal_x = half_x[side] + 0.025f * (float)screen_width;
+        const float modal_y = content_y + 0.025f * (float)screen_height;
+        const float modal_w = half_w - 0.050f * (float)screen_width;
+        const float modal_h = content_h - 0.050f * (float)screen_height;
+        prematch_gameplan_modal_first_quad[side] = quads;
+        prematch_gameplan_modal_quads[side] += emit_rect(
+            modal_x, modal_y, modal_w, modal_h, verts + quads * 24);
+        quads++;
+      }
+
+      prematch_gameplan_neutral_first_quad[side] = quads;
+      if (!waiting &&
+          (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
+           page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)) {
+        uint32_t field_count =
+            pes_controller_custom_prematch_gameplan_field_count(side);
+        if (field_count > PREMATCH_GAMEPLAN_FIELD_SLOTS)
+          field_count = PREMATCH_GAMEPLAN_FIELD_SLOTS;
+        for (uint32_t index = 0; index < field_count; index++) {
+          const float nx = (float)pes_controller_custom_prematch_gameplan_player_pitch_x(
+                               side, index) /
+                           255.0f;
+          const float ny = (float)pes_controller_custom_prematch_gameplan_player_pitch_y(
+                               side, index) /
+                           255.0f;
+          float x = pitch_x + nx * (pitch_w - player_w);
+          float y = pitch_y + ny * (pitch_h - player_h);
+          if (x < pitch_x)
+            x = pitch_x;
+          if (x + player_w > pitch_x + pitch_w)
+            x = pitch_x + pitch_w - player_w;
+          if (y < pitch_y)
+            y = pitch_y;
+          if (y + player_h > pitch_y + pitch_h)
+            y = pitch_y + pitch_h - player_h;
+          prematch_gameplan_field_rect[side][index][0] = x;
+          prematch_gameplan_field_rect[side][index][1] = y;
+          prematch_gameplan_field_rect[side][index][2] = player_w;
+          prematch_gameplan_field_rect[side][index][3] = player_h;
+          // Field players float directly on the pitch. Only the compact
+          // black role/OVR plate below the portrait gets a solid surface.
+        }
+
+        const uint32_t bench_count =
+            pes_controller_custom_prematch_gameplan_bench_count(side);
+        uint32_t visible = bench_count;
+        if (visible > PREMATCH_GAMEPLAN_VISIBLE_BENCH)
+          visible = PREMATCH_GAMEPLAN_VISIBLE_BENCH;
+        uint32_t start = 0;
+        const uint32_t bench_focus =
+            pes_controller_custom_prematch_gameplan_substitute_focus(
+                side, PES_PREMATCH_GAMEPLAN_AREA_BENCH);
+        if (bench_count > visible && visible) {
+          start = bench_focus > visible / 2 ? bench_focus - visible / 2 : 0;
+          if (start + visible > bench_count)
+            start = bench_count - visible;
+        }
+        prematch_gameplan_bench_start[side] = start;
+        prematch_gameplan_bench_visible[side] = visible;
+        const float bench_title_space = 0.030f * (float)screen_height;
+        const float bench_content_y = pitch_y + bench_title_space;
+        const float bench_content_h = pitch_h - bench_title_space;
+        const float bench_step =
+            visible ? bench_content_h / (float)visible : bench_content_h;
+        const float bench_row_h = bench_step -
+                                  0.006f * (float)screen_height;
+        for (uint32_t slot = 0; slot < visible; slot++) {
+          const float y = bench_content_y + bench_step * (float)slot;
+          prematch_gameplan_bench_rect[side][slot][0] = bench_x;
+          prematch_gameplan_bench_rect[side][slot][1] = y;
+          prematch_gameplan_bench_rect[side][slot][2] = bench_w;
+          prematch_gameplan_bench_rect[side][slot][3] = bench_row_h;
+          prematch_gameplan_neutral_quads[side] += emit_rect(
+              bench_x, y, bench_w, bench_row_h, verts + quads * 24);
+          quads++;
+        }
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION) {
+        const float row_x = half_x[side] + 0.025f * (float)screen_width;
+        const float row_w = half_w - 0.050f * (float)screen_width;
+        const float row_y = content_y + 0.155f * (float)screen_height;
+        const float row_h = 0.105f * (float)screen_height;
+        for (uint32_t row = 0; row < 3; row++) {
+          prematch_gameplan_neutral_quads[side] += emit_rect(
+              row_x, row_y + (float)row * row_h, row_w,
+              row_h - 0.008f * (float)screen_height,
+              verts + quads * 24);
+          quads++;
+        }
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP) {
+        const float modal_x = half_x[side] + 0.035f * (float)screen_width;
+        const float modal_y = content_y + 0.065f * (float)screen_height;
+        const float modal_w = half_w - 0.070f * (float)screen_width;
+        const float button_gap = 0.012f * (float)screen_width;
+        const float button_w = (modal_w - button_gap -
+                                0.040f * (float)screen_width) * 0.5f;
+        const float button_y = modal_y + 0.390f * (float)screen_height;
+        for (uint32_t button = 0; button < 2; button++) {
+          prematch_gameplan_neutral_quads[side] += emit_rect(
+              modal_x + 0.020f * (float)screen_width +
+                  (button_w + button_gap) * (float)button,
+              button_y, button_w, 0.075f * (float)screen_height,
+              verts + quads * 24);
+          quads++;
+        }
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS) {
+        const int picker =
+            pes_controller_custom_prematch_gameplan_position_picker_active(
+                side);
+        if (!picker) {
+          const float row_x = half_x[side] + 0.010f * (float)screen_width;
+          const float row_w = half_w - 0.020f * (float)screen_width;
+          const float row_y = content_y + 0.055f * (float)screen_height;
+          const float row_step = 0.062f * (float)screen_height;
+          for (uint32_t row = 0;
+               row < PES_PREMATCH_GAMEPLAN_POSITION_COUNT; row++) {
+            prematch_gameplan_neutral_quads[side] += emit_rect(
+                row_x, row_y + row_step * (float)row, row_w,
+                row_step - 0.005f * (float)screen_height,
+                verts + quads * 24);
+            quads++;
+          }
+        } else {
+          const uint32_t picker_count =
+              pes_controller_custom_prematch_gameplan_position_picker_count(
+                  side);
+          uint32_t visible = picker_count;
+          if (visible > PREMATCH_GAMEPLAN_VISIBLE_PICKER)
+            visible = PREMATCH_GAMEPLAN_VISIBLE_PICKER;
+          const uint32_t picker_focus =
+              pes_controller_custom_prematch_gameplan_position_picker_focus(
+                  side);
+          uint32_t start = 0;
+          if (picker_count > visible && visible) {
+            start = picker_focus > visible / 2
+                        ? picker_focus - visible / 2
+                        : 0;
+            if (start + visible > picker_count)
+              start = picker_count - visible;
+          }
+          prematch_gameplan_picker_start[side] = start;
+          prematch_gameplan_picker_visible[side] = visible;
+          const float row_x = half_x[side] + 0.040f * (float)screen_width;
+          const float row_w = half_w - 0.080f * (float)screen_width;
+          const float row_y = content_y + 0.105f * (float)screen_height;
+          const float row_step = 0.067f * (float)screen_height;
+          for (uint32_t slot = 0; slot < visible; slot++) {
+            const float y = row_y + row_step * (float)slot;
+            prematch_gameplan_picker_rect[side][slot][0] = row_x;
+            prematch_gameplan_picker_rect[side][slot][1] = y;
+            prematch_gameplan_picker_rect[side][slot][2] = row_w;
+            prematch_gameplan_picker_rect[side][slot][3] =
+                row_step - 0.006f * (float)screen_height;
+            prematch_gameplan_neutral_quads[side] += emit_rect(
+                row_x, y, row_w,
+                row_step - 0.006f * (float)screen_height,
+                verts + quads * 24);
+            quads++;
+          }
+        }
+      }
+
+      if (!waiting) {
+        prematch_gameplan_action_first_quad[side] = quads;
+        prematch_gameplan_action_style = (RoundedRectStyle){
+            action_w, action_h, 0.012f * (float)screen_height};
+        for (uint32_t action = 0;
+             action < PES_PREMATCH_GAMEPLAN_ACTION_COUNT; action++) {
+          prematch_gameplan_action_quads[side] += emit_round_rect_quad(
+              half_x[side] + (action_w + action_gap) * (float)action,
+              action_y, action_w, action_h, verts + quads * 24);
+          quads++;
+        }
+
+        prematch_gameplan_action_selected_first_quad[side] = quads;
+        prematch_gameplan_action_selected_quads[side] +=
+            emit_round_rect_quad(
+                half_x[side] + (action_w + action_gap) * (float)root_focus,
+                action_y, action_w, action_h, verts + quads * 24);
+        quads++;
+      }
+      prematch_gameplan_accent_first_quad[side] = quads;
+      if (!waiting && page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION) {
+        const uint32_t focus =
+            pes_controller_custom_prematch_gameplan_formation_focus(side);
+        const float row_x = half_x[side] + 0.025f * (float)screen_width;
+        const float row_w = half_w - 0.050f * (float)screen_width;
+        const float row_y = content_y + 0.155f * (float)screen_height;
+        const float row_h = 0.105f * (float)screen_height;
+        prematch_gameplan_accent_quads[side] += emit_rect(
+            row_x, row_y + (float)focus * row_h, row_w,
+            row_h - 0.008f * (float)screen_height,
+            verts + quads * 24);
+        quads++;
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP) {
+        const uint32_t focus =
+            pes_controller_custom_prematch_gameplan_auto_focus(side) & 1u;
+        const float modal_x = half_x[side] + 0.035f * (float)screen_width;
+        const float modal_y = content_y + 0.065f * (float)screen_height;
+        const float modal_w = half_w - 0.070f * (float)screen_width;
+        const float button_gap = 0.012f * (float)screen_width;
+        const float button_w = (modal_w - button_gap -
+                                0.040f * (float)screen_width) * 0.5f;
+        prematch_gameplan_accent_quads[side] += emit_rect(
+            modal_x + 0.020f * (float)screen_width +
+                (button_w + button_gap) * (float)focus,
+            modal_y + 0.390f * (float)screen_height, button_w,
+            0.075f * (float)screen_height, verts + quads * 24);
+        quads++;
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS) {
+        if (pes_controller_custom_prematch_gameplan_position_picker_active(
+                side)) {
+          const uint32_t focus =
+              pes_controller_custom_prematch_gameplan_position_picker_focus(
+                  side);
+          if (focus >= prematch_gameplan_picker_start[side] &&
+              focus < prematch_gameplan_picker_start[side] +
+                          prematch_gameplan_picker_visible[side]) {
+            const float *rect = prematch_gameplan_picker_rect[side]
+                [focus - prematch_gameplan_picker_start[side]];
+            prematch_gameplan_accent_quads[side] += emit_rect(
+                rect[0], rect[1], rect[2], rect[3], verts + quads * 24);
+            quads++;
+          }
+        } else {
+          const uint32_t focus =
+              pes_controller_custom_prematch_gameplan_position_focus(side);
+          const float row_x = half_x[side] + 0.010f * (float)screen_width;
+          const float row_w = half_w - 0.020f * (float)screen_width;
+          const float row_y = content_y + 0.055f * (float)screen_height;
+          const float row_step = 0.062f * (float)screen_height;
+          prematch_gameplan_accent_quads[side] += emit_rect(
+              row_x, row_y + row_step * (float)focus, row_w,
+              row_step - 0.005f * (float)screen_height,
+              verts + quads * 24);
+          quads++;
+        }
+      }
+
+      prematch_gameplan_focus_outline_first_quad[side] = quads;
+      if (!waiting && page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
+        const uint32_t area =
+            pes_controller_custom_prematch_gameplan_substitute_area(side);
+        const uint32_t focus =
+            pes_controller_custom_prematch_gameplan_substitute_focus(
+                side, area);
+        const float *rect = NULL;
+        if (area == PES_PREMATCH_GAMEPLAN_AREA_FIELD &&
+            focus < PREMATCH_GAMEPLAN_FIELD_SLOTS) {
+          rect = prematch_gameplan_field_rect[side][focus];
+        } else if (area == PES_PREMATCH_GAMEPLAN_AREA_BENCH &&
+                   focus >= prematch_gameplan_bench_start[side] &&
+                   focus < prematch_gameplan_bench_start[side] +
+                               prematch_gameplan_bench_visible[side]) {
+          rect = prematch_gameplan_bench_rect[side]
+              [focus - prematch_gameplan_bench_start[side]];
+        }
+        if (rect && rect[2] > 0.0f) {
+          const float pad = 0.0025f * (float)screen_height;
+          const int outline_quads = emit_outline(
+              rect[0] - pad, rect[1] - pad, rect[2] + pad * 2.0f,
+              rect[3] + pad * 2.0f, 0.0040f * (float)screen_height,
+              verts + quads * 24);
+          prematch_gameplan_focus_outline_quads[side] += outline_quads;
+          quads += outline_quads;
+        }
+      }
+
+      prematch_gameplan_selected_outline_first_quad[side] = quads;
+      if (!waiting && page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
+        for (uint32_t area = 0; area < 2; area++) {
+          const uint32_t count = area == PES_PREMATCH_GAMEPLAN_AREA_FIELD
+                                     ? pes_controller_custom_prematch_gameplan_field_count(
+                                           side)
+                                     : pes_controller_custom_prematch_gameplan_bench_count(
+                                           side);
+          for (uint32_t index = 0; index < count; index++) {
+            if (!pes_controller_custom_prematch_gameplan_substitute_selected(
+                    side, area, index))
+              continue;
+            const float *rect = NULL;
+            if (area == PES_PREMATCH_GAMEPLAN_AREA_FIELD &&
+                index < PREMATCH_GAMEPLAN_FIELD_SLOTS) {
+              rect = prematch_gameplan_field_rect[side][index];
+            } else if (area == PES_PREMATCH_GAMEPLAN_AREA_BENCH &&
+                       index >= prematch_gameplan_bench_start[side] &&
+                       index < prematch_gameplan_bench_start[side] +
+                                   prematch_gameplan_bench_visible[side]) {
+              rect = prematch_gameplan_bench_rect[side]
+                  [index - prematch_gameplan_bench_start[side]];
+            }
+            if (rect && rect[2] > 0.0f) {
+              const float pad = 0.0060f * (float)screen_height;
+              const int outline_quads = emit_outline(
+                  rect[0] - pad, rect[1] - pad, rect[2] + pad * 2.0f,
+                  rect[3] + pad * 2.0f,
+                  0.0024f * (float)screen_height, verts + quads * 24);
+              prematch_gameplan_selected_outline_quads[side] +=
+                  outline_quads;
+              quads += outline_quads;
+            }
+          }
+        }
+      }
+    }
+
+    // Keep all portrait geometry outside the solid-color batches. Each quad
+    // is drawn separately with the matching native player texture.
+    for (uint32_t side = 0; side < 2; side++) {
+      const uint32_t page =
+          pes_controller_custom_prematch_gameplan_page(side);
+      const int waiting =
+          pes_controller_custom_prematch_gameplan_waiting(side);
+      if (!waiting &&
+          (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
+           page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)) {
+        uint32_t field_count =
+            pes_controller_custom_prematch_gameplan_field_count(side);
+        if (field_count > PREMATCH_GAMEPLAN_FIELD_SLOTS)
+          field_count = PREMATCH_GAMEPLAN_FIELD_SLOTS;
+        for (uint32_t index = 0; index < field_count; index++) {
+          const uint32_t portrait_id =
+              pes_controller_custom_prematch_gameplan_player_portrait_id(
+                  side, 1, index);
+          if (!gameplan_portrait_texture(portrait_id))
+            continue;
+          const float *rect = prematch_gameplan_field_rect[side][index];
+          const float portrait_size =
+              fminf(rect[2] * 0.72f, 0.053f * (float)screen_height);
+          const float portrait_x =
+              rect[0] + (rect[2] - portrait_size) * 0.5f;
+          prematch_gameplan_portrait_quad[side][0][index] = quads;
+          emit_image_rect(portrait_x, rect[1], portrait_size, portrait_size,
+                          verts + quads * 24);
+          quads++;
+        }
+      }
+    }
+
+    // The field has no card background. A compact black plate anchors the
+    // role and OVR directly below each portrait.
+    for (uint32_t side = 0; side < 2; side++) {
+      const uint32_t page =
+          pes_controller_custom_prematch_gameplan_page(side);
+      if (pes_controller_custom_prematch_gameplan_waiting(side) ||
+          (page != PES_PREMATCH_GAMEPLAN_PAGE_ROOT &&
+           page != PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE))
+        continue;
+      uint32_t field_count =
+          pes_controller_custom_prematch_gameplan_field_count(side);
+      if (field_count > PREMATCH_GAMEPLAN_FIELD_SLOTS)
+        field_count = PREMATCH_GAMEPLAN_FIELD_SLOTS;
+      prematch_gameplan_field_plate_first_quad[side] = quads;
+      for (uint32_t index = 0; index < field_count; index++) {
+        const float *rect = prematch_gameplan_field_rect[side][index];
+        const float portrait_size =
+            fminf(rect[2] * 0.72f, 0.053f * (float)screen_height);
+        const float plate_h = 0.022f * (float)screen_height;
+        const float plate_w = rect[2] * 0.92f;
+        prematch_gameplan_field_plate_quads[side] += emit_rect(
+            rect[0] + (rect[2] - plate_w) * 0.5f,
+            rect[1] + portrait_size - 0.002f * (float)screen_height,
+            plate_w, plate_h, verts + quads * 24);
+        quads++;
+      }
+    }
+
+    // Bench and assignment rows use the same native position color language
+    // as the in-match set-piece picker. Group the geometry by role so a
+    // single draw call can color every GK/DF/MF/FW plate consistently.
+    for (uint32_t role_band = 0; role_band < 4; role_band++) {
+      prematch_gameplan_role_plate_first_quad[role_band] = quads;
+      for (uint32_t side = 0; side < 2; side++) {
+        const uint32_t page =
+            pes_controller_custom_prematch_gameplan_page(side);
+        if (pes_controller_custom_prematch_gameplan_waiting(side))
+          continue;
+        if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
+            page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
+          for (uint32_t slot = 0;
+               slot < prematch_gameplan_bench_visible[side]; slot++) {
+            const uint32_t index =
+                prematch_gameplan_bench_start[side] + slot;
+            const char *role =
+                pes_controller_custom_prematch_gameplan_player_role(
+                    side, 0, index);
+            if (selector_position_color_band(role) != role_band)
+              continue;
+            const float *rect = prematch_gameplan_bench_rect[side][slot];
+            const float plate_w = 0.036f * (float)screen_width;
+            const float plate_h =
+                fminf(rect[3] - 0.012f * (float)screen_height,
+                      0.036f * (float)screen_height);
+            prematch_gameplan_role_plate_quads[role_band] += emit_rect(
+                rect[0] + 0.006f * (float)screen_width,
+                rect[1] + (rect[3] - plate_h) * 0.5f,
+                plate_w, plate_h, verts + quads * 24);
+            quads++;
+          }
+        } else if (
+            page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS &&
+            pes_controller_custom_prematch_gameplan_position_picker_active(
+                side)) {
+          for (uint32_t slot = 0;
+               slot < prematch_gameplan_picker_visible[side]; slot++) {
+            const uint32_t index =
+                prematch_gameplan_picker_start[side] + slot;
+            const char *role =
+                pes_controller_custom_prematch_gameplan_position_picker_role(
+                    side, index);
+            if (!role || !role[0] || strcmp(role, "-") == 0 ||
+                selector_position_color_band(role) != role_band)
+              continue;
+            const float *rect = prematch_gameplan_picker_rect[side][slot];
+            const float plate_w = 0.047f * (float)screen_width;
+            const float plate_h =
+                fminf(rect[3] - 0.012f * (float)screen_height,
+                      0.039f * (float)screen_height);
+            prematch_gameplan_role_plate_quads[role_band] += emit_rect(
+                rect[0] + 0.012f * (float)screen_width,
+                rect[1] + (rect[3] - plate_h) * 0.5f,
+                plate_w, plate_h, verts + quads * 24);
+            quads++;
+          }
+        }
+      }
+    }
+
+    for (uint32_t side = 0; side < 2; side++) {
+      const float badge_size = header_h -
+                               0.020f * (float)screen_height;
+      prematch_gameplan_badge_first_quad[side] = quads;
+      prematch_gameplan_badge_quads[side] = emit_badge(
+          pes_controller_2p_prematch_hub_badge(side),
+          half_x[side] + 0.008f * (float)screen_width,
+          header_y + 0.010f * (float)screen_height, badge_size, badge_size,
+          verts + quads * 24);
+      quads += prematch_gameplan_badge_quads[side];
+    }
+
+    const float header_name_gh = (float)screen_height / 29.0f;
+    const float header_meta_gh = (float)screen_height / 36.0f;
+    const float card_main_gh = (float)screen_height / 52.0f;
+    const float card_name_gh = (float)screen_height / 55.0f;
+    const float body_gh = (float)screen_height / 34.0f;
+    const float small_gh = (float)screen_height / 38.0f;
+    const float title_gh = (float)screen_height / 28.0f;
+    const float action_gh = (float)screen_height / 42.0f;
+    int line_quads = 0;
+
+    prematch_gameplan_white_text_first_quad = quads;
+    for (uint32_t side = 0; side < 2; side++) {
+      const uint32_t page =
+          pes_controller_custom_prematch_gameplan_page(side);
+      const uint32_t root_focus =
+          pes_controller_custom_prematch_gameplan_root_focus(side);
+      const float pitch_x = half_x[side] + pitch_x_offset;
+      const float bench_x = half_x[side] + bench_x_offset;
+      const float badge_size = header_h -
+                               0.020f * (float)screen_height;
+      prematch_gameplan_header_text_first_quad[side] = quads;
+      char team_name[28];
+      compact_player_name(
+          team_name, sizeof(team_name),
+          pes_controller_2p_prematch_hub_team_name(side));
+      line_quads = emit_efootball_line(
+          team_name, (int)strlen(team_name),
+          half_x[side] + 0.013f * (float)screen_width + badge_size,
+          header_y + 0.017f * (float)screen_height, header_name_gh,
+          EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      prematch_gameplan_white_text_quads += line_quads;
+      quads += line_quads;
+      char stats[48];
+      snprintf(stats, sizeof(stats), "SPIRIT %u  POWER %u",
+               pes_controller_custom_prematch_gameplan_team_spirit(side),
+               pes_controller_custom_prematch_gameplan_team_power(side));
+      const float stats_w = measure_efootball_line(
+          stats, (int)strlen(stats), header_meta_gh, EFOOTBALL_FONT_BOLD);
+      line_quads = emit_efootball_line(
+          stats, (int)strlen(stats),
+          half_x[side] + half_w - stats_w -
+              0.012f * (float)screen_width,
+          header_y + header_h - header_meta_gh -
+              0.012f * (float)screen_height,
+          header_meta_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      prematch_gameplan_white_text_quads += line_quads;
+      quads += line_quads;
+
+      prematch_gameplan_header_text_quads[side] =
+          quads - prematch_gameplan_header_text_first_quad[side];
+      const int waiting =
+          pes_controller_custom_prematch_gameplan_waiting(side);
+      if (waiting) {
+        const float waiting_x = half_x[side] + 0.042f * (float)screen_width;
+        const float waiting_y = content_y + 0.150f * (float)screen_height;
+        const float waiting_w = half_w - 0.084f * (float)screen_width;
+        const float waiting_h = 0.315f * (float)screen_height;
+        const char *message = "WAITING FOR OPPONENT";
+        const float message_w = measure_efootball_line(
+            message, (int)strlen(message), title_gh,
+            EFOOTBALL_FONT_STENCIL);
+        prematch_gameplan_body_text_first_quad[side] = quads;
+        prematch_gameplan_waiting_text_first_quad[side] = quads;
+        line_quads = emit_efootball_line(
+            message, (int)strlen(message),
+            waiting_x + (waiting_w - message_w) * 0.5f,
+            waiting_y + waiting_h * 0.38f, title_gh,
+            EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        const char *cancel = "B  CANCEL";
+        const float cancel_w = measure_efootball_line(
+            cancel, (int)strlen(cancel), body_gh, EFOOTBALL_FONT_BOLD);
+        line_quads = emit_efootball_line(
+            cancel, (int)strlen(cancel),
+            waiting_x + (waiting_w - cancel_w) * 0.5f,
+            waiting_y + waiting_h * 0.62f, body_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        prematch_gameplan_waiting_text_quads[side] =
+            quads - prematch_gameplan_waiting_text_first_quad[side];
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
+                 page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
+        uint32_t field_count =
+            pes_controller_custom_prematch_gameplan_field_count(side);
+        if (field_count > PREMATCH_GAMEPLAN_FIELD_SLOTS)
+          field_count = PREMATCH_GAMEPLAN_FIELD_SLOTS;
+        prematch_gameplan_field_text_first_quad[side] = quads;
+        for (uint32_t index = 0; index < field_count; index++) {
+          const float *rect = prematch_gameplan_field_rect[side][index];
+          const char *role =
+              pes_controller_custom_prematch_gameplan_player_role(
+                  side, 1, index);
+          const uint32_t overall =
+              pes_controller_custom_prematch_gameplan_player_overall(
+                  side, 1, index);
+          const float portrait_size =
+              fminf(rect[2] * 0.72f, 0.053f * (float)screen_height);
+          const float plate_w = rect[2] * 0.92f;
+          const float plate_h = 0.022f * (float)screen_height;
+          const float plate_x = rect[0] + (rect[2] - plate_w) * 0.5f;
+          const float plate_y =
+              rect[1] + portrait_size - 0.002f * (float)screen_height;
+          line_quads = emit_efootball_fit_line(
+              role, (int)strlen(role),
+              plate_x + 0.004f * (float)screen_width,
+              plate_y + (plate_h - card_main_gh) * 0.5f,
+              plate_w * 0.52f, card_main_gh,
+              (float)screen_height / 66.0f, EFOOTBALL_FONT_STENCIL,
+              verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+          char overall_text[4];
+          snprintf(overall_text, sizeof(overall_text), "%u", overall);
+          const float overall_w = measure_efootball_line(
+              overall_text, (int)strlen(overall_text), card_main_gh,
+              EFOOTBALL_FONT_STENCIL);
+          prematch_gameplan_field_metric_first[side][index] = quads;
+          prematch_gameplan_field_metric_value[side][index] = overall;
+          line_quads = emit_efootball_line(
+              overall_text, (int)strlen(overall_text),
+              plate_x + plate_w - overall_w -
+                  0.004f * (float)screen_width,
+              plate_y + (plate_h - card_main_gh) * 0.5f, card_main_gh,
+              EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+          prematch_gameplan_field_metric_quads[side][index] = line_quads;
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+          const char *name =
+              pes_controller_custom_prematch_gameplan_player_name(
+                  side, 1, index);
+          line_quads = emit_efootball_centered_fit_line(
+              name, (int)strlen(name),
+              rect[0] + rect[2] * 0.5f,
+              plate_y + plate_h + 0.001f * (float)screen_height,
+              rect[2] * 1.22f, card_name_gh,
+              (float)screen_height / 68.0f,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+        const char *formation =
+            pes_controller_custom_prematch_gameplan_formation_label(side);
+        line_quads = emit_efootball_line(
+            formation, (int)strlen(formation),
+            pitch_x + 0.008f * (float)screen_width,
+            pitch_y + pitch_h - body_gh -
+                0.008f * (float)screen_height,
+            body_gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        prematch_gameplan_field_text_quads[side] =
+            quads - prematch_gameplan_field_text_first_quad[side];
+        prematch_gameplan_body_text_first_quad[side] = quads;
+        for (uint32_t slot = 0;
+             slot < prematch_gameplan_bench_visible[side]; slot++) {
+          const uint32_t index = prematch_gameplan_bench_start[side] + slot;
+          const float *rect = prematch_gameplan_bench_rect[side][slot];
+          const uint32_t overall =
+              pes_controller_custom_prematch_gameplan_player_overall(
+                  side, 0, index);
+          const char *name =
+              pes_controller_custom_prematch_gameplan_player_name(
+                  side, 0, index);
+          line_quads = emit_efootball_fit_line(
+              name, (int)strlen(name),
+              rect[0] + 0.048f * (float)screen_width,
+              rect[1] + (rect[3] - small_gh) * 0.5f,
+              rect[2] - 0.083f * (float)screen_width,
+              small_gh, (float)screen_height / 56.0f,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+          char overall_text[4];
+          snprintf(overall_text, sizeof(overall_text), "%u", overall);
+          const float overall_w = measure_efootball_line(
+              overall_text, (int)strlen(overall_text), small_gh,
+              EFOOTBALL_FONT_STENCIL);
+          prematch_gameplan_bench_metric_first[side][slot] = quads;
+          prematch_gameplan_bench_metric_value[side][slot] = overall;
+          line_quads = emit_efootball_line(
+              overall_text, (int)strlen(overall_text),
+              rect[0] + rect[2] - overall_w -
+                  0.009f * (float)screen_width,
+              rect[1] + (rect[3] - small_gh) * 0.5f, small_gh,
+              EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+          prematch_gameplan_bench_metric_quads[side][slot] = line_quads;
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+        const char *bench_title = "SUBSTITUTES";
+        const float bench_title_w = measure_efootball_line(
+            bench_title, (int)strlen(bench_title), small_gh,
+            EFOOTBALL_FONT_BOLD);
+        line_quads = emit_efootball_line(
+            bench_title, (int)strlen(bench_title),
+            bench_x + (bench_w - bench_title_w) * 0.5f,
+            pitch_y - small_gh - 0.003f * (float)screen_height, small_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+      } else {
+        prematch_gameplan_body_text_first_quad[side] = quads;
+        if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION) {
+        const char *title = "FORMATION SETTINGS";
+        line_quads = emit_efootball_line(
+            title, (int)strlen(title),
+            half_x[side] + 0.025f * (float)screen_width,
+            content_y + 0.025f * (float)screen_height, title_gh,
+            EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        char formation[32];
+        snprintf(formation, sizeof(formation), "CURRENT SHAPE  %s",
+                 pes_controller_custom_prematch_gameplan_formation_label(
+                     side));
+        line_quads = emit_efootball_line(
+            formation, (int)strlen(formation),
+            half_x[side] + 0.025f * (float)screen_width,
+            content_y + 0.085f * (float)screen_height, body_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        static const char *const formation_rows[3] = {
+            "FORMATION STYLE", "AUTO OFFSIDE TRAP", "AUTO SUBSTITUTE"};
+        const float row_x = half_x[side] + 0.041f * (float)screen_width;
+        const float row_w = half_w - 0.082f * (float)screen_width;
+        const float row_y = content_y + 0.155f * (float)screen_height;
+        const float row_h = 0.105f * (float)screen_height;
+        for (uint32_t row = 0; row < 3; row++) {
+          line_quads = emit_efootball_line(
+              formation_rows[row], (int)strlen(formation_rows[row]), row_x,
+              row_y + row_h * (float)row +
+                  (row_h - small_gh) * 0.5f,
+              small_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+          const char *value =
+              pes_controller_custom_prematch_gameplan_formation_value(
+                  side, row);
+          const float value_max_w = row_w * 0.54f;
+          const float value_w = fminf(
+              value_max_w,
+              measure_efootball_line(value, (int)strlen(value), body_gh,
+                                     EFOOTBALL_FONT_STENCIL));
+          line_quads = emit_efootball_fit_line(
+              value, (int)strlen(value),
+              row_x + row_w - value_w,
+              row_y + row_h * (float)row +
+                  (row_h - body_gh) * 0.5f,
+              value_max_w, body_gh, (float)screen_height / 46.0f,
+              EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP) {
+        const float modal_x = half_x[side] + 0.035f * (float)screen_width;
+        const float modal_y = content_y + 0.065f * (float)screen_height;
+        const float modal_w = half_w - 0.070f * (float)screen_width;
+        const char *title = "AUTO LINE UP";
+        const float title_w = measure_efootball_line(
+            title, (int)strlen(title), title_gh, EFOOTBALL_FONT_STENCIL);
+        line_quads = emit_efootball_line(
+            title, (int)strlen(title),
+            modal_x + (modal_w - title_w) * 0.5f,
+            modal_y + 0.035f * (float)screen_height, title_gh,
+            EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        const char *question = "APPLY NATIVE BEST LINEUP?";
+        const float question_w = measure_efootball_line(
+            question, (int)strlen(question), body_gh, EFOOTBALL_FONT_BOLD);
+        line_quads = emit_efootball_line(
+            question, (int)strlen(question),
+            modal_x + (modal_w - question_w) * 0.5f,
+            modal_y + 0.105f * (float)screen_height, body_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        char power[64];
+        char spirit[64];
+        if (pes_controller_custom_prematch_gameplan_auto_preview_valid(side)) {
+          snprintf(power, sizeof(power), "TEAM STRENGTH  %u  >  %u",
+                   pes_controller_custom_prematch_gameplan_auto_power(
+                       side, 0),
+                   pes_controller_custom_prematch_gameplan_auto_power(
+                       side, 1));
+          snprintf(spirit, sizeof(spirit), "TEAM SPIRIT    %u  >  %u",
+                   pes_controller_custom_prematch_gameplan_auto_spirit(
+                       side, 0),
+                   pes_controller_custom_prematch_gameplan_auto_spirit(
+                       side, 1));
+        } else {
+          strcpy(power, "NATIVE AUTO LINEUP UNAVAILABLE");
+          strcpy(spirit, "B  RETURN");
+        }
+        line_quads = emit_efootball_line(
+            power, (int)strlen(power),
+            modal_x + 0.035f * (float)screen_width,
+            modal_y + 0.205f * (float)screen_height, body_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        line_quads = emit_efootball_line(
+            spirit, (int)strlen(spirit),
+            modal_x + 0.035f * (float)screen_width,
+            modal_y + 0.265f * (float)screen_height, body_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        static const char *const choices[2] = {"CANCEL", "APPLY"};
+        const float button_gap = 0.012f * (float)screen_width;
+        const float button_w = (modal_w - button_gap -
+                                0.040f * (float)screen_width) * 0.5f;
+        for (uint32_t button = 0; button < 2; button++) {
+          const float width = measure_efootball_line(
+              choices[button], (int)strlen(choices[button]), body_gh,
+              EFOOTBALL_FONT_BOLD);
+          line_quads = emit_efootball_line(
+              choices[button], (int)strlen(choices[button]),
+              modal_x + 0.020f * (float)screen_width +
+                  (button_w + button_gap) * (float)button +
+                  (button_w - width) * 0.5f,
+              modal_y + 0.390f * (float)screen_height +
+                  (0.075f * (float)screen_height - body_gh) * 0.5f,
+              body_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS) {
+        const int picker =
+            pes_controller_custom_prematch_gameplan_position_picker_active(
+                side);
+        const char *title = picker ? "SELECT PLAYER" : "POSITION SETTINGS";
+        line_quads = emit_efootball_line(
+            title, (int)strlen(title),
+            half_x[side] + 0.025f * (float)screen_width,
+            content_y + 0.015f * (float)screen_height, title_gh,
+            EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+        prematch_gameplan_white_text_quads += line_quads;
+        quads += line_quads;
+        if (!picker) {
+          const float row_y = content_y + 0.055f * (float)screen_height;
+          const float row_step = 0.062f * (float)screen_height;
+          for (uint32_t row = 0;
+               row < PES_PREMATCH_GAMEPLAN_POSITION_COUNT; row++) {
+            const char *label =
+                pes_controller_custom_prematch_gameplan_position_label(row);
+            line_quads = emit_efootball_line(
+                label, (int)strlen(label),
+                half_x[side] + 0.020f * (float)screen_width,
+                row_y + row_step * (float)row +
+                    (row_step - small_gh) * 0.5f,
+                small_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+            char value[22];
+            compact_player_name(
+                value, sizeof(value),
+                pes_controller_custom_prematch_gameplan_position_value(
+                    side, row));
+            const float value_w = measure_efootball_line(
+                value, (int)strlen(value), small_gh, EFOOTBALL_FONT_BOLD);
+            line_quads = emit_efootball_line(
+                value, (int)strlen(value),
+                half_x[side] + half_w - value_w -
+                    0.020f * (float)screen_width,
+                row_y + row_step * (float)row +
+                    (row_step - small_gh) * 0.5f,
+                small_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+          }
+        } else {
+          for (uint32_t slot = 0;
+               slot < prematch_gameplan_picker_visible[side]; slot++) {
+            const uint32_t index =
+                prematch_gameplan_picker_start[side] + slot;
+            const float *rect = prematch_gameplan_picker_rect[side][slot];
+            const char *name =
+                pes_controller_custom_prematch_gameplan_position_picker_name(
+                    side, index);
+            const float text_y = rect[1] + (rect[3] - small_gh) * 0.5f;
+            line_quads = emit_efootball_fit_line(
+                name, (int)strlen(name),
+                rect[0] + 0.067f * (float)screen_width, text_y,
+                0.116f * (float)screen_width, small_gh,
+                (float)screen_height / 60.0f,
+                EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+            const int have_player = strcmp(name, "NONE") != 0;
+            const uint32_t foot =
+                pes_controller_custom_prematch_gameplan_position_picker_preferred_foot(
+                    side, index);
+            const uint32_t shot_power =
+                pes_controller_custom_prematch_gameplan_position_picker_shot_power(
+                    side, index);
+            const char *foot_text =
+                have_player ? (foot ? "LEFT FOOT" : "RIGHT FOOT") : "--";
+            line_quads = emit_efootball_fit_line(
+                foot_text, (int)strlen(foot_text),
+                rect[0] + 0.190f * (float)screen_width, text_y,
+                0.078f * (float)screen_width, small_gh,
+                (float)screen_height / 66.0f,
+                EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+            const char *shot_label = "SHOT POWER";
+            line_quads = emit_efootball_fit_line(
+                shot_label, (int)strlen(shot_label),
+                rect[0] + 0.274f * (float)screen_width, text_y,
+                0.088f * (float)screen_width, small_gh,
+                (float)screen_height / 68.0f,
+                EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+            char shot_text[4];
+            if (have_player)
+              snprintf(shot_text, sizeof(shot_text), "%u", shot_power);
+            else
+              strcpy(shot_text, "--");
+            const float shot_w = measure_efootball_line(
+                shot_text, (int)strlen(shot_text), small_gh,
+                EFOOTBALL_FONT_STENCIL);
+            if (have_player) {
+              prematch_gameplan_picker_metric_first[side][slot] = quads;
+              prematch_gameplan_picker_metric_value[side][slot] = shot_power;
+            }
+            line_quads = emit_efootball_line(
+                shot_text, (int)strlen(shot_text),
+                rect[0] + rect[2] - shot_w -
+                    0.010f * (float)screen_width,
+                text_y, small_gh, EFOOTBALL_FONT_STENCIL,
+                verts + quads * 24);
+            if (have_player)
+              prematch_gameplan_picker_metric_quads[side][slot] = line_quads;
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+          }
+        }
+      }
+      }
+
+      prematch_gameplan_body_text_quads[side] =
+          quads - prematch_gameplan_body_text_first_quad[side];
+      prematch_gameplan_action_text_first_quad[side] = quads;
+      if (!waiting)
+        for (uint32_t action = 0;
+             action < PES_PREMATCH_GAMEPLAN_ACTION_COUNT; action++) {
+          const float width = measure_efootball_line(
+              action_labels[action], (int)strlen(action_labels[action]),
+              action_gh, EFOOTBALL_FONT_BOLD);
+          line_quads = emit_efootball_line(
+              action_labels[action], (int)strlen(action_labels[action]),
+              half_x[side] + (action_w + action_gap) * (float)action +
+                  (action_w - width) * 0.5f,
+              action_y + (action_h - action_gh) * 0.5f, action_gh,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+      prematch_gameplan_action_text_quads[side] =
+          quads - prematch_gameplan_action_text_first_quad[side];
+
+      // Repaint only the active tab label in white over the colored focus
+      // tile. Normal tabs stay dark on their translucent white buttons.
+      prematch_gameplan_focus_text_first_quad[side] = quads;
+      line_quads = 0;
+      if (!waiting) {
+        const char *focused_action = action_labels[root_focus];
+        const float focused_action_w = measure_efootball_line(
+            focused_action, (int)strlen(focused_action), action_gh,
+            EFOOTBALL_FONT_BOLD);
+        line_quads = emit_efootball_line(
+            focused_action, (int)strlen(focused_action),
+            half_x[side] + (action_w + action_gap) * (float)root_focus +
+                (action_w - focused_action_w) * 0.5f,
+            action_y + (action_h - action_gh) * 0.5f, action_gh,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      }
+      prematch_gameplan_focus_text_quads[side] = line_quads;
+      prematch_gameplan_white_text_quads += line_quads;
+      quads += line_quads;
+    }
+
+    prematch_gameplan_role_text_first_quad = quads;
+    const float role_gh = (float)screen_height / 48.0f;
+    for (uint32_t side = 0; side < 2; side++) {
+      const uint32_t page =
+          pes_controller_custom_prematch_gameplan_page(side);
+      if (pes_controller_custom_prematch_gameplan_waiting(side))
+        continue;
+      if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
+          page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
+        for (uint32_t slot = 0;
+             slot < prematch_gameplan_bench_visible[side]; slot++) {
+          const uint32_t index = prematch_gameplan_bench_start[side] + slot;
+          const float *rect = prematch_gameplan_bench_rect[side][slot];
+          const char *role =
+              pes_controller_custom_prematch_gameplan_player_role(
+                  side, 0, index);
+          const float plate_x = rect[0] + 0.006f * (float)screen_width;
+          const float plate_w = 0.036f * (float)screen_width;
+          const float role_w = measure_efootball_line(
+              role, (int)strlen(role), role_gh, EFOOTBALL_FONT_STENCIL);
+          line_quads = emit_efootball_fit_line(
+              role, (int)strlen(role),
+              plate_x + fmaxf(0.0f, (plate_w - role_w) * 0.5f),
+              rect[1] + (rect[3] - role_gh) * 0.5f, plate_w, role_gh,
+              (float)screen_height / 64.0f, EFOOTBALL_FONT_STENCIL,
+              verts + quads * 24);
+          prematch_gameplan_role_text_quads += line_quads;
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+      } else if (
+          page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS &&
+          pes_controller_custom_prematch_gameplan_position_picker_active(
+              side)) {
+        for (uint32_t slot = 0;
+             slot < prematch_gameplan_picker_visible[side]; slot++) {
+          const uint32_t index = prematch_gameplan_picker_start[side] + slot;
+          const float *rect = prematch_gameplan_picker_rect[side][slot];
+          const char *role =
+              pes_controller_custom_prematch_gameplan_position_picker_role(
+                  side, index);
+          if (!role || !role[0] || strcmp(role, "-") == 0)
+            continue;
+          const float plate_x = rect[0] + 0.012f * (float)screen_width;
+          const float plate_w = 0.047f * (float)screen_width;
+          const float role_w = measure_efootball_line(
+              role, (int)strlen(role), role_gh, EFOOTBALL_FONT_STENCIL);
+          line_quads = emit_efootball_fit_line(
+              role, (int)strlen(role),
+              plate_x + fmaxf(0.0f, (plate_w - role_w) * 0.5f),
+              rect[1] + (rect[3] - role_gh) * 0.5f, plate_w, role_gh,
+              (float)screen_height / 64.0f, EFOOTBALL_FONT_STENCIL,
+              verts + quads * 24);
+          prematch_gameplan_role_text_quads += line_quads;
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+        }
+      }
+    }
+
+    prematch_gameplan_muted_text_first_quad = quads;
+    for (uint32_t side = 0; side < 2; side++) {
+      const uint32_t page =
+          pes_controller_custom_prematch_gameplan_page(side);
+      if (pes_controller_custom_prematch_gameplan_waiting(side))
+        continue;
+      const char *hint = "A SELECT";
+      if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT)
+        hint = side ? "A SELECT" : "A SELECT   B HUB";
+      else if (page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)
+        hint = "A PICK / SWAP   B CANCEL";
+      else if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION)
+        hint = "LEFT/RIGHT CHANGE   B BACK";
+      else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP)
+        hint = "LEFT/RIGHT SELECT   B BACK";
+      else if (pes_controller_custom_prematch_gameplan_position_picker_active(
+                   side))
+        hint = "A ASSIGN   B CANCEL";
+      else
+        hint = "A CHOOSE PLAYER   B BACK";
+      line_quads = emit_efootball_line(
+          hint, (int)strlen(hint), half_x[side],
+          0.943f * (float)screen_height, small_gh,
+          EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      prematch_gameplan_muted_text_quads += line_quads;
+      quads += line_quads;
+    }
+
+    for (uint32_t side = 0; side < 2; side++) {
+      prematch_gameplan_accent_text_first_quad[side] = quads;
+      const char *owner = side ? "P2  AWAY" : "P1  HOME";
+      line_quads = emit_efootball_line(
+          owner, (int)strlen(owner),
+          half_x[side] + 0.013f * (float)screen_width +
+              header_h - 0.020f * (float)screen_height,
+          header_y + header_h - header_meta_gh -
+              0.012f * (float)screen_height,
+          header_meta_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      prematch_gameplan_accent_text_quads[side] += line_quads;
+      quads += line_quads;
+    }
+  } else if (custom_2p_team_selector) {
     // PES-PC-style dual carousel: the focused entry expands into the large
     // centre card, with its two neighbours above and below. Each controller
     // owns one half and the opaque backdrop fully replaces the stock page.
@@ -1871,57 +3337,92 @@ static void overlay_render(void) {
     custom_key_text_quads += line_quads;
     quads += line_quads;
   } else if (custom_2p_transition) {
-    // Keep the native Game Plan hand-off covered while presenting the actual
-    // matchup, without another card competing with the background artwork.
     custom_backdrop_quads = emit_image_rect(
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
         verts + quads * 24);
     quads += custom_backdrop_quads;
-    const float badge_size = 0.215f * (float)screen_height;
-    const float badge_y = 0.285f * (float)screen_height;
-    static const float team_center_x[2] = {0.325f, 0.675f};
-    for (uint32_t side = 0; side < 2; side++) {
-      const float badge_x =
-          team_center_x[side] * (float)screen_width - badge_size * 0.5f;
-      custom_icon_quads += emit_badge(
-          pes_controller_2p_prematch_hub_badge(side), badge_x, badge_y,
-          badge_size, badge_size, verts + quads * 24);
-      quads++;
-    }
-
-    custom_white_text_first_quad = quads;
-    const float name_y = badge_y + badge_size +
-                         0.030f * (float)screen_height;
-    const float max_name_w = 0.285f * (float)screen_width;
-    for (uint32_t side = 0; side < 2; side++) {
-      const char *team = pes_controller_2p_prematch_hub_team_name(side);
-      const int team_len = (int)strlen(team);
-      float team_gh = (float)screen_height / 31.0f;
-      float team_w = measure_efootball_line(
-          team, team_len, team_gh, EFOOTBALL_FONT_STENCIL);
-      if (team_w > max_name_w && team_w > 0.0f) {
-        team_gh *= max_name_w / team_w;
-        team_w = measure_efootball_line(
-            team, team_len, team_gh, EFOOTBALL_FONT_STENCIL);
+    if (custom_2p_transition_kind == PES_2P_TRANSITION_VS) {
+      // The matchup card belongs exclusively to Kick Off.
+      const float badge_size = 0.215f * (float)screen_height;
+      const float badge_y = 0.285f * (float)screen_height;
+      static const float team_center_x[2] = {0.325f, 0.675f};
+      for (uint32_t side = 0; side < 2; side++) {
+        const float badge_x =
+            team_center_x[side] * (float)screen_width - badge_size * 0.5f;
+        custom_icon_quads += emit_badge(
+            pes_controller_2p_prematch_hub_badge(side), badge_x, badge_y,
+            badge_size, badge_size, verts + quads * 24);
+        quads++;
       }
-      const int line_quads = emit_efootball_line(
-          team, team_len,
-          team_center_x[side] * (float)screen_width - team_w * 0.5f,
-          name_y, team_gh, EFOOTBALL_FONT_STENCIL,
-          verts + quads * 24);
-      custom_white_text_quads += line_quads;
-      quads += line_quads;
+      custom_white_text_first_quad = quads;
+      const float name_y = badge_y + badge_size +
+                           0.030f * (float)screen_height;
+      const float max_name_w = 0.285f * (float)screen_width;
+      for (uint32_t side = 0; side < 2; side++) {
+        const char *team = pes_controller_2p_prematch_hub_team_name(side);
+        const int team_len = (int)strlen(team);
+        float team_gh = (float)screen_height / 31.0f;
+        float team_w = measure_efootball_line(
+            team, team_len, team_gh, EFOOTBALL_FONT_STENCIL);
+        if (team_w > max_name_w && team_w > 0.0f) {
+          team_gh *= max_name_w / team_w;
+          team_w = measure_efootball_line(
+              team, team_len, team_gh, EFOOTBALL_FONT_STENCIL);
+        }
+        const int line_quads = emit_efootball_line(
+            team, team_len,
+            team_center_x[side] * (float)screen_width - team_w * 0.5f,
+            name_y, team_gh, EFOOTBALL_FONT_STENCIL,
+            verts + quads * 24);
+        custom_white_text_quads += line_quads;
+        quads += line_quads;
+      }
+      const char *versus = "VS";
+      const float versus_gh = (float)screen_height / 22.0f;
+      const float versus_w = measure_efootball_line(
+          versus, 2, versus_gh, EFOOTBALL_FONT_BOLD);
+      const int versus_quads = emit_efootball_line(
+          versus, 2, ((float)screen_width - versus_w) * 0.5f,
+          badge_y + (badge_size - versus_gh) * 0.5f,
+          versus_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      custom_white_text_quads += versus_quads;
+      quads += versus_quads;
+    } else {
+      // Menu hand-offs use the artwork alone plus a compact animated loader.
+      custom_white_text_first_quad = quads;
+      const char *loading = "LOADING";
+      const float loading_gh = (float)screen_height / 42.0f;
+      const float loading_w = measure_efootball_line(
+          loading, 7, loading_gh, EFOOTBALL_FONT_BOLD);
+      const int loading_quads = emit_efootball_line(
+          loading, 7,
+          0.932f * (float)screen_width - loading_w,
+          0.905f * (float)screen_height - loading_gh * 0.5f,
+          loading_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      custom_white_text_quads += loading_quads;
+      quads += loading_quads;
+      const float center_x = 0.956f * (float)screen_width;
+      const float center_y = 0.905f * (float)screen_height;
+      const float radius = 0.017f * (float)screen_height;
+      const float thickness = 0.004f * (float)screen_height;
+      const u64 frequency = armGetSystemTickFreq();
+      const float phase = frequency
+                              ? (float)(armGetSystemTick() % frequency) /
+                                    (float)frequency * 6.2831853f
+                              : 0.0f;
+      custom_loading_spinner_first_quad = quads;
+      for (uint32_t segment = 0; segment < 8; segment++) {
+        const float a0 = phase + (float)segment * 0.43f;
+        const float a1 = a0 + 0.25f;
+        custom_loading_spinner_quads += emit_segment(
+            center_x + cosf(a0) * radius,
+            center_y + sinf(a0) * radius,
+            center_x + cosf(a1) * radius,
+            center_y + sinf(a1) * radius, thickness,
+            verts + quads * 24);
+        quads++;
+      }
     }
-    const char *versus = "VS";
-    const float versus_gh = (float)screen_height / 22.0f;
-    const float versus_w = measure_efootball_line(
-        versus, 2, versus_gh, EFOOTBALL_FONT_BOLD);
-    const int versus_quads = emit_efootball_line(
-        versus, 2, ((float)screen_width - versus_w) * 0.5f,
-        badge_y + (badge_size - versus_gh) * 0.5f,
-        versus_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
-    custom_white_text_quads += versus_quads;
-    quads += versus_quads;
   } else if (custom_hub_settings_popup) {
     // Match Settings is a child of the pre-match hub, but it gets its own
     // console-style page: dark title band, light selected row, blue value
@@ -4261,7 +5762,282 @@ static void overlay_render(void) {
   glUniform1f(gl.loc_round_feather, 1.15f);
   glUniform1f(gl.loc_cursor, 0.0f);
   glUniform1f(gl.loc_cursor_border, 0.0f);
-  if (custom_popup) {
+  if (custom_gameplan) {
+    static const float side_accent[2][3] = {
+        {0.08f, 0.72f, 0.96f},
+        {0.96f, 0.18f, 0.34f},
+    };
+
+    use_rounded_rect(NULL);
+    glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform4f(gl.loc_color, 0.38f, 0.46f, 0.60f, 1.0f);
+    glDrawArrays(GL_TRIANGLES,
+                 prematch_gameplan_backdrop_first_quad * 6,
+                 prematch_gameplan_backdrop_quads * 6);
+
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    use_rounded_rect(&prematch_gameplan_panel_style);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.74f);
+    glDrawArrays(GL_TRIANGLES, prematch_gameplan_panel_first_quad * 6,
+                 prematch_gameplan_panel_quads * 6);
+    use_rounded_rect(NULL);
+
+    for (uint32_t side = 0; side < 2; side++) {
+      glUniform4f(gl.loc_color, side_accent[side][0] * 0.16f,
+                  side_accent[side][1] * 0.16f,
+                  side_accent[side][2] * 0.16f, 0.98f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_header_first_quad[side] * 6,
+                   prematch_gameplan_header_quads[side] * 6);
+    }
+
+    glUniform4f(gl.loc_color, 0.020f, 0.235f, 0.145f, 0.98f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_pitch_first_quad[side] * 6,
+                   prematch_gameplan_pitch_quads[side] * 6);
+    glUniform4f(gl.loc_color, 0.035f, 0.315f, 0.190f, 0.78f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_stripe_first_quad[side] * 6,
+                   prematch_gameplan_stripe_quads[side] * 6);
+    glUniform4f(gl.loc_color, 0.86f, 0.94f, 0.93f, 0.72f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_line_first_quad[side] * 6,
+                   prematch_gameplan_line_quads[side] * 6);
+
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.88f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_modal_first_quad[side] * 6,
+                   prematch_gameplan_modal_quads[side] * 6);
+    glUniform4f(gl.loc_color, 0.94f, 0.97f, 1.0f, 0.76f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_neutral_first_quad[side] * 6,
+                   prematch_gameplan_neutral_quads[side] * 6);
+
+    use_rounded_rect(&prematch_gameplan_waiting_style);
+    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 0.92f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_waiting_first_quad[side] * 6,
+                   prematch_gameplan_waiting_quads[side] * 6);
+    use_rounded_rect(NULL);
+
+    for (uint32_t side = 0; side < 2; side++) {
+      glUniform4f(gl.loc_color, side_accent[side][0],
+                  side_accent[side][1], side_accent[side][2], 0.80f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_accent_first_quad[side] * 6,
+                   prematch_gameplan_accent_quads[side] * 6);
+    }
+
+    // The four actions are detached from the content panel, with rounded
+    // white buttons and a side-colored active button.
+    use_rounded_rect(&prematch_gameplan_action_style);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.80f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_action_first_quad[side] * 6,
+                   prematch_gameplan_action_quads[side] * 6);
+    for (uint32_t side = 0; side < 2; side++) {
+      glUniform4f(gl.loc_color, side_accent[side][0],
+                  side_accent[side][1], side_accent[side][2], 0.92f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_action_selected_first_quad[side] * 6,
+                   prematch_gameplan_action_selected_quads[side] * 6);
+    }
+    use_rounded_rect(NULL);
+
+    // Portraits are uploaded lazily from the native common/player archive.
+    // Draw each quad with its own cached texture; the surrounding card and
+    // text remain in the normal solid/font batches above and below it.
+    {
+      GLint previous_sampler = 0;
+      if (gl.bind_sampler) {
+        glGetIntegerv(GL_SAMPLER_BINDING, &previous_sampler);
+        gl.bind_sampler(0, 0);
+      }
+      glUniform1f(gl.loc_solid, 0.0f);
+      glUniform1f(gl.loc_image, 1.0f);
+      glUniform1f(gl.loc_image_curve, 0.0f);
+      glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+      for (uint32_t side = 0; side < 2; side++) {
+        const uint32_t page =
+            pes_controller_custom_prematch_gameplan_page(side);
+        if (page != PES_PREMATCH_GAMEPLAN_PAGE_ROOT &&
+            page != PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)
+          continue;
+        const uint32_t count =
+            pes_controller_custom_prematch_gameplan_field_count(side);
+        for (uint32_t index = 0; index < count && index < 40; index++) {
+          const int quad = prematch_gameplan_portrait_quad[side][0][index];
+          if (quad < 0)
+            continue;
+          const uint32_t portrait_id =
+              pes_controller_custom_prematch_gameplan_player_portrait_id(
+                  side, 1u, index);
+          const GLuint texture = gameplan_portrait_texture(portrait_id);
+          if (!texture)
+            continue;
+          glBindTexture(GL_TEXTURE_2D, texture);
+          glDrawArrays(GL_TRIANGLES, quad * 6, 6);
+        }
+      }
+      if (gl.bind_sampler)
+        gl.bind_sampler(0, (GLuint)previous_sampler);
+      glBindTexture(GL_TEXTURE_2D, gl.tex);
+      glUniform1f(gl.loc_image, 0.0f);
+      glUniform1f(gl.loc_solid, 1.0f);
+    }
+
+    glUniform4f(gl.loc_color, 0.015f, 0.020f, 0.025f, 0.94f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_field_plate_first_quad[side] * 6,
+                   prematch_gameplan_field_plate_quads[side] * 6);
+
+    static const float gameplan_role_colors[4][3] = {
+        {0.96f, 0.55f, 0.10f}, // goalkeeper
+        {0.08f, 0.45f, 0.88f}, // defenders
+        {0.05f, 0.68f, 0.36f}, // midfielders
+        {0.88f, 0.18f, 0.20f}, // forwards
+    };
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    use_rounded_rect(NULL);
+    for (uint32_t role_band = 0; role_band < 4; role_band++) {
+      if (!prematch_gameplan_role_plate_quads[role_band])
+        continue;
+      glUniform4f(gl.loc_color, gameplan_role_colors[role_band][0],
+                  gameplan_role_colors[role_band][1],
+                  gameplan_role_colors[role_band][2], 0.92f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_role_plate_first_quad[role_band] * 6,
+                   prematch_gameplan_role_plate_quads[role_band] * 6);
+    }
+
+    for (uint32_t side = 0; side < 2; side++) {
+      glUniform4f(gl.loc_color, side_accent[side][0],
+                  side_accent[side][1], side_accent[side][2], 0.62f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_selected_outline_first_quad[side] * 6,
+                   prematch_gameplan_selected_outline_quads[side] * 6);
+      glUniform4f(gl.loc_color, side_accent[side][0],
+                  side_accent[side][1], side_accent[side][2], 1.0f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_focus_outline_first_quad[side] * 6,
+                   prematch_gameplan_focus_outline_quads[side] * 6);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, gl.badge_tex);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_badge_first_quad[side] * 6,
+                   prematch_gameplan_badge_quads[side] * 6);
+
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES,
+                 prematch_gameplan_white_text_first_quad * 6,
+                 prematch_gameplan_white_text_quads * 6);
+    // Body copy sits on translucent white surfaces, while the header keeps
+    // the native white-on-color treatment. Repaint only body/action ranges.
+    glUniform4f(gl.loc_color, 0.025f, 0.055f, 0.095f, 1.0f);
+    for (uint32_t side = 0; side < 2; side++) {
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_body_text_first_quad[side] * 6,
+                   prematch_gameplan_body_text_quads[side] * 6);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_action_text_first_quad[side] * 6,
+                   prematch_gameplan_action_text_quads[side] * 6);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_waiting_text_first_quad[side] * 6,
+                   prematch_gameplan_waiting_text_quads[side] * 6);
+    }
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    for (uint32_t side = 0; side < 2; side++) {
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_header_text_first_quad[side] * 6,
+                   prematch_gameplan_header_text_quads[side] * 6);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_focus_text_first_quad[side] * 6,
+                   prematch_gameplan_focus_text_quads[side] * 6);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_field_text_first_quad[side] * 6,
+                   prematch_gameplan_field_text_quads[side] * 6);
+    }
+    glDrawArrays(GL_TRIANGLES,
+                 prematch_gameplan_role_text_first_quad * 6,
+                 prematch_gameplan_role_text_quads * 6);
+    glUniform4f(gl.loc_color, 0.68f, 0.74f, 0.82f, 1.0f);
+    glDrawArrays(GL_TRIANGLES,
+                 prematch_gameplan_muted_text_first_quad * 6,
+                 prematch_gameplan_muted_text_quads * 6);
+    for (uint32_t side = 0; side < 2; side++) {
+      for (uint32_t index = 0; index < PREMATCH_GAMEPLAN_FIELD_SLOTS;
+           index++) {
+        if (prematch_gameplan_field_metric_first[side][index] < 0 ||
+            !prematch_gameplan_field_metric_quads[side][index])
+          continue;
+        float red = 1.0f, green = 1.0f, blue = 1.0f;
+        gameplan_metric_color(
+            prematch_gameplan_field_metric_value[side][index], &red, &green,
+            &blue);
+        glUniform4f(gl.loc_color, red, green, blue, 1.0f);
+        glDrawArrays(GL_TRIANGLES,
+                     prematch_gameplan_field_metric_first[side][index] * 6,
+                     prematch_gameplan_field_metric_quads[side][index] * 6);
+      }
+      for (uint32_t slot = 0; slot < PREMATCH_GAMEPLAN_VISIBLE_BENCH;
+           slot++) {
+        if (prematch_gameplan_bench_metric_first[side][slot] < 0 ||
+            !prematch_gameplan_bench_metric_quads[side][slot])
+          continue;
+        float red = 1.0f, green = 1.0f, blue = 1.0f;
+        gameplan_metric_color(
+            prematch_gameplan_bench_metric_value[side][slot], &red, &green,
+            &blue);
+        glUniform4f(gl.loc_color, red, green, blue, 1.0f);
+        glDrawArrays(GL_TRIANGLES,
+                     prematch_gameplan_bench_metric_first[side][slot] * 6,
+                     prematch_gameplan_bench_metric_quads[side][slot] * 6);
+      }
+      for (uint32_t slot = 0; slot < PREMATCH_GAMEPLAN_VISIBLE_PICKER;
+           slot++) {
+        if (prematch_gameplan_picker_metric_first[side][slot] < 0 ||
+            !prematch_gameplan_picker_metric_quads[side][slot])
+          continue;
+        float red = 1.0f, green = 1.0f, blue = 1.0f;
+        gameplan_metric_color(
+            prematch_gameplan_picker_metric_value[side][slot], &red, &green,
+            &blue);
+        glUniform4f(gl.loc_color, red, green, blue, 1.0f);
+        glDrawArrays(GL_TRIANGLES,
+                     prematch_gameplan_picker_metric_first[side][slot] * 6,
+                     prematch_gameplan_picker_metric_quads[side][slot] * 6);
+      }
+    }
+    for (uint32_t side = 0; side < 2; side++) {
+      glUniform4f(gl.loc_color, side_accent[side][0],
+                  side_accent[side][1], side_accent[side][2], 1.0f);
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_accent_text_first_quad[side] * 6,
+                   prematch_gameplan_accent_text_quads[side] * 6);
+    }
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+    glUniform1f(gl.loc_solid, 0.0f);
+  } else if (custom_popup) {
     int custom_offset = 0;
     if (custom_2p_team_selector || custom_2p_prematch_hub_raw ||
         custom_2p_transition) {
@@ -4274,6 +6050,11 @@ static void overlay_render(void) {
       glUniform1f(gl.loc_image, 0.0f);
       glBindTexture(GL_TEXTURE_2D, gl.tex);
       glUniform1f(gl.loc_solid, 1.0f);
+      if (custom_loading_spinner_quads) {
+        glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.94f);
+        glDrawArrays(GL_TRIANGLES, custom_loading_spinner_first_quad * 6,
+                     custom_loading_spinner_quads * 6);
+      }
     } else {
       glUniform1f(gl.loc_solid, 1.0f);
       glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f,

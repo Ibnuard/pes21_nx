@@ -17,107 +17,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import struct
-import zlib
-from dataclasses import dataclass
 from pathlib import Path
 
+from exhibition_team_catalog import catalog_team_map, load_catalog
+from pesdb import (
+    PlayerAssignment as Assignment,
+    decode_wesys,
+    parse_ef10_assignments,
+    parse_pes21_assignments,
+)
 
-MASK32 = 0xFFFFFFFF
 EF10_PLAYER_RECORD_SIZE = 392
 PES21_PLAYER_RECORD_SIZE = 312
-EF10_ASSIGNMENT_RECORD_SIZE = 24
 MIN_COMPATIBLE_PLAYERS = 11
 MIN_MATCH_SQUAD = 18
 MAX_MATCH_SQUAD = 40
-
-KEY_CONSTANTS = {
-    1: (378445824, 774547186, 214490323),
-    2: (3982174560, 1246903118, 4087552941),
-}
-
-
-@dataclass(frozen=True)
-class Assignment:
-    player_id: int
-    team_id: int
-    order: int
-    shirt: int
-
-
-def decode_wesys(path: Path) -> bytes:
-    data = path.read_bytes()
-    if len(data) < 16 or data[3:8] != b"WESYS":
-        raise ValueError(f"{path}: invalid WESYS header")
-
-    compressed_size, raw_size = struct.unpack_from("<II", data, 8)
-    payload = bytearray(data[16 : 16 + compressed_size])
-    if len(payload) != compressed_size:
-        raise ValueError(f"{path}: truncated compressed payload")
-
-    key_index = data[1] & 0x0F
-    if key_index in KEY_CONSTANTS:
-        x, y, z = KEY_CONSTANTS[key_index]
-        w = ((raw_size << 16) | compressed_size) & MASK32
-        # The final partial word is not encrypted.
-        for offset in range(0, len(payload) - 3, 4):
-            t = (x ^ (x << 11)) & MASK32
-            x, y, z, previous = y, z, w, w
-            w = (previous ^ (((previous >> 11) ^ t) >> 8) ^ t) & MASK32
-            word = struct.unpack_from("<I", payload, offset)[0] ^ w
-            struct.pack_into("<I", payload, offset, word)
-
-    raw = zlib.decompress(payload)
-    if len(raw) != raw_size:
-        raise ValueError(
-            f"{path}: decoded {len(raw)} bytes, expected {raw_size}"
-        )
-    return raw
-
-
-def parse_c_arrays(paths: list[Path]) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
-    players: dict[str, list[int]] = {}
-    shirts: dict[str, list[int]] = {}
-    pattern = re.compile(
-        r"static\s+const\s+uint(32|8)_t\s+"
-        r"exhibition_([a-z0-9_]+)_(players|shirts)\[\]\s*=\s*\{(.*?)\};",
-        re.DOTALL,
-    )
-    for path in paths:
-        text = path.read_text(encoding="utf-8")
-        for width, name, kind, body in pattern.findall(text):
-            values = [int(value) for value in re.findall(r"\b(\d+)u?\b", body)]
-            target = players if kind == "players" else shirts
-            target[name] = values
-    return players, shirts
-
-
-def parse_team_symbols(source: Path, nations: Path) -> dict[int, str]:
-    text = source.read_text(encoding="utf-8")
-    result = {
-        int(team_id): symbol
-        for team_id, symbol in re.findall(
-            r"\{\s*(\d+),\s*exhibition_([a-z0-9_]+)_players,",
-            text,
-        )
-    }
-    nation_text = nations.read_text(encoding="utf-8")
-    for symbol, team_id in re.findall(
-        r"EXHIBITION_NATION\(\s*([a-z0-9_]+)\s*,\s*(\d+)", nation_text
-    ):
-        result[int(team_id)] = symbol
-    return result
-
-
-def parse_nation_team_ids(nations: Path) -> set[int]:
-    return {
-        int(team_id)
-        for team_id in re.findall(
-            r"EXHIBITION_NATION\(\s*[a-z0-9_]+\s*,\s*(\d+)",
-            nations.read_text(encoding="utf-8"),
-        )
-    }
 
 
 def parse_pes21_player_ids(raw: bytes) -> set[int]:
@@ -140,28 +55,6 @@ def parse_ef10_player_names(raw: bytes) -> dict[int, str]:
             "utf-8", errors="replace"
         )
     return result
-
-
-def parse_ef10_assignments(raw: bytes) -> dict[int, list[Assignment]]:
-    if len(raw) % EF10_ASSIGNMENT_RECORD_SIZE:
-        raise ValueError("EF10 PlayerAssignment.bin does not contain 24-byte records")
-    teams: dict[int, list[Assignment]] = {}
-    for offset in range(0, len(raw), EF10_ASSIGNMENT_RECORD_SIZE):
-        player_id, team_id, _assignment_id, packed, _padding = struct.unpack_from(
-            "<QIIII", raw, offset
-        )
-        teams.setdefault(team_id, []).append(
-            Assignment(
-                player_id=player_id,
-                team_id=team_id,
-                # The upper bits are assignment flags, not appointment order.
-                order=(packed >> 8) & 0xFF,
-                shirt=packed & 0xFF,
-            )
-        )
-    for assignments in teams.values():
-        assignments.sort(key=lambda item: (item.order, item.player_id))
-    return teams
 
 
 def wrapped_values(values: list[int], suffix: str, per_line: int = 8) -> str:
@@ -217,23 +110,27 @@ def generate(args: argparse.Namespace) -> None:
     ef10_dir = root / args.ef10_dir
     pes21_dir = root / args.pes21_dir
 
-    source = team_source_root / "source" / "ue4_hooks.c"
-    nations = team_source_root / "source" / "exhibition_nations.inc"
-    roster_sources = [path for path in [
-        source,
-        team_source_root / "source" / "exhibition_rosters.inc",
-        team_source_root / "source" / "exhibition_migration.inc",
-    ] if path.is_file()]
-    old_players, old_shirts = parse_c_arrays(roster_sources)
-    team_symbols = parse_team_symbols(source, nations)
-    nation_team_ids = parse_nation_team_ids(nations)
+    catalog = load_catalog(team_source_root / args.catalog)
+    team_by_id = catalog_team_map(catalog)
+    team_symbols = {
+        team_id: str(team["symbol"])
+        for team_id, team in team_by_id.items()
+        if team.get("conversion_eligible", False)
+    }
+    nation_team_ids = {
+        team_id
+        for team_id, team in team_by_id.items()
+        if team.get("conversion_eligible", False) and team.get("kind") == "national"
+    }
 
     ef10_players_raw = decode_wesys(ef10_dir / "Player.bin")
     ef10_assignments_raw = decode_wesys(ef10_dir / "PlayerAssignment.bin")
     pes21_players_raw = decode_wesys(pes21_dir / "Player.bin")
+    pes21_assignments_raw = decode_wesys(pes21_dir / "PlayerAssignment.bin")
 
     names = parse_ef10_player_names(ef10_players_raw)
     assignments_by_team = parse_ef10_assignments(ef10_assignments_raw)
+    pes21_assignments_by_team = parse_pes21_assignments(pes21_assignments_raw)
     available_ids = parse_pes21_player_ids(pes21_players_raw)
     surrogate_map_path = root / args.surrogate_map
     surrogate_map: dict[int, int] = {}
@@ -276,8 +173,9 @@ def generate(args: argparse.Namespace) -> None:
         if selected_team_ids is not None and team_id not in selected_team_ids:
             continue
         assignments = assignments_by_team.get(team_id, [])
-        base_players = old_players.get(symbol, [])
-        base_shirts = old_shirts.get(symbol, [])
+        native_roster = pes21_assignments_by_team.get(team_id, [])
+        base_players = [item.player_id for item in native_roster]
+        base_shirts = [item.shirt for item in native_roster]
         if not assignments or not base_players or len(base_players) != len(base_shirts):
             continue
 
@@ -385,6 +283,12 @@ def main() -> None:
         "--team-source-root",
         type=Path,
         help="optional source tree supplying the exposed team list and base rosters",
+    )
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path("data/exhibition_team_catalog.json"),
+        help="generated Exhibition team catalog relative to --team-source-root",
     )
     parser.add_argument(
         "--ef10-dir",

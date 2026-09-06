@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "minimum_players": 18,
+  "maximum_players": 40,
+  "expected_safe_team_count": 464,
+  "legacy_team_ids": [59, 115, 127, 133, 134, 135],
+  "categories": [
+    {
+      "key": "english_league",
+      "label": "ENGLISH LEAGUE",
+      "icon": "ENG",
+      "kind": "club",
+      "source_category_ids": [113],
+      "badge_source": "emblemLc/emb_0009.png"
+    },
+    {
+      "key": "english_second",
+      "label": "ENGLISH 2ND DIV",
+      "icon": "ENG",
+      "kind": "club",
+      "source_category_ids": [337],
+      "badge_source": "emblemLc/emb_0009.png"
+    },
+    {
+      "key": "spanish_league",
+      "label": "SPANISH LEAGUE",
+      "icon": "ESP",
+      "kind": "club",
+      "source_category_ids": [119],
+      "badge_source": "emblemLc/emb_0011.png"
+    },
+    {
+      "key": "spanish_second",
+      "label": "SPANISH 2ND DIV",
+      "icon": "ESP",
+      "kind": "club",
+      "source_category_ids": [340],
+      "badge_source": "emblemLc/emb_0011.png"
+    },
+    {
+      "key": "ligue_1",
+      "label": "LIGUE 1",
+      "icon": "FRA",
+      "kind": "club",
+      "source_category_ids": [122],
+      "team_ids": [115],
+      "badge_source": "emblemLc/emb_0012_b.png"
+    },
+    {
+      "key": "ligue_2",
+      "label": "LIGUE 2",
+      "icon": "FRA",
+      "kind": "club",
+      "source_category_ids": [343],
+      "badge_source": "emblemLc/emb_0012_b.png"
+    },
+    {
+      "key": "serie_a",
+      "label": "SERIE A",
+      "icon": "ITA",
+      "kind": "club",
+      "source_category_ids": [116],
+      "badge_source": "emblemLc/emb_0010.png"
+    },
+    {
+      "key": "serie_b",
+      "label": "SERIE B",
+      "icon": "ITA",
+      "kind": "club",
+      "source_category_ids": [346],
+      "badge_source": "emblemLc/emb_0010.png"
+    },
+    {
+      "key": "eredivisie",
+      "label": "EREDIVISIE",
+      "icon": "NED",
+      "kind": "club",
+      "source_category_ids": [125],
+      "badge_source": "emblemLc/emb_0019.png"
+    },
+    {
+      "key": "liga_portugal",
+      "label": "LIGA PORTUGAL",
+      "icon": "POR",
+      "kind": "club",
+      "source_category_ids": [128],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "german_teams",
+      "label": "GERMAN TEAMS",
+      "icon": "GER",
+      "kind": "club",
+      "team_ids": [127, 128],
+      "badge_source": "flag/e_000014_r.png"
+    },
+    {
+      "key": "turkish_league",
+      "label": "TURKISH LEAGUE",
+      "icon": "TUR",
+      "kind": "club",
+      "source_category_ids": [476],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "scottish_league",
+      "label": "SCOTTISH LEAGUE",
+      "icon": "SCO",
+      "kind": "club",
+      "source_category_ids": [518],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "danish_league",
+      "label": "DANISH LEAGUE",
+      "icon": "DEN",
+      "kind": "club",
+      "source_category_ids": [549],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "belgian_league",
+      "label": "BELGIAN LEAGUE",
+      "icon": "BEL",
+      "kind": "club",
+      "source_category_ids": [566],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "swiss_league",
+      "label": "SWISS LEAGUE",
+      "icon": "SUI",
+      "kind": "club",
+      "source_category_ids": [473],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "other_europe",
+      "label": "OTHER EUROPE",
+      "icon": "EUR",
+      "kind": "club",
+      "source_category_ids": [65542],
+      "team_ids": [133, 134, 135],
+      "badge_source": "other/emblemOther-clublEurope.png"
+    },
+    {
+      "key": "brazil_serie_a",
+      "label": "BRAZIL SERIE A",
+      "icon": "BRA",
+      "kind": "club",
+      "source_category_ids": [149],
+      "badge_source": "other/emblemOther-clubLatinAmerica.png"
+    },
+    {
+      "key": "brazil_serie_b",
+      "label": "BRAZIL SERIE B",
+      "icon": "BRA",
+      "kind": "club",
+      "source_category_ids": [588, 65546],
+      "badge_source": "other/emblemOther-clubLatinAmerica.png"
+    },
+    {
+      "key": "argentina_league",
+      "label": "ARGENTINA LEAGUE",
+      "icon": "ARG",
+      "kind": "club",
+      "source_category_ids": [152],
+      "badge_source": "other/emblemOther-clubLatinAmerica.png"
+    },
+    {
+      "key": "chilean_league",
+      "label": "CHILEAN LEAGUE",
+      "icon": "CHI",
+      "kind": "club",
+      "source_category_ids": [287],
+      "badge_source": "other/emblemOther-clubLatinAmerica.png"
+    },
+    {
+      "key": "colombian_league",
+      "label": "COLOMBIAN LEAGUE",
+      "icon": "COL",
+      "kind": "club",
+      "source_category_ids": [576],
+      "badge_source": "other/emblemOther-clubLatinAmerica.png"
+    },
+    {
+      "key": "j1_league",
+      "label": "J1 LEAGUE",
+      "icon": "JPN",
+      "kind": "club",
+      "source_category_ids": [266],
+      "badge_source": "other/emblemOther-clubAsia.png"
+    },
+    {
+      "key": "j2_league",
+      "label": "J2 LEAGUE",
+      "icon": "JPN",
+      "kind": "club",
+      "source_category_ids": [269],
+      "badge_source": "other/emblemOther-clubAsia.png"
+    },
+    {
+      "key": "thai_league",
+      "label": "THAI LEAGUE",
+      "icon": "THA",
+      "kind": "club",
+      "source_category_ids": [585],
+      "badge_source": "other/emblemOther-clubAsia.png"
+    },
+    {
+      "key": "other_asia_clubs",
+      "label": "OTHER ASIA CLUBS",
+      "icon": "ASI",
+      "kind": "club",
+      "source_category_ids": [101, 694, 703, 65543],
+      "badge_source": "other/emblemOther-clubAsia.png",
+      "omit_if_empty": true
+    },
+    {
+      "key": "north_america_clubs",
+      "label": "N AMERICA CLUBS",
+      "icon": "NAM",
+      "kind": "club",
+      "source_category_ids": [603, 635, 65550],
+      "badge_source": "other/emblemOther-other.png",
+      "omit_if_empty": true
+    },
+    {
+      "key": "world_edit_clubs",
+      "label": "WORLD / EDIT CLUBS",
+      "icon": "FC",
+      "kind": "club",
+      "source_category_ids": [65560],
+      "team_ids": [199, 200],
+      "badge_source": "other/emblemOther-other.png"
+    },
+    {
+      "key": "national_europe",
+      "label": "NATIONAL EUROPE",
+      "icon": "EUR",
+      "kind": "national",
+      "source_category_ids": [65552],
+      "team_ids": [59],
+      "badge_source": "other/emblemOther-nationalEurope.png"
+    },
+    {
+      "key": "national_africa",
+      "label": "NATIONAL AFRICA",
+      "icon": "AFR",
+      "kind": "national",
+      "source_category_ids": [65555],
+      "badge_source": "other/emblemOther-nationalAfrica.png"
+    },
+    {
+      "key": "national_north_america",
+      "label": "NATIONAL N AMERICA",
+      "icon": "NAM",
+      "kind": "national",
+      "source_category_ids": [65556],
+      "badge_source": "other/emblemOther-nationalNorthAmerica.png"
+    },
+    {
+      "key": "national_south_america",
+      "label": "NATIONAL S AMERICA",
+      "icon": "SAM",
+      "kind": "national",
+      "source_category_ids": [65554],
+      "badge_source": "other/emblemOther-nationalLatinAmerica.png"
+    },
+    {
+      "key": "national_asia_oceania",
+      "label": "NATIONAL ASIA OCEANIA",
+      "icon": "AOC",
+      "kind": "national",
+      "source_category_ids": [65553],
+      "badge_source": "other/emblemOther-nationalAsia.png"
+    }
+  ]
+}

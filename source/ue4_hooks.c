@@ -7,6 +7,7 @@
 
 #include "aaudio_shim.h"
 #include "config.h"
+#include "exhibition_team_catalog.h"
 #include "match_visual_policy.h"
 #include "error.h"
 #include "so_util.h"
@@ -40,6 +41,21 @@ typedef struct {
   float y;
   float z;
 } Match2DVector3;
+
+// These native values are returned by value on AArch64. Keeping their exact
+// sizes makes the compiler emit the hidden x8 result pointer expected by UE4.
+typedef struct {
+  uint64_t words[18];
+} TmpdbFormationValue;
+
+typedef struct {
+  uint8_t bytes[52];
+} TmpdbMatchPlanSettingsValue;
+
+_Static_assert(sizeof(TmpdbFormationValue) == 144,
+               "tmpdb::Formation ABI changed");
+_Static_assert(sizeof(TmpdbMatchPlanSettingsValue) == 52,
+               "tmpdb::MatchPlanSettings ABI changed");
 
 static ObjectInitializerArrayState object_initializer_states[
     OBJECT_INITIALIZER_STATE_SLOTS];
@@ -97,6 +113,7 @@ static void **exhibition_flow_listener_instance;
 static void (*exhibition_flow_direct_set)(void *transition,
                                            const char *flow_name);
 static void *(*exhibition_matchplan_get_instance)(void);
+static void *(*exhibition_matchplan_create_instance)(void);
 static void (*exhibition_matchplan_setup_team)(void *data,
                                                 const uint32_t *team_id,
                                                 uint32_t home_away);
@@ -186,6 +203,7 @@ static uint32_t (*match_tmpdb_player_get_data)(const void *player,
                                                 uint32_t *value);
 static uint32_t (*match_tmpdb_get_analyze_parameter)(const void *player,
                                                       uint32_t kind);
+static uint32_t (*match_player_id_without_data_flag)(uint32_t player_id);
 static const void *(*match_global_registry_get_team_ai_info)(
     const void *registry, uint32_t side);
 static uint32_t (*match_team_parameter_get_role)(
@@ -207,6 +225,37 @@ static void (*match_replace_squad_player)(void *squad_data,
 static uint32_t (*match_squad_data_get_tactics)(void *squad_data);
 static void (*match_squad_data_set_tactics)(void *squad_data,
                                              uint32_t tactics);
+static TmpdbFormationValue (*match_squad_data_get_formation)(
+    const void *squad_data, uint32_t tactics);
+static const uint8_t *(*match_formation_get_position)(
+    const void *formation, uint32_t order_no, uint32_t phase);
+static uint32_t (*match_formation_get_role)(const void *formation,
+                                             uint32_t order_no,
+                                             uint32_t phase);
+static uint32_t (*match_squad_data_get_player_role_position)(
+    const void *squad_data, uint32_t member_id, const void *player_id,
+    const uint32_t *tactics);
+static uint32_t (*match_squad_data_get_team_power)(
+    const void *squad_data);
+static float (*match_squad_data_calc_chemistry)(
+    const void *squad_data, const uint32_t *tactics);
+static void (*match_squad_data_copy_construct)(void *destination,
+                                                const void *source);
+static void (*match_squad_data_destruct)(void *squad_data);
+static void (*match_auto_set_squad)(void *squad_data, uint32_t select_kind,
+                                     uint32_t tactics, uint32_t preserve);
+static TmpdbMatchPlanSettingsValue (*match_squad_data_get_settings)(
+    const void *squad_data);
+static void (*match_squad_data_set_settings)(
+    void *squad_data, const TmpdbMatchPlanSettingsValue *settings);
+static void (*match_squad_data_set_captain)(void *squad_data,
+                                             uint32_t member_id);
+static void (*match_squad_data_set_piece_taker)(void *squad_data,
+                                                 uint32_t kind,
+                                                 uint32_t member_id);
+static void (*match_squad_data_set_attacker)(void *squad_data,
+                                              uint32_t slot,
+                                              uint32_t member_id);
 static void (*match_pause_camera_swipe)(void *window, uint32_t old_page,
                                          uint32_t new_page);
 static void (*match_pause_camera_footer)(void *window, uint32_t footer_key);
@@ -634,9 +683,64 @@ static _Alignas(4) uint32_t exhibition_strategy_action;
 static _Alignas(4) uint32_t exhibition_plan_ready;
 static _Alignas(4) uint32_t exhibition_return_to_selector;
 static _Alignas(4) uint32_t exhibition_gameplan_custom_active;
-static _Alignas(4) uint32_t exhibition_gameplan_custom_page;
-static _Alignas(4) uint32_t exhibition_gameplan_custom_focus;
-static _Alignas(4) uint32_t exhibition_gameplan_custom_action;
+#define PREMATCH_GAMEPLAN_MAX_PLAYERS 40u
+#define PREMATCH_GAMEPLAN_NO_SELECTION UINT32_MAX
+typedef struct {
+  unsigned char player_id[16];
+  char name[48];
+  uint32_t order_no;
+  uint32_t member_id;
+  uint32_t overall;
+  uint32_t portrait_id;
+  uint32_t shot_power;
+  uint8_t preferred_foot;
+  uint8_t starting;
+  uint8_t role;
+  uint8_t pitch_x;
+  uint8_t pitch_y;
+} PrematchGameplanPlayer;
+
+typedef struct {
+  void *squad_data;
+  PrematchGameplanPlayer players[PREMATCH_GAMEPLAN_MAX_PLAYERS];
+  uint32_t player_count;
+  uint32_t field_count;
+  uint32_t bench_count;
+  uint32_t page;
+  uint32_t root_focus;
+  uint32_t substitute_area;
+  uint32_t field_focus;
+  uint32_t bench_focus;
+  uint32_t selected_area;
+  uint32_t selected_index;
+  uint32_t formation_focus;
+  uint32_t tactics;
+  uint32_t auto_substitute;
+  uint32_t auto_offside;
+  uint32_t team_power;
+  uint32_t team_spirit;
+  uint32_t auto_focus;
+  uint32_t auto_preview_valid;
+  uint32_t auto_power_before;
+  uint32_t auto_power_after;
+  uint32_t auto_spirit_before;
+  uint32_t auto_spirit_after;
+  uint32_t position_focus;
+  uint32_t position_picker_open;
+  uint32_t position_picker_focus;
+  uint32_t waiting;
+  TmpdbMatchPlanSettingsValue settings;
+  char formation_label[16];
+} PrematchGameplanSide;
+
+static PrematchGameplanSide exhibition_gameplan_sides[2];
+static _Alignas(4) uint32_t exhibition_gameplan_custom_action[2];
+#define PREMATCH_GAMEPLAN_PORTRAIT_MAX_BYTES (1024u * 1024u)
+static _Alignas(8) uintptr_t
+    exhibition_gameplan_portrait_pending[2][PREMATCH_GAMEPLAN_MAX_PLAYERS];
+static uint32_t
+    exhibition_gameplan_portrait_ids[2][PREMATCH_GAMEPLAN_MAX_PLAYERS];
+static _Alignas(8) uint64_t exhibition_gameplan_portrait_retry_tick[2];
 #define EXHIBITION_UNIFORM_CHOICE_MAX 9u
 static uint32_t exhibition_uniform_choices[2][EXHIBITION_UNIFORM_CHOICE_MAX];
 static uint32_t exhibition_uniform_choice_count[2];
@@ -713,6 +817,8 @@ static _Alignas(4) uint32_t main_menu_2p_selector_postbootstrap_host;
 // frames to construct/destroy its native page; without this guard the stock
 // menu flashes between the selector and hub (and on the trip back to tiles).
 static _Alignas(4) uint32_t main_menu_2p_transition_active;
+// 1 covers ordinary frontend hand-offs; 2 is reserved for Kick Off's VS card.
+static _Alignas(4) uint32_t main_menu_2p_transition_kind;
 static _Alignas(4) uint32_t main_menu_restore_focus_pending;
 #define MAIN_MENU_2P_PREMATCH_LINEUP_COUNT 11u
 static char main_menu_2p_prematch_lineup[2]
@@ -886,12 +992,6 @@ enum {
 };
 
 enum {
-  EXHIBITION_GAMEPLAN_PAGE_ROOT = 0,
-  EXHIBITION_GAMEPLAN_PAGE_SUBSTITUTION = 1,
-  EXHIBITION_GAMEPLAN_PAGE_FORMATION = 2,
-};
-
-enum {
   MATCH_POSTMATCH_PAGE_ROOT = 0,
   MATCH_POSTMATCH_PAGE_GAMEPLAN = 1,
   MATCH_POSTMATCH_PAGE_SUBSTITUTION = 2,
@@ -921,6 +1021,12 @@ enum {
 enum {
   MAIN_MENU_2P_PREMATCH_BOOT_NONE = 0,
   MAIN_MENU_2P_PREMATCH_BOOT_HUB = 1,
+};
+
+enum {
+  MAIN_MENU_2P_TRANSITION_NONE = 0,
+  MAIN_MENU_2P_TRANSITION_LOADING = 1,
+  MAIN_MENU_2P_TRANSITION_VS = 2,
 };
 
 #define MAIN_MENU_2P_LEAGUE_COUNT EXHIBITION_TEAM_CATEGORY_COUNT
@@ -974,6 +1080,9 @@ static void main_menu_2p_native_uniform_select(uint32_t side);
 static void main_menu_2p_uniform_preview_clear_pending(void);
 static void main_menu_2p_uniform_preview_load(uint32_t side);
 static void native_lab_assign_matchplan_pads(void *data);
+static int exhibition_gameplan_open_custom(void);
+static void exhibition_gameplan_process_pending(void);
+static void exhibition_gameplan_reset(void);
 static const char *exhibition_team_name(uint32_t team_id);
 static void *exhibition_get_tmpdb_match(void);
 static void exhibition_gameplan_refresh_uniform_choices(void);
@@ -997,72 +1106,6 @@ static void exhibition_nested_back_expire(void) {
     exhibition_popup_focus_direction = 0;
   }
 }
-
-static const uint32_t exhibition_category_english[] = {
-    100, 101, 102, 103, 104, 105, 106, 107, 173, 177, 179, 377};
-static const uint32_t exhibition_category_spanish[] = {108, 109, 110, 111};
-static const uint32_t exhibition_category_french[] = {112, 113, 114, 115};
-static const uint32_t exhibition_category_italian[] = {
-    119, 120, 121, 122, 123, 124, 125};
-static const uint32_t exhibition_category_dutch[] = {116, 117, 118};
-static const uint32_t exhibition_category_german[] = {127, 128};
-static const uint32_t exhibition_category_other_europe[] = {
-    130, 131, 132, 133, 134, 135, 191, 192, 193, 234, 327, 333};
-static const uint32_t exhibition_category_south_america_clubs[] = {
-    136, 137, 138, 139};
-static const uint32_t exhibition_category_national_europe[] = {
-    1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
-    16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30, 31};
-static const uint32_t exhibition_category_national_africa[] = {
-    32, 33, 34, 35, 36, 37, 38};
-static const uint32_t exhibition_category_national_north_america[] = {
-    39, 40, 41, 42, 43};
-static const uint32_t exhibition_category_national_south_america[] = {
-    44, 45, 46, 47, 48, 49, 50, 51};
-static const uint32_t exhibition_category_national_asia[] = {
-    52, 53, 54, 55, 56, 57, 59};
-
-typedef struct {
-  const char *label;
-  const char *icon;
-  const uint32_t *teams;
-  uint32_t team_count;
-} ExhibitionTeamCategory;
-
-#define EXHIBITION_CATEGORY(label_value, icon_value, array_value)          \
-  {                                                                        \
-      label_value, icon_value, array_value,                                \
-      (uint32_t)(sizeof(array_value) / sizeof((array_value)[0])),           \
-  }
-static const ExhibitionTeamCategory exhibition_team_categories[] = {
-    EXHIBITION_CATEGORY("ENGLISH LEAGUE", "ENG",
-                        exhibition_category_english),
-    EXHIBITION_CATEGORY("SPANISH LEAGUE", "ESP",
-                        exhibition_category_spanish),
-    EXHIBITION_CATEGORY("LIGUE 1", "FRA", exhibition_category_french),
-    EXHIBITION_CATEGORY("SERIE A", "ITA", exhibition_category_italian),
-    EXHIBITION_CATEGORY("EREDIVISIE", "NED", exhibition_category_dutch),
-    EXHIBITION_CATEGORY("GERMAN TEAMS", "GER", exhibition_category_german),
-    EXHIBITION_CATEGORY("OTHER EUROPE", "EUR",
-                        exhibition_category_other_europe),
-    EXHIBITION_CATEGORY("SOUTH AMERICA CLUBS", "SAM",
-                        exhibition_category_south_america_clubs),
-    EXHIBITION_CATEGORY("NATIONAL EUROPE", "EUR",
-                        exhibition_category_national_europe),
-    EXHIBITION_CATEGORY("NATIONAL AFRICA", "AFR",
-                        exhibition_category_national_africa),
-    EXHIBITION_CATEGORY("NATIONAL N AMERICA", "NAM",
-                        exhibition_category_national_north_america),
-    EXHIBITION_CATEGORY("NATIONAL S AMERICA", "SAM",
-                        exhibition_category_national_south_america),
-    EXHIBITION_CATEGORY("NATIONAL ASIA OCEANIA", "AOC",
-                        exhibition_category_national_asia),
-};
-#undef EXHIBITION_CATEGORY
-
-#define EXHIBITION_TEAM_CATEGORY_COUNT                                  \
-  ((uint32_t)(sizeof(exhibition_team_categories) /                       \
-              sizeof(exhibition_team_categories[0])))
 
 static const ExhibitionTeamCategory *exhibition_team_category(void) {
   return exhibition_team_category_index < EXHIBITION_TEAM_CATEGORY_COUNT
@@ -1105,21 +1148,7 @@ static const ExhibitionTeamCategory *main_menu_2p_team_selector_category(
 }
 
 static uint32_t main_menu_2p_team_selector_badge_for_team(uint32_t team_id) {
-  if (team_id < 140u)
-    return team_id;
-  switch (team_id) {
-  case 173u: return 153u;
-  case 177u: return 154u;
-  case 179u: return 155u;
-  case 191u: return 156u;
-  case 192u: return 157u;
-  case 193u: return 158u;
-  case 234u: return 159u;
-  case 327u: return 160u;
-  case 333u: return 161u;
-  case 377u: return 162u;
-  default: return 0;
-  }
+  return exhibition_team_catalog_badge(team_id);
 }
 
 static uint32_t main_menu_2p_team_selector_team_index(uint32_t league,
@@ -1261,6 +1290,7 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
 
 static void main_menu_2p_team_selector_open(void) {
   main_menu_2p_uniform_preview_clear_pending();
+  exhibition_gameplan_reset();
   __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_prematch_hub_page,
                    MAIN_MENU_2P_PREMATCH_PAGE_MAIN, __ATOMIC_RELEASE);
@@ -1287,6 +1317,8 @@ static void main_menu_2p_team_selector_open(void) {
   __atomic_store_n(&main_menu_2p_selector_postbootstrap_host, 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_transition_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_transition_kind,
+                   MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_active, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
                    __ATOMIC_RELEASE);
@@ -1316,11 +1348,15 @@ static void main_menu_2p_team_selector_open(void) {
 
 static void main_menu_2p_team_selector_close(void) {
   main_menu_2p_uniform_preview_clear_pending();
+  exhibition_gameplan_reset();
   const int postbootstrap = __atomic_exchange_n(
       &main_menu_2p_selector_postbootstrap_host, 0, __ATOMIC_ACQ_REL);
-  if (postbootstrap)
+  if (postbootstrap) {
     __atomic_store_n(&main_menu_2p_transition_active, 1,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(&main_menu_2p_transition_kind,
+                     MAIN_MENU_2P_TRANSITION_LOADING, __ATOMIC_RELEASE);
+  }
   __atomic_store_n(&main_menu_2p_team_selector_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_team_selector_start_pending, 0,
                    __ATOMIC_RELEASE);
@@ -1601,7 +1637,9 @@ uint32_t pes_controller_2p_team_selector_badge(uint32_t pad,
     return 0;
   if (main_menu_2p_team_selector_phase[pad] ==
       MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE)
-    return index < MAIN_MENU_2P_LEAGUE_COUNT ? 140u + index : 0;
+    return index < MAIN_MENU_2P_LEAGUE_COUNT
+               ? exhibition_team_categories[index].badge_slot
+               : 0;
   const ExhibitionTeamCategory *category =
       main_menu_2p_team_selector_category(pad);
   return category && index < category->team_count
@@ -1851,6 +1889,8 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   // Strategy is no longer visible once MatchSetup starts. Hand presentation
   // back to the game's own loading scene instead of covering the whole load.
   __atomic_store_n(&main_menu_2p_transition_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_transition_kind,
+                   MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
   if (__atomic_load_n(&exhibition_match_settings_armed, __ATOMIC_ACQUIRE)) {
     exhibition_apply_cpu_level(
         __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
@@ -2003,6 +2043,7 @@ static const uint8_t exhibition_madrid_shirts[] = {
 #include "exhibition_rosters.inc"
 #include "exhibition_migration.inc"
 #include "exhibition_rosters_ef10.inc"
+#include "exhibition_rosters_pes21_generated.inc"
 
 #define EXHIBITION_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 #define EXHIBITION_ASSERT_ROSTER(name)                                      \
@@ -2402,18 +2443,46 @@ static const ExhibitionMasterRoster exhibition_master_rosters[] = {
 #undef EXHIBITION_NATION
 };
 
+static const ExhibitionMasterRoster *exhibition_find_sorted_roster(
+    const ExhibitionMasterRoster *rosters, uint32_t roster_count,
+    uint32_t team_id) {
+  uint32_t low = 0;
+  uint32_t high = roster_count;
+  while (low < high) {
+    const uint32_t middle = low + (high - low) / 2u;
+    if (rosters[middle].team_id < team_id)
+      low = middle + 1u;
+    else
+      high = middle;
+  }
+  return low < roster_count && rosters[low].team_id == team_id
+             ? &rosters[low]
+             : NULL;
+}
+
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
   // Prefer the generated eFootball 10 compatibility roster. These entries
   // contain only IDs that the PES21 CommonWork database can resolve, so this
   // changes no player objects and adds no per-frame work.
-  for (uint32_t i = 0;
-       i < sizeof(exhibition_ef10_master_rosters) /
-               sizeof(exhibition_ef10_master_rosters[0]);
-       i++) {
-    if (exhibition_ef10_master_rosters[i].team_id == team_id)
-      return &exhibition_ef10_master_rosters[i];
-  }
+  const ExhibitionMasterRoster *roster = exhibition_find_sorted_roster(
+      exhibition_ef10_master_rosters,
+      (uint32_t)(sizeof(exhibition_ef10_master_rosters) /
+                 sizeof(exhibition_ef10_master_rosters[0])),
+      team_id);
+  if (roster)
+    return roster;
+
+  // Every generated catalog team has a native PES21 baseline unless it is
+  // one of the explicitly retained legacy entries below.
+  roster = exhibition_find_sorted_roster(
+      exhibition_pes21_master_rosters,
+      (uint32_t)(sizeof(exhibition_pes21_master_rosters) /
+                 sizeof(exhibition_pes21_master_rosters[0])),
+      team_id);
+  if (roster)
+    return roster;
+
   for (uint32_t i = 0;
        i < sizeof(exhibition_master_rosters) /
                sizeof(exhibition_master_rosters[0]);
@@ -2427,7 +2496,8 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
 static int exhibition_is_valid_team(uint32_t team_id) {
   const ExhibitionMasterRoster *roster = exhibition_find_roster(team_id);
   // A selector entry without a full starting squad can never reach kickoff.
-  return roster && roster->player_count >= 11u;
+  return exhibition_team_catalog_find(team_id) && roster &&
+         roster->player_count >= 11u;
 }
 
 static int exhibition_matchup_ready(void) {
@@ -2440,18 +2510,11 @@ static int exhibition_matchup_ready(void) {
 static uint32_t exhibition_picker_seed_team(uint32_t team_id) {
   return exhibition_is_valid_team(team_id)
              ? team_id
-             : exhibition_master_rosters[0].team_id;
+             : exhibition_team_catalog_first_id();
 }
 
 static uint32_t exhibition_first_other_team(uint32_t team_id) {
-  for (uint32_t i = 0;
-       i < sizeof(exhibition_master_rosters) /
-               sizeof(exhibition_master_rosters[0]);
-       i++) {
-    if (exhibition_master_rosters[i].team_id != team_id)
-      return exhibition_master_rosters[i].team_id;
-  }
-  return team_id;
+  return exhibition_team_catalog_first_other_id(team_id);
 }
 
 static void exhibition_refresh_uniforms(void *tmpdb_match,
@@ -2645,108 +2708,7 @@ static void exhibition_gameplan_change_uniform(uint32_t side,
 }
 
 static const char *exhibition_team_name(uint32_t team_id) {
-#define EXHIBITION_NATION(name, nation_team_id, display_name) \
-  if (team_id == nation_team_id)                              \
-    return display_name;
-#include "exhibition_nations.inc"
-#undef EXHIBITION_NATION
-  if (team_id == 100)
-    return "MANCHESTER UNITED";
-  if (team_id == 101)
-    return "ARSENAL";
-  if (team_id == 102)
-    return "CHELSEA B";
-  if (team_id == 103)
-    return "LIVERPOOL R";
-  if (team_id == 104)
-    return "LEEDS W";
-  if (team_id == 105)
-    return "WEST HAM RB";
-  if (team_id == 106)
-    return "NEWCASTLE WB";
-  if (team_id == 107)
-    return "ASTON RB";
-  if (team_id == 108)
-    return "FC BARCELONA";
-  if (team_id == 109)
-    return "MADRID CHAMARTIN B";
-  if (team_id == 110)
-    return "VALENCIA BN";
-  if (team_id == 114)
-    return "PSG";
-  if (team_id == 116)
-    return "AJAX";
-  if (team_id == 118)
-    return "PSV";
-  if (team_id == 119)
-    return "LOMBARDIA NA";
-  if (team_id == 120)
-    return "JUVENTUS";
-  if (team_id == 121)
-    return "MILANO RN";
-  if (team_id == 122)
-    return "LAZIO";
-  if (team_id == 125)
-    return "ROMA";
-  if (team_id == 127)
-    return "FC BAYERN MUNCHEN";
-  if (team_id == 138)
-    return "RIVER PLATE";
-  if (team_id == 139)
-    return "BOCA JUNIORS";
-  if (team_id == 111)
-    return "LA CORUNA AB";
-  if (team_id == 112)
-    return "MONACO";
-  if (team_id == 113)
-    return "OLYMPIQUE MARSEILLE";
-  if (team_id == 115)
-    return "BORDEAUX";
-  if (team_id == 117)
-    return "FEYENOORD";
-  if (team_id == 123)
-    return "PARMA";
-  if (team_id == 124)
-    return "FIORENTINA";
-  if (team_id == 128)
-    return "BAYER LEVERKUSEN";
-  if (team_id == 130)
-    return "GALATASARAY";
-  if (team_id == 131)
-    return "CELTIC";
-  if (team_id == 132)
-    return "RANGERS";
-  if (team_id == 133)
-    return "OLYMPIAKOS PIRAEUS";
-  if (team_id == 134)
-    return "DYNAMO KYIV";
-  if (team_id == 135)
-    return "SPARTAK MOSKVA";
-  if (team_id == 136)
-    return "VASCO DA GAMA";
-  if (team_id == 137)
-    return "BARRA FUNDA V";
-  if (team_id == 173)
-    return "MANCHESTER B";
-  if (team_id == 177)
-    return "EVERTON B";
-  if (team_id == 179)
-    return "TOTTENHAM WB";
-  if (team_id == 191)
-    return "BENFICA";
-  if (team_id == 192)
-    return "PORTO";
-  if (team_id == 193)
-    return "SPORTING CP";
-  if (team_id == 234)
-    return "ATALANTA";
-  if (team_id == 327)
-    return "NAPOLI";
-  if (team_id == 333)
-    return "TORINO";
-  if (team_id == 377)
-    return "BRIGHTON WB";
-  return "";
+  return exhibition_team_catalog_name(team_id);
 }
 
 static void main_menu_2p_prematch_hub_cache_lineups(void) {
@@ -2804,6 +2766,10 @@ int pes_controller_2p_prematch_hub_active(void) {
 int pes_controller_2p_transition_active(void) {
   return __atomic_load_n(&main_menu_2p_transition_active,
                          __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_2p_transition_kind(void) {
+  return __atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE);
 }
 
 uint32_t pes_controller_2p_prematch_hub_focus(void) {
@@ -3378,6 +3344,8 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
                          __ATOMIC_RELEASE);
         __atomic_store_n(&main_menu_2p_transition_active, 0,
                          __ATOMIC_RELEASE);
+        __atomic_store_n(&main_menu_2p_transition_kind,
+                         MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
         __atomic_store_n(&main_menu_2p_prematch_hub_page,
                          MAIN_MENU_2P_PREMATCH_PAGE_MAIN, __ATOMIC_RELEASE);
         __atomic_store_n(&exhibition_team_select_active, 0,
@@ -3466,6 +3434,8 @@ uintptr_t pes_exhibition_tutorial_main_entry(void *tutorial_flow) {
                            __ATOMIC_RELEASE);
           __atomic_store_n(&main_menu_2p_transition_active, 0,
                            __ATOMIC_RELEASE);
+          __atomic_store_n(&main_menu_2p_transition_kind,
+                           MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
           __atomic_store_n(&main_menu_controller_active, 0,
                            __ATOMIC_RELEASE);
           debugPrintf("native 2P prematch: Tutorial bootstrap -> hub\n");
@@ -4225,26 +4195,11 @@ uint32_t pes_controller_custom_team_popup_badge(uint32_t index) {
     const ExhibitionTeamCategory *category = exhibition_team_category();
     if (!category || index >= category->team_count)
       return 0;
-    const uint32_t team_id = category->teams[index];
-    if (team_id < 140u)
-      return team_id;
-    // Slots 140..152 are category emblems. The migrated high-ID clubs use
-    // compact slots 153..162 populated from the same native badge PNGs.
-    switch (team_id) {
-    case 173u: return 153u;
-    case 177u: return 154u;
-    case 179u: return 155u;
-    case 191u: return 156u;
-    case 192u: return 157u;
-    case 193u: return 158u;
-    case 234u: return 159u;
-    case 327u: return 160u;
-    case 333u: return 161u;
-    case 377u: return 162u;
-    default: return 0;
-    }
+    return exhibition_team_catalog_badge(category->teams[index]);
   }
-  return index < EXHIBITION_TEAM_CATEGORY_COUNT ? 140u + index : 140u;
+  return index < EXHIBITION_TEAM_CATEGORY_COUNT
+             ? exhibition_team_categories[index].badge_slot
+             : 0;
 }
 
 const char *pes_controller_custom_team_popup_title(void) {
@@ -4502,9 +4457,1290 @@ static void match_gameplan_swap_selected(void) {
   match_gameplan_refresh_players(0);
 }
 
+static const char *prematch_gameplan_role_label(uint32_t role) {
+  static const char *const labels[] = {
+      "GK", "CB", "LB", "RB", "DMF", "CMF", "LMF",
+      "RMF", "AMF", "LWF", "RWF", "SS", "CF",
+  };
+  return role < sizeof(labels) / sizeof(labels[0]) ? labels[role] : "SUB";
+}
+
+static void prematch_gameplan_reset_side(PrematchGameplanSide *state) {
+  if (!state)
+    return;
+  memset(state, 0, sizeof(*state));
+  state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+  state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+  strcpy(state->formation_label, "--");
+}
+
+static void prematch_gameplan_clear_portrait_pending(uint32_t side) {
+  if (side > 1)
+    return;
+  for (uint32_t index = 0; index < PREMATCH_GAMEPLAN_MAX_PLAYERS; index++) {
+    const uintptr_t pending = __atomic_exchange_n(
+        &exhibition_gameplan_portrait_pending[side][index], 0,
+        __ATOMIC_ACQ_REL);
+    free((void *)pending);
+    exhibition_gameplan_portrait_ids[side][index] = 0;
+  }
+}
+
+static uint32_t prematch_gameplan_portrait_id(const void *player,
+                                              const unsigned char *player_id) {
+  uint32_t id = 0;
+  // tmpdb::Player stores the common::PlayerId at offset 48; this is the same
+  // value consumed by NodeRectPlayer::SetPlayerTexture in the native UI.
+  if (player)
+    memcpy(&id, (const unsigned char *)player + 48, sizeof(id));
+  if (!id && player_id)
+    memcpy(&id, player_id, sizeof(id));
+  id &= 0xfff7ffffu; // NodeRectPlayer excludes the legacy variation flag.
+  if (match_player_id_without_data_flag)
+    id = match_player_id_without_data_flag(id);
+  else
+    id &= 0x8fffffffu;
+  return id;
+}
+
+static int prematch_gameplan_load_portrait(uint32_t side, uint32_t index,
+                                           uint32_t portrait_id) {
+  if (side > 1 || index >= PREMATCH_GAMEPLAN_MAX_PLAYERS || !portrait_id ||
+      !exhibition_sys_file_create || !exhibition_sys_file_sync_read ||
+      !exhibition_sys_file_get_body || !exhibition_sys_file_get_size ||
+      !exhibition_sys_file_release)
+    return 0;
+
+  char path[96];
+  uint32_t file_id = portrait_id;
+  snprintf(path, sizeof(path), "common/player/%u.png", file_id);
+  void *file = exhibition_sys_file_create(path, 0xc01);
+  const void *body = NULL;
+  size_t size = 0;
+  if (file && exhibition_sys_file_sync_read(file)) {
+    body = exhibition_sys_file_get_body(file);
+    size = exhibition_sys_file_get_size(file);
+  }
+  static const unsigned char png_signature[8] = {
+      0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+  int valid = body && size >= sizeof(png_signature) &&
+              size <= PREMATCH_GAMEPLAN_PORTRAIT_MAX_BYTES &&
+              memcmp(body, png_signature, sizeof(png_signature)) == 0;
+  if (!valid && (portrait_id & 0x0ff00000u)) {
+    if (file)
+      exhibition_sys_file_release(file);
+    file_id = portrait_id & 0x0003ffffu;
+    snprintf(path, sizeof(path), "common/player/%u.png", file_id);
+    file = exhibition_sys_file_create(path, 0xc01);
+    body = NULL;
+    size = 0;
+    if (file && exhibition_sys_file_sync_read(file)) {
+      body = exhibition_sys_file_get_body(file);
+      size = exhibition_sys_file_get_size(file);
+    }
+    valid = body && size >= sizeof(png_signature) &&
+            size <= PREMATCH_GAMEPLAN_PORTRAIT_MAX_BYTES &&
+            memcmp(body, png_signature, sizeof(png_signature)) == 0;
+  }
+  if (!valid) {
+    if (file)
+      exhibition_sys_file_release(file);
+    return 0;
+  }
+  PesPrematchGameplanPortraitPng *portrait =
+      malloc(sizeof(*portrait) + size);
+  if (!portrait) {
+    exhibition_sys_file_release(file);
+    return 0;
+  }
+  portrait->portrait_id = portrait_id;
+  portrait->byte_count = (uint32_t)size;
+  memcpy(portrait->bytes, body, size);
+  exhibition_sys_file_release(file);
+  const uintptr_t previous = __atomic_exchange_n(
+      &exhibition_gameplan_portrait_pending[side][index], (uintptr_t)portrait,
+      __ATOMIC_ACQ_REL);
+  free((void *)previous);
+  debugPrintf("native 2P Game Plan: portrait side=%u slot=%u id=%u file=%u "
+              "bytes=%u\n",
+              side, index, portrait_id, file_id, (unsigned int)size);
+  return 1;
+}
+
+static void prematch_gameplan_load_portraits(uint32_t side) {
+  if (side > 1)
+    return;
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  for (uint32_t index = 0; index < state->player_count; index++) {
+    const uint32_t portrait_id = state->players[index].portrait_id;
+    if (exhibition_gameplan_portrait_ids[side][index] == portrait_id)
+      continue;
+    if (!portrait_id) {
+      exhibition_gameplan_portrait_ids[side][index] = 0;
+      continue;
+    }
+    // Keep the slot retryable when the archive is not ready yet. This is
+    // common during the first frame after the native match-plan is created.
+    if (prematch_gameplan_load_portrait(side, index, portrait_id))
+      exhibition_gameplan_portrait_ids[side][index] = portrait_id;
+  }
+  for (uint32_t index = state->player_count;
+       index < PREMATCH_GAMEPLAN_MAX_PLAYERS; index++)
+    exhibition_gameplan_portrait_ids[side][index] = 0;
+}
+
+static void exhibition_gameplan_reset(void) {
+  __atomic_store_n(&exhibition_gameplan_custom_active, 0,
+                   __ATOMIC_RELEASE);
+  for (uint32_t side = 0; side < 2; side++) {
+    prematch_gameplan_clear_portrait_pending(side);
+    exhibition_gameplan_portrait_retry_tick[side] = 0;
+    __atomic_store_n(&exhibition_gameplan_custom_action[side], 0,
+                     __ATOMIC_RELEASE);
+    prematch_gameplan_reset_side(&exhibition_gameplan_sides[side]);
+  }
+}
+
+static void *prematch_gameplan_resolve_squad(uint32_t side) {
+  if (side > 1 || !exhibition_tmpdb_manager_get_instance ||
+      !exhibition_squad_edit_get_squad_data)
+    return NULL;
+  void *manager = exhibition_tmpdb_manager_get_instance();
+  void *tmpdb_data = NULL;
+  if (manager)
+    memcpy(&tmpdb_data, (unsigned char *)manager + 72,
+           sizeof(tmpdb_data));
+  if (!tmpdb_data)
+    return NULL;
+  return exhibition_squad_edit_get_squad_data(
+      (unsigned char *)tmpdb_data + 0x18360, side);
+}
+
+static PrematchGameplanPlayer *prematch_gameplan_nth_player(
+    PrematchGameplanSide *state, uint32_t starting, uint32_t wanted) {
+  if (!state)
+    return NULL;
+  uint32_t seen = 0;
+  for (uint32_t index = 0; index < state->player_count; index++) {
+    PrematchGameplanPlayer *player = &state->players[index];
+    if ((uint32_t)player->starting != starting)
+      continue;
+    if (seen++ == wanted)
+      return player;
+  }
+  return NULL;
+}
+
+static const PrematchGameplanPlayer *prematch_gameplan_nth_player_const(
+    const PrematchGameplanSide *state, uint32_t starting, uint32_t wanted) {
+  return prematch_gameplan_nth_player((PrematchGameplanSide *)state,
+                                      starting, wanted);
+}
+
+static void prematch_gameplan_sort_players(PrematchGameplanSide *state) {
+  for (uint32_t index = 1; index < state->player_count; index++) {
+    PrematchGameplanPlayer value = state->players[index];
+    uint32_t target = index;
+    while (target) {
+      const PrematchGameplanPlayer *previous = &state->players[target - 1];
+      const int value_first = value.starting != previous->starting
+                                  ? value.starting > previous->starting
+                                  : value.order_no < previous->order_no;
+      if (!value_first)
+        break;
+      state->players[target] = *previous;
+      target--;
+    }
+    state->players[target] = value;
+  }
+}
+
+static uint32_t prematch_gameplan_layout_lane(uint32_t role) {
+  if (role == 0)
+    return 0; // GK
+  if (role <= 3)
+    return 1; // back line
+  if (role == 4)
+    return 2; // holding midfield
+  if (role <= 7)
+    return 3; // central/wide midfield
+  if (role == 8)
+    return 4; // attacking midfield
+  if (role <= 12)
+    return 5; // front line
+  return 6;
+}
+
+static void prematch_gameplan_stabilize_pitch_layout(
+    PrematchGameplanSide *state) {
+  if (!state || !state->field_count)
+    return;
+  uint32_t known = 0;
+  for (uint32_t index = 0; index < state->field_count; index++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_nth_player_const(state, 1, index);
+    if (player && player->role <= 12)
+      known++;
+  }
+  if (known * 2u < state->field_count)
+    return;
+
+  static const uint8_t lane_y[6] = {250, 202, 154, 108, 60, 12};
+  for (uint32_t lane = 0; lane < 6; lane++) {
+    PrematchGameplanPlayer *players[PREMATCH_GAMEPLAN_MAX_PLAYERS];
+    uint32_t count = 0;
+    for (uint32_t index = 0; index < state->field_count; index++) {
+      PrematchGameplanPlayer *player =
+          prematch_gameplan_nth_player(state, 1, index);
+      if (player && prematch_gameplan_layout_lane(player->role) == lane)
+        players[count++] = player;
+    }
+    for (uint32_t index = 1; index < count; index++) {
+      PrematchGameplanPlayer *value = players[index];
+      uint32_t target = index;
+      while (target &&
+             (players[target - 1]->pitch_x > value->pitch_x ||
+              (players[target - 1]->pitch_x == value->pitch_x &&
+               players[target - 1]->order_no > value->order_no))) {
+        players[target] = players[target - 1];
+        target--;
+      }
+      players[target] = value;
+    }
+    for (uint32_t index = 0; index < count; index++) {
+      players[index]->pitch_x =
+          count == 1 ? 128u : (uint8_t)(8u + (239u * index) / (count - 1u));
+      players[index]->pitch_y = lane_y[lane];
+    }
+  }
+}
+
+static uint32_t prematch_gameplan_team_spirit(const void *squad_data,
+                                               uint32_t tactics) {
+  if (!squad_data || !match_squad_data_calc_chemistry)
+    return 0;
+  float chemistry = match_squad_data_calc_chemistry(squad_data, &tactics);
+  if (!(chemistry >= 0.0f))
+    return 0;
+  if (chemistry > 99.0f)
+    chemistry = 99.0f;
+  return (uint32_t)(chemistry + 0.5f);
+}
+
+static void prematch_gameplan_build_formation_label(
+    PrematchGameplanSide *state) {
+  uint32_t defenders = 0;
+  uint32_t midfielders = 0;
+  uint32_t forwards = 0;
+  for (uint32_t index = 0; index < state->field_count; index++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_nth_player_const(state, 1, index);
+    if (!player || player->role == 0)
+      continue;
+    if (player->role <= 3)
+      defenders++;
+    else if (player->role <= 8)
+      midfielders++;
+    else if (player->role <= 12)
+      forwards++;
+  }
+  if (defenders + midfielders + forwards)
+    snprintf(state->formation_label, sizeof(state->formation_label),
+             "%u-%u-%u", defenders, midfielders, forwards);
+  else
+    strcpy(state->formation_label, "--");
+}
+
+static void prematch_gameplan_refresh_side(uint32_t side) {
+  if (side > 1)
+    return;
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  state->player_count = 0;
+  state->field_count = 0;
+  state->bench_count = 0;
+  state->squad_data = prematch_gameplan_resolve_squad(side);
+  void *squad_data = state->squad_data;
+  if (!squad_data || !exhibition_squad_data_get_player_count ||
+      !exhibition_squad_data_get_player_by_index)
+    return;
+
+  state->tactics = match_squad_data_get_tactics
+                       ? match_squad_data_get_tactics(squad_data) & 1u
+                       : 0;
+  TmpdbFormationValue formation = {0};
+  const int have_formation = match_squad_data_get_formation != NULL;
+  if (have_formation)
+    formation = match_squad_data_get_formation(squad_data, state->tactics);
+  if (match_squad_data_get_settings)
+    state->settings = match_squad_data_get_settings(squad_data);
+  else {
+    memset(&state->settings, 0xff, sizeof(state->settings));
+    state->settings.bytes[50] = 0;
+    state->settings.bytes[51] = 0;
+  }
+  state->auto_substitute = state->settings.bytes[50] != 0;
+  state->auto_offside = state->settings.bytes[51] != 0;
+
+  uint32_t count = exhibition_squad_data_get_player_count(squad_data);
+  if (count > PREMATCH_GAMEPLAN_MAX_PLAYERS)
+    count = PREMATCH_GAMEPLAN_MAX_PLAYERS;
+  for (uint32_t index = 0; index < count; index++) {
+    void *squad_player =
+        exhibition_squad_data_get_player_by_index(squad_data, &index);
+    if (!squad_player)
+      continue;
+    PrematchGameplanPlayer *entry =
+        &state->players[state->player_count];
+    memset(entry, 0, sizeof(*entry));
+    memcpy(entry->player_id, squad_player, sizeof(entry->player_id));
+    entry->order_no = match_squad_data_get_order_no
+                          ? match_squad_data_get_order_no(squad_data,
+                                                          entry->player_id)
+                          : index;
+    entry->member_id = match_squad_data_get_member_id
+                           ? match_squad_data_get_member_id(squad_data,
+                                                            entry->player_id)
+                           : index;
+    entry->starting = match_squad_data_is_starting
+                          ? match_squad_data_is_starting(
+                                squad_data, entry->player_id) != 0
+                          : index < 11;
+    void *player = match_squad_data_get_tmpdb_player
+                       ? match_squad_data_get_tmpdb_player(
+                             squad_data, entry->player_id)
+                       : NULL;
+    const char *name = player && match_tmpdb_player_get_name
+                           ? match_tmpdb_player_get_name(player)
+                           : NULL;
+    if (name && name[0]) {
+      strncpy(entry->name, name, sizeof(entry->name) - 1);
+      entry->name[sizeof(entry->name) - 1] = '\0';
+    } else {
+      snprintf(entry->name, sizeof(entry->name), "PLAYER %u", index + 1);
+    }
+
+    static const uint8_t fallback_pitch_x[11] = {
+        128, 32, 96, 160, 224, 48, 128, 208, 48, 128, 208,
+    };
+    static const uint8_t fallback_pitch_y[11] = {
+        238, 190, 190, 190, 190, 125, 125, 125, 55, 55, 55,
+    };
+    if (entry->starting && entry->order_no < 11) {
+      entry->pitch_x = fallback_pitch_x[entry->order_no];
+      entry->pitch_y = fallback_pitch_y[entry->order_no];
+    }
+
+    uint32_t role = 13;
+    if (match_squad_data_get_player_role_position)
+      role = match_squad_data_get_player_role_position(
+          squad_data, entry->member_id, entry->player_id, &state->tactics);
+    if (entry->starting && entry->order_no < 11 && have_formation) {
+      if (match_formation_get_role)
+        role = match_formation_get_role(&formation, entry->order_no, 0);
+      if (match_formation_get_position) {
+        const uint8_t *position = match_formation_get_position(
+            &formation, entry->order_no, 0);
+        if (position) {
+          const uint32_t raw_y = position[0] > 48 ? 48 : position[0];
+          const uint32_t raw_x = position[1] > 105 ? 105 : position[1];
+          entry->pitch_x = (uint8_t)((raw_x * 255u + 52u) / 105u);
+          entry->pitch_y =
+              (uint8_t)(255u - (raw_y * 255u + 24u) / 48u);
+        }
+      }
+    }
+    if (role > 12)
+      role = 13;
+    entry->role = (uint8_t)role;
+    if (player && exhibition_get_player_overall) {
+      uint32_t overall_position = role <= 12 ? role : 13;
+      entry->overall = exhibition_get_player_overall(
+          player, &overall_position, 2);
+    }
+    entry->portrait_id = prematch_gameplan_portrait_id(player,
+                                                       entry->player_id);
+    if (player && match_tmpdb_player_get_data) {
+      uint32_t preferred_foot = 0;
+      uint32_t shot_power = 0;
+      // PlayerBase::GetData(42) is the native preferred-foot field. Ability
+      // 12 maps to the native kick_power data label (36).
+      match_tmpdb_player_get_data(player, 42u, &preferred_foot);
+      match_tmpdb_player_get_data(player, 36u, &shot_power);
+      entry->preferred_foot = preferred_foot ? 1u : 0u;
+      entry->shot_power = shot_power;
+    }
+    if (entry->starting)
+      state->field_count++;
+    else
+      state->bench_count++;
+    state->player_count++;
+  }
+
+  if (!state->field_count && state->player_count) {
+    state->field_count = state->player_count < 11
+                             ? state->player_count
+                             : 11;
+    state->bench_count = state->player_count - state->field_count;
+    for (uint32_t index = 0; index < state->player_count; index++)
+      state->players[index].starting = index < state->field_count;
+  }
+  prematch_gameplan_sort_players(state);
+  prematch_gameplan_stabilize_pitch_layout(state);
+  if (state->field_focus >= state->field_count)
+    state->field_focus = 0;
+  if (state->bench_focus >= state->bench_count)
+    state->bench_focus = 0;
+  if (state->selected_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD &&
+      state->selected_index >= state->field_count)
+    state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+  if (state->selected_area == PES_PREMATCH_GAMEPLAN_AREA_BENCH &&
+      state->selected_index >= state->bench_count)
+    state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+  if (state->selected_area == PREMATCH_GAMEPLAN_NO_SELECTION)
+    state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+
+  state->team_power = match_squad_data_get_team_power
+                          ? match_squad_data_get_team_power(squad_data)
+                          : 0;
+  state->team_spirit =
+      prematch_gameplan_team_spirit(squad_data, state->tactics);
+  state->auto_preview_valid = 0;
+  prematch_gameplan_build_formation_label(state);
+  prematch_gameplan_load_portraits(side);
+}
+
+static uint32_t prematch_gameplan_position_member(
+    const PrematchGameplanSide *state, uint32_t row) {
+  if (!state || row >= PES_PREMATCH_GAMEPLAN_POSITION_COUNT)
+    return 0xffu;
+  if (row == 0)
+    return state->settings.bytes[49];
+  if (row <= 5)
+    return state->settings.bytes[39 + row];
+  return state->settings.bytes[40 + row];
+}
+
+static const PrematchGameplanPlayer *prematch_gameplan_find_member(
+    const PrematchGameplanSide *state, uint32_t member_id) {
+  if (!state || member_id == 0xffu)
+    return NULL;
+  for (uint32_t index = 0; index < state->player_count; index++) {
+    if (state->players[index].member_id == member_id)
+      return &state->players[index];
+  }
+  return NULL;
+}
+
+static uint32_t prematch_gameplan_picker_count(
+    const PrematchGameplanSide *state) {
+  if (!state)
+    return 0;
+  if (state->position_focus < 6)
+    return state->field_count;
+  uint32_t count = 1;
+  for (uint32_t index = 0; index < state->field_count; index++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_nth_player_const(state, 1, index);
+    if (player && player->role != 0)
+      count++;
+  }
+  return count;
+}
+
+static const PrematchGameplanPlayer *prematch_gameplan_picker_player(
+    const PrematchGameplanSide *state, uint32_t picker_index) {
+  if (!state)
+    return NULL;
+  if (state->position_focus < 6)
+    return prematch_gameplan_nth_player_const(state, 1, picker_index);
+  if (!picker_index)
+    return NULL;
+  uint32_t seen = 1;
+  for (uint32_t index = 0; index < state->field_count; index++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_nth_player_const(state, 1, index);
+    if (!player || player->role == 0)
+      continue;
+    if (seen++ == picker_index)
+      return player;
+  }
+  return NULL;
+}
+
+static void prematch_gameplan_open_position_picker(
+    PrematchGameplanSide *state) {
+  if (!state)
+    return;
+  state->position_picker_open = 1;
+  state->position_picker_focus = 0;
+  const uint32_t assigned = prematch_gameplan_position_member(
+      state, state->position_focus);
+  const uint32_t count = prematch_gameplan_picker_count(state);
+  for (uint32_t index = 0; index < count; index++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_picker_player(state, index);
+    const uint32_t member_id = player ? player->member_id : 0xffu;
+    if (member_id == assigned) {
+      state->position_picker_focus = index;
+      break;
+    }
+  }
+}
+
+static void prematch_gameplan_save_and_refresh(uint32_t side) {
+  if (matchplan_squad_save)
+    matchplan_squad_save();
+  // Keep the backing tmpdb match synchronized so reopening the page cannot
+  // restore the pre-edit formation or option bits.
+  void *plan = exhibition_matchplan_get_instance
+                   ? exhibition_matchplan_get_instance()
+                   : NULL;
+  if (plan && exhibition_matchplan_update_tmpdb)
+    exhibition_matchplan_update_tmpdb(plan);
+  prematch_gameplan_refresh_side(side);
+}
+
+static void prematch_gameplan_apply_position(uint32_t side) {
+  if (side > 1)
+    return;
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      state, state->position_picker_focus);
+  const uint32_t member_id = player ? player->member_id : 0xffu;
+  const uint32_t row = state->position_focus;
+  if (row == 0 && player && match_squad_data_set_captain) {
+    match_squad_data_set_captain(state->squad_data, member_id);
+  } else if (row >= 1 && row <= 5 && player &&
+             match_squad_data_set_piece_taker) {
+    match_squad_data_set_piece_taker(state->squad_data, row - 1,
+                                     member_id);
+  } else if (row >= 6 && row <= 8 &&
+             match_squad_data_set_attacker) {
+    match_squad_data_set_attacker(state->squad_data, row - 6, member_id);
+  } else {
+    state->position_picker_open = 0;
+    return;
+  }
+  state->position_picker_open = 0;
+  prematch_gameplan_save_and_refresh(side);
+}
+
+static void prematch_gameplan_swap(uint32_t side) {
+  if (side > 1)
+    return;
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  uint32_t field_index = state->field_focus;
+  uint32_t bench_index = state->bench_focus;
+  if (state->selected_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD)
+    field_index = state->selected_index;
+  else if (state->selected_area == PES_PREMATCH_GAMEPLAN_AREA_BENCH)
+    bench_index = state->selected_index;
+  PrematchGameplanPlayer *field =
+      prematch_gameplan_nth_player(state, 1, field_index);
+  PrematchGameplanPlayer *bench =
+      prematch_gameplan_nth_player(state, 0, bench_index);
+  if (!state->squad_data || !field || !bench ||
+      !match_squad_data_get_order_no || !match_squad_data_get_member_id ||
+      !match_swap_member_info_construct || !match_replace_squad_player)
+    return;
+
+  _Alignas(8) unsigned char field_info[24] = {0};
+  _Alignas(8) unsigned char bench_info[24] = {0};
+  char field_name[sizeof(field->name)];
+  char bench_name[sizeof(bench->name)];
+  memcpy(field_name, field->name, sizeof(field_name));
+  memcpy(bench_name, bench->name, sizeof(bench_name));
+  match_swap_member_info_construct(
+      field_info,
+      match_squad_data_get_order_no(state->squad_data, field->player_id),
+      match_squad_data_get_member_id(state->squad_data, field->player_id),
+      field->player_id);
+  match_swap_member_info_construct(
+      bench_info,
+      match_squad_data_get_order_no(state->squad_data, bench->player_id),
+      match_squad_data_get_member_id(state->squad_data, bench->player_id),
+      bench->player_id);
+  match_replace_squad_player(state->squad_data, field_info, bench_info);
+  state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+  state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+  prematch_gameplan_save_and_refresh(side);
+  debugPrintf("native 2P Game Plan: side=%u swapped %s <-> %s\n",
+              side, field_name, bench_name);
+}
+
+static void prematch_gameplan_move_field(PrematchGameplanSide *state,
+                                          uint32_t action) {
+  if (!state || !state->field_count)
+    return;
+  const PrematchGameplanPlayer *current =
+      prematch_gameplan_nth_player_const(state, 1, state->field_focus);
+  if (!current)
+    return;
+  uint32_t best = PREMATCH_GAMEPLAN_NO_SELECTION;
+  uint32_t best_score = UINT32_MAX;
+  for (uint32_t index = 0; index < state->field_count; index++) {
+    if (index == state->field_focus)
+      continue;
+    const PrematchGameplanPlayer *candidate =
+        prematch_gameplan_nth_player_const(state, 1, index);
+    if (!candidate)
+      continue;
+    const int dx = (int)candidate->pitch_x - (int)current->pitch_x;
+    const int dy = (int)candidate->pitch_y - (int)current->pitch_y;
+    int major = 0;
+    int minor = 0;
+    if (action == PES_PAUSE_INPUT_LEFT) {
+      major = -dx;
+      minor = dy;
+    } else if (action == PES_PAUSE_INPUT_RIGHT) {
+      major = dx;
+      minor = dy;
+    } else if (action == PES_PAUSE_INPUT_UP) {
+      major = -dy;
+      minor = dx;
+    } else {
+      major = dy;
+      minor = dx;
+    }
+    if (major <= 3)
+      continue;
+    const uint32_t distance =
+        (uint32_t)(major * major + minor * minor + abs(minor) * 12);
+    if (distance < best_score) {
+      best_score = distance;
+      best = index;
+    }
+  }
+  if (best != PREMATCH_GAMEPLAN_NO_SELECTION) {
+    state->field_focus = best;
+  } else if (action == PES_PAUSE_INPUT_LEFT) {
+    // The console page treats the pitch and substitution list as one
+    // horizontal work area. At either horizontal edge hand focus to the
+    // other area instead of wrapping to a distant player.
+    if (state->bench_count) {
+      state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_BENCH;
+      if (state->bench_focus >= state->bench_count)
+        state->bench_focus = state->bench_count - 1;
+      return;
+    }
+  } else if (action == PES_PAUSE_INPUT_UP) {
+    state->field_focus = state->field_focus
+                             ? state->field_focus - 1
+                             : state->field_count - 1;
+  } else {
+    state->field_focus = (state->field_focus + 1) % state->field_count;
+  }
+}
+
+static void prematch_gameplan_toggle_formation_setting(uint32_t side,
+                                                        uint32_t row) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (!state->squad_data)
+    return;
+  if (row == 0 && match_squad_data_set_tactics) {
+    state->tactics ^= 1u;
+    match_squad_data_set_tactics(state->squad_data, state->tactics);
+  } else if (row == 1 && match_squad_data_set_settings) {
+    state->settings.bytes[51] = state->settings.bytes[51] ? 0 : 1;
+    match_squad_data_set_settings(state->squad_data, &state->settings);
+  } else if (row == 2 && match_squad_data_set_settings) {
+    state->settings.bytes[50] = state->settings.bytes[50] ? 0 : 1;
+    match_squad_data_set_settings(state->squad_data, &state->settings);
+  } else {
+    return;
+  }
+  prematch_gameplan_save_and_refresh(side);
+}
+
+static void prematch_gameplan_prepare_auto_preview(uint32_t side) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  state->auto_focus = 1;
+  state->auto_preview_valid = 0;
+  state->auto_power_before = state->team_power;
+  state->auto_spirit_before = state->team_spirit;
+  state->auto_power_after = state->team_power;
+  state->auto_spirit_after = state->team_spirit;
+  if (!state->squad_data || !match_squad_data_copy_construct ||
+      !match_squad_data_destruct || !match_auto_set_squad ||
+      !match_squad_data_get_team_power ||
+      !match_squad_data_calc_chemistry)
+    return;
+
+  _Alignas(16) unsigned char preview[2048];
+  memset(preview, 0, sizeof(preview));
+  match_squad_data_copy_construct(preview, state->squad_data);
+  match_auto_set_squad(preview, 3, state->tactics, 0);
+  state->auto_power_after = match_squad_data_get_team_power(preview);
+  state->auto_spirit_after =
+      prematch_gameplan_team_spirit(preview, state->tactics);
+  match_squad_data_destruct(preview);
+  state->auto_preview_valid = 1;
+}
+
+static void prematch_gameplan_apply_auto_lineup(uint32_t side) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (!state->auto_preview_valid || !state->squad_data ||
+      !match_auto_set_squad)
+    return;
+  match_auto_set_squad(state->squad_data, 3, state->tactics, 0);
+  prematch_gameplan_save_and_refresh(side);
+  debugPrintf("native 2P Game Plan: auto lineup side=%u power=%u spirit=%u\n",
+              side, state->team_power, state->team_spirit);
+}
+
+static int exhibition_gameplan_prepare_matchplan(void) {
+  const int plan_ready =
+      __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) != 0;
+  if (!plan_ready && !exhibition_refresh_selected_tmpdb()) {
+    debugPrintf("native 2P Game Plan: selected matchup refresh failed\n");
+    return 0;
+  }
+
+  void *data = exhibition_matchplan_get_instance
+                   ? exhibition_matchplan_get_instance()
+                   : NULL;
+  if (!data && exhibition_matchplan_create_instance) {
+    data = exhibition_matchplan_create_instance();
+    debugPrintf("native 2P Game Plan: created matchPlan data=%p\n", data);
+  }
+  if (!data || !exhibition_matchplan_setup_tmpdb) {
+    debugPrintf("native 2P Game Plan: matchPlan unavailable data=%p "
+                "get=%p create=%p setup=%p\n",
+                data, exhibition_matchplan_get_instance,
+                exhibition_matchplan_create_instance,
+                exhibition_matchplan_setup_tmpdb);
+    return 0;
+  }
+
+  if (!plan_ready) {
+    const uint32_t strategy_mode = 2;
+    memcpy((unsigned char *)data + 8, &strategy_mode,
+           sizeof(strategy_mode));
+    exhibition_matchplan_setup_tmpdb(data);
+    native_lab_assign_matchplan_pads(data);
+    exhibition_apply_cpu_level(
+        __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
+    exhibition_apply_match_settings(NULL);
+    exhibition_apply_selected_uniforms(NULL);
+  } else {
+    native_lab_assign_matchplan_pads(data);
+  }
+
+  // Only the first bootstrap needs a load. Re-loading an already prepared
+  // match plan overwrites edits made by the custom Game Plan page.
+  if (!plan_ready && matchplan_squad_load)
+    matchplan_squad_load();
+  exhibition_refresh_squad_player_stats();
+  prematch_gameplan_refresh_side(0);
+  prematch_gameplan_refresh_side(1);
+  if (!exhibition_gameplan_sides[0].field_count ||
+      !exhibition_gameplan_sides[1].field_count) {
+    debugPrintf("native 2P Game Plan: incomplete squads HOME=%u AWAY=%u\n",
+                exhibition_gameplan_sides[0].field_count,
+                exhibition_gameplan_sides[1].field_count);
+    return 0;
+  }
+  __atomic_store_n(&exhibition_plan_ready, 1, __ATOMIC_RELEASE);
+  return 1;
+}
+
+static int exhibition_gameplan_open_custom(void) {
+  exhibition_gameplan_reset();
+  if (!exhibition_gameplan_prepare_matchplan()) {
+    debugPrintf("native 2P Game Plan: squad initialization unavailable\n");
+    return 0;
+  }
+  for (uint32_t side = 0; side < 2; side++) {
+    PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+    state->root_focus = 0;
+    state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+    state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+  }
+  __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                   __ATOMIC_RELEASE);
+  main_menu_2p_prematch_hub_input_armed[0] = 0;
+  main_menu_2p_prematch_hub_input_armed[1] = 0;
+  __atomic_store_n(&exhibition_gameplan_custom_active, 1,
+                   __ATOMIC_RELEASE);
+  debugPrintf("native 2P Game Plan: custom split page opened HOME=%u AWAY=%u\n",
+              exhibition_gameplan_sides[0].player_count,
+              exhibition_gameplan_sides[1].player_count);
+  return 1;
+}
+
+static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (state->waiting) {
+    if (action == PES_PAUSE_INPUT_BACK)
+      state->waiting = 0;
+    return;
+  }
+  if (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_UP) {
+    state->root_focus = state->root_focus
+                            ? state->root_focus - 1
+                            : PES_PREMATCH_GAMEPLAN_ACTION_COUNT - 1;
+  } else if (action == PES_PAUSE_INPUT_RIGHT ||
+             action == PES_PAUSE_INPUT_DOWN) {
+    state->root_focus =
+        (state->root_focus + 1) % PES_PREMATCH_GAMEPLAN_ACTION_COUNT;
+  } else if (action == PES_PAUSE_INPUT_BACK && side == 0) {
+    __atomic_store_n(&exhibition_gameplan_custom_active, 0,
+                     __ATOMIC_RELEASE);
+    main_menu_2p_prematch_hub_input_armed[0] = 0;
+    main_menu_2p_prematch_hub_input_armed[1] = 0;
+    debugPrintf("native 2P Game Plan: back -> prematch hub\n");
+  } else if (action == PES_PAUSE_INPUT_BACK && side == 1) {
+    // P2 may finish first, but only P1 owns the shared Back-to-hub action.
+    state->waiting = 1;
+    debugPrintf("native 2P Game Plan: P2 waiting for opponent\n");
+  } else if (action == PES_PAUSE_INPUT_DECIDE) {
+    if (state->root_focus == 0) {
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE;
+      state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_FIELD;
+      state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+      state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+    } else if (state->root_focus == 1) {
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_FORMATION;
+      state->formation_focus = 0;
+    } else if (state->root_focus == 2) {
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP;
+      prematch_gameplan_prepare_auto_preview(side);
+    } else {
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS;
+      state->position_focus = 0;
+      state->position_picker_open = 0;
+    }
+  }
+}
+
+static void prematch_gameplan_process_substitute(uint32_t side,
+                                                  uint32_t action) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (action == PES_PAUSE_INPUT_BACK) {
+    if (state->selected_area != PREMATCH_GAMEPLAN_NO_SELECTION) {
+      state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+      state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+    } else {
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+    }
+    return;
+  }
+  if (action == PES_PAUSE_INPUT_DECIDE) {
+    const uint32_t current =
+        state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD
+            ? state->field_focus
+            : state->bench_focus;
+    if (state->selected_area == PREMATCH_GAMEPLAN_NO_SELECTION ||
+        state->selected_area == state->substitute_area) {
+      state->selected_area = state->substitute_area;
+      state->selected_index = current;
+      if (state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD &&
+          state->bench_count)
+        state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_BENCH;
+      else if (state->field_count)
+        state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_FIELD;
+    } else {
+      prematch_gameplan_swap(side);
+    }
+    return;
+  }
+  if (state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD) {
+    if (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_DOWN ||
+        action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_RIGHT)
+      prematch_gameplan_move_field(state, action);
+  } else if (state->bench_count &&
+             (action == PES_PAUSE_INPUT_UP ||
+              action == PES_PAUSE_INPUT_DOWN ||
+              action == PES_PAUSE_INPUT_LEFT ||
+              action == PES_PAUSE_INPUT_RIGHT)) {
+    if (action == PES_PAUSE_INPUT_LEFT) {
+      if (state->field_count)
+        state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_FIELD;
+      return;
+    }
+    const int previous = action == PES_PAUSE_INPUT_UP ||
+                         action == PES_PAUSE_INPUT_LEFT;
+    state->bench_focus = previous
+                             ? (state->bench_focus
+                                    ? state->bench_focus - 1
+                                    : state->bench_count - 1)
+                             : (state->bench_focus + 1) % state->bench_count;
+  }
+}
+
+static void prematch_gameplan_process_formation(uint32_t side,
+                                                 uint32_t action) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (action == PES_PAUSE_INPUT_BACK) {
+    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+  } else if (action == PES_PAUSE_INPUT_UP) {
+    state->formation_focus = state->formation_focus
+                                 ? state->formation_focus - 1
+                                 : 2;
+  } else if (action == PES_PAUSE_INPUT_DOWN) {
+    state->formation_focus = (state->formation_focus + 1) % 3;
+  } else if (action == PES_PAUSE_INPUT_LEFT ||
+             action == PES_PAUSE_INPUT_RIGHT ||
+             action == PES_PAUSE_INPUT_DECIDE) {
+    prematch_gameplan_toggle_formation_setting(
+        side, state->formation_focus);
+  }
+}
+
+static void prematch_gameplan_process_auto(uint32_t side,
+                                            uint32_t action) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (action == PES_PAUSE_INPUT_BACK) {
+    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+  } else if (action == PES_PAUSE_INPUT_LEFT ||
+             action == PES_PAUSE_INPUT_RIGHT ||
+             action == PES_PAUSE_INPUT_UP ||
+             action == PES_PAUSE_INPUT_DOWN) {
+    state->auto_focus ^= 1u;
+  } else if (action == PES_PAUSE_INPUT_DECIDE) {
+    if (state->auto_focus && state->auto_preview_valid)
+      prematch_gameplan_apply_auto_lineup(side);
+    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+  }
+}
+
+static void prematch_gameplan_process_positions(uint32_t side,
+                                                 uint32_t action) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (state->position_picker_open) {
+    const uint32_t count = prematch_gameplan_picker_count(state);
+    if (action == PES_PAUSE_INPUT_BACK) {
+      state->position_picker_open = 0;
+    } else if (count &&
+               (action == PES_PAUSE_INPUT_UP ||
+                action == PES_PAUSE_INPUT_LEFT)) {
+      state->position_picker_focus = state->position_picker_focus
+                                         ? state->position_picker_focus - 1
+                                         : count - 1;
+    } else if (count &&
+               (action == PES_PAUSE_INPUT_DOWN ||
+                action == PES_PAUSE_INPUT_RIGHT)) {
+      state->position_picker_focus =
+          (state->position_picker_focus + 1) % count;
+    } else if (action == PES_PAUSE_INPUT_DECIDE) {
+      prematch_gameplan_apply_position(side);
+    }
+    return;
+  }
+  if (action == PES_PAUSE_INPUT_BACK) {
+    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+  } else if (action == PES_PAUSE_INPUT_UP) {
+    state->position_focus = state->position_focus
+                                ? state->position_focus - 1
+                                : PES_PREMATCH_GAMEPLAN_POSITION_COUNT - 1;
+  } else if (action == PES_PAUSE_INPUT_DOWN) {
+    state->position_focus =
+        (state->position_focus + 1) % PES_PREMATCH_GAMEPLAN_POSITION_COUNT;
+  } else if (action == PES_PAUSE_INPUT_DECIDE) {
+    prematch_gameplan_open_position_picker(state);
+  }
+}
+
+static void exhibition_gameplan_process_pending(void) {
+  if (!pes_controller_custom_prematch_gameplan_active())
+    return;
+  const uint64_t now = armGetSystemTick();
+  for (uint32_t side = 0; side < 2; side++) {
+    const uint64_t retry_tick = exhibition_gameplan_portrait_retry_tick[side];
+    if (!retry_tick ||
+        armTicksToNs(now - retry_tick) >= 500000000ULL) {
+      exhibition_gameplan_portrait_retry_tick[side] = now;
+      prematch_gameplan_load_portraits(side);
+    }
+    const uint32_t action = __atomic_exchange_n(
+        &exhibition_gameplan_custom_action[side], 0, __ATOMIC_ACQ_REL);
+    if (!action)
+      continue;
+    PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+    if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT)
+      prematch_gameplan_process_root(side, action);
+    else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)
+      prematch_gameplan_process_substitute(side, action);
+    else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION)
+      prematch_gameplan_process_formation(side, action);
+    else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP)
+      prematch_gameplan_process_auto(side, action);
+    else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS)
+      prematch_gameplan_process_positions(side, action);
+  }
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_page(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].page
+                 : PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_root_focus(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].root_focus : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_field_count(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].field_count : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_bench_count(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].bench_count : 0;
+}
+
+static const PrematchGameplanPlayer *prematch_gameplan_public_player(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  return pad < 2 ? prematch_gameplan_nth_player_const(
+                       &exhibition_gameplan_sides[pad], starting != 0, index)
+                 : NULL;
+}
+
+const char *pes_controller_custom_prematch_gameplan_player_name(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? player->name : "";
+}
+
+const char *pes_controller_custom_prematch_gameplan_player_role(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? prematch_gameplan_role_label(player->role) : "";
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_overall(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? player->overall : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_portrait_id(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? player->portrait_id : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_preferred_foot(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? player->preferred_foot : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_shot_power(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? player->shot_power : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_pitch_x(
+    uint32_t pad, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, 1, index);
+  return player ? player->pitch_x : 128;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_pitch_y(
+    uint32_t pad, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, 1, index);
+  return player ? player->pitch_y : 128;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_substitute_area(
+    uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].substitute_area : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_substitute_focus(
+    uint32_t pad, uint32_t area) {
+  if (pad > 1)
+    return 0;
+  return area == PES_PREMATCH_GAMEPLAN_AREA_BENCH
+             ? exhibition_gameplan_sides[pad].bench_focus
+             : exhibition_gameplan_sides[pad].field_focus;
+}
+
+int pes_controller_custom_prematch_gameplan_substitute_selected(
+    uint32_t pad, uint32_t area, uint32_t index) {
+  return pad < 2 && exhibition_gameplan_sides[pad].selected_area == area &&
+         exhibition_gameplan_sides[pad].selected_index == index;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_formation_focus(
+    uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].formation_focus : 0;
+}
+
+const char *pes_controller_custom_prematch_gameplan_formation_value(
+    uint32_t pad, uint32_t row) {
+  if (pad > 1)
+    return "";
+  const PrematchGameplanSide *state = &exhibition_gameplan_sides[pad];
+  if (row == 0)
+    return state->tactics ? "< DEFENSIVE >" : "< ATTACKING >";
+  if (row == 1)
+    return state->auto_offside ? "< ON >" : "< OFF >";
+  if (row == 2)
+    return state->auto_substitute ? "< ON >" : "< OFF >";
+  return "";
+}
+
+const char *pes_controller_custom_prematch_gameplan_formation_label(
+    uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].formation_label : "--";
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_team_power(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].team_power : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_team_spirit(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].team_spirit : 0;
+}
+
+int pes_controller_custom_prematch_gameplan_auto_preview_valid(
+    uint32_t pad) {
+  return pad < 2 && exhibition_gameplan_sides[pad].auto_preview_valid;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_auto_focus(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].auto_focus : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_auto_power(
+    uint32_t pad, uint32_t after) {
+  if (pad > 1)
+    return 0;
+  return after ? exhibition_gameplan_sides[pad].auto_power_after
+               : exhibition_gameplan_sides[pad].auto_power_before;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_auto_spirit(
+    uint32_t pad, uint32_t after) {
+  if (pad > 1)
+    return 0;
+  return after ? exhibition_gameplan_sides[pad].auto_spirit_after
+               : exhibition_gameplan_sides[pad].auto_spirit_before;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_focus(
+    uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].position_focus : 0;
+}
+
+const char *pes_controller_custom_prematch_gameplan_position_label(
+    uint32_t row) {
+  static const char *const labels[PES_PREMATCH_GAMEPLAN_POSITION_COUNT] = {
+      "CAPTAIN",          "RIGHT CORNER KICK", "LEFT CORNER KICK",
+      "LONG FREE KICK",   "SHORT FREE KICK",  "PENALTY KICK",
+      "SET-PIECE ATTACKER 1", "SET-PIECE ATTACKER 2",
+      "SET-PIECE ATTACKER 3",
+  };
+  return row < PES_PREMATCH_GAMEPLAN_POSITION_COUNT ? labels[row] : "";
+}
+
+const char *pes_controller_custom_prematch_gameplan_position_value(
+    uint32_t pad, uint32_t row) {
+  if (pad > 1 || row >= PES_PREMATCH_GAMEPLAN_POSITION_COUNT)
+    return "";
+  const PrematchGameplanSide *state = &exhibition_gameplan_sides[pad];
+  const PrematchGameplanPlayer *player = prematch_gameplan_find_member(
+      state, prematch_gameplan_position_member(state, row));
+  return player ? player->name : "NONE";
+}
+
+int pes_controller_custom_prematch_gameplan_position_picker_active(
+    uint32_t pad) {
+  return pad < 2 && exhibition_gameplan_sides[pad].position_picker_open;
+}
+
+int pes_controller_custom_prematch_gameplan_waiting(uint32_t pad) {
+  return pad < 2 && exhibition_gameplan_sides[pad].waiting;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_focus(
+    uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].position_picker_focus : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_count(
+    uint32_t pad) {
+  return pad < 2
+             ? prematch_gameplan_picker_count(&exhibition_gameplan_sides[pad])
+             : 0;
+}
+
+const char *pes_controller_custom_prematch_gameplan_position_picker_name(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return "";
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      &exhibition_gameplan_sides[pad], index);
+  return player ? player->name : "NONE";
+}
+
+const char *pes_controller_custom_prematch_gameplan_position_picker_role(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return "";
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      &exhibition_gameplan_sides[pad], index);
+  return player ? prematch_gameplan_role_label(player->role) : "-";
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_overall(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return 0;
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      &exhibition_gameplan_sides[pad], index);
+  return player ? player->overall : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_portrait_id(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return 0;
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      &exhibition_gameplan_sides[pad], index);
+  return player ? player->portrait_id : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_preferred_foot(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return 0;
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      &exhibition_gameplan_sides[pad], index);
+  return player ? player->preferred_foot : 0;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_shot_power(
+    uint32_t pad, uint32_t index) {
+  if (pad > 1)
+    return 0;
+  const PrematchGameplanPlayer *player = prematch_gameplan_picker_player(
+      &exhibition_gameplan_sides[pad], index);
+  return player ? player->shot_power : 0;
+}
+
+PesPrematchGameplanPortraitPng *
+pes_controller_custom_prematch_gameplan_take_portrait_png(uint32_t pad,
+                                                           uint32_t index) {
+  if (pad > 1 || index >= PREMATCH_GAMEPLAN_MAX_PLAYERS)
+    return NULL;
+  return (PesPrematchGameplanPortraitPng *)__atomic_exchange_n(
+      &exhibition_gameplan_portrait_pending[pad][index], 0,
+      __ATOMIC_ACQ_REL);
+}
+
 int pes_controller_custom_info_popup_active(void) {
-  return pes_controller_custom_prematch_gameplan_active() ||
-         __atomic_load_n(&match_pause_custom_active, __ATOMIC_ACQUIRE) != 0 ||
+  return __atomic_load_n(&match_pause_custom_active, __ATOMIC_ACQUIRE) != 0 ||
          __atomic_load_n(&match_postmatch_custom_active,
                          __ATOMIC_ACQUIRE) != 0 ||
          __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
@@ -4512,15 +5748,6 @@ int pes_controller_custom_info_popup_active(void) {
 }
 
 const char *pes_controller_custom_info_popup_title(void) {
-  if (pes_controller_custom_prematch_gameplan_active()) {
-    const uint32_t page = __atomic_load_n(
-        &exhibition_gameplan_custom_page, __ATOMIC_ACQUIRE);
-    if (page == EXHIBITION_GAMEPLAN_PAGE_SUBSTITUTION)
-      return "SUBSTITUTION";
-    if (page == EXHIBITION_GAMEPLAN_PAGE_FORMATION)
-      return "FORMATION";
-    return "GAME PLAN";
-  }
   if (__atomic_load_n(&match_pause_custom_active, __ATOMIC_ACQUIRE)) {
     const uint32_t page =
         __atomic_load_n(&match_pause_custom_page, __ATOMIC_ACQUIRE);
@@ -4553,11 +5780,6 @@ const char *pes_controller_custom_info_popup_title(void) {
 }
 
 uint32_t pes_controller_custom_info_popup_line_count(void) {
-  if (pes_controller_custom_prematch_gameplan_active()) {
-    const uint32_t page = __atomic_load_n(
-        &exhibition_gameplan_custom_page, __ATOMIC_ACQUIRE);
-    return page == EXHIBITION_GAMEPLAN_PAGE_ROOT ? 5 : 4;
-  }
   if (__atomic_load_n(&match_pause_custom_active, __ATOMIC_ACQUIRE)) {
     const uint32_t page =
         __atomic_load_n(&match_pause_custom_page, __ATOMIC_ACQUIRE);
@@ -4575,73 +5797,6 @@ uint32_t pes_controller_custom_info_popup_line_count(void) {
 }
 
 const char *pes_controller_custom_info_popup_line(uint32_t index) {
-  if (pes_controller_custom_prematch_gameplan_active()) {
-    const uint32_t page = __atomic_load_n(
-        &exhibition_gameplan_custom_page, __ATOMIC_ACQUIRE);
-    if (page == EXHIBITION_GAMEPLAN_PAGE_ROOT) {
-      static const char *const normal[] = {
-          "  SUBSTITUTION", "  FORMATION", "  HOME KIT",
-          "  AWAY KIT", "  PLAY"};
-      static const char *const focused[] = {
-          "> SUBSTITUTION", "> FORMATION", "> HOME KIT",
-          "> AWAY KIT", "> PLAY"};
-      static char kit_line[2][64];
-      const uint32_t focus = __atomic_load_n(
-          &exhibition_gameplan_custom_focus, __ATOMIC_ACQUIRE);
-      if (index == 2 || index == 3) {
-        const uint32_t side = index - 2;
-        const uint32_t count = exhibition_uniform_choice_count[side];
-        const uint32_t choice = exhibition_uniform_choice_index[side];
-        if (count && choice < count) {
-          const uint32_t kit_number =
-              (exhibition_uniform_choices[side][choice] & 0x7fu) + 1u;
-          snprintf(kit_line[side], sizeof(kit_line[side]),
-                   "%c %s KIT: < KIT %u >",
-                   focus == index ? '>' : ' ', side ? "AWAY" : "HOME",
-                   kit_number);
-        } else {
-          snprintf(kit_line[side], sizeof(kit_line[side]),
-                   "%c %s KIT: UNAVAILABLE",
-                   focus == index ? '>' : ' ', side ? "AWAY" : "HOME");
-        }
-        return kit_line[side];
-      }
-      return index < 5 ? (index == focus ? focused[index] : normal[index])
-                       : "";
-    }
-    if (page == EXHIBITION_GAMEPLAN_PAGE_SUBSTITUTION) {
-      static char starter_line[64];
-      static char bench_line[64];
-      const MatchGameplanPlayer *starter = match_gameplan_nth_player(
-          1, match_gameplan_starter_index);
-      const MatchGameplanPlayer *bench = match_gameplan_nth_player(
-          0, match_gameplan_bench_index);
-      if (index == 0) {
-        snprintf(starter_line, sizeof(starter_line), "%c STARTER: < %s >",
-                 match_gameplan_focus == 0 ? '>' : ' ',
-                 starter ? starter->name : "UNAVAILABLE");
-        return starter_line;
-      }
-      if (index == 1) {
-        snprintf(bench_line, sizeof(bench_line), "%c BENCH: < %s >",
-                 match_gameplan_focus == 1 ? '>' : ' ',
-                 bench ? bench->name : "UNAVAILABLE");
-        return bench_line;
-      }
-      if (index == 2)
-        return "LEFT / RIGHT: CHOOSE PLAYER";
-      return index == 3 ? "A SWAP   B BACK" : "";
-    }
-    if (page == EXHIBITION_GAMEPLAN_PAGE_FORMATION) {
-      if (index == 0)
-        return "> FORMATION MODE";
-      if (index == 1)
-        return match_gameplan_tactics ? "< DEFENSIVE >" : "< OFFENSIVE >";
-      if (index == 2)
-        return "LEFT / RIGHT: CHANGE";
-      return index == 3 ? "A APPLY   B BACK" : "";
-    }
-  }
   if (__atomic_load_n(&match_pause_custom_active, __ATOMIC_ACQUIRE)) {
     const uint32_t page =
         __atomic_load_n(&match_pause_custom_page, __ATOMIC_ACQUIRE);
@@ -6091,6 +7246,8 @@ static int main_menu_start_two_player_match(void) {
                       __ATOMIC_ACQUIRE) == MAIN_MENU_2P_PREMATCH_BOOT_HUB;
   native_pad_lab_reset();
   __atomic_store_n(&main_menu_2p_transition_active, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_transition_kind,
+                   MAIN_MENU_2P_TRANSITION_LOADING, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_active, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&native_gamepad_lab_autostart, bootstrap_hub ? 0 : 1,
                    __ATOMIC_RELEASE);
@@ -6130,6 +7287,8 @@ static void main_menu_2p_team_selector_process_pending(void) {
     __atomic_store_n(&main_menu_controller_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&main_menu_2p_transition_active, 0,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(&main_menu_2p_transition_kind,
+                     MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
     debugPrintf("native 2P lab: custom selector start deferred\n");
   }
 }
@@ -6156,6 +7315,7 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
 
   main_menu_2p_native_uniform_track_init();
+  exhibition_gameplan_process_pending();
 
   const uint32_t kit_action = __atomic_exchange_n(
       &main_menu_2p_prematch_kit_input_pending, 0, __ATOMIC_ACQ_REL);
@@ -6201,7 +7361,13 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
     exhibition_popup_focus_index = 1;
     return;
   }
-  if (action != 3 && action != 4)
+  const int game_plan = action == 4;
+  if (game_plan) {
+    main_menu_2p_native_uniform_close();
+    exhibition_gameplan_open_custom();
+    return;
+  }
+  if (action != 3)
     return;
 
   void *listener = exhibition_flow_listener_instance
@@ -6210,29 +7376,29 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   if (!listener || !exhibition_flow_direct_set)
     return;
   static const char strategy_flow[] = "MyClub/Match/MenuMatchMenu";
-  const int game_plan = action == 4;
   main_menu_2p_native_uniform_close();
-  if (!game_plan)
+  if (!game_plan) {
     __atomic_store_n(&main_menu_2p_transition_active, 1,
                      __ATOMIC_RELEASE);
+    __atomic_store_n(&main_menu_2p_transition_kind,
+                     MAIN_MENU_2P_TRANSITION_VS, __ATOMIC_RELEASE);
+  }
   __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_strategy_action,
-                   game_plan ? EXHIBITION_STRATEGY_EDIT
-                             : EXHIBITION_STRATEGY_START,
+                   EXHIBITION_STRATEGY_START,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_strategy_pending, 1, __ATOMIC_RELEASE);
-  __atomic_store_n(&native_gamepad_lab_autostart, game_plan ? 0 : 1,
+  __atomic_store_n(&native_gamepad_lab_autostart, 1,
                    __ATOMIC_RELEASE);
-  __atomic_store_n(&main_menu_2p_prematch_return_pending,
-                   game_plan ? 1 : 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_prematch_return_pending, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   exhibition_flow_direct_set((unsigned char *)listener + 0x118,
                              strategy_flow);
-  debugPrintf("native 2P prematch: %s -> Strategy\n",
-              game_plan ? "Game Plan" : "Kick Off");
+  debugPrintf("native 2P prematch: Kick Off -> Strategy\n");
 }
 
 // Called from the game-thread Pad::Update hook rather than the HID polling
@@ -6476,6 +7642,8 @@ void pes_main_menu_simplify(void *window) {
   // disabled, so always leave the menu on its Match page.
   *(uint32_t *)((unsigned char *)window + 532) = 0;
   __atomic_store_n(&main_menu_2p_transition_active, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&main_menu_2p_transition_kind,
+                   MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
   if (!logged) {
     debugPrintf("UE4 menu: four-tile mode active "
                 "root=%p page=%p\n",
@@ -6965,14 +8133,7 @@ uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
     exhibition_refresh_squad_player_stats();
 
   const int native_active = strategy_flow && squad_edit;
-  __atomic_store_n(&exhibition_gameplan_custom_active, 0,
-                   __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_gameplan_custom_page,
-                   EXHIBITION_GAMEPLAN_PAGE_ROOT, __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_gameplan_custom_focus, 0,
-                   __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_gameplan_custom_action, 0,
-                   __ATOMIC_RELEASE);
+  exhibition_gameplan_reset();
   if (native_active) {
     __atomic_store_n(&match_gameplan_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
@@ -6989,109 +8150,11 @@ int pes_controller_custom_prematch_gameplan_active(void) {
                          __ATOMIC_ACQUIRE) != 0;
 }
 
-void pes_controller_custom_prematch_gameplan_input(uint32_t action) {
-  if (pes_controller_custom_prematch_gameplan_active() && action)
-    __atomic_store_n(&exhibition_gameplan_custom_action, action,
+void pes_controller_custom_prematch_gameplan_input(uint32_t pad,
+                                                    uint32_t action) {
+  if (pad < 2 && pes_controller_custom_prematch_gameplan_active() && action)
+    __atomic_store_n(&exhibition_gameplan_custom_action[pad], action,
                      __ATOMIC_RELEASE);
-}
-
-static void exhibition_gameplan_process_input(void *window) {
-  const uint32_t action = __atomic_exchange_n(
-      &exhibition_gameplan_custom_action, 0, __ATOMIC_ACQ_REL);
-  if (!action || !window)
-    return;
-
-  const uint32_t page = __atomic_load_n(
-      &exhibition_gameplan_custom_page, __ATOMIC_ACQUIRE);
-  if (page == EXHIBITION_GAMEPLAN_PAGE_ROOT) {
-    uint32_t focus = __atomic_load_n(&exhibition_gameplan_custom_focus,
-                                     __ATOMIC_ACQUIRE);
-    if (focus >= 5)
-      focus = 0;
-    if (action == PES_PAUSE_INPUT_UP) {
-      focus = focus ? focus - 1 : 4;
-      __atomic_store_n(&exhibition_gameplan_custom_focus, focus,
-                       __ATOMIC_RELEASE);
-    } else if (action == PES_PAUSE_INPUT_DOWN) {
-      __atomic_store_n(&exhibition_gameplan_custom_focus,
-                       (focus + 1) % 5, __ATOMIC_RELEASE);
-    } else if ((action == PES_PAUSE_INPUT_LEFT ||
-                action == PES_PAUSE_INPUT_RIGHT) &&
-               (focus == 2 || focus == 3)) {
-      exhibition_gameplan_change_uniform(
-          focus - 2, action == PES_PAUSE_INPUT_RIGHT ? 1 : -1);
-    } else if (action == PES_PAUSE_INPUT_BACK) {
-      __atomic_store_n(&exhibition_gameplan_custom_active, 0,
-                       __ATOMIC_RELEASE);
-      pes_exhibition_strategy_footer(window, 1);
-    } else if (action == PES_PAUSE_INPUT_DECIDE) {
-      if (focus == 0) {
-        match_gameplan_focus = 0;
-        __atomic_store_n(&exhibition_gameplan_custom_page,
-                         EXHIBITION_GAMEPLAN_PAGE_SUBSTITUTION,
-                         __ATOMIC_RELEASE);
-      } else if (focus == 1) {
-        match_gameplan_focus = 0;
-        __atomic_store_n(&exhibition_gameplan_custom_page,
-                         EXHIBITION_GAMEPLAN_PAGE_FORMATION,
-                         __ATOMIC_RELEASE);
-      } else if (focus == 2 || focus == 3) {
-        exhibition_gameplan_change_uniform(focus - 2, 1);
-      } else {
-        __atomic_store_n(&exhibition_gameplan_custom_active, 0,
-                         __ATOMIC_RELEASE);
-        pes_exhibition_strategy_footer(window, 0);
-      }
-    }
-    return;
-  }
-
-  if (page == EXHIBITION_GAMEPLAN_PAGE_SUBSTITUTION) {
-    const uint32_t focus = match_gameplan_focus & 1u;
-    if (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_DOWN) {
-      match_gameplan_focus = focus ^ 1u;
-    } else if (action == PES_PAUSE_INPUT_LEFT ||
-               action == PES_PAUSE_INPUT_RIGHT) {
-      const int direction = action == PES_PAUSE_INPUT_RIGHT ? 1 : -1;
-      uint32_t *selection = focus == 0 ? &match_gameplan_starter_index
-                                       : &match_gameplan_bench_index;
-      const uint32_t count = focus == 0 ? match_gameplan_starter_count
-                                         : match_gameplan_bench_count;
-      if (count)
-        *selection = direction > 0 ? (*selection + 1) % count
-                                   : (*selection ? *selection - 1
-                                                 : count - 1);
-    } else if (action == PES_PAUSE_INPUT_DECIDE) {
-      match_gameplan_swap_selected();
-    } else if (action == PES_PAUSE_INPUT_BACK) {
-      match_gameplan_focus = 0;
-      __atomic_store_n(&exhibition_gameplan_custom_focus, 0,
-                       __ATOMIC_RELEASE);
-      __atomic_store_n(&exhibition_gameplan_custom_page,
-                       EXHIBITION_GAMEPLAN_PAGE_ROOT, __ATOMIC_RELEASE);
-    }
-    return;
-  }
-
-  if (page == EXHIBITION_GAMEPLAN_PAGE_FORMATION) {
-    if (action == PES_PAUSE_INPUT_LEFT ||
-        action == PES_PAUSE_INPUT_RIGHT) {
-      match_gameplan_tactics ^= 1u;
-    } else if (action == PES_PAUSE_INPUT_DECIDE) {
-      if (match_gameplan_squad_data && match_squad_data_set_tactics) {
-        match_squad_data_set_tactics(match_gameplan_squad_data,
-                                      match_gameplan_tactics);
-        if (matchplan_squad_save)
-          matchplan_squad_save();
-      }
-    } else if (action == PES_PAUSE_INPUT_BACK) {
-      match_gameplan_focus = 0;
-      __atomic_store_n(&exhibition_gameplan_custom_focus, 1,
-                       __ATOMIC_RELEASE);
-      __atomic_store_n(&exhibition_gameplan_custom_page,
-                       EXHIBITION_GAMEPLAN_PAGE_ROOT, __ATOMIC_RELEASE);
-    }
-  }
 }
 
 static uint32_t pes_exhibition_strategy_update(void *window,
@@ -7114,10 +8177,6 @@ static uint32_t pes_exhibition_strategy_update(void *window,
       __atomic_load_n(&exhibition_strategy_action, __ATOMIC_ACQUIRE) ==
           EXHIBITION_STRATEGY_START)
     exhibition_set_pad_key_string(window, 0, 0x7fff0002);
-
-  if (window && pes_controller_custom_prematch_gameplan_active()) {
-    exhibition_gameplan_process_input(window);
-  }
 
   return result;
 }
@@ -7158,10 +8217,7 @@ static void pes_exhibition_strategy_footer(void *window,
 
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_gameplan_custom_active, 0,
-                   __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_gameplan_custom_action, 0,
-                   __ATOMIC_RELEASE);
+  exhibition_gameplan_reset();
 
   if (exhibition_strategy_footer_original)
     exhibition_strategy_footer_original(window, footer_key);
@@ -10412,6 +11468,9 @@ void install_ue4_hooks(so_module *module) {
   exhibition_matchplan_get_instance =
       (void *)so_find_addr_rx(module,
                               "_ZN9matchPlan4Data11GetInstanceEv");
+  exhibition_matchplan_create_instance =
+      (void *)so_find_addr_rx(module,
+                              "_ZN9matchPlan4Data14CreateInstanceEv");
   exhibition_matchplan_setup_team =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan4Data17SetupDataByTeamIdEN6common6TeamIdE8HomeAway");
@@ -10548,7 +11607,8 @@ void install_ue4_hooks(so_module *module) {
   }
   debugPrintf("UE4 hook: Exhibition Strategy seed backing=%p runtime=%p "
                "hook=%p resume=%p childSite=%p childHook=%p childResume=%p "
-               "get=%p setupTeam=%p setupTmpdb=%p setTeam=%p update=%p "
+               "get=%p create=%p setupTeam=%p setupTmpdb=%p setTeam=%p "
+               "update=%p "
                "setPad=%p getPad=%p "
                "vtable=%p post=%p footer=%p\n",
                (void *)strategy_main, (void *)strategy_main_runtime,
@@ -10558,6 +11618,7 @@ void install_ue4_hooks(so_module *module) {
               pes_exhibition_strategy_created_hook,
               (void *)exhibition_strategy_created_resume,
               exhibition_matchplan_get_instance,
+               exhibition_matchplan_create_instance,
                exhibition_matchplan_setup_team,
                exhibition_matchplan_setup_tmpdb,
                exhibition_set_team,
@@ -10670,15 +11731,14 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(filter_teams,
              (uintptr_t)&pes_exhibition_filter_teams_hook);
   debugPrintf("UE4 hook: Exhibition matchup UI touch=%p list=%p child=%p "
-              "footer=%p filter=%p setTeamId=%p valid=%u clubs\n",
+              "footer=%p filter=%p setTeamId=%p valid=%u teams\n",
               (void *)training_touch_runtime,
               (void *)training_list_runtime,
               (void *)training_child_runtime,
               (void *)training_footer_runtime,
               (void *)filter_teams_runtime,
               exhibition_set_test_match_team_id,
-              (unsigned int)(sizeof(exhibition_master_rosters) /
-                             sizeof(exhibition_master_rosters[0])));
+              (unsigned int)EXHIBITION_TEAM_CATALOG_COUNT);
 
   // Convert the stock Match Searching window into the single Exhibition hub.
   // Its native footer already supports four slots; only the Training game mode
@@ -11826,6 +12886,9 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(
           module,
           "_ZN5tmpdb4util19GetAnalyzeParameterERKNS_6PlayerENS0_17ANALYZE_PARA_KINDE");
+  match_player_id_without_data_flag =
+      (void *)so_try_find_addr_rx(
+          module, "_ZN5tmpdb19DuplicationDataFlag26GetPlayerIdWithoutDataFlagEj");
   match_squad_data_get_order_no =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData15GetSquadOrderNoERKNS_8PlayerIdE");
@@ -11847,6 +12910,47 @@ void install_ue4_hooks(so_module *module) {
   match_squad_data_set_tactics =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb9SquadData14SetTacticsKindENS_5Coach11TacticsKindE");
+  match_squad_data_get_formation =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadData12GetFormationENS_5Coach11TacticsKindE");
+  match_formation_get_position =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9Formation11GetPositionEhh");
+  match_formation_get_role =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9Formation7GetRoleEhh");
+  match_squad_data_get_player_role_position =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadData21GetPlayerRolePositionE8MemberIdRKNS_8PlayerIdERKNS_5Coach11TacticsKindE");
+  match_squad_data_get_team_power =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadData12GetTeamPowerEv");
+  match_squad_data_calc_chemistry =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb4util13CalcChemistryERKNS_9SquadDataERKNS_5Coach11TacticsKindE");
+  match_squad_data_copy_construct =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadDataC2ERKS0_");
+  match_squad_data_destruct =
+      (void *)so_find_addr_rx(module, "_ZN5tmpdb9SquadDataD2Ev");
+  match_auto_set_squad =
+      (void *)so_find_addr_rx(module,
+          "_ZN10onlinemode22UtilityMyClubSquadEdit7AutoSetERN5tmpdb9SquadDataENS1_4util7autoset10SelectKindENS1_5Coach11TacticsKindEb");
+  match_squad_data_get_settings =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadData20GetMatchPlanSettingsEv");
+  match_squad_data_set_settings =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadData20SetMatchPlanSettingsERKNS_17MatchPlanSettingsE");
+  match_squad_data_set_captain =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadData10SetCaptainE8MemberId");
+  match_squad_data_set_piece_taker =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadData16SetSetPieceTakerENS_17MatchPlanSettings13SetPieceTakerE8MemberId");
+  match_squad_data_set_attacker =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadData19SetDFOverlapSetPlayEj8MemberId");
   hook_arm64(pause_update, (uintptr_t)&pes_match_pause_update_hook);
 
   const char *squad_edit_update_symbol =

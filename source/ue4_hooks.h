@@ -250,8 +250,92 @@ void pes_controller_fix_demo_skip_request(void);
 int pes_controller_fix_demo_skip_active(void);
 int pes_controller_custom_postmatch_active(void);
 void pes_controller_custom_postmatch_input(uint32_t action);
+#define PES_PREMATCH_GAMEPLAN_PAGE_ROOT 0u
+#define PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE 1u
+#define PES_PREMATCH_GAMEPLAN_PAGE_FORMATION 2u
+#define PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP 3u
+#define PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS 4u
+#define PES_PREMATCH_GAMEPLAN_ACTION_COUNT 4u
+#define PES_PREMATCH_GAMEPLAN_POSITION_COUNT 9u
+#define PES_PREMATCH_GAMEPLAN_AREA_FIELD 0u
+#define PES_PREMATCH_GAMEPLAN_AREA_BENCH 1u
 int pes_controller_custom_prematch_gameplan_active(void);
-void pes_controller_custom_prematch_gameplan_input(uint32_t action);
+void pes_controller_custom_prematch_gameplan_input(uint32_t pad,
+                                                    uint32_t action);
+uint32_t pes_controller_custom_prematch_gameplan_page(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_root_focus(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_field_count(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_bench_count(uint32_t pad);
+const char *pes_controller_custom_prematch_gameplan_player_name(
+    uint32_t pad, uint32_t starting, uint32_t index);
+const char *pes_controller_custom_prematch_gameplan_player_role(
+    uint32_t pad, uint32_t starting, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_overall(
+    uint32_t pad, uint32_t starting, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_portrait_id(
+    uint32_t pad, uint32_t starting, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_preferred_foot(
+    uint32_t pad, uint32_t starting, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_shot_power(
+    uint32_t pad, uint32_t starting, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_pitch_x(
+    uint32_t pad, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_pitch_y(
+    uint32_t pad, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_substitute_area(
+    uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_substitute_focus(
+    uint32_t pad, uint32_t area);
+int pes_controller_custom_prematch_gameplan_substitute_selected(
+    uint32_t pad, uint32_t area, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_formation_focus(
+    uint32_t pad);
+const char *pes_controller_custom_prematch_gameplan_formation_value(
+    uint32_t pad, uint32_t row);
+const char *pes_controller_custom_prematch_gameplan_formation_label(
+    uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_team_power(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_team_spirit(uint32_t pad);
+int pes_controller_custom_prematch_gameplan_auto_preview_valid(
+    uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_auto_focus(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_auto_power(
+    uint32_t pad, uint32_t after);
+uint32_t pes_controller_custom_prematch_gameplan_auto_spirit(
+    uint32_t pad, uint32_t after);
+uint32_t pes_controller_custom_prematch_gameplan_position_focus(
+    uint32_t pad);
+const char *pes_controller_custom_prematch_gameplan_position_label(
+    uint32_t row);
+const char *pes_controller_custom_prematch_gameplan_position_value(
+    uint32_t pad, uint32_t row);
+int pes_controller_custom_prematch_gameplan_position_picker_active(
+    uint32_t pad);
+int pes_controller_custom_prematch_gameplan_waiting(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_focus(
+    uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_count(
+    uint32_t pad);
+const char *pes_controller_custom_prematch_gameplan_position_picker_name(
+    uint32_t pad, uint32_t index);
+const char *pes_controller_custom_prematch_gameplan_position_picker_role(
+    uint32_t pad, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_overall(
+    uint32_t pad, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_portrait_id(
+    uint32_t pad, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_preferred_foot(
+    uint32_t pad, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_position_picker_shot_power(
+    uint32_t pad, uint32_t index);
+typedef struct {
+  uint32_t portrait_id;
+  uint32_t byte_count;
+  unsigned char bytes[];
+} PesPrematchGameplanPortraitPng;
+PesPrematchGameplanPortraitPng *
+pes_controller_custom_prematch_gameplan_take_portrait_png(uint32_t pad,
+                                                           uint32_t index);
 int pes_controller_menu_active(void);
 int pes_controller_gameplan_cursor_active(void);
 int pes_controller_virtual_cursor_context(void);
@@ -304,6 +388,10 @@ void pes_controller_2p_team_selector_pad_event(uint32_t pad,
 #define PES_2P_PREMATCH_HUB_PAGE_STADIUM 2u
 int pes_controller_2p_prematch_hub_active(void);
 int pes_controller_2p_transition_active(void);
+#define PES_2P_TRANSITION_NONE 0u
+#define PES_2P_TRANSITION_LOADING 1u
+#define PES_2P_TRANSITION_VS 2u
+uint32_t pes_controller_2p_transition_kind(void);
 uint32_t pes_controller_2p_prematch_hub_focus(void);
 uint32_t pes_controller_2p_prematch_hub_page(void);
 uint32_t pes_controller_2p_prematch_hub_page_focus(void);

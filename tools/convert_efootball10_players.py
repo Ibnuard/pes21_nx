@@ -28,11 +28,13 @@ import sys
 import zlib
 from pathlib import Path
 
-from generate_efootball10_rosters import (
-    decode_wesys,
-    parse_c_arrays,
-    parse_team_symbols,
+from exhibition_team_catalog import (
+    catalog_team_map,
+    conversion_team_ids,
+    load_catalog,
+    parse_c_roster_arrays,
 )
+from pesdb import decode_wesys
 from prepare_runtime import read_cpk_packet
 
 
@@ -506,6 +508,12 @@ def main() -> None:
         ),
     )
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path("data/exhibition_team_catalog.json"),
+        help="generated team catalog relative to --root",
+    )
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -535,29 +543,30 @@ def main() -> None:
     )
     ef10_by_player, ef10_by_team = parse_ef10_assignment_rows(ef10_assignments)
 
-    team_symbols = parse_team_symbols(
-        root / "source" / "ue4_hooks.c",
-        root / "source" / "exhibition_nations.inc",
-    )
+    catalog_path = args.catalog if args.catalog.is_absolute() else root / args.catalog
+    catalog = load_catalog(catalog_path)
+    team_by_id = catalog_team_map(catalog)
+    eligible_team_ids = conversion_team_ids(catalog)
     if args.team_id == 0:
         tracked_team_ids = {
-            team_id for team_id in team_symbols if ef10_by_team.get(team_id)
+            team_id for team_id in eligible_team_ids if ef10_by_team.get(team_id)
         }
         target_symbol = "all_exhibition_teams"
-    elif args.team_id in team_symbols:
+    elif args.team_id in eligible_team_ids:
         tracked_team_ids = {args.team_id}
-        target_symbol = team_symbols[args.team_id]
+        target_symbol = str(team_by_id[args.team_id]["symbol"])
     else:
-        raise ValueError(f"team ID {args.team_id} is not exposed by Exhibition")
+        raise ValueError(
+            f"team ID {args.team_id} is not conversion-eligible in the Exhibition catalog"
+        )
     if not tracked_team_ids:
         raise RuntimeError("no selected Exhibition teams have EF10 assignments")
     roster_paths = [
-        root / "source" / "ue4_hooks.c",
         root / "source" / "exhibition_rosters.inc",
     ]
     if not args.supersede_migration_rosters:
         roster_paths.append(root / "source" / "exhibition_migration.inc")
-    roster_players, _roster_shirts = parse_c_arrays(
+    roster_players, _roster_shirts = parse_c_roster_arrays(
         [path for path in roster_paths if path.is_file()]
     )
     reserved_ids = {
