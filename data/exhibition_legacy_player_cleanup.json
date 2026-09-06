@@ -1,0 +1,2137 @@
+{
+  "schema_version": 1,
+  "generated_by": "tools/generate_legacy_player_cleanup.py",
+  "catalog_content_id": "29914839e0782650",
+  "policy": {
+    "scope": "club_to_club",
+    "automatic_identity": "shared_player_id",
+    "name_only_matches": "review_only",
+    "preserve_national_team_membership": true,
+    "minimum_players_after_cleanup": 18
+  },
+  "counts": {
+    "active_ef10_teams": 99,
+    "active_ef10_clubs": 43,
+    "fallback_clubs": 338,
+    "affected_fallback_clubs": 136,
+    "removed_legacy_memberships": 299,
+    "minimum_cleaned_roster": 19,
+    "name_only_review_candidates": 2
+  },
+  "source_sha256": {
+    "active_ef10_rosters": "fa8e863a8b6d1304663c0a41751d74589c01e72d4124713c62bc7dbb810a116b",
+    "ef10_assignments": "0a9d105987c97dd956dc32ff333c80276d3efb622d6d4c3319135b3b6c57b325",
+    "ef10_players": "e0e6dfd20ea2b1ae5f291af104b7b3745884ebd23133a0941ee2402c33a22b69",
+    "pes21_assignments": "1dc971b8a5697fb258611afb22f20ef79e9915192c63903a64d6fdb230a53260",
+    "pes21_players": "de1e71f275123a85d264b506ac36a3598a1fda101183a99adc0e0bb8df7e724b"
+  },
+  "active_ef10_team_ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    123,
+    124,
+    125,
+    128,
+    130,
+    131,
+    132,
+    136,
+    137,
+    138,
+    139,
+    173,
+    177,
+    179,
+    191,
+    192,
+    193,
+    234,
+    327,
+    333,
+    377
+  ],
+  "active_ef10_club_team_ids": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    123,
+    124,
+    125,
+    128,
+    130,
+    131,
+    132,
+    136,
+    137,
+    138,
+    139,
+    173,
+    177,
+    179,
+    191,
+    192,
+    193,
+    234,
+    327,
+    333,
+    377
+  ],
+  "cleaned_player_counts": {
+    "115": 25,
+    "127": 31,
+    "133": 34,
+    "134": 36,
+    "135": 35,
+    "146": 28,
+    "152": 25,
+    "163": 24,
+    "172": 24,
+    "174": 27,
+    "176": 29,
+    "178": 22,
+    "181": 23,
+    "186": 34,
+    "190": 30,
+    "194": 30,
+    "195": 33,
+    "196": 33,
+    "197": 27,
+    "204": 25,
+    "205": 28,
+    "207": 23,
+    "208": 25,
+    "213": 21,
+    "216": 26,
+    "217": 28,
+    "218": 26,
+    "221": 27,
+    "235": 26,
+    "242": 30,
+    "245": 29,
+    "250": 19,
+    "254": 30,
+    "255": 29,
+    "258": 26,
+    "265": 29,
+    "266": 35,
+    "267": 26,
+    "269": 23,
+    "273": 26,
+    "320": 27,
+    "323": 26,
+    "328": 39,
+    "336": 33,
+    "349": 28,
+    "357": 27,
+    "361": 31,
+    "362": 27,
+    "364": 36,
+    "370": 29,
+    "378": 27,
+    "382": 26,
+    "383": 39,
+    "388": 29,
+    "389": 29,
+    "394": 36,
+    "398": 31,
+    "414": 29,
+    "415": 30,
+    "418": 35,
+    "1195": 21,
+    "1197": 30,
+    "1207": 25,
+    "1208": 27,
+    "1237": 37,
+    "1239": 32,
+    "1240": 37,
+    "1241": 36,
+    "1242": 28,
+    "1243": 36,
+    "1244": 38,
+    "1245": 27,
+    "1247": 28,
+    "1248": 30,
+    "1249": 35,
+    "1252": 30,
+    "1255": 32,
+    "1256": 39,
+    "1330": 26,
+    "1600": 32,
+    "1706": 29,
+    "1765": 36,
+    "1804": 34,
+    "1832": 27,
+    "1919": 31,
+    "1922": 39,
+    "1927": 35,
+    "1929": 39,
+    "1931": 29,
+    "1945": 28,
+    "1950": 25,
+    "1957": 28,
+    "1974": 32,
+    "1986": 35,
+    "2009": 30,
+    "2069": 31,
+    "2187": 31,
+    "2188": 31,
+    "2191": 28,
+    "2193": 31,
+    "2285": 27,
+    "2360": 29,
+    "2391": 27,
+    "2451": 27,
+    "2465": 32,
+    "2538": 39,
+    "2616": 32,
+    "2625": 32,
+    "2653": 27,
+    "2722": 38,
+    "4071": 20,
+    "4123": 28,
+    "4145": 27,
+    "4146": 27,
+    "4180": 30,
+    "4183": 39,
+    "4192": 31,
+    "4194": 26,
+    "4220": 30,
+    "4229": 33,
+    "4230": 33,
+    "4237": 34,
+    "4244": 28,
+    "4308": 32,
+    "4309": 25,
+    "4323": 29,
+    "4363": 30,
+    "4914": 28,
+    "4964": 31,
+    "5028": 36,
+    "5046": 30,
+    "5143": 22,
+    "5194": 31,
+    "5202": 28,
+    "5204": 33,
+    "5356": 29
+  },
+  "removals": [
+    {
+      "fallback_team_id": 115,
+      "player_id": 119878,
+      "destination_team_id": 124,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 115,
+      "player_id": 126710,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 127,
+      "player_id": 40002,
+      "destination_team_id": 108,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 127,
+      "player_id": 41124,
+      "destination_team_id": 109,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 127,
+      "player_id": 104717,
+      "destination_team_id": 114,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 127,
+      "player_id": 104752,
+      "destination_team_id": 119,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 127,
+      "player_id": 134868,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 133,
+      "player_id": 47543,
+      "destination_team_id": 191,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 134,
+      "player_id": 118347,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 135,
+      "player_id": 102481,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 146,
+      "player_id": 132979,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 152,
+      "player_id": 121701,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 163,
+      "player_id": 115662,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 163,
+      "player_id": 126859,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 163,
+      "player_id": 126860,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 172,
+      "player_id": 43075,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 172,
+      "player_id": 100299,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 172,
+      "player_id": 108129,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 172,
+      "player_id": 109997,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 172,
+      "player_id": 126336,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 172,
+      "player_id": 138181,
+      "destination_team_id": 111,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 174,
+      "player_id": 102892,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 174,
+      "player_id": 116224,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 174,
+      "player_id": 136668,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 176,
+      "player_id": 111465,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 176,
+      "player_id": 127114,
+      "destination_team_id": 103,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 176,
+      "player_id": 138081,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 178,
+      "player_id": 42825,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 178,
+      "player_id": 47786,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 178,
+      "player_id": 104722,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 178,
+      "player_id": 108402,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 178,
+      "player_id": 110599,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 178,
+      "player_id": 110679,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 181,
+      "player_id": 111804,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 181,
+      "player_id": 117049,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 181,
+      "player_id": 140940,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 186,
+      "player_id": 113711,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 186,
+      "player_id": 121813,
+      "destination_team_id": 101,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 190,
+      "player_id": 60560,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 194,
+      "player_id": 104324,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 194,
+      "player_id": 114592,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 195,
+      "player_id": 60558,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 196,
+      "player_id": 103613,
+      "destination_team_id": 101,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 196,
+      "player_id": 115079,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 197,
+      "player_id": 61531,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 197,
+      "player_id": 114088,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 197,
+      "player_id": 123592,
+      "destination_team_id": 100,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 204,
+      "player_id": 9042,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 204,
+      "player_id": 35505,
+      "destination_team_id": 100,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 204,
+      "player_id": 59801,
+      "destination_team_id": 107,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 204,
+      "player_id": 114036,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 204,
+      "player_id": 114855,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 204,
+      "player_id": 121373,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 205,
+      "player_id": 103047,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 205,
+      "player_id": 126825,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 16800,
+      "destination_team_id": 112,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 36768,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 46536,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 101356,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 114147,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 126820,
+      "destination_team_id": 112,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 207,
+      "player_id": 138082,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 208,
+      "player_id": 32386,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 208,
+      "player_id": 34868,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 208,
+      "player_id": 117087,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 208,
+      "player_id": 127649,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 208,
+      "player_id": 135067,
+      "destination_team_id": 114,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 208,
+      "player_id": 143136,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 213,
+      "player_id": 60447,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 213,
+      "player_id": 110578,
+      "destination_team_id": 191,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 213,
+      "player_id": 117835,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 213,
+      "player_id": 123160,
+      "destination_team_id": 125,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 213,
+      "player_id": 125402,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 213,
+      "player_id": 127542,
+      "destination_team_id": 192,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 216,
+      "player_id": 115254,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 217,
+      "player_id": 60109,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 217,
+      "player_id": 117804,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 217,
+      "player_id": 118110,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 217,
+      "player_id": 126689,
+      "destination_team_id": 101,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 217,
+      "player_id": 126724,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 217,
+      "player_id": 127386,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 218,
+      "player_id": 114016,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 218,
+      "player_id": 127516,
+      "destination_team_id": 173,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 218,
+      "player_id": 128078,
+      "destination_team_id": 109,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 221,
+      "player_id": 109024,
+      "destination_team_id": 116,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 221,
+      "player_id": 128338,
+      "destination_team_id": 125,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 221,
+      "player_id": 133023,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 235,
+      "player_id": 119606,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 235,
+      "player_id": 126570,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 235,
+      "player_id": 140737,
+      "destination_team_id": 124,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 235,
+      "player_id": 140738,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 235,
+      "player_id": 141013,
+      "destination_team_id": 119,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 235,
+      "player_id": 141440,
+      "destination_team_id": 125,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 242,
+      "player_id": 114604,
+      "destination_team_id": 116,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 242,
+      "player_id": 114627,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 242,
+      "player_id": 116710,
+      "destination_team_id": 124,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 242,
+      "player_id": 118274,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 242,
+      "player_id": 118316,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 245,
+      "player_id": 116018,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 245,
+      "player_id": 127217,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 245,
+      "player_id": 139693,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 250,
+      "player_id": 108163,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 250,
+      "player_id": 109534,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 250,
+      "player_id": 126097,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 250,
+      "player_id": 130763,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 250,
+      "player_id": 132851,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 250,
+      "player_id": 136182,
+      "destination_team_id": 117,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 254,
+      "player_id": 127551,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 255,
+      "player_id": 128022,
+      "destination_team_id": 191,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 258,
+      "player_id": 45290,
+      "destination_team_id": 108,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 265,
+      "player_id": 38491,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 265,
+      "player_id": 46649,
+      "destination_team_id": 111,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 265,
+      "player_id": 103317,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 265,
+      "player_id": 110784,
+      "destination_team_id": 108,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 266,
+      "player_id": 128435,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 266,
+      "player_id": 142760,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 267,
+      "player_id": 60059,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 267,
+      "player_id": 109872,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 267,
+      "player_id": 114910,
+      "destination_team_id": 107,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 267,
+      "player_id": 127058,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 267,
+      "player_id": 141421,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 269,
+      "player_id": 122728,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 269,
+      "player_id": 132062,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 269,
+      "player_id": 133470,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 273,
+      "player_id": 42343,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 273,
+      "player_id": 126995,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 320,
+      "player_id": 60694,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 320,
+      "player_id": 102759,
+      "destination_team_id": 116,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 320,
+      "player_id": 116482,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 320,
+      "player_id": 118352,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 320,
+      "player_id": 133002,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 40525,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 100428,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 106127,
+      "destination_team_id": 125,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 113743,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 114903,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 115117,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 323,
+      "player_id": 128478,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 328,
+      "player_id": 119151,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 107686,
+      "destination_team_id": 119,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 109232,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 109263,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 136672,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 138047,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 140565,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 336,
+      "player_id": 140987,
+      "destination_team_id": 123,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 349,
+      "player_id": 106869,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 349,
+      "player_id": 127613,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 357,
+      "player_id": 108270,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 357,
+      "player_id": 134474,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 361,
+      "player_id": 104282,
+      "destination_team_id": 111,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 362,
+      "player_id": 109849,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 362,
+      "player_id": 116575,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 364,
+      "player_id": 141569,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 370,
+      "player_id": 43387,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 370,
+      "player_id": 60878,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 370,
+      "player_id": 127571,
+      "destination_team_id": 109,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 378,
+      "player_id": 101781,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 378,
+      "player_id": 103830,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 378,
+      "player_id": 124840,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 382,
+      "player_id": 46598,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 382,
+      "player_id": 61710,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 383,
+      "player_id": 103511,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 388,
+      "player_id": 101586,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 388,
+      "player_id": 108079,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 388,
+      "player_id": 126513,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 388,
+      "player_id": 133107,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 389,
+      "player_id": 126299,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 394,
+      "player_id": 139728,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 398,
+      "player_id": 102975,
+      "destination_team_id": 333,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 398,
+      "player_id": 127787,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 414,
+      "player_id": 122271,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 415,
+      "player_id": 139658,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 418,
+      "player_id": 136009,
+      "destination_team_id": 125,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1195,
+      "player_id": 115994,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1195,
+      "player_id": 117505,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1197,
+      "player_id": 117993,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1207,
+      "player_id": 120424,
+      "destination_team_id": 125,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1207,
+      "player_id": 141221,
+      "destination_team_id": 100,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1208,
+      "player_id": 135956,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1208,
+      "player_id": 143266,
+      "destination_team_id": 377,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1208,
+      "player_id": 143267,
+      "destination_team_id": 191,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1237,
+      "player_id": 108055,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1237,
+      "player_id": 126341,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1237,
+      "player_id": 135143,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1239,
+      "player_id": 141562,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1240,
+      "player_id": 114366,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1240,
+      "player_id": 128960,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1240,
+      "player_id": 141098,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1241,
+      "player_id": 128959,
+      "destination_team_id": 137,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1241,
+      "player_id": 140874,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1241,
+      "player_id": 140875,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1242,
+      "player_id": 141350,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1243,
+      "player_id": 126535,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1243,
+      "player_id": 131948,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1244,
+      "player_id": 47583,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1244,
+      "player_id": 141649,
+      "destination_team_id": 123,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1245,
+      "player_id": 107657,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1245,
+      "player_id": 138662,
+      "destination_team_id": 173,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1247,
+      "player_id": 126517,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1248,
+      "player_id": 135039,
+      "destination_team_id": 137,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1248,
+      "player_id": 140739,
+      "destination_team_id": 192,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1249,
+      "player_id": 118644,
+      "destination_team_id": 137,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1252,
+      "player_id": 42274,
+      "destination_team_id": 137,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1252,
+      "player_id": 132043,
+      "destination_team_id": 137,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1255,
+      "player_id": 113364,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1255,
+      "player_id": 119141,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1256,
+      "player_id": 125022,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1330,
+      "player_id": 127189,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1600,
+      "player_id": 103120,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1600,
+      "player_id": 118041,
+      "destination_team_id": 123,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1706,
+      "player_id": 123117,
+      "destination_team_id": 191,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1765,
+      "player_id": 45113,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1765,
+      "player_id": 47215,
+      "destination_team_id": 193,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1765,
+      "player_id": 103581,
+      "destination_team_id": 109,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1765,
+      "player_id": 119139,
+      "destination_team_id": 192,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1804,
+      "player_id": 110762,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1804,
+      "player_id": 129378,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1804,
+      "player_id": 137766,
+      "destination_team_id": 119,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1832,
+      "player_id": 126905,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1919,
+      "player_id": 59548,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1919,
+      "player_id": 107949,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1919,
+      "player_id": 122716,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1922,
+      "player_id": 110415,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1927,
+      "player_id": 122020,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1929,
+      "player_id": 118957,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1931,
+      "player_id": 121266,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1945,
+      "player_id": 140228,
+      "destination_team_id": 116,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1950,
+      "player_id": 102531,
+      "destination_team_id": 113,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1957,
+      "player_id": 139962,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1974,
+      "player_id": 47432,
+      "destination_team_id": 193,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1974,
+      "player_id": 103064,
+      "destination_team_id": 116,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1974,
+      "player_id": 132760,
+      "destination_team_id": 112,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1974,
+      "player_id": 137267,
+      "destination_team_id": 192,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 1986,
+      "player_id": 121431,
+      "destination_team_id": 132,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2009,
+      "player_id": 138392,
+      "destination_team_id": 121,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2069,
+      "player_id": 133260,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2187,
+      "player_id": 138026,
+      "destination_team_id": 108,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2188,
+      "player_id": 110635,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2191,
+      "player_id": 136007,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2193,
+      "player_id": 132388,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2285,
+      "player_id": 60855,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2360,
+      "player_id": 118699,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2391,
+      "player_id": 122538,
+      "destination_team_id": 193,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2451,
+      "player_id": 123439,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2451,
+      "player_id": 131070,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2465,
+      "player_id": 110412,
+      "destination_team_id": 137,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2538,
+      "player_id": 141148,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2616,
+      "player_id": 140870,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2625,
+      "player_id": 130817,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2653,
+      "player_id": 141420,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2722,
+      "player_id": 118157,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 2722,
+      "player_id": 128281,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4071,
+      "player_id": 37291,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4071,
+      "player_id": 102947,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4071,
+      "player_id": 104680,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4071,
+      "player_id": 110774,
+      "destination_team_id": 131,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4071,
+      "player_id": 114937,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4123,
+      "player_id": 140649,
+      "destination_team_id": 179,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4145,
+      "player_id": 47241,
+      "destination_team_id": 111,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4145,
+      "player_id": 60387,
+      "destination_team_id": 118,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4145,
+      "player_id": 60687,
+      "destination_team_id": 139,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4145,
+      "player_id": 103041,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4146,
+      "player_id": 109101,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4180,
+      "player_id": 101520,
+      "destination_team_id": 101,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4180,
+      "player_id": 110292,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4183,
+      "player_id": 126918,
+      "destination_team_id": 193,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4192,
+      "player_id": 119835,
+      "destination_team_id": 106,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4194,
+      "player_id": 118657,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4194,
+      "player_id": 121428,
+      "destination_team_id": 105,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4194,
+      "player_id": 122706,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4194,
+      "player_id": 142846,
+      "destination_team_id": 177,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4220,
+      "player_id": 128021,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4220,
+      "player_id": 138141,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4220,
+      "player_id": 140556,
+      "destination_team_id": 123,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4229,
+      "player_id": 116946,
+      "destination_team_id": 327,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4230,
+      "player_id": 126241,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4237,
+      "player_id": 142828,
+      "destination_team_id": 193,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4244,
+      "player_id": 100479,
+      "destination_team_id": 123,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4244,
+      "player_id": 128232,
+      "destination_team_id": 122,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4308,
+      "player_id": 60360,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4309,
+      "player_id": 107321,
+      "destination_team_id": 111,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4323,
+      "player_id": 104479,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4323,
+      "player_id": 132923,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4363,
+      "player_id": 135172,
+      "destination_team_id": 102,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4914,
+      "player_id": 113677,
+      "destination_team_id": 120,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4914,
+      "player_id": 114835,
+      "destination_team_id": 119,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4914,
+      "player_id": 122707,
+      "destination_team_id": 119,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4914,
+      "player_id": 124236,
+      "destination_team_id": 124,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 4964,
+      "player_id": 139749,
+      "destination_team_id": 104,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5028,
+      "player_id": 128174,
+      "destination_team_id": 110,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5028,
+      "player_id": 142410,
+      "destination_team_id": 100,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5046,
+      "player_id": 119811,
+      "destination_team_id": 234,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5046,
+      "player_id": 140051,
+      "destination_team_id": 128,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5143,
+      "player_id": 106641,
+      "destination_team_id": 136,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5194,
+      "player_id": 126133,
+      "destination_team_id": 138,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5202,
+      "player_id": 138161,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5204,
+      "player_id": 125731,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    },
+    {
+      "fallback_team_id": 5356,
+      "player_id": 113219,
+      "destination_team_id": 130,
+      "match": "shared_player_id"
+    }
+  ],
+  "name_only_review": [
+    {
+      "fallback_team_id": 1933,
+      "pes21_player_id": 108850,
+      "active_ef10_player_id": 103064,
+      "destination_team_id": 116,
+      "normalized_name": "MATHEUS",
+      "match_evidence": [
+        "normalized_name",
+        "nationality",
+        "position"
+      ],
+      "action": "review_only"
+    },
+    {
+      "fallback_team_id": 4302,
+      "pes21_player_id": 102743,
+      "active_ef10_player_id": 127571,
+      "destination_team_id": 109,
+      "normalized_name": "FRAN GARCIA",
+      "match_evidence": [
+        "normalized_name",
+        "nationality",
+        "position"
+      ],
+      "action": "review_only"
+    }
+  ],
+  "content_id": "b6560bb15cddf9c3"
+}

@@ -40,6 +40,14 @@ class TeamRecord:
 
 
 @dataclass(frozen=True)
+class PlayerRecord:
+    player_id: int
+    name: str
+    nationality_code: int
+    position: int
+
+
+@dataclass(frozen=True)
 class PlayerAssignment:
     player_id: int
     team_id: int
@@ -134,6 +142,39 @@ def parse_player_ids(raw: bytes, schema: str) -> set[int]:
                 f"{schema} Player.bin has invalid duplicate player ID {player_id}"
             )
         result.add(player_id)
+    return result
+
+
+def parse_player_records(raw: bytes, schema: str) -> dict[int, PlayerRecord]:
+    if schema == "ef10":
+        record_size = EF10_PLAYER_RECORD_SIZE
+        id_format = "<Q"
+        name_offset = 328
+        nationality = lambda record: record[40] << 1
+        position = lambda record: (struct.unpack_from("<I", record, 64)[0] >> 24) & 0x0F
+    elif schema == "pes21":
+        record_size = PES21_PLAYER_RECORD_SIZE
+        id_format = "<I"
+        name_offset = 251
+        nationality = lambda record: int.from_bytes(record[29:31], "little") & 0x03FF
+        position = lambda record: (struct.unpack_from("<I", record, 52)[0] >> 18) & 0x0F
+    else:
+        raise ValueError(f"unknown Player.bin schema: {schema}")
+
+    result: dict[int, PlayerRecord] = {}
+    for record in split_records(raw, record_size, f"{schema} Player.bin"):
+        player_id = struct.unpack_from(id_format, record, PLAYER_ID_OFFSET)[0]
+        if not player_id or player_id in result:
+            raise ValueError(
+                f"{schema} Player.bin has invalid duplicate player ID {player_id}"
+            )
+        name = _decode_name(record[name_offset : name_offset + 61])
+        result[player_id] = PlayerRecord(
+            player_id=player_id,
+            name=name,
+            nationality_code=nationality(record),
+            position=position(record),
+        )
     return result
 
 

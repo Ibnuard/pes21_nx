@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -12,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from exhibition_team_catalog import load_catalog  # noqa: E402
+from exhibition_team_catalog import load_catalog, parse_master_rosters  # noqa: E402
 from generate_exhibition_team_catalog import render_team_include  # noqa: E402
 
 
@@ -21,6 +23,8 @@ TEAM_INCLUDE_PATH = ROOT / "source" / "exhibition_teams_generated.inc"
 ROSTER_INCLUDE_PATH = (
     ROOT / "source" / "exhibition_rosters_pes21_generated.inc"
 )
+EF10_ROSTER_INCLUDE_PATH = ROOT / "source" / "exhibition_rosters_ef10.inc"
+LEGACY_CLEANUP_PATH = ROOT / "data" / "exhibition_legacy_player_cleanup.json"
 BADGE_ATLAS_PATH = ROOT / "source" / "badge_atlas.h"
 BADGE_ATLAS_BINARY_PATH = ROOT / "data" / "badge_atlas.bin"
 UE4_HOOKS_PATH = ROOT / "source" / "ue4_hooks.c"
@@ -45,6 +49,7 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         cls.teams = cls.catalog["teams"]
         cls.categories = cls.catalog["categories"]
         cls.team_by_id = {int(team["team_id"]): team for team in cls.teams}
+        cls.cleanup = json.loads(LEGACY_CLEANUP_PATH.read_text(encoding="utf-8"))
 
     def test_expected_safe_catalog_shape(self) -> None:
         counts = self.catalog["counts"]
@@ -131,6 +136,9 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertIn(
             f"// Catalog content ID: {self.catalog['content_id']}", source
         )
+        self.assertIn(
+            f"// Legacy cleanup content ID: {self.cleanup['content_id']}", source
+        )
         player_ids = parse_uint_array(source, "exhibition_pes21_player_ids")
         shirt_numbers = parse_uint_array(
             source, "exhibition_pes21_shirt_numbers"
@@ -150,7 +158,17 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
             for team in self.teams
             if team["roster_source"] == "pes21_native"
         ]
-        self.assertEqual([entry[0] for entry in entries], native_team_ids)
+        cleanup_team_ids = {
+            int(row["fallback_team_id"]) for row in self.cleanup["removals"]
+        }
+        expected_team_ids = sorted(set(native_team_ids) | cleanup_team_ids)
+        self.assertEqual([entry[0] for entry in entries], expected_team_ids)
+
+        removals_by_team: dict[int, set[int]] = {}
+        for row in self.cleanup["removals"]:
+            removals_by_team.setdefault(int(row["fallback_team_id"]), set()).add(
+                int(row["player_id"])
+            )
 
         expected_offset = 0
         for team_id, player_offset, shirt_offset, count in entries:
@@ -158,13 +176,114 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
             self.assertEqual(shirt_offset, expected_offset)
             self.assertGreaterEqual(count, 18)
             self.assertLessEqual(count, 40)
-            self.assertEqual(count, self.team_by_id[team_id]["pes21_player_count"])
+            self.assertEqual(
+                count,
+                self.team_by_id[team_id]["pes21_player_count"]
+                - len(removals_by_team.get(team_id, set())),
+            )
             roster = player_ids[player_offset : player_offset + count]
             self.assertEqual(len(roster), count)
             self.assertEqual(len(roster), len(set(roster)))
             self.assertTrue(all(player_id > 0 for player_id in roster))
+            self.assertFalse(set(roster) & removals_by_team.get(team_id, set()))
             expected_offset += count
         self.assertEqual(expected_offset, len(player_ids))
+
+    def test_legacy_cleanup_manifest_is_safe_and_applied(self) -> None:
+        canonical = {
+            key: value for key, value in self.cleanup.items() if key != "content_id"
+        }
+        expected_content_id = hashlib.sha256(
+            json.dumps(
+                canonical, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        self.assertEqual(self.cleanup["content_id"], expected_content_id)
+        self.assertEqual(self.cleanup["catalog_content_id"], self.catalog["content_id"])
+        self.assertTrue(self.cleanup["policy"]["preserve_national_team_membership"])
+
+        counts = self.cleanup["counts"]
+        self.assertEqual(counts["active_ef10_teams"], 99)
+        self.assertEqual(counts["active_ef10_clubs"], 43)
+        self.assertEqual(counts["affected_fallback_clubs"], 136)
+        self.assertEqual(counts["removed_legacy_memberships"], 299)
+        self.assertGreaterEqual(counts["minimum_cleaned_roster"], 18)
+
+        removals = self.cleanup["removals"]
+        pairs = {
+            (int(row["fallback_team_id"]), int(row["player_id"]))
+            for row in removals
+        }
+        self.assertEqual(len(pairs), len(removals))
+        self.assertTrue(
+            all(
+                self.team_by_id[int(row["fallback_team_id"])]["kind"] == "club"
+                and self.team_by_id[int(row["destination_team_id"])]["kind"]
+                == "club"
+                and row["match"] == "shared_player_id"
+                for row in removals
+            )
+        )
+        self.assertIn((127, 40002), pairs)
+        lewandowski = next(
+            row
+            for row in removals
+            if int(row["fallback_team_id"]) == 127
+            and int(row["player_id"]) == 40002
+        )
+        self.assertEqual(int(lewandowski["destination_team_id"]), 108)
+
+        ef10_source = EF10_ROSTER_INCLUDE_PATH.read_text(encoding="utf-8")
+        barcelona_players = parse_uint_array(
+            ef10_source, "exhibition_ef10_barcelona_players"
+        )
+        self.assertIn(40002, barcelona_players)
+        self.assertTrue(
+            all(
+                row["action"] == "review_only"
+                and int(row["pes21_player_id"])
+                != int(row["active_ef10_player_id"])
+                for row in self.cleanup["name_only_review"]
+            )
+        )
+
+    def test_effective_club_rosters_have_unique_player_ids(self) -> None:
+        source = ROSTER_INCLUDE_PATH.read_text(encoding="utf-8")
+        player_ids = parse_uint_array(source, "exhibition_pes21_player_ids")
+        entries = [
+            tuple(int(value) for value in match)
+            for match in re.findall(
+                r"\{(\d+)u, exhibition_pes21_player_ids \+ (\d+)u, "
+                r"exhibition_pes21_shirt_numbers \+ (\d+)u, (\d+)u\}",
+                source,
+            )
+        ]
+        fallback_rosters = {
+            team_id: player_ids[offset : offset + count]
+            for team_id, offset, _shirt_offset, count in entries
+        }
+        ef10_rosters = {
+            team_id: players
+            for team_id, (players, _shirts) in parse_master_rosters(
+                EF10_ROSTER_INCLUDE_PATH, "exhibition_ef10_master_rosters"
+            ).items()
+        }
+        club_team_ids = {
+            int(team["team_id"]) for team in self.teams if team["kind"] == "club"
+        }
+
+        owner_by_player: dict[int, int] = {}
+        for team_id in sorted(club_team_ids):
+            roster = ef10_rosters.get(team_id, fallback_rosters.get(team_id, []))
+            self.assertTrue(roster, f"club {team_id} has no effective roster")
+            for player_id in roster:
+                self.assertNotIn(
+                    player_id,
+                    owner_by_player,
+                    f"player {player_id} belongs to clubs "
+                    f"{owner_by_player.get(player_id)} and {team_id}",
+                )
+                owner_by_player[player_id] = team_id
 
     def test_badge_atlas_metadata_matches_catalog(self) -> None:
         with BADGE_ATLAS_PATH.open("r", encoding="ascii") as source:
@@ -233,6 +352,17 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         ]
         if not all(path.exists() for path in required):
             self.skipTest("ignored local PES database sources are unavailable")
+        subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools" / "generate_legacy_player_cleanup.py"),
+                "--check",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         subprocess.run(
             [
                 sys.executable,

@@ -116,3 +116,48 @@ def parse_c_roster_arrays(
             target = players if kind == "players" else shirts
             target[name] = values
     return players, shirts
+
+
+def parse_master_roster_team_ids(path: Path, symbol: str) -> list[int]:
+    """Return team IDs from one generated ExhibitionMasterRoster table."""
+    return list(parse_master_rosters(path, symbol))
+
+
+def parse_master_rosters(
+    path: Path, symbol: str
+) -> dict[int, tuple[list[int], list[int]]]:
+    """Return team IDs and arrays from one ExhibitionMasterRoster table."""
+    text = path.read_text(encoding="utf-8")
+    match = re.search(
+        rf"static\s+const\s+ExhibitionMasterRoster\s+{re.escape(symbol)}"
+        rf"\[\]\s*=\s*\{{(.*?)\n\}};",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        raise ValueError(f"{path}: roster table not found: {symbol}")
+    entries = [
+        (int(team_id), array_name)
+        for team_id, array_name in re.findall(
+            r"\{\s*(\d+)u?\s*,\s*exhibition_([a-z0-9_]+)_players\s*,"
+            r"\s*exhibition_\2_shirts\s*,",
+            match.group(1),
+        )
+    ]
+    team_ids = [team_id for team_id, _array_name in entries]
+    if not team_ids or team_ids != sorted(team_ids):
+        raise ValueError(f"{path}: roster table {symbol} must be non-empty and sorted")
+    if len(team_ids) != len(set(team_ids)):
+        raise ValueError(f"{path}: roster table {symbol} has duplicate team IDs")
+
+    player_arrays, shirt_arrays = parse_c_roster_arrays([path])
+    result: dict[int, tuple[list[int], list[int]]] = {}
+    for team_id, array_name in entries:
+        if array_name not in player_arrays or array_name not in shirt_arrays:
+            raise ValueError(f"{path}: missing roster arrays for {array_name}")
+        players = player_arrays[array_name]
+        shirts = shirt_arrays[array_name]
+        if len(players) != len(shirts):
+            raise ValueError(f"{path}: roster length mismatch for {array_name}")
+        result[team_id] = (players, shirts)
+    return result

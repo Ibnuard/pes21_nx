@@ -16,16 +16,19 @@ team names, compact badge slots, and native PES21 fallback rosters.
 - Final selector teams: 470
 - Compact atlas slots, including slot 0 and category emblems: 502
 
-Phase one deliberately uses the native PES21 roster for newly exposed teams.
-An existing converted EF10 roster wins when present; legacy manual rosters are
-only the final fallback. Full EF10 player conversion and duplicate-name cleanup
-remain separate later phases.
+Newly exposed teams still use native PES21 rosters until their EF10 player data
+is converted. Existing converted EF10 rosters win first. The generated fallback
+table removes 299 stale club memberships
+from 136 old clubs by stable player ID; national-team
+membership is preserved. Name-only matches remain review-only to avoid deleting
+unrelated namesakes. Full EF10 conversion beyond the active roster set is a later phase.
 
 ## Generated runtime data
 
 - `data/exhibition_team_catalog.json`: canonical team/category manifest
 - `source/exhibition_teams_generated.inc`: selector order, names, and badge slots
 - `source/exhibition_rosters_pes21_generated.inc`: native PES21 fallback rosters
+- `data/exhibition_legacy_player_cleanup.json`: deterministic stale-membership rules
 - `source/badge_atlas.h`: compact atlas metadata and runtime symbol declaration
 - `data/badge_atlas.bin`: raw RGBA team/category badge atlas
 

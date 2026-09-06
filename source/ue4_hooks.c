@@ -164,6 +164,8 @@ static void *(*exhibition_squad_edit_get_squad_data)(void *squad_edit,
                                                       uint32_t home_away);
 static void (*exhibition_squad_edit_set_my_side)(void *squad_edit,
                                                   const uint32_t *home_away);
+static uint32_t (*exhibition_squad_edit_get_my_side)(
+    const void *squad_edit);
 static uint32_t (*exhibition_squad_data_get_player_count)(void *squad_data);
 static void *(*exhibition_squad_data_get_player_by_index)(
     void *squad_data, const uint32_t *index);
@@ -195,6 +197,8 @@ static void (*match_pause_exec_event_decide)(void *window,
                                               const void *event_name);
 static void (*matchplan_squad_load)(void);
 static void (*matchplan_squad_save)(void);
+static void *(*match_squad_data_copy_assign)(void *destination,
+                                             const void *source);
 static void *(*match_squad_data_get_tmpdb_player)(void *squad_data,
                                                    const void *player_id);
 static const char *(*match_tmpdb_player_get_name)(const void *player);
@@ -683,6 +687,12 @@ static _Alignas(4) uint32_t exhibition_strategy_action;
 static _Alignas(4) uint32_t exhibition_plan_ready;
 static _Alignas(4) uint32_t exhibition_return_to_selector;
 static _Alignas(4) uint32_t exhibition_gameplan_custom_active;
+#define EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES 2048u
+// Stock Strategy reconstructs HOME while entering its editor. Keep deep-copy
+// snapshots of both custom squads so that reconstruction cannot erase hub edits.
+static _Alignas(16) unsigned char exhibition_pre_strategy_squad_snapshot
+    [2][EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES];
+static _Alignas(4) uint32_t exhibition_pre_strategy_squad_snapshot_valid[2];
 #define PREMATCH_GAMEPLAN_MAX_PLAYERS 40u
 #define PREMATCH_GAMEPLAN_NO_SELECTION UINT32_MAX
 typedef struct {
@@ -1088,6 +1098,9 @@ static void *exhibition_get_tmpdb_match(void);
 static void exhibition_gameplan_refresh_uniform_choices(void);
 static void exhibition_gameplan_change_uniform(uint32_t side, int direction);
 static void exhibition_apply_selected_uniforms(void *match);
+static void exhibition_discard_pre_strategy_squad_snapshot(void);
+static int exhibition_capture_pre_strategy_squad_snapshot(void);
+static uint32_t exhibition_restore_pre_strategy_squad_snapshot(void);
 static void *exhibition_find_root_node(void *root, const char *name);
 static void pes_virtual_cursor_activate(uint32_t context, uint32_t x,
                                         uint32_t y);
@@ -1290,6 +1303,7 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
 
 static void main_menu_2p_team_selector_open(void) {
   main_menu_2p_uniform_preview_clear_pending();
+  exhibition_discard_pre_strategy_squad_snapshot();
   exhibition_gameplan_reset();
   __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_prematch_hub_page,
@@ -1348,6 +1362,7 @@ static void main_menu_2p_team_selector_open(void) {
 
 static void main_menu_2p_team_selector_close(void) {
   main_menu_2p_uniform_preview_clear_pending();
+  exhibition_discard_pre_strategy_squad_snapshot();
   exhibition_gameplan_reset();
   const int postbootstrap = __atomic_exchange_n(
       &main_menu_2p_selector_postbootstrap_host, 0, __ATOMIC_ACQ_REL);
@@ -1885,20 +1900,150 @@ static void exhibition_apply_match_settings(void *match) {
               match_time, time_zone, extra_time, penalties, match);
 }
 
+static unsigned char *exhibition_get_squad_edit(void) {
+  if (!exhibition_tmpdb_manager_get_instance)
+    return NULL;
+  void *manager = exhibition_tmpdb_manager_get_instance();
+  void *tmpdb_data = NULL;
+  if (manager)
+    memcpy(&tmpdb_data, (unsigned char *)manager + 72,
+           sizeof(tmpdb_data));
+  return tmpdb_data ? (unsigned char *)tmpdb_data + 0x18360 : NULL;
+}
+
+static void exhibition_discard_pre_strategy_squad_snapshot(void) {
+  for (uint32_t side = 0; side < 2; side++) {
+    if (__atomic_exchange_n(&exhibition_pre_strategy_squad_snapshot_valid[side],
+                            0, __ATOMIC_ACQ_REL) &&
+        match_squad_data_destruct)
+      match_squad_data_destruct(exhibition_pre_strategy_squad_snapshot[side]);
+  }
+}
+
+static int exhibition_capture_pre_strategy_squad_snapshot(void) {
+  exhibition_discard_pre_strategy_squad_snapshot();
+  if (!__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) ||
+      !match_squad_data_copy_construct || !match_squad_data_copy_assign ||
+      !match_squad_data_destruct || !exhibition_squad_edit_get_squad_data)
+    return 0;
+
+  unsigned char *squad_edit = exhibition_get_squad_edit();
+  if (!squad_edit)
+    return 0;
+
+  for (uint32_t side = 0; side < 2; side++) {
+    void *squad_data = exhibition_squad_edit_get_squad_data(squad_edit, side);
+    if (!squad_data) {
+      exhibition_discard_pre_strategy_squad_snapshot();
+      return 0;
+    }
+    memset(exhibition_pre_strategy_squad_snapshot[side], 0,
+           EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES);
+    match_squad_data_copy_construct(
+        exhibition_pre_strategy_squad_snapshot[side], squad_data);
+    __atomic_store_n(&exhibition_pre_strategy_squad_snapshot_valid[side], 1,
+                     __ATOMIC_RELEASE);
+  }
+  debugPrintf("native 2P Game Plan: captured HOME/AWAY snapshots before "
+              "Strategy\n");
+  return 1;
+}
+
+static uint32_t exhibition_restore_pre_strategy_squad_snapshot(void) {
+  if (!match_squad_data_copy_assign || !exhibition_squad_edit_get_squad_data)
+    return 0;
+  unsigned char *squad_edit = exhibition_get_squad_edit();
+  if (!squad_edit)
+    return 0;
+
+  uint32_t restored = 0;
+  for (uint32_t side = 0; side < 2; side++) {
+    if (!__atomic_load_n(&exhibition_pre_strategy_squad_snapshot_valid[side],
+                         __ATOMIC_ACQUIRE))
+      continue;
+    void *squad_data = exhibition_squad_edit_get_squad_data(squad_edit, side);
+    if (!squad_data)
+      continue;
+    match_squad_data_copy_assign(
+        squad_data, exhibition_pre_strategy_squad_snapshot[side]);
+    restored++;
+  }
+  if (restored)
+    debugPrintf("native 2P Game Plan: restored %u pre-Strategy squad "
+                "snapshot(s)\n",
+                restored);
+  return restored;
+}
+
+// The native save helper commits only SquadEdit::GetMySide(). Our split
+// screen edits HOME and AWAY independently, so select and save each requested
+// side before publishing the complete match plan back to tmpdb::Match.
+static void exhibition_save_matchplan_sides(uint32_t side_mask) {
+  unsigned char *squad_edit = exhibition_get_squad_edit();
+  if (!__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) ||
+      !side_mask || !squad_edit || !matchplan_squad_save ||
+      !exhibition_squad_edit_set_my_side)
+    return;
+
+  uint32_t previous_side = 2u;
+  if (exhibition_squad_edit_get_my_side)
+    previous_side = exhibition_squad_edit_get_my_side(squad_edit);
+  else
+    memcpy(&previous_side, squad_edit + 5312, sizeof(previous_side));
+
+  for (uint32_t side = 0; side < 2; side++) {
+    if (!(side_mask & (1u << side)))
+      continue;
+    exhibition_squad_edit_set_my_side(squad_edit, &side);
+    matchplan_squad_save();
+  }
+  exhibition_squad_edit_set_my_side(squad_edit, &previous_side);
+
+  void *plan = exhibition_matchplan_get_instance
+                   ? exhibition_matchplan_get_instance()
+                   : NULL;
+  if (plan && exhibition_matchplan_update_tmpdb)
+    exhibition_matchplan_update_tmpdb(plan);
+  debugPrintf("native 2P Game Plan: saved sides mask=0x%x previous=%u "
+              "plan=%p\n",
+              side_mask, previous_side, plan);
+}
+
+static void exhibition_publish_prepared_matchplan(void) {
+  if (!__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
+    return;
+  void *plan = exhibition_matchplan_get_instance
+                   ? exhibition_matchplan_get_instance()
+                   : NULL;
+  if (plan && exhibition_matchplan_update_tmpdb) {
+    exhibition_matchplan_update_tmpdb(plan);
+    debugPrintf("native 2P Game Plan: published prepared plan=%p to "
+                "MatchSetup\n",
+                plan);
+  }
+}
+
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
   // Strategy is no longer visible once MatchSetup starts. Hand presentation
   // back to the game's own loading scene instead of covering the whole load.
   __atomic_store_n(&main_menu_2p_transition_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_transition_kind,
                    MAIN_MENU_2P_TRANSITION_NONE, __ATOMIC_RELEASE);
+  // MatchSetup reads both tmpdb::Match and matchPlan::Data immediately after
+  // this hook. Publish the final two-sided squad/tactics state first, then
+  // reassert rules and kits that stock setup helpers may have normalized.
+  // A late native Strategy callback can reconstruct HOME after the visible
+  // footer; restore the captured hub state one last time before publishing.
+  if (exhibition_restore_pre_strategy_squad_snapshot())
+    exhibition_save_matchplan_sides(3u);
+  exhibition_publish_prepared_matchplan();
   if (__atomic_load_n(&exhibition_match_settings_armed, __ATOMIC_ACQUIRE)) {
     exhibition_apply_cpu_level(
         __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
     exhibition_apply_match_settings(NULL);
   }
-  // MatchSetup is the final tmpdb consumer before gameplay. Reassert both
-  // explicit kit choices here so HOME is not silently reset to kit 1.
   exhibition_apply_selected_uniforms(NULL);
+  exhibition_discard_pre_strategy_squad_snapshot();
   return exhibition_match_setup_data_resume;
 }
 
@@ -4782,6 +4927,7 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
   state->auto_offside = state->settings.bytes[51] != 0;
 
   uint32_t count = exhibition_squad_data_get_player_count(squad_data);
+  uint32_t native_position_count = 0;
   if (count > PREMATCH_GAMEPLAN_MAX_PLAYERS)
     count = PREMATCH_GAMEPLAN_MAX_PLAYERS;
   for (uint32_t index = 0; index < count; index++) {
@@ -4846,6 +4992,7 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
           entry->pitch_x = (uint8_t)((raw_x * 255u + 52u) / 105u);
           entry->pitch_y =
               (uint8_t)(255u - (raw_y * 255u + 24u) / 48u);
+          native_position_count++;
         }
       }
     }
@@ -4885,7 +5032,11 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
       state->players[index].starting = index < state->field_count;
   }
   prematch_gameplan_sort_players(state);
-  prematch_gameplan_stabilize_pitch_layout(state);
+  // Preserve the native Attacking/Defensive coordinates whenever the team
+  // supplies a usable formation. The old unconditional lane pass flattened
+  // both tactics into the same visual shape.
+  if (native_position_count * 2u < state->field_count)
+    prematch_gameplan_stabilize_pitch_layout(state);
   if (state->field_focus >= state->field_count)
     state->field_focus = 0;
   if (state->bench_focus >= state->bench_count)
@@ -4988,15 +5139,9 @@ static void prematch_gameplan_open_position_picker(
 }
 
 static void prematch_gameplan_save_and_refresh(uint32_t side) {
-  if (matchplan_squad_save)
-    matchplan_squad_save();
-  // Keep the backing tmpdb match synchronized so reopening the page cannot
-  // restore the pre-edit formation or option bits.
-  void *plan = exhibition_matchplan_get_instance
-                   ? exhibition_matchplan_get_instance()
-                   : NULL;
-  if (plan && exhibition_matchplan_update_tmpdb)
-    exhibition_matchplan_update_tmpdb(plan);
+  if (side > 1)
+    return;
+  exhibition_save_matchplan_sides(1u << side);
   prematch_gameplan_refresh_side(side);
 }
 
@@ -5113,10 +5258,10 @@ static void prematch_gameplan_move_field(PrematchGameplanSide *state,
   }
   if (best != PREMATCH_GAMEPLAN_NO_SELECTION) {
     state->field_focus = best;
-  } else if (action == PES_PAUSE_INPUT_LEFT) {
+  } else if (action == PES_PAUSE_INPUT_RIGHT) {
     // The console page treats the pitch and substitution list as one
-    // horizontal work area. At either horizontal edge hand focus to the
-    // other area instead of wrapping to a distant player.
+    // horizontal work area. The bench is drawn to the right of the pitch,
+    // so only the right edge hands focus to that list.
     if (state->bench_count) {
       state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_BENCH;
       if (state->bench_focus >= state->bench_count)
@@ -7244,6 +7389,7 @@ static int main_menu_start_two_player_match(void) {
   const int bootstrap_hub =
       __atomic_load_n(&main_menu_2p_prematch_bootstrap_mode,
                       __ATOMIC_ACQUIRE) == MAIN_MENU_2P_PREMATCH_BOOT_HUB;
+  exhibition_discard_pre_strategy_squad_snapshot();
   native_pad_lab_reset();
   __atomic_store_n(&main_menu_2p_transition_active, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_transition_kind,
@@ -7377,6 +7523,15 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
     return;
   static const char strategy_flow[] = "MyClub/Match/MenuMatchMenu";
   main_menu_2p_native_uniform_close();
+  // Freeze every custom hub choice before Strategy runs its stock loader.
+  // SaveSquadDataToMatchPlanData is side-scoped, so both owners must be
+  // committed explicitly for substitutions and tactics to survive kickoff.
+  exhibition_capture_pre_strategy_squad_snapshot();
+  exhibition_save_matchplan_sides(3u);
+  exhibition_apply_cpu_level(
+      __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
+  exhibition_apply_match_settings(NULL);
+  exhibition_apply_selected_uniforms(NULL);
   if (!game_plan) {
     __atomic_store_n(&main_menu_2p_transition_active, 1,
                      __ATOMIC_RELEASE);
@@ -7923,6 +8078,10 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
       const int reuse_plan =
           action == EXHIBITION_STRATEGY_START &&
           __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE);
+      if (reuse_plan &&
+          !__atomic_load_n(&exhibition_pre_strategy_squad_snapshot_valid[0],
+                           __ATOMIC_ACQUIRE))
+        exhibition_capture_pre_strategy_squad_snapshot();
       if (!reuse_plan) {
         void *data = exhibition_matchplan_get_instance
                          ? exhibition_matchplan_get_instance()
@@ -8120,19 +8279,28 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
 // the Strategy child normally, then leave it in state 1 so the player can edit
 // the plan and explicitly choose Play.
 uintptr_t pes_exhibition_strategy_created_entry(void *strategy_flow,
-                                                void *squad_edit) {
+                                                 void *squad_edit) {
   uint32_t state = squad_edit ? 1u : 2u;
   if (strategy_flow && squad_edit && exhibition_task_add_unit)
     exhibition_task_add_unit(strategy_flow, squad_edit);
   if (strategy_flow)
     memcpy((unsigned char *)strategy_flow + 540, &state, sizeof(state));
 
+  const int native_active = strategy_flow && squad_edit;
+  // MyClubFlowMatchMenu's state-0 loader can rebuild HOME from its stock
+  // source while creating this child. Reapply both hub-owned SquadData
+  // objects before the Strategy window receives its first update.
+  if (native_active &&
+      __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
+      __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) &&
+      exhibition_restore_pre_strategy_squad_snapshot()) {
+    exhibition_save_matchplan_sides(3u);
+    exhibition_publish_prepared_matchplan();
+  }
   if (strategy_flow && squad_edit &&
       __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
       __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
     exhibition_refresh_squad_player_stats();
-
-  const int native_active = strategy_flow && squad_edit;
   exhibition_gameplan_reset();
   if (native_active) {
     __atomic_store_n(&match_gameplan_seen_tick, armGetSystemTick(),
@@ -8190,14 +8358,22 @@ static void pes_exhibition_strategy_footer(void *window,
 
   // Back reuses the proven editor-return trampoline; Play stays on the stock
   // Strategy proceed path and enters MatchSetup normally.
-  if (starting_match && footer_key == 1)
+  if (starting_match && footer_key == 1) {
+    exhibition_restore_pre_strategy_squad_snapshot();
+    exhibition_save_matchplan_sides(3u);
     __atomic_store_n(&exhibition_strategy_action,
                      EXHIBITION_STRATEGY_EDIT, __ATOMIC_RELEASE);
+  }
 
   if (starting_match && footer_key == 0) {
+    // Native Strategy may have rebuilt HOME while it was opening. Restore the
+    // two snapshots before the stock footer saves and advances to MatchSetup.
+    exhibition_restore_pre_strategy_squad_snapshot();
+    exhibition_save_matchplan_sides(3u);
     exhibition_apply_cpu_level(
         __atomic_load_n(&exhibition_cpu_level_value, __ATOMIC_ACQUIRE), NULL);
     exhibition_apply_match_settings(NULL);
+    exhibition_apply_selected_uniforms(NULL);
     __atomic_store_n(&exhibition_match_settings_armed, 1,
                      __ATOMIC_RELEASE);
     // Strategy Play is the first point at which Exhibition is committed to a
@@ -8221,6 +8397,9 @@ static void pes_exhibition_strategy_footer(void *window,
 
   if (exhibition_strategy_footer_original)
     exhibition_strategy_footer_original(window, footer_key);
+
+  if (starting_match && footer_key == 1)
+    exhibition_discard_pre_strategy_squad_snapshot();
 
   if (starting_match && footer_key == 0) {
     __atomic_store_n(&exhibition_strategy_action,
@@ -11543,6 +11722,9 @@ void install_ue4_hooks(so_module *module) {
   exhibition_squad_edit_set_my_side =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb9SquadEdit9SetMySideERK8HomeAway");
+  exhibition_squad_edit_get_my_side =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb9SquadEdit9GetMySideEv");
   exhibition_squad_data_get_player_count =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData17GetSquadPlayerNumEv");
@@ -12874,6 +13056,8 @@ void install_ue4_hooks(so_module *module) {
   matchplan_squad_save =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan16SquadEditUtility28SaveSquadDataToMatchPlanDataEv");
+  match_squad_data_copy_assign =
+      (void *)so_find_addr_rx(module, "_ZN5tmpdb9SquadDataaSERKS0_");
   match_squad_data_get_tmpdb_player =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData14GetTmpdbPlayerERKNS_8PlayerIdE");

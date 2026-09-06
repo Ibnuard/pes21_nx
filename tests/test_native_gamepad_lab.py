@@ -302,12 +302,22 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertNotIn(
             'pes_controller_custom_prematch_gameplan_position_picker_overall(',
             page)
-        self.assertIn('"SHOT POWER"', page)
+        self.assertNotIn('"SHOT POWER"', page)
+        self.assertNotIn('"RIGHT FOOT"', page)
+        self.assertNotIn('"LEFT FOOT"', page)
+        self.assertIn("const char foot_text[2]", page)
+        self.assertIn('prematch_gameplan_picker_foot_first_quad', page)
         self.assertIn('gameplan_metric_color(', draw)
         self.assertIn('prematch_gameplan_bench_metric_first', draw)
         self.assertIn('prematch_gameplan_picker_metric_first', draw)
-        self.assertIn('prematch_gameplan_stabilize_pitch_layout(state);',
-                      self.hooks)
+        self.assertIn('prematch_gameplan_field_role_first', draw)
+        self.assertIn('gameplan_role_colors[role_band]', draw)
+        self.assertIn('prematch_gameplan_auto_gain_first', draw)
+        self.assertIn('"%s  %u  ->  "', page)
+        self.assertRegex(
+            self.hooks,
+            r'if \(native_position_count \* 2u < state->field_count\)\s+'
+            r'prematch_gameplan_stabilize_pitch_layout\(state\);')
         self.assertIn('if (!plan_ready && matchplan_squad_load)', prepare)
         self.assertIn('exhibition_matchplan_update_tmpdb(plan);', self.hooks)
         self.assertIn('state->waiting = 1;', root_input)
@@ -315,6 +325,91 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('prematch_gameplan_waiting_text_first_quad', draw)
         for value in ('< ATTACKING >', '< DEFENSIVE >', '< ON >', '< OFF >'):
             self.assertIn(value, self.hooks)
+
+        move_field = re.search(
+            r'static void prematch_gameplan_move_field\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        process_substitute = re.search(
+            r'static void prematch_gameplan_process_substitute\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        save_sides = re.search(
+            r'static void exhibition_save_matchplan_sides\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        kickoff = re.search(
+            r'static void main_menu_2p_prematch_hub_process_pending\(void\) '
+            r'\{.*?\n\}', self.hooks, re.S).group(0)
+        match_setup = re.search(
+            r'uintptr_t pes_exhibition_match_setup_data_entry\(void\) '
+            r'\{.*?\n\}', self.hooks, re.S).group(0)
+        strategy_footer = re.search(
+            r'static void pes_exhibition_strategy_footer\('
+            r'void \*window,\s+uint32_t footer_key\) \{.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('else if (action == PES_PAUSE_INPUT_RIGHT)', move_field)
+        self.assertIn('if (action == PES_PAUSE_INPUT_LEFT)',
+                      process_substitute)
+        self.assertIn('exhibition_squad_edit_get_my_side(squad_edit)',
+                      save_sides)
+        self.assertIn('exhibition_save_matchplan_sides(3u);', kickoff)
+        self.assertIn('exhibition_capture_pre_strategy_squad_snapshot();', kickoff)
+        self.assertIn('exhibition_restore_pre_strategy_squad_snapshot();',
+                      strategy_footer)
+        self.assertIn('exhibition_discard_pre_strategy_squad_snapshot();',
+                      match_setup)
+        self.assertIn('exhibition_publish_prepared_matchplan();', match_setup)
+        self.assertIn('exhibition_apply_selected_uniforms(NULL);',
+                      strategy_footer)
+        self.assertIn('_ZN5tmpdb9SquadDataaSERKS0_', self.hooks)
+        self.assertIn('EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES',
+                      self.hooks)
+        self.assertIn(
+            '_ZNK5tmpdb9SquadEdit9GetMySideEv', self.hooks)
+
+    def test_position_picker_title_stays_inside_its_modal(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        title = re.search(
+            r'const char \*title = picker \? "SELECT PLAYER".*?'
+            r'line_quads = emit_efootball_line\(.*?title_y, title_gh',
+            overlay, re.S).group(0)
+        self.assertIn('(picker ? 0.040f : 0.015f)', title)
+
+    def test_kickoff_restores_both_squads_after_stock_strategy_loader(self):
+        capture = re.search(
+            r'static int exhibition_capture_pre_strategy_squad_snapshot\(void\) '
+            r'\{.*?\n\}', self.hooks, re.S).group(0)
+        restore = re.search(
+            r'static uint32_t exhibition_restore_pre_strategy_squad_snapshot'
+            r'\(void\) \{.*?\n\}', self.hooks, re.S).group(0)
+        kickoff = re.search(
+            r'static void main_menu_2p_prematch_hub_process_pending\(void\) '
+            r'\{.*?\n\}', self.hooks, re.S).group(0)
+        created = re.search(
+            r'uintptr_t pes_exhibition_strategy_created_entry\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        footer = re.search(
+            r'static void pes_exhibition_strategy_footer\([^;]*\)\s*'
+            r'\{.*?\n\}', self.hooks, re.S).group(0)
+        match_setup = re.search(
+            r'uintptr_t pes_exhibition_match_setup_data_entry\(void\) '
+            r'\{.*?\n\}', self.hooks, re.S).group(0)
+
+        self.assertIn('match_squad_data_copy_construct(', capture)
+        self.assertIn('match_squad_data_copy_assign(', restore)
+        self.assertLess(
+            kickoff.index('exhibition_capture_pre_strategy_squad_snapshot();'),
+            kickoff.index('exhibition_save_matchplan_sides(3u);'))
+        self.assertLess(
+            created.index('exhibition_restore_pre_strategy_squad_snapshot()'),
+            created.index('exhibition_publish_prepared_matchplan();'))
+        self.assertLess(
+            footer.index('exhibition_restore_pre_strategy_squad_snapshot();'),
+            footer.index('exhibition_save_matchplan_sides(3u);'))
+        self.assertLess(
+            match_setup.index('exhibition_restore_pre_strategy_squad_snapshot()'),
+            match_setup.index('exhibition_publish_prepared_matchplan();'))
+        self.assertLess(
+            match_setup.index('exhibition_publish_prepared_matchplan();'),
+            match_setup.index('exhibition_discard_pre_strategy_squad_snapshot();'))
 
     def test_prematch_choice_pages_use_screen_edge_helpers(self):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
@@ -464,6 +559,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('custom_loading_spinner_first_quad * 6', overlay)
         self.assertIn('MAIN_MENU_2P_TRANSITION_LOADING', self.hooks)
         self.assertIn('MAIN_MENU_2P_TRANSITION_VS', pending)
+        self.assertIn(
+            'const float badge_y = 0.345f * (float)screen_height;',
+            transition)
         self.assertRegex(
             overlay,
             r'const int gameplan_cursor =\s*!custom_2p_transition')

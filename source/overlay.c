@@ -1668,14 +1668,27 @@ static void overlay_render(void) {
   int prematch_gameplan_field_metric_first[2][11];
   int prematch_gameplan_field_metric_quads[2][11];
   uint32_t prematch_gameplan_field_metric_value[2][11];
+  int prematch_gameplan_field_role_first[2][11];
+  int prematch_gameplan_field_role_quads[2][11];
+  uint32_t prematch_gameplan_field_role_band[2][11];
   int prematch_gameplan_bench_metric_first[2][8];
   int prematch_gameplan_bench_metric_quads[2][8];
   uint32_t prematch_gameplan_bench_metric_value[2][8];
   int prematch_gameplan_picker_metric_first[2][7];
   int prematch_gameplan_picker_metric_quads[2][7];
   uint32_t prematch_gameplan_picker_metric_value[2][7];
+  int prematch_gameplan_picker_foot_first_quad[2] = {0};
+  int prematch_gameplan_picker_foot_quads[2] = {0};
+  int prematch_gameplan_auto_gain_first[2][2];
+  int prematch_gameplan_auto_gain_quads[2][2];
   memset(prematch_gameplan_field_metric_first, -1,
          sizeof(prematch_gameplan_field_metric_first));
+  memset(prematch_gameplan_field_role_first, -1,
+         sizeof(prematch_gameplan_field_role_first));
+  memset(prematch_gameplan_field_role_quads, 0,
+         sizeof(prematch_gameplan_field_role_quads));
+  memset(prematch_gameplan_field_role_band, 0,
+         sizeof(prematch_gameplan_field_role_band));
   memset(prematch_gameplan_bench_metric_first, -1,
          sizeof(prematch_gameplan_bench_metric_first));
   memset(prematch_gameplan_picker_metric_first, -1,
@@ -1692,6 +1705,10 @@ static void overlay_render(void) {
          sizeof(prematch_gameplan_picker_metric_quads));
   memset(prematch_gameplan_picker_metric_value, 0,
          sizeof(prematch_gameplan_picker_metric_value));
+  memset(prematch_gameplan_auto_gain_first, -1,
+         sizeof(prematch_gameplan_auto_gain_first));
+  memset(prematch_gameplan_auto_gain_quads, 0,
+         sizeof(prematch_gameplan_auto_gain_quads));
   int prematch_gameplan_role_plate_first_quad[4] = {0};
   int prematch_gameplan_role_plate_quads[4] = {0};
   int prematch_gameplan_role_text_first_quad = 0;
@@ -2303,6 +2320,35 @@ static void overlay_render(void) {
       }
     }
 
+    // No stable native foot-icon texture is exposed by this screen. Mirror
+    // the set-piece picker with a compact circular R/L badge instead.
+    for (uint32_t side = 0; side < 2; side++) {
+      prematch_gameplan_picker_foot_first_quad[side] = quads;
+      if (pes_controller_custom_prematch_gameplan_waiting(side) ||
+          pes_controller_custom_prematch_gameplan_page(side) !=
+              PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS ||
+          !pes_controller_custom_prematch_gameplan_position_picker_active(
+              side))
+        continue;
+      for (uint32_t slot = 0;
+           slot < prematch_gameplan_picker_visible[side]; slot++) {
+        const uint32_t index =
+            prematch_gameplan_picker_start[side] + slot;
+        const char *name =
+            pes_controller_custom_prematch_gameplan_position_picker_name(
+                side, index);
+        if (!name || strcmp(name, "NONE") == 0)
+          continue;
+        const float *rect = prematch_gameplan_picker_rect[side][slot];
+        const float center_x =
+            rect[0] + rect[2] - 0.070f * (float)screen_width;
+        prematch_gameplan_picker_foot_quads[side] += emit_circle_quad(
+            center_x, rect[1] + rect[3] * 0.5f,
+            0.016f * (float)screen_height, verts + quads * 24);
+        quads++;
+      }
+    }
+
     for (uint32_t side = 0; side < 2; side++) {
       const float badge_size = header_h -
                                0.020f * (float)screen_height;
@@ -2419,6 +2465,9 @@ static void overlay_render(void) {
           const float plate_x = rect[0] + (rect[2] - plate_w) * 0.5f;
           const float plate_y =
               rect[1] + portrait_size - 0.002f * (float)screen_height;
+          prematch_gameplan_field_role_first[side][index] = quads;
+          prematch_gameplan_field_role_band[side][index] =
+              selector_position_color_band(role);
           line_quads = emit_efootball_fit_line(
               role, (int)strlen(role),
               plate_x + 0.004f * (float)screen_width,
@@ -2426,6 +2475,7 @@ static void overlay_render(void) {
               plate_w * 0.52f, card_main_gh,
               (float)screen_height / 66.0f, EFOOTBALL_FONT_STENCIL,
               verts + quads * 24);
+          prematch_gameplan_field_role_quads[side][index] = line_quads;
           prematch_gameplan_white_text_quads += line_quads;
           quads += line_quads;
           char overall_text[4];
@@ -2595,37 +2645,64 @@ static void overlay_render(void) {
             EFOOTBALL_FONT_BOLD, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
-        char power[64];
-        char spirit[64];
         if (pes_controller_custom_prematch_gameplan_auto_preview_valid(side)) {
-          snprintf(power, sizeof(power), "TEAM STRENGTH  %u  >  %u",
-                   pes_controller_custom_prematch_gameplan_auto_power(
-                       side, 0),
-                   pes_controller_custom_prematch_gameplan_auto_power(
-                       side, 1));
-          snprintf(spirit, sizeof(spirit), "TEAM SPIRIT    %u  >  %u",
-                   pes_controller_custom_prematch_gameplan_auto_spirit(
-                       side, 0),
-                   pes_controller_custom_prematch_gameplan_auto_spirit(
-                       side, 1));
+          const uint32_t before[2] = {
+              pes_controller_custom_prematch_gameplan_auto_power(side, 0),
+              pes_controller_custom_prematch_gameplan_auto_spirit(side, 0),
+          };
+          const uint32_t after[2] = {
+              pes_controller_custom_prematch_gameplan_auto_power(side, 1),
+              pes_controller_custom_prematch_gameplan_auto_spirit(side, 1),
+          };
+          static const char *const labels[2] = {
+              "TEAM STRENGTH", "TEAM SPIRIT"};
+          for (uint32_t metric = 0; metric < 2; metric++) {
+            char prefix[64];
+            snprintf(prefix, sizeof(prefix), "%s  %u  ->  ",
+                     labels[metric], before[metric]);
+            const float text_x = modal_x + 0.035f * (float)screen_width;
+            const float text_y = modal_y +
+                                 (0.205f + 0.060f * (float)metric) *
+                                     (float)screen_height;
+            line_quads = emit_efootball_line(
+                prefix, (int)strlen(prefix), text_x, text_y, body_gh,
+                EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+
+            char result[8];
+            snprintf(result, sizeof(result), "%u", after[metric]);
+            prematch_gameplan_auto_gain_first[side][metric] = quads;
+            line_quads = emit_efootball_line(
+                result, (int)strlen(result),
+                text_x + measure_efootball_line(
+                             prefix, (int)strlen(prefix), body_gh,
+                             EFOOTBALL_FONT_BOLD),
+                text_y, body_gh, EFOOTBALL_FONT_STENCIL,
+                verts + quads * 24);
+            prematch_gameplan_auto_gain_quads[side][metric] =
+                before[metric] != after[metric] ? line_quads : 0;
+            prematch_gameplan_white_text_quads += line_quads;
+            quads += line_quads;
+          }
         } else {
-          strcpy(power, "NATIVE AUTO LINEUP UNAVAILABLE");
-          strcpy(spirit, "B  RETURN");
+          const char *unavailable = "NATIVE AUTO LINEUP UNAVAILABLE";
+          line_quads = emit_efootball_line(
+              unavailable, (int)strlen(unavailable),
+              modal_x + 0.035f * (float)screen_width,
+              modal_y + 0.205f * (float)screen_height, body_gh,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
+          const char *return_hint = "B  RETURN";
+          line_quads = emit_efootball_line(
+              return_hint, (int)strlen(return_hint),
+              modal_x + 0.035f * (float)screen_width,
+              modal_y + 0.265f * (float)screen_height, body_gh,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          prematch_gameplan_white_text_quads += line_quads;
+          quads += line_quads;
         }
-        line_quads = emit_efootball_line(
-            power, (int)strlen(power),
-            modal_x + 0.035f * (float)screen_width,
-            modal_y + 0.205f * (float)screen_height, body_gh,
-            EFOOTBALL_FONT_BOLD, verts + quads * 24);
-        prematch_gameplan_white_text_quads += line_quads;
-        quads += line_quads;
-        line_quads = emit_efootball_line(
-            spirit, (int)strlen(spirit),
-            modal_x + 0.035f * (float)screen_width,
-            modal_y + 0.265f * (float)screen_height, body_gh,
-            EFOOTBALL_FONT_BOLD, verts + quads * 24);
-        prematch_gameplan_white_text_quads += line_quads;
-        quads += line_quads;
         static const char *const choices[2] = {"CANCEL", "APPLY"};
         const float button_gap = 0.012f * (float)screen_width;
         const float button_w = (modal_w - button_gap -
@@ -2650,10 +2727,13 @@ static void overlay_render(void) {
             pes_controller_custom_prematch_gameplan_position_picker_active(
                 side);
         const char *title = picker ? "SELECT PLAYER" : "POSITION SETTINGS";
+        const float title_y =
+            content_y +
+            (picker ? 0.040f : 0.015f) * (float)screen_height;
         line_quads = emit_efootball_line(
             title, (int)strlen(title),
             half_x[side] + 0.025f * (float)screen_width,
-            content_y + 0.015f * (float)screen_height, title_gh,
+            title_y, title_gh,
             EFOOTBALL_FONT_STENCIL, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
@@ -2699,10 +2779,15 @@ static void overlay_render(void) {
                 pes_controller_custom_prematch_gameplan_position_picker_name(
                     side, index);
             const float text_y = rect[1] + (rect[3] - small_gh) * 0.5f;
+            const float foot_center_x =
+                rect[0] + rect[2] - 0.070f * (float)screen_width;
+            const float name_x =
+                rect[0] + 0.067f * (float)screen_width;
             line_quads = emit_efootball_fit_line(
-                name, (int)strlen(name),
-                rect[0] + 0.067f * (float)screen_width, text_y,
-                0.116f * (float)screen_width, small_gh,
+                name, (int)strlen(name), name_x, text_y,
+                foot_center_x - name_x -
+                    0.028f * (float)screen_width,
+                small_gh,
                 (float)screen_height / 60.0f,
                 EFOOTBALL_FONT_BOLD, verts + quads * 24);
             prematch_gameplan_white_text_quads += line_quads;
@@ -2714,25 +2799,16 @@ static void overlay_render(void) {
             const uint32_t shot_power =
                 pes_controller_custom_prematch_gameplan_position_picker_shot_power(
                     side, index);
-            const char *foot_text =
-                have_player ? (foot ? "LEFT FOOT" : "RIGHT FOOT") : "--";
-            line_quads = emit_efootball_fit_line(
-                foot_text, (int)strlen(foot_text),
-                rect[0] + 0.190f * (float)screen_width, text_y,
-                0.078f * (float)screen_width, small_gh,
-                (float)screen_height / 66.0f,
-                EFOOTBALL_FONT_BOLD, verts + quads * 24);
-            prematch_gameplan_white_text_quads += line_quads;
-            quads += line_quads;
-            const char *shot_label = "SHOT POWER";
-            line_quads = emit_efootball_fit_line(
-                shot_label, (int)strlen(shot_label),
-                rect[0] + 0.274f * (float)screen_width, text_y,
-                0.088f * (float)screen_width, small_gh,
-                (float)screen_height / 68.0f,
-                EFOOTBALL_FONT_BOLD, verts + quads * 24);
-            prematch_gameplan_white_text_quads += line_quads;
-            quads += line_quads;
+            if (have_player) {
+              const char foot_text[2] = {foot ? 'L' : 'R', '\0'};
+              const float foot_w = measure_efootball_line(
+                  foot_text, 1, small_gh, EFOOTBALL_FONT_BOLD);
+              line_quads = emit_efootball_line(
+                  foot_text, 1, foot_center_x - foot_w * 0.5f, text_y,
+                  small_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+              prematch_gameplan_white_text_quads += line_quads;
+              quads += line_quads;
+            }
             char shot_text[4];
             if (have_player)
               snprintf(shot_text, sizeof(shot_text), "%u", shot_power);
@@ -3344,7 +3420,7 @@ static void overlay_render(void) {
     if (custom_2p_transition_kind == PES_2P_TRANSITION_VS) {
       // The matchup card belongs exclusively to Kick Off.
       const float badge_size = 0.215f * (float)screen_height;
-      const float badge_y = 0.285f * (float)screen_height;
+      const float badge_y = 0.345f * (float)screen_height;
       static const float team_center_x[2] = {0.325f, 0.675f};
       for (uint32_t side = 0; side < 2; side++) {
         const float badge_x =
@@ -5923,6 +5999,15 @@ static void overlay_render(void) {
                    prematch_gameplan_role_plate_quads[role_band] * 6);
     }
 
+    glUniform1f(gl.loc_circle, 1.0f);
+    glUniform1f(gl.loc_circle_feather, 0.020f);
+    glUniform4f(gl.loc_color, 0.82f, 0.86f, 0.90f, 0.96f);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES,
+                   prematch_gameplan_picker_foot_first_quad[side] * 6,
+                   prematch_gameplan_picker_foot_quads[side] * 6);
+    glUniform1f(gl.loc_circle, 0.0f);
+
     for (uint32_t side = 0; side < 2; side++) {
       glUniform4f(gl.loc_color, side_accent[side][0],
                   side_accent[side][1], side_accent[side][2], 0.62f);
@@ -5965,6 +6050,17 @@ static void overlay_render(void) {
                    prematch_gameplan_waiting_text_first_quad[side] * 6,
                    prematch_gameplan_waiting_text_quads[side] * 6);
     }
+    glUniform4f(gl.loc_color, 0.05f, 0.68f, 0.30f, 1.0f);
+    for (uint32_t side = 0; side < 2; side++) {
+      for (uint32_t metric = 0; metric < 2; metric++) {
+        if (prematch_gameplan_auto_gain_first[side][metric] < 0 ||
+            !prematch_gameplan_auto_gain_quads[side][metric])
+          continue;
+        glDrawArrays(GL_TRIANGLES,
+                     prematch_gameplan_auto_gain_first[side][metric] * 6,
+                     prematch_gameplan_auto_gain_quads[side][metric] * 6);
+      }
+    }
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     for (uint32_t side = 0; side < 2; side++) {
       glDrawArrays(GL_TRIANGLES,
@@ -5977,6 +6073,25 @@ static void overlay_render(void) {
                    prematch_gameplan_field_text_first_quad[side] * 6,
                    prematch_gameplan_field_text_quads[side] * 6);
     }
+    // Field role abbreviations use the native GK/DF/MF/FW color language;
+    // names remain white and OVR keeps its independent value spectrum.
+    for (uint32_t side = 0; side < 2; side++) {
+      for (uint32_t index = 0; index < PREMATCH_GAMEPLAN_FIELD_SLOTS;
+           index++) {
+        if (prematch_gameplan_field_role_first[side][index] < 0 ||
+            !prematch_gameplan_field_role_quads[side][index])
+          continue;
+        const uint32_t role_band =
+            prematch_gameplan_field_role_band[side][index];
+        glUniform4f(gl.loc_color, gameplan_role_colors[role_band][0],
+                    gameplan_role_colors[role_band][1],
+                    gameplan_role_colors[role_band][2], 1.0f);
+        glDrawArrays(GL_TRIANGLES,
+                     prematch_gameplan_field_role_first[side][index] * 6,
+                     prematch_gameplan_field_role_quads[side][index] * 6);
+      }
+    }
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES,
                  prematch_gameplan_role_text_first_quad * 6,
                  prematch_gameplan_role_text_quads * 6);
