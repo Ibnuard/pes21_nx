@@ -4,6 +4,9 @@
   "maximum_players": 40,
   "expected_safe_team_count": 464,
   "legacy_team_ids": [59, 115, 127, 133, 134, 135],
+  "external_active_clubs": [
+    {"team_id": 5738, "display_name": "INTER MIAMI CF"}
+  ],
   "categories": [
     {
       "key": "english_league",

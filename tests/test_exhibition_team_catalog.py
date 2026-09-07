@@ -203,13 +203,19 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertTrue(self.cleanup["policy"]["preserve_national_team_membership"])
 
         counts = self.cleanup["counts"]
-        self.assertEqual(counts["active_ef10_teams"], 99)
-        self.assertEqual(counts["active_ef10_clubs"], 43)
+        self.assertEqual(counts["active_ef10_teams"], 100)
+        self.assertEqual(counts["active_ef10_clubs"], 44)
+        self.assertEqual(counts["external_active_clubs"], 1)
+        self.assertEqual(counts["external_shared_players"], 8)
         self.assertEqual(counts["affected_fallback_clubs"], 136)
-        self.assertEqual(counts["removed_legacy_memberships"], 299)
+        self.assertEqual(counts["removed_legacy_memberships"], 303)
         self.assertGreaterEqual(counts["minimum_cleaned_roster"], 18)
 
         removals = self.cleanup["removals"]
+        external_club_ids = {
+            int(team["team_id"])
+            for team in self.cleanup["external_active_clubs"]
+        }
         pairs = {
             (int(row["fallback_team_id"]), int(row["player_id"]))
             for row in removals
@@ -218,13 +224,29 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertTrue(
             all(
                 self.team_by_id[int(row["fallback_team_id"])]["kind"] == "club"
-                and self.team_by_id[int(row["destination_team_id"])]["kind"]
-                == "club"
+                and (
+                    int(row["destination_team_id"]) in external_club_ids
+                    or self.team_by_id[int(row["destination_team_id"])]["kind"]
+                    == "club"
+                )
                 and row["match"] == "shared_player_id"
                 for row in removals
             )
         )
         self.assertIn((127, 40002), pairs)
+        self.assertEqual(
+            {
+                (int(row["fallback_team_id"]), int(row["player_id"]))
+                for row in removals
+                if int(row["destination_team_id"]) == 5738
+            },
+            {
+                (172, 34881),
+                (1239, 127201),
+                (1256, 109842),
+                (2722, 118960),
+            },
+        )
         lewandowski = next(
             row
             for row in removals
@@ -295,13 +317,14 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         definitions = {
             name: int(value)
             for name, value in re.findall(
-                r"#define (BADGE_(?:CELL_SIZE|ATLAS_(?:COLS|SLOTS|ROWS))) (\d+)",
+                r"#define (BADGE_(?:CELL_SIZE|ATLAS_(?:COLS|CATALOG_SLOTS|SLOTS|ROWS))) (\d+)",
                 header,
             )
         }
         self.assertEqual(definitions["BADGE_CELL_SIZE"], 128)
         self.assertEqual(definitions["BADGE_ATLAS_COLS"], 16)
-        self.assertEqual(definitions["BADGE_ATLAS_SLOTS"], 502)
+        self.assertEqual(definitions["BADGE_ATLAS_CATALOG_SLOTS"], 502)
+        self.assertEqual(definitions["BADGE_ATLAS_SLOTS"], 503)
         self.assertEqual(definitions["BADGE_ATLAS_ROWS"], 32)
         self.assertIn("extern const uint8_t badge_atlas_bin[];", header)
         self.assertIn("#define badge_atlas_rgba8 badge_atlas_bin", header)
@@ -310,6 +333,13 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         expected_size = 128 * 128 * 16 * 32 * 4
         self.assertEqual(len(binary), expected_size)
         self.assertEqual(binary[: 128 * 128 * 4], bytes(128 * 128 * 4))
+        slot_x = (502 % 16) * 128
+        slot_y = (502 // 16) * 128
+        experimental_alpha = bytearray()
+        for row in range(128):
+            start = ((slot_y + row) * 2048 + slot_x) * 4
+            experimental_alpha.extend(binary[start + 3 : start + 128 * 4 : 4])
+        self.assertTrue(any(experimental_alpha))
 
     def test_runtime_consumes_generated_catalog_and_roster_priority(self) -> None:
         source = UE4_HOOKS_PATH.read_text(encoding="utf-8")
@@ -319,8 +349,9 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         )
         self.assertIn("return exhibition_team_catalog_name(team_id);", source)
         self.assertIn("return exhibition_team_catalog_badge(team_id);", source)
-        self.assertIn("exhibition_team_categories[index].badge_slot", source)
-        self.assertIn("exhibition_team_catalog_find(team_id) && roster", source)
+        self.assertIn("exhibition_team_category_at(index)", source)
+        self.assertIn("return category ? category->badge_slot : 0;", source)
+        self.assertIn("catalogued && roster && roster->player_count >= 11u", source)
         self.assertNotIn("static const uint32_t exhibition_category_english", source)
         self.assertNotIn("case 173u: return 153u;", source)
 

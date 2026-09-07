@@ -8,6 +8,7 @@
 #include "aaudio_shim.h"
 #include "config.h"
 #include "exhibition_team_catalog.h"
+#include "experimental_inter_miami.h"
 #include "match_visual_policy.h"
 #include "error.h"
 #include "so_util.h"
@@ -1046,7 +1047,12 @@ enum {
   MAIN_MENU_2P_TRANSITION_VS = 2,
 };
 
+#if PES_EXPERIMENT_INTER_MIAMI
+#define MAIN_MENU_2P_LEAGUE_COUNT (EXHIBITION_TEAM_CATEGORY_COUNT + 1u)
+#define MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX 25u
+#else
 #define MAIN_MENU_2P_LEAGUE_COUNT EXHIBITION_TEAM_CATEGORY_COUNT
+#endif
 #define MAIN_MENU_2P_TEAM_VISIBLE_ROWS 5u
 
 enum {
@@ -1102,6 +1108,18 @@ static int exhibition_gameplan_open_custom(void);
 static void exhibition_gameplan_process_pending(void);
 static void exhibition_gameplan_reset(void);
 static const char *exhibition_team_name(uint32_t team_id);
+
+static uint32_t exhibition_physical_team_raw(uint32_t logical_team_id) {
+#if PES_EXPERIMENT_INTER_MIAMI
+  if (logical_team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
+    return EXHIBITION_INTER_MIAMI_PHYSICAL_TEAM_ID;
+#endif
+  return logical_team_id;
+}
+
+static uint32_t exhibition_native_team_id(uint32_t logical_team_id) {
+  return exhibition_physical_team_raw(logical_team_id) << 14;
+}
 static void *exhibition_get_tmpdb_match(void);
 static void exhibition_gameplan_refresh_uniform_choices(void);
 static void exhibition_gameplan_change_uniform(uint32_t side, int direction);
@@ -1128,10 +1146,24 @@ static void exhibition_nested_back_expire(void) {
   }
 }
 
+static const ExhibitionTeamCategory *exhibition_team_category_at(
+    uint32_t index) {
+#if PES_EXPERIMENT_INTER_MIAMI
+  // EF10 category 603 is North America / MLS. The generated catalog omits
+  // this EF10-only category, so insert the stable Inter Miami entry at the
+  // same position as the source category list (after Thai League).
+  if (index == MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX)
+    return &experimental_inter_miami_category;
+  if (index > MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX)
+    index--;
+#endif
+  if (index < EXHIBITION_TEAM_CATEGORY_COUNT)
+    return &exhibition_team_categories[index];
+  return NULL;
+}
+
 static const ExhibitionTeamCategory *exhibition_team_category(void) {
-  return exhibition_team_category_index < EXHIBITION_TEAM_CATEGORY_COUNT
-             ? &exhibition_team_categories[exhibition_team_category_index]
-             : NULL;
+  return exhibition_team_category_at(exhibition_team_category_index);
 }
 
 static const char *exhibition_team_name(uint32_t team_id);
@@ -1142,7 +1174,7 @@ static uint32_t exhibition_custom_team_item_count(void) {
     const ExhibitionTeamCategory *category = exhibition_team_category();
     return category ? category->team_count : 0;
   }
-  return EXHIBITION_TEAM_CATEGORY_COUNT;
+  return MAIN_MENU_2P_LEAGUE_COUNT;
 }
 
 static uint32_t main_menu_2p_team_selector_item_count(uint32_t pad) {
@@ -1153,9 +1185,9 @@ static uint32_t main_menu_2p_team_selector_item_count(uint32_t pad) {
     return MAIN_MENU_2P_LEAGUE_COUNT;
   if (phase == MAIN_MENU_2P_TEAM_SELECTOR_TEAM) {
     const uint32_t league = main_menu_2p_team_selector_league[pad];
-    return league < MAIN_MENU_2P_LEAGUE_COUNT
-               ? exhibition_team_categories[league].team_count
-               : 0;
+    const ExhibitionTeamCategory *category =
+        exhibition_team_category_at(league);
+    return category ? category->team_count : 0;
   }
   return 0;
 }
@@ -1165,10 +1197,15 @@ static const ExhibitionTeamCategory *main_menu_2p_team_selector_category(
   if (pad > 1 || main_menu_2p_team_selector_league[pad] >=
                      MAIN_MENU_2P_LEAGUE_COUNT)
     return NULL;
-  return &exhibition_team_categories[main_menu_2p_team_selector_league[pad]];
+  return exhibition_team_category_at(
+      main_menu_2p_team_selector_league[pad]);
 }
 
 static uint32_t main_menu_2p_team_selector_badge_for_team(uint32_t team_id) {
+#if PES_EXPERIMENT_INTER_MIAMI
+  if (team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
+    return EXHIBITION_INTER_MIAMI_BADGE_SLOT;
+#endif
   return exhibition_team_catalog_badge(team_id);
 }
 
@@ -1176,7 +1213,9 @@ static uint32_t main_menu_2p_team_selector_team_index(uint32_t league,
                                                        uint32_t team_id) {
   if (league >= MAIN_MENU_2P_LEAGUE_COUNT)
     return 0;
-  const ExhibitionTeamCategory *category = &exhibition_team_categories[league];
+  const ExhibitionTeamCategory *category = exhibition_team_category_at(league);
+  if (!category)
+    return 0;
   for (uint32_t index = 0; index < category->team_count; index++) {
     if (category->teams[index] == team_id)
       return index;
@@ -1272,7 +1311,8 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
       // Selector data stores the compact master ID (100 = Arsenal), whereas
       // common::TeamId stores that value in bits 14+. Passing the compact ID
       // resolves the same fallback record for every club (39/39/39).
-      const uint32_t native_team_id = team_id << 14;
+      const uint32_t native_team_id =
+          exhibition_native_team_id(team_id);
       defence = exhibition_get_position_overall(&native_team_id, 0u);
       midfield = exhibition_get_position_overall(&native_team_id, 1u);
       forward = exhibition_get_position_overall(&native_team_id, 2u);
@@ -1515,7 +1555,8 @@ static int main_menu_2p_team_selector_confirm(uint32_t pad) {
     main_menu_2p_team_selector_focus[pad] = team_focus;
     main_menu_2p_team_selector_scroll[pad] =
         main_menu_2p_team_selector_centered_scroll(
-            exhibition_team_categories[focus].team_count, team_focus);
+            main_menu_2p_team_selector_category(pad)->team_count,
+            team_focus);
     main_menu_2p_team_selector_confirmed[pad] = 0;
     return 1;
   }
@@ -1728,10 +1769,11 @@ const char *pes_controller_2p_team_selector_label(uint32_t pad,
   if (pad > 1)
     return "";
   if (main_menu_2p_team_selector_phase[pad] ==
-      MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE)
-    return index < MAIN_MENU_2P_LEAGUE_COUNT
-               ? exhibition_team_categories[index].label
-               : "";
+      MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE) {
+    const ExhibitionTeamCategory *category =
+        exhibition_team_category_at(index);
+    return category ? category->label : "";
+  }
   const ExhibitionTeamCategory *category =
       main_menu_2p_team_selector_category(pad);
   return category && index < category->team_count
@@ -1744,10 +1786,11 @@ uint32_t pes_controller_2p_team_selector_badge(uint32_t pad,
   if (pad > 1)
     return 0;
   if (main_menu_2p_team_selector_phase[pad] ==
-      MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE)
-    return index < MAIN_MENU_2P_LEAGUE_COUNT
-               ? exhibition_team_categories[index].badge_slot
-               : 0;
+      MAIN_MENU_2P_TEAM_SELECTOR_LEAGUE) {
+    const ExhibitionTeamCategory *category =
+        exhibition_team_category_at(index);
+    return category ? category->badge_slot : 0;
+  }
   const ExhibitionTeamCategory *category =
       main_menu_2p_team_selector_category(pad);
   return category && index < category->team_count
@@ -2286,6 +2329,16 @@ typedef struct {
   uint32_t player_count;
 } ExhibitionMasterRoster;
 
+#if PES_EXPERIMENT_INTER_MIAMI
+static const ExhibitionMasterRoster experimental_inter_miami_roster = {
+    EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID,
+    experimental_inter_miami_players,
+    experimental_inter_miami_shirts,
+    (uint32_t)(sizeof(experimental_inter_miami_players) /
+               sizeof(experimental_inter_miami_players[0])),
+};
+#endif
+
 // PlayerAssignment.raw is the authoritative base-club membership table. The
 // mobile build loads Team.raw and Player.raw, but its old myClub-only startup
 // path leaves the Team records' runtime member arrays empty. Every PlayerId is
@@ -2739,6 +2792,10 @@ static const ExhibitionMasterRoster *exhibition_find_sorted_roster(
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
+#if PES_EXPERIMENT_INTER_MIAMI
+  if (team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
+    return &experimental_inter_miami_roster;
+#endif
   // Prefer the generated eFootball 10 compatibility roster. These entries
   // contain only IDs that the PES21 CommonWork database can resolve, so this
   // changes no player objects and adds no per-frame work.
@@ -2773,8 +2830,11 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
 static int exhibition_is_valid_team(uint32_t team_id) {
   const ExhibitionMasterRoster *roster = exhibition_find_roster(team_id);
   // A selector entry without a full starting squad can never reach kickoff.
-  return exhibition_team_catalog_find(team_id) && roster &&
-         roster->player_count >= 11u;
+  int catalogued = exhibition_team_catalog_find(team_id) != NULL;
+#if PES_EXPERIMENT_INTER_MIAMI
+  catalogued |= team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID;
+#endif
+  return catalogued && roster && roster->player_count >= 11u;
 }
 
 static int exhibition_matchup_ready(void) {
@@ -2843,8 +2903,8 @@ static void exhibition_gameplan_refresh_uniform_choices(void) {
   };
   void *match = exhibition_get_tmpdb_match();
   const uint32_t encoded_team[2] = {
-      selected_team[0] << 14,
-      selected_team[1] << 14,
+      exhibition_native_team_id(selected_team[0]),
+      exhibition_native_team_id(selected_team[1]),
   };
   // Match the stock MyClubMatchSelectUniform preparation path: enumerate
   // each club's master Uniform record instead of relying on the optional
@@ -2867,7 +2927,8 @@ static void exhibition_gameplan_refresh_uniform_choices(void) {
         &exhibition_selected_uniform_id[side], __ATOMIC_ACQUIRE);
     if (__atomic_load_n(&exhibition_selected_uniform_valid[side],
                         __ATOMIC_ACQUIRE) &&
-        (persisted >> 14) == selected_team[side])
+        (persisted >> 14) ==
+            exhibition_physical_team_raw(selected_team[side]))
       current = persisted;
     uint32_t count = 0;
     uint32_t regulation = 0;
@@ -2903,7 +2964,8 @@ static void exhibition_gameplan_refresh_uniform_choices(void) {
             match, &side, &list_index);
         const uint32_t candidate = entry ? *entry : UINT32_MAX;
         if (candidate == UINT32_MAX ||
-            (candidate >> 14) != selected_team[side])
+            (candidate >> 14) !=
+                exhibition_physical_team_raw(selected_team[side]))
           continue;
         uint32_t duplicate = 0;
         for (uint32_t index = 0; index < count; index++) {
@@ -2921,7 +2983,9 @@ static void exhibition_gameplan_refresh_uniform_choices(void) {
     // represented by the regular kind table. During the bootstrap's one-frame
     // tmpdb gap, fall back to the club's first encoded kit rather than showing
     // UNAVAILABLE.
-    if (current == UINT32_MAX || (current >> 14) != selected_team[side])
+    if (current == UINT32_MAX ||
+        (current >> 14) !=
+            exhibition_physical_team_raw(selected_team[side]))
       current = encoded_team[side];
     uint32_t current_index = UINT32_MAX;
     for (uint32_t index = 0; index < count; index++) {
@@ -2985,6 +3049,10 @@ static void exhibition_gameplan_change_uniform(uint32_t side,
 }
 
 static const char *exhibition_team_name(uint32_t team_id) {
+#if PES_EXPERIMENT_INTER_MIAMI
+  if (team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
+    return "INTER MIAMI CF";
+#endif
   return exhibition_team_catalog_name(team_id);
 }
 
@@ -3370,8 +3438,8 @@ static int exhibition_refresh_selected_tmpdb(void) {
   if (!home_roster || !away_roster || !exhibition_set_team)
     return 0;
 
-  const uint32_t home_team_id = home_raw << 14;
-  const uint32_t away_team_id = away_raw << 14;
+  const uint32_t home_team_id = exhibition_native_team_id(home_raw);
+  const uint32_t away_team_id = exhibition_native_team_id(away_raw);
   void *manager = exhibition_tmpdb_manager_get_instance
                       ? exhibition_tmpdb_manager_get_instance()
                       : NULL;
@@ -4460,9 +4528,8 @@ const char *pes_controller_custom_team_popup_label(uint32_t index) {
                ? exhibition_team_name(category->teams[index])
                : "";
   }
-  return index < EXHIBITION_TEAM_CATEGORY_COUNT
-             ? exhibition_team_categories[index].label
-             : "";
+  const ExhibitionTeamCategory *category = exhibition_team_category_at(index);
+  return category ? category->label : "";
 }
 
 const char *pes_controller_custom_team_popup_icon(uint32_t index) {
@@ -4471,9 +4538,8 @@ const char *pes_controller_custom_team_popup_icon(uint32_t index) {
     const ExhibitionTeamCategory *category = exhibition_team_category();
     return category ? category->icon : "FC";
   }
-  return index < EXHIBITION_TEAM_CATEGORY_COUNT
-             ? exhibition_team_categories[index].icon
-             : "";
+  const ExhibitionTeamCategory *category = exhibition_team_category_at(index);
+  return category ? category->icon : "";
 }
 
 uint32_t pes_controller_custom_team_popup_badge(uint32_t index) {
@@ -4482,11 +4548,11 @@ uint32_t pes_controller_custom_team_popup_badge(uint32_t index) {
     const ExhibitionTeamCategory *category = exhibition_team_category();
     if (!category || index >= category->team_count)
       return 0;
-    return exhibition_team_catalog_badge(category->teams[index]);
+    return main_menu_2p_team_selector_badge_for_team(
+        category->teams[index]);
   }
-  return index < EXHIBITION_TEAM_CATEGORY_COUNT
-             ? exhibition_team_categories[index].badge_slot
-             : 0;
+  const ExhibitionTeamCategory *category = exhibition_team_category_at(index);
+  return category ? category->badge_slot : 0;
 }
 
 const char *pes_controller_custom_team_popup_title(void) {
@@ -4798,6 +4864,11 @@ static uint32_t prematch_gameplan_portrait_id(const void *player,
     id = match_player_id_without_data_flag(id);
   else
     id &= 0x8fffffffu;
+#if PES_EXPERIMENT_INTER_MIAMI
+  // Original EF10 IDs reuse retired PES21 portrait slots populated only in
+  // the detachable Inter Miami dt241 package.
+  id = experimental_inter_miami_portrait_id(id);
+#endif
   return id;
 }
 
@@ -5375,7 +5446,7 @@ static void prematch_gameplan_move_field(PrematchGameplanSide *state,
   if (!current)
     return;
   uint32_t best = PREMATCH_GAMEPLAN_NO_SELECTION;
-  uint32_t best_score = UINT32_MAX;
+  uint64_t best_score = UINT64_MAX;
   for (uint32_t index = 0; index < state->field_count; index++) {
     if (index == state->field_focus)
       continue;
@@ -5385,27 +5456,39 @@ static void prematch_gameplan_move_field(PrematchGameplanSide *state,
       continue;
     const int dx = (int)candidate->pitch_x - (int)current->pitch_x;
     const int dy = (int)candidate->pitch_y - (int)current->pitch_y;
-    int major = 0;
-    int minor = 0;
+    int forward = 0;
+    int lateral = 0;
     if (action == PES_PAUSE_INPUT_LEFT) {
-      major = -dx;
-      minor = dy;
+      forward = -dx;
+      lateral = dy;
     } else if (action == PES_PAUSE_INPUT_RIGHT) {
-      major = dx;
-      minor = dy;
+      forward = dx;
+      lateral = dy;
     } else if (action == PES_PAUSE_INPUT_UP) {
-      major = -dy;
-      minor = dx;
+      forward = -dy;
+      lateral = dx;
     } else {
-      major = dy;
-      minor = dx;
+      forward = dy;
+      lateral = dx;
     }
-    if (major <= 3)
+    // Keep a broad directional cone so sparse formations can cross lanes.
+    if (forward <= 3)
       continue;
-    const uint32_t distance =
-        (uint32_t)(major * major + minor * minor + abs(minor) * 12);
-    if (distance < best_score) {
-      best_score = distance;
+    const int abs_lateral = abs(lateral);
+    if (abs_lateral > forward * 3)
+      continue;
+#if PES_EXPERIMENT_INTER_MIAMI
+    // The imported EF10 formation has tightly packed central coordinates;
+    // penalize lateral drift so LEFT from Messi reaches the aligned winger.
+    const uint64_t lateral_weight = 4u;
+#else
+    const uint64_t lateral_weight = 1u;
+#endif
+    const uint64_t score = (uint64_t)forward * (uint64_t)forward +
+                           lateral_weight * (uint64_t)abs_lateral *
+                               (uint64_t)abs_lateral;
+    if (score < best_score) {
+      best_score = score;
       best = index;
     }
   }
@@ -5421,12 +5504,6 @@ static void prematch_gameplan_move_field(PrematchGameplanSide *state,
         state->bench_focus = state->bench_count - 1;
       return;
     }
-  } else if (action == PES_PAUSE_INPUT_UP) {
-    state->field_focus = state->field_focus
-                             ? state->field_focus - 1
-                             : state->field_count - 1;
-  } else {
-    state->field_focus = (state->field_focus + 1) % state->field_count;
   }
 }
 
@@ -6303,17 +6380,17 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
     const uint32_t phase =
         __atomic_load_n(&exhibition_custom_team_popup, __ATOMIC_ACQUIRE);
     if (phase == EXHIBITION_TEAM_POPUP_CATEGORY &&
-        exhibition_popup_focus_index < EXHIBITION_TEAM_CATEGORY_COUNT) {
+        exhibition_popup_focus_index < MAIN_MENU_2P_LEAGUE_COUNT) {
       exhibition_team_category_index = exhibition_popup_focus_index;
       __atomic_store_n(&exhibition_custom_team_popup,
                        EXHIBITION_TEAM_POPUP_TEAM, __ATOMIC_RELEASE);
       exhibition_popup_focus_index = 0;
       exhibition_team_scroll_offset = 0;
       exhibition_popup_focus_direction = 0;
+      const ExhibitionTeamCategory *category = exhibition_team_category();
       debugPrintf("exhibition: custom category=%u %s\n",
                   exhibition_team_category_index,
-                  exhibition_team_categories[exhibition_team_category_index]
-                      .label);
+                  category ? category->label : "(invalid)");
       return;
     }
     const ExhibitionTeamCategory *category = exhibition_team_category();
@@ -6597,7 +6674,7 @@ static void exhibition_open_team_picker(void *window, uint32_t side) {
   __atomic_store_n(&exhibition_select_side, side, __ATOMIC_RELEASE);
   debugPrintf("exhibition: custom team browser side=%u current=%u "
               "categories=%u\n",
-              side, selected_team, EXHIBITION_TEAM_CATEGORY_COUNT);
+              side, selected_team, MAIN_MENU_2P_LEAGUE_COUNT);
 }
 
 void pes_exhibition_search_touch(void *window, const void *touch_info) {
@@ -7264,7 +7341,8 @@ static void exhibition_update_search_task_record(void *task, uint32_t side,
   unsigned char *record =
       (unsigned char *)task + 0x78 + side * 0x70;
   const int selected = exhibition_is_valid_team(team_raw);
-  const uint32_t team_id = selected ? team_raw << 14 : 0;
+  const uint32_t team_id =
+      selected ? exhibition_native_team_id(team_raw) : 0;
   memcpy(record, &side, sizeof(side));
   memcpy(record + 8, &team_id, sizeof(team_id));
   exhibition_make_short_string(record + 16,
@@ -8128,7 +8206,7 @@ static void exhibition_update_matchmaking_card(void *window, uint32_t side,
     const int selected = exhibition_is_valid_team(team_raw);
     exhibition_node_set_visible(emblem, selected, 2);
     if (selected) {
-      const uint32_t team_id = team_raw << 14;
+      const uint32_t team_id = exhibition_native_team_id(team_raw);
       exhibition_emblem_set_team(emblem, &team_id, 0, 5, 0, 0);
     }
   }
@@ -8345,8 +8423,8 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
           home_roster = exhibition_find_roster(home_raw);
           away_roster = exhibition_find_roster(away_raw);
         }
-        const uint32_t home_team_id = home_raw << 14;
-        const uint32_t away_team_id = away_raw << 14;
+        const uint32_t home_team_id = exhibition_native_team_id(home_raw);
+        const uint32_t away_team_id = exhibition_native_team_id(away_raw);
         uint32_t data_mode;
         memcpy(&data_mode, (unsigned char *)data + 8, sizeof(data_mode));
 

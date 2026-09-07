@@ -215,10 +215,21 @@ def main() -> None:
             }
         else:
             texture = decode_texture(uexp, output)
+        # The original-ID experiment report names the converted PES21 slot
+        # `target_pes21_id`, while the older converter report uses
+        # `pes21_player_id`. Accept both report shapes so the same extraction
+        # pipeline can feed either package without duplicating assets.
+        target_pes21_id = player.get(
+            "pes21_player_id", player.get("target_pes21_id")
+        )
+        if target_pes21_id is None:
+            raise KeyError(
+                "portrait report player is missing pes21_player_id/target_pes21_id"
+            )
         extracted.append(
             {
                 "ef10_player_id": player_id,
-                "pes21_player_id": int(player["pes21_player_id"]),
+                "pes21_player_id": int(target_pes21_id),
                 "name": player["name"],
                 "source": None if placeholder else str(uexp),
                 "output": str(output),
@@ -232,9 +243,15 @@ def main() -> None:
                 flush=True,
             )
 
+    team = conversion.get("team", {})
+    team_id = conversion.get("team_id", team.get("ef10_team_id"))
+    if team_id is None:
+        raise KeyError("portrait report is missing team_id/ef10_team_id")
     report = {
-        "team_id": conversion["team_id"],
-        "team_symbol": conversion["team_symbol"],
+        "team_id": int(team_id),
+        "team_symbol": conversion.get(
+            "team_symbol", team.get("ef10_name", str(team_id))
+        ),
         "real_portraits": len(extracted) - blank_count,
         "blank_portraits": blank_count,
         "portraits": extracted,

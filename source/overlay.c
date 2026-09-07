@@ -1684,8 +1684,8 @@ static void overlay_render(void) {
   uint32_t prematch_gameplan_picker_metric_value[2][7];
   int prematch_gameplan_picker_foot_first_quad[2] = {0};
   int prematch_gameplan_picker_foot_quads[2] = {0};
-  int prematch_gameplan_picker_check_first_quad[2] = {0};
-  int prematch_gameplan_picker_check_quads[2] = {0};
+  int prematch_gameplan_picker_active_text_first[2][7];
+  int prematch_gameplan_picker_active_text_quads[2][7];
   int prematch_gameplan_auto_gain_first[2][2];
   int prematch_gameplan_auto_gain_quads[2][2];
   memset(prematch_gameplan_field_metric_first, -1,
@@ -1712,6 +1712,10 @@ static void overlay_render(void) {
          sizeof(prematch_gameplan_picker_metric_quads));
   memset(prematch_gameplan_picker_metric_value, 0,
          sizeof(prematch_gameplan_picker_metric_value));
+  memset(prematch_gameplan_picker_active_text_first, -1,
+         sizeof(prematch_gameplan_picker_active_text_first));
+  memset(prematch_gameplan_picker_active_text_quads, 0,
+         sizeof(prematch_gameplan_picker_active_text_quads));
   memset(prematch_gameplan_auto_gain_first, -1,
          sizeof(prematch_gameplan_auto_gain_first));
   memset(prematch_gameplan_auto_gain_quads, 0,
@@ -2356,47 +2360,6 @@ static void overlay_render(void) {
       }
     }
 
-    // Mark the player currently assigned to the selected set-piece slot.  The
-    // native picker uses a blue active marker; keep NONE rows deliberately
-    // unmarked so an empty slot is never mistaken for an assignment.
-    for (uint32_t side = 0; side < 2; side++) {
-      prematch_gameplan_picker_check_first_quad[side] = quads;
-      if (pes_controller_custom_prematch_gameplan_waiting(side) ||
-          pes_controller_custom_prematch_gameplan_page(side) !=
-              PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS ||
-          !pes_controller_custom_prematch_gameplan_position_picker_active(
-              side))
-        continue;
-      for (uint32_t slot = 0;
-           slot < prematch_gameplan_picker_visible[side]; slot++) {
-        const uint32_t index =
-            prematch_gameplan_picker_start[side] + slot;
-        const char *name =
-            pes_controller_custom_prematch_gameplan_position_picker_name(
-                side, index);
-        if (!name || strcmp(name, "NONE") == 0 ||
-            !pes_controller_custom_prematch_gameplan_position_picker_assigned(
-                side, index))
-          continue;
-        const float *rect = prematch_gameplan_picker_rect[side][slot];
-        // Keep the marker before the role plate so it never collides with the
-        // position abbreviation or the player's name.
-        const float center_x = rect[0] + 0.006f * (float)screen_width;
-        const float center_y = rect[1] + rect[3] * 0.5f;
-        const float size = 0.012f * (float)screen_height;
-        prematch_gameplan_picker_check_quads[side] += emit_segment(
-            center_x - size * 0.62f, center_y,
-            center_x - size * 0.14f, center_y + size * 0.52f,
-            0.0045f * (float)screen_height, verts + quads * 24);
-        quads++;
-        prematch_gameplan_picker_check_quads[side] += emit_segment(
-            center_x - size * 0.14f, center_y + size * 0.52f,
-            center_x + size * 0.72f, center_y - size * 0.55f,
-            0.0045f * (float)screen_height, verts + quads * 24);
-        quads++;
-      }
-    }
-
     for (uint32_t side = 0; side < 2; side++) {
       const float badge_size = header_h -
                                0.020f * (float)screen_height;
@@ -2828,11 +2791,18 @@ static void overlay_render(void) {
             const char *name =
                 pes_controller_custom_prematch_gameplan_position_picker_name(
                     side, index);
+            const int have_player = strcmp(name, "NONE") != 0;
+            const int assigned =
+                have_player &&
+                pes_controller_custom_prematch_gameplan_position_picker_assigned(
+                    side, index);
             const float text_y = rect[1] + (rect[3] - small_gh) * 0.5f;
             const float foot_center_x =
                 rect[0] + rect[2] - 0.070f * (float)screen_width;
             const float name_x =
                 rect[0] + 0.067f * (float)screen_width;
+            if (assigned)
+              prematch_gameplan_picker_active_text_first[side][slot] = quads;
             line_quads = emit_efootball_fit_line(
                 name, (int)strlen(name), name_x, text_y,
                 foot_center_x - name_x -
@@ -2840,9 +2810,11 @@ static void overlay_render(void) {
                 small_gh,
                 (float)screen_height / 60.0f,
                 EFOOTBALL_FONT_BOLD, verts + quads * 24);
+            if (assigned)
+              prematch_gameplan_picker_active_text_quads[side][slot] =
+                  line_quads;
             prematch_gameplan_white_text_quads += line_quads;
             quads += line_quads;
-            const int have_player = strcmp(name, "NONE") != 0;
             const uint32_t foot =
                 pes_controller_custom_prematch_gameplan_position_picker_preferred_foot(
                     side, index);
@@ -5304,7 +5276,11 @@ static void overlay_render(void) {
     const uint32_t status = native_debug.status;
     char label[192];
     snprintf(label, sizeof(label),
-             "NATIVE 2P SETPLAY V8.17.12 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+#if PES_EXPERIMENT_INTER_MIAMI
+             "NATIVE 2P SETPLAY V8.17.17 IM27 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+#else
+             "NATIVE 2P SETPLAY V8.17.17 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+#endif
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,
              native_debug.native_sample_mask & 3u,
@@ -6083,18 +6059,6 @@ static void overlay_render(void) {
                    prematch_gameplan_picker_foot_quads[side] * 6);
     glUniform1f(gl.loc_circle, 0.0f);
 
-    // Assigned-player checkmarks are always the P1-style blue accent, even
-    // when the right-hand game-plan pane is rendered in red.
-    glUniform1f(gl.loc_solid, 1.0f);
-    glUniform4f(gl.loc_color, 0.04f, 0.46f, 0.96f, 1.0f);
-    for (uint32_t side = 0; side < 2; side++) {
-      if (!prematch_gameplan_picker_check_quads[side])
-        continue;
-      glDrawArrays(GL_TRIANGLES,
-                   prematch_gameplan_picker_check_first_quad[side] * 6,
-                   prematch_gameplan_picker_check_quads[side] * 6);
-    }
-
     for (uint32_t side = 0; side < 2; side++) {
       glUniform4f(gl.loc_color, side_accent[side][0],
                   side_accent[side][1], side_accent[side][2], 0.62f);
@@ -6229,6 +6193,21 @@ static void overlay_render(void) {
         glDrawArrays(GL_TRIANGLES,
                      prematch_gameplan_picker_metric_first[side][slot] * 6,
                      prematch_gameplan_picker_metric_quads[side][slot] * 6);
+      }
+    }
+    // A blue player name is a quieter active-assignment cue than an extra
+    // checkmark and leaves the compact POS / NAME / FOOT / PWR row untouched.
+    glUniform4f(gl.loc_color, 0.04f, 0.46f, 0.96f, 1.0f);
+    for (uint32_t side = 0; side < 2; side++) {
+      for (uint32_t slot = 0; slot < PREMATCH_GAMEPLAN_VISIBLE_PICKER;
+           slot++) {
+        if (prematch_gameplan_picker_active_text_first[side][slot] < 0 ||
+            !prematch_gameplan_picker_active_text_quads[side][slot])
+          continue;
+        glDrawArrays(
+            GL_TRIANGLES,
+            prematch_gameplan_picker_active_text_first[side][slot] * 6,
+            prematch_gameplan_picker_active_text_quads[side][slot] * 6);
       }
     }
     for (uint32_t side = 0; side < 2; side++) {

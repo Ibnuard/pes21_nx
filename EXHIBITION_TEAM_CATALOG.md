@@ -18,7 +18,7 @@ team names, compact badge slots, and native PES21 fallback rosters.
 
 Newly exposed teams still use native PES21 rosters until their EF10 player data
 is converted. Existing converted EF10 rosters win first. The generated fallback
-table removes 299 stale club memberships
+table removes 303 stale club memberships
 from 136 old clubs by stable player ID; national-team
 membership is preserved. Name-only matches remain review-only to avoid deleting
 unrelated namesakes. Full EF10 conversion beyond the active roster set is a later phase.

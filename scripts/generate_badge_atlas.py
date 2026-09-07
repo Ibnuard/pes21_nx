@@ -24,6 +24,7 @@ DEFAULT_SYMBOL_ROOT = (
     ROOT / "local-debug" / "cpk-emblem-check" / "common" / "render" / "symbol"
 )
 DEFAULT_OVERRIDE_ROOT = ROOT / "assets" / "badges"
+EXPERIMENTAL_INTER_MIAMI_BADGE = ROOT / "data" / "experimental_inter_miami_badge.png"
 
 # 128px cells retain the native emblem detail used by the focused team card.
 CELL = 128
@@ -108,6 +109,7 @@ def emit_atlas(
     atlas: Image.Image,
     header_output_path: Path,
     binary_output_path: Path,
+    catalog_slot_count: int,
     slot_count: int,
     row_count: int,
     content_id: str,
@@ -127,6 +129,7 @@ def emit_atlas(
 #define BADGE_ATLAS_CONTENT_ID "{content_id}"
 #define BADGE_CELL_SIZE {CELL}
 #define BADGE_ATLAS_COLS {COLS}
+#define BADGE_ATLAS_CATALOG_SLOTS {catalog_slot_count}
 #define BADGE_ATLAS_SLOTS {slot_count}
 #define BADGE_ATLAS_ROWS {row_count}
 #define BADGE_ATLAS_W (BADGE_CELL_SIZE * BADGE_ATLAS_COLS)
@@ -183,7 +186,15 @@ def main() -> None:
         raise SystemExit(f"extracted symbol directory not found: {symbol_root}")
 
     catalog = load_catalog(catalog_path)
-    slot_count = catalog_slot_count(catalog)
+    catalog_slots = catalog_slot_count(catalog)
+    # Keep the experiment out of the generated team catalog. Its one dormant
+    # atlas slot is available to opt-in runtime builds without changing the
+    # stable selector or increasing the existing 32-row texture allocation.
+    experimental_badges = ((catalog_slots, EXPERIMENTAL_INTER_MIAMI_BADGE),)
+    if any(not source.is_file() for _slot, source in experimental_badges):
+        missing = [str(source) for _slot, source in experimental_badges if not source.is_file()]
+        raise SystemExit("experimental badge source not found: " + ", ".join(missing))
+    slot_count = catalog_slots + len(experimental_badges)
     row_count = (slot_count + COLS - 1) // COLS
     atlas = Image.new(
         "RGBA", (COLS * CELL, row_count * CELL), (0, 0, 0, 0)
@@ -207,10 +218,14 @@ def main() -> None:
             )
         paste_badge(atlas, int(category["badge_slot"]), source)
 
+    for slot, source in experimental_badges:
+        paste_badge(atlas, slot, source)
+
     emit_atlas(
         atlas,
         args.output.resolve(),
         args.binary_output.resolve(),
+        catalog_slots,
         slot_count,
         row_count,
         str(catalog["content_id"]),

@@ -126,8 +126,10 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('_ZN9game_mode18convOverallToGradeEh', self.hooks)
         self.assertIn('main_menu_2p_team_selector_refresh_ratings();',
                       self.hooks)
-        self.assertIn('const uint32_t native_team_id = team_id << 14;',
-                      self.hooks)
+        self.assertIn(
+            'const uint32_t native_team_id =\n'
+            '          exhibition_native_team_id(team_id);',
+            self.hooks)
         self.assertIn('defence = exhibition_get_position_overall(&native_team_id, 0u);',
                       self.hooks)
         self.assertIn('midfield = exhibition_get_position_overall(&native_team_id, 1u);',
@@ -322,6 +324,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertNotIn('"LEFT FOOT"', page)
         self.assertIn("const char foot_text[2]", page)
         self.assertIn('prematch_gameplan_picker_foot_first_quad', page)
+        self.assertIn('prematch_gameplan_picker_active_text_first', page)
+        self.assertNotIn('prematch_gameplan_picker_check_first_quad', page)
         self.assertIn('gameplan_metric_color(', draw)
         self.assertIn('prematch_gameplan_bench_metric_first', draw)
         self.assertIn('prematch_gameplan_picker_metric_first', draw)
@@ -361,6 +365,14 @@ class NativeGamepadLabTests(unittest.TestCase):
             r'void \*window,\s+uint32_t footer_key\) \{.*?\n\}',
             self.hooks, re.S).group(0)
         self.assertIn('else if (action == PES_PAUSE_INPUT_RIGHT)', move_field)
+        self.assertIn('if (abs_lateral > forward * 3)', move_field)
+        self.assertIn('const uint64_t lateral_weight = 4u;', move_field)
+        self.assertIn('const uint64_t lateral_weight = 1u;', move_field)
+        self.assertNotIn('state->field_focus = state->field_focus', move_field)
+        self.assertNotIn(
+            'state->field_focus = (state->field_focus + 1) % '
+            'state->field_count;',
+            move_field)
         self.assertIn('if (action == PES_PAUSE_INPUT_LEFT)',
                       process_substitute)
         self.assertIn('exhibition_squad_edit_get_my_side(squad_edit)',
@@ -379,6 +391,73 @@ class NativeGamepadLabTests(unittest.TestCase):
                       self.hooks)
         self.assertIn(
             '_ZNK5tmpdb9SquadEdit9GetMySideEv', self.hooks)
+
+    def test_gameplan_field_navigation_matches_console_spatial_steps(self):
+        players = {
+            "pope": (128, 238),
+            "burn": (48, 190),
+            "botman": (128, 190),
+            "schar": (208, 190),
+            "livramento": (32, 125),
+            "tonali": (92, 140),
+            "bruno": (155, 140),
+            "murphy": (224, 125),
+            "gordon": (40, 55),
+            "isak": (128, 25),
+            "barnes": (216, 55),
+        }
+        vectors = {
+            "left": (-1, 0),
+            "right": (1, 0),
+            "up": (0, -1),
+            "down": (0, 1),
+        }
+
+        def move(current, action, lateral_weight=1):
+            x, y = players[current]
+            vx, vy = vectors[action]
+            candidates = []
+            for name, (candidate_x, candidate_y) in players.items():
+                if name == current:
+                    continue
+                dx = candidate_x - x
+                dy = candidate_y - y
+                forward = dx * vx + dy * vy
+                lateral = dx * vy - dy * vx
+                if forward <= 3 or abs(lateral) > forward * 3:
+                    continue
+                score = forward * forward + lateral_weight * lateral * lateral
+                candidates.append((score, name))
+            return min(candidates)[1] if candidates else None
+
+        # These are the three bad transitions shown in the hardware review.
+        self.assertEqual(move("botman", "up"), "bruno")
+        self.assertEqual(move("gordon", "up"), "isak")
+        self.assertEqual(move("livramento", "right"), "tonali")
+
+        # Starting at the goalkeeper, all eleven field nodes remain reachable.
+        reached = {"pope"}
+        while True:
+            expanded = reached | {
+                target
+                for current in reached
+                for action in vectors
+                if (target := move(current, action)) is not None
+            }
+            if expanded == reached:
+                break
+            reached = expanded
+        self.assertEqual(reached, set(players))
+
+        # Reproduces the Inter Miami review: Messi LEFT must prefer Tadeo over
+        # the closer central midfielder below him.
+        players.clear()
+        players.update({
+            "tadeo": (48, 70),
+            "messi": (128, 70),
+            "cremaschi": (100, 125),
+        })
+        self.assertEqual(move("messi", "left", lateral_weight=4), "tadeo")
 
     def test_position_picker_title_stays_inside_its_modal(self):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
@@ -535,7 +614,10 @@ class NativeGamepadLabTests(unittest.TestCase):
         refresh = re.search(
             r'static void exhibition_gameplan_refresh_uniform_choices\(void\) \{'
             r'.*?\n\}', self.hooks, re.S).group(0)
-        self.assertIn('(persisted >> 14) == selected_team[side]', refresh)
+        self.assertIn(
+            '(persisted >> 14) ==\n'
+            '            exhibition_physical_team_raw(selected_team[side])',
+            refresh)
         self.assertIn('exhibition_match_set_uni_id(match, side, selected);',
                       refresh)
         self.assertGreaterEqual(
@@ -905,7 +987,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_SETPLAY_BUTTON_SET_PIECE_TAKER', self.shim)
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('NATIVE 2P SETPLAY V8.17.12', overlay)
+        self.assertIn('NATIVE 2P SETPLAY V8.17.17', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)

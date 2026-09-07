@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "experiment": "inter_miami_original_id",
+  "team": {
+    "ef10_team_id": 5738,
+    "ef10_name": "Miami BP",
+    "ef10_category_id": 603,
+    "ef10_category_label": "N AMERICA CLUBS",
+    "logical_team_id": 5738,
+    "pes21_physical_team_id": 2473,
+    "pes21_physical_team_name": "PUNTIHUERVA",
+    "slot_policy": "non_selector_physical_slot"
+  },
+  "policy": {
+    "include_shared_players": true,
+    "require_deleted_donor": true,
+    "require_position_match": true,
+    "runtime_integration": false,
+    "team_record_import": false
+  },
+  "expected_shared_player_ids": [
+    7511,
+    34881,
+    38568,
+    40425,
+    109842,
+    118960,
+    127201,
+    135359
+  ],
+  "expected_missing_player_ids": [
+    34430,
+    153007,
+    160365,
+    157971,
+    152391,
+    142912,
+    145651,
+    152772,
+    160151,
+    143641,
+    144296,
+    160784,
+    142972,
+    104790,
+    168915,
+    163647,
+    160362,
+    168129,
+    166137
+  ],
+  "modes": {
+    "canary": [153007],
+    "xi": [153007, 160365, 157971],
+    "full": [
+      34430,
+      153007,
+      160365,
+      157971,
+      152391,
+      142912,
+      145651,
+      152772,
+      160151,
+      143641,
+      144296,
+      160784,
+      142972,
+      104790,
+      168915,
+      163647,
+      160362,
+      168129,
+      166137
+    ]
+  }
+}

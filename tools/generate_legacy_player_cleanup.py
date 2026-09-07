@@ -33,6 +33,7 @@ DEFAULT_PES21_DIR = Path(
     "old_dt200_mobile_all.cpk/common/etc/pesdb"
 )
 DEFAULT_ACTIVE_ROSTERS = Path("source/exhibition_rosters_ef10.inc")
+DEFAULT_CONFIG = Path("data/exhibition_team_categories.json")
 DEFAULT_OUTPUT = Path("data/exhibition_legacy_player_cleanup.json")
 DEFAULT_REPORT = Path("EFOOTBALL10_LEGACY_CLEANUP.md")
 ACTIVE_ROSTER_SYMBOL = "exhibition_ef10_master_rosters"
@@ -73,6 +74,7 @@ def build_cleanup(
     active_rosters_path: Path,
     ef10_dir: Path,
     pes21_dir: Path,
+    external_active_clubs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
 
     source_paths = {
@@ -102,6 +104,12 @@ def build_cleanup(
         )
     active_club_ids = set(active_team_ids) & catalog_club_ids
     fallback_club_ids = catalog_club_ids - active_club_ids
+    external_clubs = external_active_clubs or []
+    external_club_ids = {int(team["team_id"]) for team in external_clubs}
+    if not all(team_id > 0 for team_id in external_club_ids):
+        raise ValueError("external active club IDs must be positive")
+    if external_club_ids & set(team_by_id):
+        raise ValueError("external active clubs must not duplicate catalog teams")
 
     ef10_players = parse_player_records(
         decode_wesys(source_paths["ef10_players"]), "ef10"
@@ -128,6 +136,30 @@ def build_cleanup(
                     f"EF10 player {assignment.player_id} belongs to active clubs "
                     f"{previous} and {team_id}"
                 )
+
+    external_memberships: list[dict[str, int | str]] = []
+    for team in external_clubs:
+        team_id = int(team["team_id"])
+        display_name = str(team["display_name"])
+        roster = ef10_rosters.get(team_id)
+        if not roster:
+            raise RuntimeError(f"external active club {team_id} has no EF10 roster")
+        for assignment in roster:
+            if assignment.player_id not in pes21_players:
+                continue
+            previous = owner_by_player.setdefault(assignment.player_id, team_id)
+            if previous != team_id:
+                raise RuntimeError(
+                    f"EF10 player {assignment.player_id} belongs to active clubs "
+                    f"{previous} and {team_id}"
+                )
+            external_memberships.append(
+                {
+                    "team_id": team_id,
+                    "display_name": display_name,
+                    "player_id": assignment.player_id,
+                }
+            )
 
     minimum_players = int(catalog["policy"]["minimum_players"])
     removals: list[dict[str, int | str]] = []
@@ -239,9 +271,11 @@ def build_cleanup(
             "minimum_players_after_cleanup": minimum_players,
         },
         "counts": {
-            "active_ef10_teams": len(active_team_ids),
-            "active_ef10_clubs": len(active_club_ids),
+            "active_ef10_teams": len(active_team_ids) + len(external_club_ids),
+            "active_ef10_clubs": len(active_club_ids) + len(external_club_ids),
             "fallback_clubs": len(fallback_club_ids),
+            "external_active_clubs": len(external_club_ids),
+            "external_shared_players": len(external_memberships),
             "affected_fallback_clubs": len(affected_counts),
             "removed_legacy_memberships": len(removals),
             "minimum_cleaned_roster": minimum_cleaned_count,
@@ -250,8 +284,10 @@ def build_cleanup(
         "source_sha256": {
             key: sha256_file(path) for key, path in sorted(source_paths.items())
         },
-        "active_ef10_team_ids": active_team_ids,
-        "active_ef10_club_team_ids": sorted(active_club_ids),
+        "active_ef10_team_ids": sorted(set(active_team_ids) | external_club_ids),
+        "active_ef10_club_team_ids": sorted(active_club_ids | external_club_ids),
+        "external_active_clubs": external_clubs,
+        "external_shared_memberships": external_memberships,
         "cleaned_player_counts": {
             str(team_id): count for team_id, count in sorted(cleaned_counts.items())
         },
@@ -283,6 +319,8 @@ def render_report(payload: dict[str, Any], catalog: dict[str, Any]) -> str:
         f"- Cleanup content ID: `{payload['content_id']}`",
         f"- Active EF10 rosters: {counts['active_ef10_teams']}",
         f"- Active EF10 clubs: {counts['active_ef10_clubs']}",
+        f"- External original-ID clubs: {counts['external_active_clubs']}",
+        f"- External shared players tracked: {counts['external_shared_players']}",
         f"- Fallback clubs checked: {counts['fallback_clubs']}",
         f"- Affected fallback clubs: {counts['affected_fallback_clubs']}",
         f"- Stale club memberships removed: {counts['removed_legacy_memberships']}",
@@ -379,6 +417,7 @@ def main() -> None:
     parser.add_argument(
         "--active-rosters", type=Path, default=DEFAULT_ACTIVE_ROSTERS
     )
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--check", action="store_true")
@@ -387,11 +426,15 @@ def main() -> None:
     root = args.root.resolve()
     catalog_path = resolve_from_root(root, args.catalog)
     catalog = load_catalog(catalog_path)
+    config = json.loads(
+        resolve_from_root(root, args.config).read_text(encoding="utf-8")
+    )
     payload = build_cleanup(
         catalog=catalog,
         active_rosters_path=resolve_from_root(root, args.active_rosters),
         ef10_dir=resolve_from_root(root, args.ef10_dir),
         pes21_dir=resolve_from_root(root, args.pes21_dir),
+        external_active_clubs=config.get("external_active_clubs", []),
     )
     output_path = resolve_from_root(root, args.output)
     report_path = resolve_from_root(root, args.report)

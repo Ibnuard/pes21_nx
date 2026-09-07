@@ -81,6 +81,97 @@ def patch_slot(source: Path, output: Path, member: str, replacement: Path):
             'replacement_sha256':hashlib.sha256(payload).hexdigest()}
 
 
+def patch_slots(source: Path, output: Path, replacements: dict[str, Path]):
+    """Patch several stored members after copying the outer CPK only once."""
+    if source.resolve() == output.resolve() or output.exists():
+        raise ValueError('output must be a new path, distinct from source')
+    if not replacements:
+        raise ValueError('at least one replacement is required')
+    normalized = {
+        name.replace('\\', '/').strip('/'): Path(path)
+        for name, path in replacements.items()
+    }
+    with source.open('rb') as original:
+        header = read_cpk_packet(original, 0, b'CPK ')[0]
+        toc = int(header['TocOffset'])
+        rows = read_cpk_packet(original, toc, b'TOC ')
+        base = min(toc, int(header['ContentOffset']))
+        by_name = {member_name(row): (index, row) for index, row in enumerate(rows)}
+        missing = sorted(set(normalized) - set(by_name))
+        if missing:
+            raise ValueError(f'missing replacement targets: {missing}')
+        updates = [{} for _ in rows]
+        targets = []
+        for name, replacement in normalized.items():
+            if not replacement.is_file():
+                raise FileNotFoundError(replacement)
+            index, row = by_name[name]
+            if row['FileSize'] != row['ExtractSize']:
+                raise ValueError(f'compressed CPK entry unsupported: {name}')
+            start = base + int(row['FileOffset'])
+            next_offsets = [
+                base + int(other['FileOffset'])
+                for other in rows
+                if int(other['FileOffset']) > int(row['FileOffset'])
+            ]
+            limit = min(next_offsets) if next_offsets else start + int(row['FileSize'])
+            size = replacement.stat().st_size
+            if size > limit - start:
+                raise ValueError(
+                    f'replacement needs {size}; slot capacity {limit - start}: {name}'
+                )
+            if size > int(row['FileSize']):
+                original.seek(start + int(row['FileSize']))
+                if any(original.read(size - int(row['FileSize']))):
+                    raise ValueError(f'nonzero bytes in proposed padding extension: {name}')
+            updates[index] = {'FileSize': size, 'ExtractSize': size}
+            targets.append((name, replacement, start, int(row['FileSize']), size))
+        original.seek(toc + 8)
+        packet_size = struct.unpack('<Q', original.read(8))[0]
+        packet = original.read(packet_size)
+        modified = patch_utf_rows(packet, updates)
+        if len(modified) != len(packet):
+            raise ValueError('TOC size changed')
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, output)
+    with output.open('r+b') as destination:
+        for _name, replacement, start, old_size, size in targets:
+            destination.seek(start)
+            with replacement.open('rb') as payload:
+                shutil.copyfileobj(payload, destination, 1024 * 1024)
+            if size < old_size:
+                destination.write(b'\0' * (old_size - size))
+        destination.seek(toc + 16)
+        destination.write(modified)
+    if output.stat().st_size != source.stat().st_size:
+        raise RuntimeError('outer CPK size changed')
+
+    result = []
+    with output.open('rb') as rebuilt:
+        rebuilt_rows = read_cpk_packet(rebuilt, toc, b'TOC ')
+        rebuilt_by_name = {member_name(row): row for row in rebuilt_rows}
+        for name, replacement, _start, _old_size, size in targets:
+            row = rebuilt_by_name[name]
+            rebuilt.seek(base + int(row['FileOffset']))
+            observed = hashlib.sha256()
+            remaining = size
+            while remaining:
+                chunk = rebuilt.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise RuntimeError(f'truncated patched member: {name}')
+                observed.update(chunk)
+                remaining -= len(chunk)
+            expected = hashlib.sha256()
+            with replacement.open('rb') as payload:
+                for chunk in iter(lambda: payload.read(1024 * 1024), b''):
+                    expected.update(chunk)
+            if observed.digest() != expected.digest():
+                raise RuntimeError(f'replacement verification failed: {name}')
+            result.append({'member': name, 'size': size, 'sha256': observed.hexdigest()})
+    return result
+
+
 if __name__=='__main__':
     import json
     p=argparse.ArgumentParser()

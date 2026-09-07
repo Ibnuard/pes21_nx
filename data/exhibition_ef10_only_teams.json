@@ -21,7 +21,7 @@
     "focus_teams": 12
   },
   "source_sha256": {
-    "category_config": "7af8963b42b3c1c768da0021c206f07fc14592527dc776ba3771db87192fde99",
+    "category_config": "e661411d94a8ce2d926289d73b8f353e3c4e3f0d3b0bc094deb08aa926368b35",
     "ef10_assignments": "0a9d105987c97dd956dc32ff333c80276d3efb622d6d4c3319135b3b6c57b325",
     "ef10_categories": "8d48348cfc883f59864a20a860da4b2202a5e4b0ee7b63f0aec46f25b130576f",
     "ef10_players": "e0e6dfd20ea2b1ae5f291af104b7b3745884ebd23133a0941ee2402c33a22b69",
@@ -12382,5 +12382,5 @@
       "classification": "surrogate_required"
     }
   ],
-  "content_id": "e23681f95366d201"
+  "content_id": "fce0790002a3b02e"
 }

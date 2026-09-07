@@ -55,6 +55,9 @@ ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 LTOFLAGS := -flto=auto -fuse-linker-plugin
 DIAGNOSTICS ?= 0
 PERF_TRACE ?= 0
+# Inter Miami original-ID/MLS integration is part of the stable runtime.
+# Keep the variable as an opt-out build switch for rollback and bisecting.
+PES_EXPERIMENT_INTER_MIAMI ?= 1
 
 CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
@@ -69,6 +72,8 @@ endif
 ifeq ($(PERF_TRACE),1)
 CFLAGS	+=	-DPERF_TRACE=1
 endif
+
+CFLAGS	+=	-DPES_EXPERIMENT_INTER_MIAMI=$(PES_EXPERIMENT_INTER_MIAMI)
 
 CXXFLAGS	:= $(CFLAGS)
 

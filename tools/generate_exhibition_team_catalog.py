@@ -372,6 +372,7 @@ def build_catalog(
         active_rosters_path=resolve_from_root(root, args.active_ef10_rosters),
         ef10_dir=ef10_dir,
         pes21_dir=pes21_dir,
+        external_active_clubs=config.get("external_active_clubs", []),
     )
 
     cleaned_rosters = {
