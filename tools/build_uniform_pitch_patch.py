@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from build_efootball10_visual_patch import mowing_blend, pitch
+from build_efootball10_visual_patch import (NINE_BAND_PITCH_STYLES,
+                                             mowing_blend, pitch, pitch_colors)
 from build_low_pitch_phase_patch import CONTENT, TEXTURE, NEW_TEXTURE
 from cooked_texture import Texture
 
@@ -16,6 +17,9 @@ DIFFUSES = ('pitch_l_bsm_alp', 'pitch_r_bsm_alp', 'pitch_lr_bsm_exLow_alp',
 
 
 def validate(baseline, built, stock, style='clean-v9'):
+    dark_color, light_color = pitch_colors(style)
+    green_threshold = (dark_color[1] + light_color[1]) / 2
+    green_sum = dark_color[1] + light_color[1]
     files = {p.relative_to(baseline) for p in baseline.rglob('*') if p.is_file()}
     assert files == {p.relative_to(built) for p in built.rglob('*') if p.is_file()}
     assert len(files) == 27
@@ -69,7 +73,7 @@ def validate(baseline, built, stock, style='clean-v9'):
             radius = max(0, int(radius))
             greens.append(float(np.median(encoded[110:180,
                                                  x-radius:x+radius+1, 1])))
-        assert np.array_equal(np.array(greens) > 61.5, shade[phase_centers]), name
+        assert np.array_equal(np.array(greens) > green_threshold, shade[phase_centers]), name
         textures.append({'name': name, 'mips': len(candidate.mips),
                          'encoded_phase_verified': True, 'band_green_samples': greens,
                          'line_blocks_preserved': line_counts})
@@ -95,18 +99,18 @@ def validate(baseline, built, stock, style='clean-v9'):
     a = np.array(a_samples)
     b = np.array(b_samples)
     expected = blend[0,centers,0]
-    assert np.array_equal(a > 61.5, expected)
-    assert np.array_equal(b > 61.5, 1-expected)
-    assert np.max(np.abs(a+b-123)) < 4
+    assert np.array_equal(a > green_threshold, expected)
+    assert np.array_equal(b > green_threshold, 1-expected)
+    assert np.max(np.abs(a+b-green_sum)) < 4
     if style in ('clean-v12', 'clean-v13'):
         # v12 locks the penalty-box transition at x494; its final clipped
         # outer stripe therefore ends in the opposite phase to v10/v11.
-        assert a[-1] < 61.5 and b[-1] > 61.5
+        assert a[-1] < green_threshold and b[-1] > green_threshold
     else:
-        assert a[-1] > 61.5 and b[-1] < 61.5  # actual mirrored Low seam
+        assert a[-1] > green_threshold and b[-1] < green_threshold
     # At v10 the entire field is one constant pitch, not ten narrow bands
     # per half. Ignore only the two outer portions clipped by the goal lines.
-    if style in ('clean-v10', 'clean-v11', 'clean-v12', 'clean-v13', 'clean-v14'):
+    if style in ('clean-v10', 'clean-v11', 'clean-v12', 'clean-v13', 'clean-v14') + NINE_BAND_PITCH_STYLES:
         full = np.r_[active, 1-active[::-1]]
         transitions = np.flatnonzero(np.diff(full))+1
         lengths = np.diff(transitions)
@@ -114,7 +118,8 @@ def validate(baseline, built, stock, style='clean-v9'):
                           {173,174} if style == 'clean-v11' else
                           {17,69,171} if style == 'clean-v12' else
                           {14,168,174} if style == 'clean-v13' else
-                          {163,176,177})
+                          {163,176,177} if style == 'clean-v14' else
+                          {77,81,82,88,89})
         assert set(lengths).issubset(expected_width)
         assert 770 in transitions
         if style == 'clean-v10':
@@ -125,18 +130,41 @@ def validate(baseline, built, stock, style='clean-v9'):
             assert 494 in edges
         elif style == 'clean-v14':
             assert 331 in edges and 494 in edges
-        assert len(centers) == (6 if style in ('clean-v12','clean-v13') else 5)
+        elif style in NINE_BAND_PITCH_STYLES:
+            assert edges[0] == 254 and edges[-1] == 1024
+            assert 494 in edges
+            left_pattern, _ = mowing_blend('pitch_l_bsm_alp', 1024, style)
+            right_pattern, _ = mowing_blend('pitch_r_bsm_alp', 1024, style)
+            assert left_pattern[0,253,0] != left_pattern[0,254,0]
+            assert right_pattern[0,769,0] != right_pattern[0,770,0]
+        expected_bands = (6 if style in ('clean-v12','clean-v13') else
+                          9 if style in NINE_BAND_PITCH_STYLES else 5)
+        assert len(centers) == expected_bands
     return {'recipe': style, 'pak_files': len(files), 'unchanged_files': len(files-changed),
             'all_materials_shaders_headers_identical_to_v8': True,
             'visible_bands_per_half': len(centers), 'full_pitch_visible_bands': 2*len(centers),
-            'band_width_texture_px': band_width,
-            'all_band_widths_uniform': style not in ('clean-v13','clean-v14'),
+            'band_width_texture_px': None if style in NINE_BAND_PITCH_STYLES else band_width,
+            'average_band_width_texture_px': band_width if style in NINE_BAND_PITCH_STYLES else None,
+            'all_band_widths_uniform': style not in ('clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES,
             'dark_band_width_texture_px': 168.0 if style == 'clean-v13' else None,
             'light_band_width_texture_px': 174.0 if style == 'clean-v13' else None,
             'light_to_dark_width_ratio': (174.0/168.0 if style == 'clean-v13' else None),
             'goal_area_corrected_band_width_texture_px': 163.0 if style == 'clean-v14' else None,
+            'v15_goal_to_goal_area_band_width_texture_px': 77.0 if style == 'clean-v15' else None,
+            'v15_goal_area_to_penalty_band_width_texture_px': 81.5 if style == 'clean-v15' else None,
+            'v15_penalty_to_midfield_band_width_texture_px': 530.0/6.0 if style == 'clean-v15' else None,
+            'nine_band_goal_to_goal_area_band_width_texture_px': 77.0 if style in NINE_BAND_PITCH_STYLES else None,
+            'nine_band_goal_area_to_penalty_band_width_texture_px': 81.5 if style in NINE_BAND_PITCH_STYLES else None,
+            'nine_band_penalty_to_midfield_band_width_texture_px': 530.0/6.0 if style in NINE_BAND_PITCH_STYLES else None,
             'symmetric_goal_area_correction': style == 'clean-v14',
-            'outer_band_continues_beyond_goal_line': style in ('clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'),
+            'goal_line_to_midfield_equal_bands': False,
+            'penalty_box_front_phase_locked': style in NINE_BAND_PITCH_STYLES,
+            'goal_area_front_phase_locked': style in NINE_BAND_PITCH_STYLES,
+            'symmetric_line_alignment': style in NINE_BAND_PITCH_STYLES,
+            'brighter_reference_palette': style in ('clean-v15', 'clean-v16'),
+            'dark_rgb': dark_color, 'light_rgb': light_color,
+            'outer_band_continues_beyond_goal_line': style in ('clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES,
+            'goal_lines_are_mowing_transitions': style in NINE_BAND_PITCH_STYLES,
             'left_band_boundaries_in_playable_area_px': edges.tolist(),
             'left_green_samples': a.tolist(), 'right_green_samples': b.tolist(),
             'native_lines': textures, 'device_tested': False}
@@ -150,7 +178,7 @@ def main():
     p.add_argument('--ef10', type=Path, default=Path('local-debug/stability-visuals/ef10'))
     p.add_argument('--etc1tool', type=Path, default=Path.home()/'AppData/Local/Android/Sdk/platform-tools/etc1tool.exe')
     p.add_argument('--verify-only', action='store_true')
-    p.add_argument('--style', choices=('clean-v9', 'clean-v10', 'clean-v11', 'clean-v12', 'clean-v13', 'clean-v14'), default='clean-v9')
+    p.add_argument('--style', choices=('clean-v9', 'clean-v10', 'clean-v11', 'clean-v12', 'clean-v13', 'clean-v14') + NINE_BAND_PITCH_STYLES, default='clean-v9')
     args = p.parse_args()
     stage = args.output/'pitch-stage'
     if not args.verify_only:

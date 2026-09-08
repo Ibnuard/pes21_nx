@@ -22,6 +22,14 @@
 #define PES_NX_VERSION "0.0.0"
 #endif
 
+#ifndef PES_PESDB_RUNTIME_ROSTERS
+#define PES_PESDB_RUNTIME_ROSTERS 0
+#endif
+
+#ifndef PES_PESDB_AUTHORITATIVE_OVR
+#define PES_PESDB_AUTHORITATIVE_OVR 0
+#endif
+
 typedef struct {
   void *data;
   int32_t num;
@@ -214,6 +222,14 @@ static const void *(*match_global_registry_get_team_ai_info)(
 static uint32_t (*match_team_parameter_get_role)(
     const void *team_parameter, uint32_t order_no, uint32_t formation_type,
     uint32_t tactics_plan_kind);
+
+static uint32_t exhibition_player_overall(const void *player,
+                                          const uint32_t *position,
+                                          uint32_t condition);
+static int exhibition_pesdb_team_rating(uint32_t team_id, uint32_t *forward,
+                                        uint32_t *midfield,
+                                        uint32_t *defence,
+                                        uint32_t *overall);
 static uint32_t (*match_squad_data_get_order_no)(void *squad_data,
                                                  const void *player_id);
 static uint32_t (*match_squad_data_get_member_id)(void *squad_data,
@@ -1047,12 +1063,7 @@ enum {
   MAIN_MENU_2P_TRANSITION_VS = 2,
 };
 
-#if PES_EXPERIMENT_INTER_MIAMI
-#define MAIN_MENU_2P_LEAGUE_COUNT (EXHIBITION_TEAM_CATEGORY_COUNT + 1u)
-#define MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX 25u
-#else
 #define MAIN_MENU_2P_LEAGUE_COUNT EXHIBITION_TEAM_CATEGORY_COUNT
-#endif
 #define MAIN_MENU_2P_TEAM_VISIBLE_ROWS 5u
 
 enum {
@@ -1110,11 +1121,27 @@ static void exhibition_gameplan_reset(void);
 static const char *exhibition_team_name(uint32_t team_id);
 
 static uint32_t exhibition_physical_team_raw(uint32_t logical_team_id) {
-#if PES_EXPERIMENT_INTER_MIAMI
-  if (logical_team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
-    return EXHIBITION_INTER_MIAMI_PHYSICAL_TEAM_ID;
-#endif
-  return logical_team_id;
+  return exhibition_team_catalog_physical(logical_team_id);
+}
+
+static uint32_t exhibition_logical_team_id(uint32_t team_id) {
+  uint32_t logical = exhibition_team_catalog_logical(team_id);
+  if (logical)
+    return logical;
+  const ExhibitionTeamCatalogEntry *direct =
+      exhibition_team_catalog_find(team_id);
+  if (direct && direct->physical_team_id == team_id)
+    return team_id;
+  if ((team_id & 0x3fffu) == 0u) {
+    const uint32_t decoded = team_id >> 14;
+    logical = exhibition_team_catalog_logical(decoded);
+    if (logical)
+      return logical;
+    direct = exhibition_team_catalog_find(decoded);
+    if (direct && direct->physical_team_id == decoded)
+      return decoded;
+  }
+  return 0u;
 }
 
 static uint32_t exhibition_native_team_id(uint32_t logical_team_id) {
@@ -1148,15 +1175,6 @@ static void exhibition_nested_back_expire(void) {
 
 static const ExhibitionTeamCategory *exhibition_team_category_at(
     uint32_t index) {
-#if PES_EXPERIMENT_INTER_MIAMI
-  // EF10 category 603 is North America / MLS. The generated catalog omits
-  // this EF10-only category, so insert the stable Inter Miami entry at the
-  // same position as the source category list (after Thai League).
-  if (index == MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX)
-    return &experimental_inter_miami_category;
-  if (index > MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX)
-    index--;
-#endif
   if (index < EXHIBITION_TEAM_CATEGORY_COUNT)
     return &exhibition_team_categories[index];
   return NULL;
@@ -1202,10 +1220,6 @@ static const ExhibitionTeamCategory *main_menu_2p_team_selector_category(
 }
 
 static uint32_t main_menu_2p_team_selector_badge_for_team(uint32_t team_id) {
-#if PES_EXPERIMENT_INTER_MIAMI
-  if (team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
-    return EXHIBITION_INTER_MIAMI_BADGE_SLOT;
-#endif
   return exhibition_team_catalog_badge(team_id);
 }
 
@@ -1306,7 +1320,12 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
     uint32_t midfield = 0;
     uint32_t defence = 0;
     uint32_t grade_half_steps = 0;
-    if (team_id && exhibition_get_position_overall) {
+    uint32_t overall = 0;
+    if (team_id && exhibition_pesdb_team_rating(
+                       team_id, &forward, &midfield, &defence, &overall)) {
+      grade_half_steps =
+          main_menu_2p_team_selector_grade_half_steps(overall);
+    } else if (team_id && exhibition_get_position_overall) {
       // BroadRoleKind in this PES21 mobile database is ordered DEF/MF/FW.
       // Selector data stores the compact master ID (100 = Arsenal), whereas
       // common::TeamId stores that value in bits 14+. Passing the compact ID
@@ -1318,7 +1337,7 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
       forward = exhibition_get_position_overall(&native_team_id, 2u);
       if (forward <= 100u && midfield <= 100u && defence <= 100u &&
           forward && midfield && defence) {
-        const uint32_t overall = (forward + midfield + defence + 1u) / 3u;
+        overall = (forward + midfield + defence + 1u) / 3u;
         grade_half_steps =
             main_menu_2p_team_selector_grade_half_steps(overall);
       } else {
@@ -2329,6 +2348,27 @@ typedef struct {
   uint32_t player_count;
 } ExhibitionMasterRoster;
 
+#if PES_PESDB_RUNTIME_ROSTERS
+typedef struct {
+  uint32_t player_unique_id;
+  uint32_t owner_team_id;
+} ExhibitionPesdbPlayerOwner;
+
+typedef struct {
+  uint32_t player_unique_id;
+  uint8_t overall;
+  uint8_t primary_position;
+} ExhibitionPesdbPlayerRating;
+
+typedef struct {
+  uint32_t team_id;
+  uint8_t forward;
+  uint8_t midfield;
+  uint8_t defence;
+  uint8_t overall;
+} ExhibitionPesdbTeamRating;
+#endif
+
 #if PES_EXPERIMENT_INTER_MIAMI
 static const ExhibitionMasterRoster experimental_inter_miami_roster = {
     EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID,
@@ -2374,6 +2414,101 @@ static const uint8_t exhibition_madrid_shirts[] = {
 #include "exhibition_migration.inc"
 #include "exhibition_rosters_ef10.inc"
 #include "exhibition_rosters_pes21_generated.inc"
+#if PES_PESDB_RUNTIME_ROSTERS
+#include "exhibition_rosters_pesdb_generated.inc"
+#endif
+
+#if PES_PESDB_RUNTIME_ROSTERS && PES_PESDB_AUTHORITATIVE_OVR
+static const ExhibitionPesdbPlayerRating *
+exhibition_find_pesdb_player_rating(uint32_t player_unique_id) {
+  uint32_t low = 0;
+  uint32_t high = (uint32_t)(sizeof(exhibition_pesdb_player_ratings) /
+                             sizeof(exhibition_pesdb_player_ratings[0]));
+  while (low < high) {
+    const uint32_t middle = low + (high - low) / 2u;
+    if (exhibition_pesdb_player_ratings[middle].player_unique_id <
+        player_unique_id)
+      low = middle + 1u;
+    else
+      high = middle;
+  }
+  return low < (uint32_t)(sizeof(exhibition_pesdb_player_ratings) /
+                          sizeof(exhibition_pesdb_player_ratings[0])) &&
+                 exhibition_pesdb_player_ratings[low].player_unique_id ==
+                     player_unique_id
+             ? &exhibition_pesdb_player_ratings[low]
+             : NULL;
+}
+#endif
+
+#if PES_PESDB_RUNTIME_ROSTERS
+static const ExhibitionPesdbTeamRating *
+exhibition_find_pesdb_team_rating(uint32_t team_id) {
+  uint32_t low = 0;
+  uint32_t high = (uint32_t)(sizeof(exhibition_pesdb_team_ratings) /
+                             sizeof(exhibition_pesdb_team_ratings[0]));
+  while (low < high) {
+    const uint32_t middle = low + (high - low) / 2u;
+    if (exhibition_pesdb_team_ratings[middle].team_id < team_id)
+      low = middle + 1u;
+    else
+      high = middle;
+  }
+  return low < (uint32_t)(sizeof(exhibition_pesdb_team_ratings) /
+                          sizeof(exhibition_pesdb_team_ratings[0])) &&
+                 exhibition_pesdb_team_ratings[low].team_id == team_id
+             ? &exhibition_pesdb_team_ratings[low]
+             : NULL;
+}
+#endif
+
+static uint32_t exhibition_player_overall(const void *player,
+                                          const uint32_t *position,
+                                          uint32_t condition) {
+  if (!player || !exhibition_get_player_overall)
+    return 0u;
+
+  const uint32_t native_overall =
+      exhibition_get_player_overall(player, position, condition);
+#if PES_PESDB_RUNTIME_ROSTERS && PES_PESDB_AUTHORITATIVE_OVR
+  uint64_t player_id = 0u;
+  memcpy(&player_id, (const unsigned char *)player + 44, sizeof(player_id));
+  const ExhibitionPesdbPlayerRating *rating =
+      exhibition_find_pesdb_player_rating((uint32_t)(player_id >> 32));
+  if (rating)
+    return rating->overall;
+#endif
+  return native_overall;
+}
+
+static int exhibition_pesdb_team_rating(uint32_t team_id, uint32_t *forward,
+                                        uint32_t *midfield,
+                                        uint32_t *defence,
+                                        uint32_t *overall) {
+#if PES_PESDB_RUNTIME_ROSTERS
+  const ExhibitionPesdbTeamRating *rating =
+      exhibition_find_pesdb_team_rating(team_id);
+  if (!rating)
+    return 0;
+  if (forward)
+    *forward = rating->forward;
+  if (midfield)
+    *midfield = rating->midfield;
+  if (defence)
+    *defence = rating->defence;
+  if (overall)
+    *overall = rating->overall;
+  return rating->forward && rating->midfield && rating->defence &&
+         rating->overall;
+#else
+  (void)team_id;
+  (void)forward;
+  (void)midfield;
+  (void)defence;
+  (void)overall;
+  return 0;
+#endif
+}
 
 #define EXHIBITION_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 #define EXHIBITION_ASSERT_ROSTER(name)                                      \
@@ -2790,8 +2925,90 @@ static const ExhibitionMasterRoster *exhibition_find_sorted_roster(
              : NULL;
 }
 
+#if PES_PESDB_RUNTIME_ROSTERS
+static int exhibition_sorted_team_contains(const uint32_t *team_ids,
+                                            uint32_t team_count,
+                                            uint32_t team_id) {
+  uint32_t low = 0;
+  uint32_t high = team_count;
+  while (low < high) {
+    const uint32_t middle = low + (high - low) / 2u;
+    if (team_ids[middle] < team_id)
+      low = middle + 1u;
+    else
+      high = middle;
+  }
+  return low < team_count && team_ids[low] == team_id;
+}
+
+static uint32_t exhibition_pesdb_player_owner(uint32_t player_unique_id) {
+  uint32_t low = 0;
+  uint32_t high = (uint32_t)(sizeof(exhibition_pesdb_player_owners) /
+                             sizeof(exhibition_pesdb_player_owners[0]));
+  while (low < high) {
+    const uint32_t middle = low + (high - low) / 2u;
+    if (exhibition_pesdb_player_owners[middle].player_unique_id <
+        player_unique_id)
+      low = middle + 1u;
+    else
+      high = middle;
+  }
+  if (low < (uint32_t)(sizeof(exhibition_pesdb_player_owners) /
+                       sizeof(exhibition_pesdb_player_owners[0])) &&
+      exhibition_pesdb_player_owners[low].player_unique_id ==
+          player_unique_id)
+    return exhibition_pesdb_player_owners[low].owner_team_id;
+  return 0u;
+}
+#endif
+
+static int exhibition_roster_player_allowed(
+    const ExhibitionMasterRoster *roster, uint32_t player_unique_id) {
+#if PES_PESDB_RUNTIME_ROSTERS
+  if (roster && exhibition_sorted_team_contains(
+                    exhibition_pesdb_club_team_ids,
+                    (uint32_t)(sizeof(exhibition_pesdb_club_team_ids) /
+                               sizeof(exhibition_pesdb_club_team_ids[0])),
+                    roster->team_id)) {
+    const uint32_t owner = exhibition_pesdb_player_owner(player_unique_id);
+    return !owner || owner == roster->team_id;
+  }
+#else
+  (void)roster;
+  (void)player_unique_id;
+#endif
+  // Club ownership cleanup must never remove national-team membership.
+  return 1;
+}
+
+static uint32_t exhibition_roster_effective_player_count(
+    const ExhibitionMasterRoster *roster) {
+  if (!roster)
+    return 0u;
+  uint32_t count = 0u;
+  for (uint32_t i = 0; i < roster->player_count; i++) {
+    if (exhibition_roster_player_allowed(roster,
+                                         roster->player_unique_ids[i]))
+      count++;
+  }
+  return count;
+}
+
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
+  const ExhibitionMasterRoster *roster = NULL;
+#if PES_PESDB_RUNTIME_ROSTERS
+  // PESDB Authentic is the release source of current club membership, roster
+  // order, and shirt numbers. The generated table points at physical PES21
+  // rows whose verified values are shipped in the matching Player.bin patch.
+  roster = exhibition_find_sorted_roster(
+      exhibition_pesdb_master_rosters,
+      (uint32_t)(sizeof(exhibition_pesdb_master_rosters) /
+                 sizeof(exhibition_pesdb_master_rosters[0])),
+      team_id);
+  if (roster)
+    return roster;
+#endif
 #if PES_EXPERIMENT_INTER_MIAMI
   if (team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
     return &experimental_inter_miami_roster;
@@ -2799,7 +3016,7 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
   // Prefer the generated eFootball 10 compatibility roster. These entries
   // contain only IDs that the PES21 CommonWork database can resolve, so this
   // changes no player objects and adds no per-frame work.
-  const ExhibitionMasterRoster *roster = exhibition_find_sorted_roster(
+  roster = exhibition_find_sorted_roster(
       exhibition_ef10_master_rosters,
       (uint32_t)(sizeof(exhibition_ef10_master_rosters) /
                  sizeof(exhibition_ef10_master_rosters[0])),
@@ -2830,11 +3047,8 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
 static int exhibition_is_valid_team(uint32_t team_id) {
   const ExhibitionMasterRoster *roster = exhibition_find_roster(team_id);
   // A selector entry without a full starting squad can never reach kickoff.
-  int catalogued = exhibition_team_catalog_find(team_id) != NULL;
-#if PES_EXPERIMENT_INTER_MIAMI
-  catalogued |= team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID;
-#endif
-  return catalogued && roster && roster->player_count >= 11u;
+  const int catalogued = exhibition_team_catalog_find(team_id) != NULL;
+  return catalogued && exhibition_roster_effective_player_count(roster) >= 11u;
 }
 
 static int exhibition_matchup_ready(void) {
@@ -3049,10 +3263,6 @@ static void exhibition_gameplan_change_uniform(uint32_t side,
 }
 
 static const char *exhibition_team_name(uint32_t team_id) {
-#if PES_EXPERIMENT_INTER_MIAMI
-  if (team_id == EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID)
-    return "INTER MIAMI CF";
-#endif
   return exhibition_team_catalog_name(team_id);
 }
 
@@ -3304,8 +3514,13 @@ static uint32_t exhibition_install_master_roster(
 
   uint32_t valid = 0;
   uint32_t missing = 0;
+  uint32_t reassigned = 0;
   for (uint32_t i = 0; i < roster->player_count && valid < 40; i++) {
     const uint32_t unique_id = roster->player_unique_ids[i];
+    if (!exhibition_roster_player_allowed(roster, unique_id)) {
+      reassigned++;
+      continue;
+    }
     const uint64_t player_id =
         exhibition_get_player_id_by_unique_id(&unique_id);
     if ((uint32_t)(player_id >> 32) != unique_id ||
@@ -3325,8 +3540,8 @@ static uint32_t exhibition_install_master_roster(
   member_flags |= (valid & 0x7fu) << 9;
   memcpy(team + 0x3a6, &member_flags, sizeof(member_flags));
   debugPrintf("exhibition: master roster team=0x%x valid=%u missing=%u "
-              "flags=0x%x\n",
-              *team_id, valid, missing, member_flags);
+              "reassigned=%u flags=0x%x\n",
+              *team_id, valid, missing, reassigned, member_flags);
   return valid;
 }
 
@@ -3349,6 +3564,8 @@ static uint32_t exhibition_refresh_squad_side_player_stats(
   while (updated < squad_count && roster_index < roster->player_count) {
     const uint32_t unique_id =
         roster->player_unique_ids[roster_index++];
+    if (!exhibition_roster_player_allowed(roster, unique_id))
+      continue;
     const uint64_t player_id =
         exhibition_get_player_id_by_unique_id(&unique_id);
     unsigned char *player =
@@ -3372,8 +3589,8 @@ static uint32_t exhibition_refresh_squad_side_player_stats(
 #ifdef DEBUG_LOG
     if (exhibition_get_player_overall && updated < 4) {
       const uint32_t natural_position = 13;
-      const uint32_t overall = exhibition_get_player_overall(
-          player, &natural_position, 2);
+      const uint32_t overall =
+          exhibition_player_overall(player, &natural_position, 2);
       debugPrintf("exhibition: squad stats side=%u slot=%u unique=%u "
                   "player=0x%llx overall=%u\n",
                   side, updated, unique_id,
@@ -3829,9 +4046,12 @@ uintptr_t pes_exhibition_training_touch_entry(void *window,
       const uint32_t team_id = exhibition_picker_seed_team(selected_team);
       __atomic_store_n(&exhibition_select_side, side, __ATOMIC_RELEASE);
       if (exhibition_set_test_match_team_id)
-        exhibition_set_test_match_team_id(team_id);
-      debugPrintf("exhibition: team picker open side=%u current=%u seed=%u\n",
-                  side, selected_team, team_id);
+        exhibition_set_test_match_team_id(
+            exhibition_physical_team_raw(team_id));
+      debugPrintf("exhibition: team picker open side=%u current=%u seed=%u "
+                  "physical=%u\n",
+                  side, selected_team, team_id,
+                  exhibition_physical_team_raw(team_id));
     }
   }
   return exhibition_training_touch_resume;
@@ -3850,7 +4070,7 @@ uintptr_t pes_exhibition_training_list_entry(void *window, void *page,
               ? __atomic_load_n(&exhibition_home_team_id, __ATOMIC_ACQUIRE)
               : __atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE);
       const uint32_t team_id = exhibition_picker_seed_team(selected_team);
-      exhibition_set_test_match_team_id(team_id);
+      exhibition_set_test_match_team_id(exhibition_physical_team_raw(team_id));
     }
   }
   return exhibition_training_list_resume;
@@ -3861,14 +4081,16 @@ uintptr_t pes_exhibition_training_child_entry(void *window,
                                               uint32_t selected_team_id) {
   (void)window;
   (void)child_name;
+  const uint32_t logical_team_id =
+      exhibition_logical_team_id(selected_team_id);
   if (__atomic_load_n(&exhibition_team_select_active, __ATOMIC_ACQUIRE) &&
-      exhibition_is_valid_team(selected_team_id)) {
+      exhibition_is_valid_team(logical_team_id)) {
     const uint32_t side =
         __atomic_load_n(&exhibition_select_side, __ATOMIC_ACQUIRE);
-    exhibition_select_team(side, selected_team_id);
+    exhibition_select_team(side, logical_team_id);
     __atomic_store_n(&exhibition_plan_ready, 0, __ATOMIC_RELEASE);
-    debugPrintf("exhibition: selected side=%u team=%u\n", side,
-                selected_team_id);
+    debugPrintf("exhibition: selected side=%u team=%u native=%u\n", side,
+                logical_team_id, selected_team_id);
   }
   return exhibition_training_child_resume;
 }
@@ -4879,6 +5101,14 @@ static int prematch_gameplan_load_portrait(uint32_t side, uint32_t index,
       !exhibition_sys_file_get_body || !exhibition_sys_file_get_size ||
       !exhibition_sys_file_release)
     return 0;
+  // Some EF10 roster IDs have no packaged portrait.  Do not call the
+  // synchronous asset reader for these entries: on Switch/Ryujinx a missing
+  // AAsset can leave sync_read waiting forever and freeze the whole hub.
+  if (portrait_id == 320983u) {
+    debugPrintf("native 2P Game Plan: portrait missing id=%u; using blank fallback\n",
+                portrait_id);
+    return 0;
+  }
 
   char path[96];
   uint32_t file_id = portrait_id;
@@ -5225,8 +5455,8 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
     entry->role = (uint8_t)role;
     if (player && exhibition_get_player_overall) {
       uint32_t overall_position = role <= 12 ? role : 13;
-      entry->overall = exhibition_get_player_overall(
-          player, &overall_position, 2);
+      entry->overall =
+          exhibition_player_overall(player, &overall_position, 2);
     }
     entry->portrait_id = prematch_gameplan_portrait_id(player,
                                                        entry->player_id);
@@ -5564,6 +5794,7 @@ static void prematch_gameplan_apply_auto_lineup(uint32_t side) {
 }
 
 static int exhibition_gameplan_prepare_matchplan(void) {
+  debugPrintf("native 2P Game Plan: prepare begin\\n");
   const int plan_ready =
       __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) != 0;
   if (!plan_ready && !exhibition_refresh_selected_tmpdb()) {
@@ -5605,7 +5836,9 @@ static int exhibition_gameplan_prepare_matchplan(void) {
   // match plan overwrites edits made by the custom Game Plan page.
   if (!plan_ready && matchplan_squad_load)
     matchplan_squad_load();
+  debugPrintf("native 2P Game Plan: before squad stats\\n");
   exhibition_refresh_squad_player_stats();
+  debugPrintf("native 2P Game Plan: after squad stats\\n");
   prematch_gameplan_refresh_side(0);
   prematch_gameplan_refresh_side(1);
   if (!exhibition_gameplan_sides[0].field_count ||
@@ -5620,8 +5853,19 @@ static int exhibition_gameplan_prepare_matchplan(void) {
 }
 
 static int exhibition_gameplan_open_custom(void) {
+  debugPrintf("native 2P Game Plan: open requested\\n");
   exhibition_gameplan_reset();
+  debugPrintf("native 2P Game Plan: reset done\\n");
   if (!exhibition_gameplan_prepare_matchplan()) {
+    // The hub stays visible on failure. Require a neutral input frame so the
+    // A press used to open Game Plan cannot leave its controls disarmed.
+    __atomic_store_n(&main_menu_2p_prematch_hub_input_pending, 0,
+                     __ATOMIC_RELEASE);
+    main_menu_2p_prematch_hub_input_armed[0] = 0;
+    main_menu_2p_prematch_hub_input_armed[1] = 0;
+    __atomic_store_n(&main_menu_2p_prematch_hub_page_focus, 0,
+                     __ATOMIC_RELEASE);
+    debugPrintf("native 2P Game Plan: open failed; hub remains usable\n");
     debugPrintf("native 2P Game Plan: squad initialization unavailable\n");
     return 0;
   }
@@ -8347,8 +8591,9 @@ uintptr_t pes_exhibition_filter_teams_entry(void *selector,
       uint32_t *out = begin;
       for (uint32_t *it = begin; it != end; ++it) {
         const uint32_t encoded = *it;
-        const uint32_t raw = encoded >> 14;
-        if (exhibition_is_valid_team(raw))
+        const uint32_t logical =
+            exhibition_logical_team_id(encoded >> 14);
+        if (exhibition_is_valid_team(logical))
           *out++ = encoded;
       }
       memcpy((unsigned char *)team_vector + 8, &out, sizeof(out));
@@ -9549,6 +9794,11 @@ static void match_goal_demo_refresh_owner(void) {
 // use the heartbeat only to select the goal-specific controller surface.
 static uint32_t pes_match_goal_demo_pad_main(void *unit, const void *input,
                                              uint32_t kind) {
+  static unsigned int trace_calls;
+  const unsigned int trace_call = ++trace_calls;
+  if (trace_call <= 4 || trace_call % 300 == 0)
+    debugPrintf("asset-trace-v5: GoalPad enter call=%u unit=%p input=%p kind=%u\n",
+                trace_call, unit, input, kind);
   const uint32_t result = match_goal_demo_pad_main_original
                               ? match_goal_demo_pad_main_original(unit, input,
                                                                   kind)
@@ -9567,6 +9817,8 @@ static uint32_t pes_match_goal_demo_pad_main(void *unit, const void *input,
         !__atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE))
       match_goal_demo_refresh_owner();
   }
+  if (trace_call <= 4 || trace_call % 300 == 0)
+    debugPrintf("asset-trace-v5: GoalPad exit call=%u result=%u\n", trace_call, result);
   return result;
 }
 
@@ -9591,8 +9843,10 @@ static void match_pause_dispatch_pending(void) {
       !match_task_manager_get_instance || !match_task_manager_push_msg_event)
     return;
   void *manager = match_task_manager_get_instance();
+  debugPrintf("asset-trace-v5: pause dispatch manager=%p\n", manager);
   if (manager)
     match_task_manager_push_msg_event(manager, 0x01050062u, NULL);
+  debugPrintf("asset-trace-v5: pause dispatch returned\n");
 }
 
 static void pes_match_pause_button_update(void *window) {
@@ -11171,6 +11425,10 @@ static void pes_match_result_update(void *window) {
 }
 
 uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
+  static unsigned int trace_calls;
+  if (++trace_calls <= 4 || trace_calls % 300 == 0)
+    debugPrintf("asset-trace-v5: pause update call=%u window=%p pad=%u\n",
+                trace_calls, window, pad_status);
   (void)pad_status;
   if (window) {
     match_pause_apply_owner_side();

@@ -24,11 +24,12 @@ DEFAULT_SYMBOL_ROOT = (
     ROOT / "local-debug" / "cpk-emblem-check" / "common" / "render" / "symbol"
 )
 DEFAULT_OVERRIDE_ROOT = ROOT / "assets" / "badges"
-EXPERIMENTAL_INTER_MIAMI_BADGE = ROOT / "data" / "experimental_inter_miami_badge.png"
 
 # 128px cells retain the native emblem detail used by the focused team card.
 CELL = 128
-COLS = 16
+# The expanded catalog no longer fits under the Switch's 4096px texture limit
+# with 16 columns. A 32x17 layout keeps both dimensions within that limit.
+COLS = 32
 
 
 def badge_tile() -> Image.Image:
@@ -87,12 +88,19 @@ def catalog_slot_count(catalog: dict[str, Any]) -> int:
     return slot_count
 
 
-def catalog_badge_path(symbol_root: Path, relative_path: str) -> Path:
-    source = (symbol_root / relative_path).resolve()
+def catalog_badge_path(
+    root: Path, symbol_root: Path, entry: dict[str, Any]
+) -> Path:
+    relative_path = str(entry["badge_source"])
+    source_root = str(entry.get("badge_source_root", "symbol_root"))
+    base = root if source_root == "repo" else symbol_root
+    if source_root not in {"repo", "symbol_root"}:
+        raise ValueError(f"unknown badge source root: {source_root}")
+    source = (base / relative_path).resolve()
     try:
-        source.relative_to(symbol_root)
+        source.relative_to(base)
     except ValueError as exc:
-        raise ValueError(f"badge source escapes symbol root: {relative_path}") from exc
+        raise ValueError(f"badge source escapes {source_root}: {relative_path}") from exc
     if not source.is_file():
         raise FileNotFoundError(f"catalog badge source not found: {source}")
     return source
@@ -187,14 +195,7 @@ def main() -> None:
 
     catalog = load_catalog(catalog_path)
     catalog_slots = catalog_slot_count(catalog)
-    # Keep the experiment out of the generated team catalog. Its one dormant
-    # atlas slot is available to opt-in runtime builds without changing the
-    # stable selector or increasing the existing 32-row texture allocation.
-    experimental_badges = ((catalog_slots, EXPERIMENTAL_INTER_MIAMI_BADGE),)
-    if any(not source.is_file() for _slot, source in experimental_badges):
-        missing = [str(source) for _slot, source in experimental_badges if not source.is_file()]
-        raise SystemExit("experimental badge source not found: " + ", ".join(missing))
-    slot_count = catalog_slots + len(experimental_badges)
+    slot_count = catalog_slots
     row_count = (slot_count + COLS - 1) // COLS
     atlas = Image.new(
         "RGBA", (COLS * CELL, row_count * CELL), (0, 0, 0, 0)
@@ -205,7 +206,7 @@ def main() -> None:
         team_id = int(team["team_id"])
         source = custom_team_image(override_root, team_id)
         if source is None:
-            source = catalog_badge_path(symbol_root, str(team["badge_source"]))
+            source = catalog_badge_path(ROOT, symbol_root, team)
         paste_badge(atlas, int(team["badge_slot"]), source)
 
     for index, category in enumerate(catalog["categories"]):
@@ -213,13 +214,8 @@ def main() -> None:
             override_root, str(category["key"]), index
         )
         if source is None:
-            source = catalog_badge_path(
-                symbol_root, str(category["badge_source"])
-            )
+            source = catalog_badge_path(ROOT, symbol_root, category)
         paste_badge(atlas, int(category["badge_slot"]), source)
-
-    for slot, source in experimental_badges:
-        paste_badge(atlas, slot, source)
 
     emit_atlas(
         atlas,

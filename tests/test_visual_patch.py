@@ -195,6 +195,79 @@ class TextureTests(unittest.TestCase):
             self.assertEqual(int(combined[0,width//2-1,0]), 1)
             self.assertEqual(int(combined[0,width//2,0]), 0)
 
+    def test_reference_v15_has_nine_line_aligned_bands_per_painted_half(self):
+        import numpy as np
+        left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v15')
+        right, right_band = mowing_blend('pitch_r_bsm_alp', 1024, 'clean-v15')
+        self.assertAlmostEqual(band, 770/9)
+        self.assertEqual(right_band, band)
+        left_active = left[0,254:1024,0]
+        right_active = right[0,0:770,0]
+        left_edges = np.r_[0,np.flatnonzero(np.diff(left_active))+1,770]
+        right_edges = np.r_[0,np.flatnonzero(np.diff(right_active))+1,770]
+        self.assertEqual(len(left_edges)-1, 9)
+        self.assertEqual(len(right_edges)-1, 9)
+        self.assertTrue(set(np.diff(left_edges)).issubset({77,81,82,88,89}))
+        self.assertTrue(set(np.diff(right_edges)).issubset({77,81,82,88,89}))
+        self.assertIn(331-254, left_edges)
+        self.assertIn(494-254, left_edges)
+        self.assertIn(530, right_edges)
+        self.assertIn(693, right_edges)
+        full = np.r_[left_active,right_active]
+        transitions = np.flatnonzero(np.diff(full))+1
+        self.assertEqual(len(transitions), 17)
+        self.assertIn(770, transitions)
+        self.assertEqual(int(left_active[-1]), 1)
+        self.assertEqual(int(right_active[0]), 0)
+        # The same cadence must continue outside the field. Clamping the
+        # padding to the first/last playable shade visually stretches a strip
+        # across the white goal line.
+        self.assertNotEqual(int(left[0,253,0]), int(left[0,254,0]))
+        self.assertNotEqual(int(right[0,769,0]), int(right[0,770,0]))
+        self.assertEqual((np.flatnonzero(np.diff(left[0,:,0]))+1).tolist(),
+                         [14,91,172,254,331,412,494,582,670,759,847,935])
+        self.assertEqual((np.flatnonzero(np.diff(right[0,:,0]))+1).tolist(),
+                         [89,177,265,354,442,530,612,693,770,852,933,1010])
+
+    def test_reference_v15_is_brighter_and_l_r_lr_phase_locked(self):
+        import numpy as np
+        dark, light = pitch_colors('clean-v15')
+        old_dark, old_light = pitch_colors('clean-v14')
+        self.assertEqual((dark, light), ([36,63,17], [60,96,29]))
+        self.assertGreater((dark[1]+light[1])/2,
+                           (old_dark[1]+old_light[1])/2)
+        for width in (1024,512,256,128):
+            left, band = mowing_blend('pitch_l_bsm_alp', width, 'clean-v15')
+            right, right_band = mowing_blend('pitch_r_bsm_alp', width, 'clean-v15')
+            combined, full_band = mowing_blend('pitch_lr_bsm_exLow_alp', width, 'clean-v15')
+            self.assertEqual(right_band, band)
+            self.assertEqual(full_band, band/2)
+            self.assertTrue(np.array_equal(left[0,::2,0],combined[0,:width//2,0]))
+            self.assertTrue(np.array_equal(right[0,::2,0],combined[0,width//2:,0]))
+            self.assertEqual(int(combined[0,width//2-1,0]), 1)
+            self.assertEqual(int(combined[0,width//2,0]), 0)
+            transitions=(np.flatnonzero(np.diff(combined[0,:,0]))+1).tolist()
+            for expected in (127*width/1024,247*width/1024,
+                             777*width/1024,897*width/1024):
+                self.assertLessEqual(min(abs(edge-expected) for edge in transitions),1)
+
+    def test_soft_contrast_v16_changes_only_the_dark_palette(self):
+        import numpy as np
+        v15_dark, v15_light = pitch_colors('clean-v15')
+        v16_dark, v16_light = pitch_colors('clean-v16')
+        self.assertEqual((v16_dark, v16_light), ([42,72,20], [60,96,29]))
+        self.assertEqual(v16_light, v15_light)
+        self.assertTrue(all(new > old for new, old in zip(v16_dark, v15_dark)))
+        self.assertLess(v16_light[1]-v16_dark[1],
+                        v15_light[1]-v15_dark[1])
+        for width in (1024,512,256,128):
+            for name in ('pitch_l_bsm_alp', 'pitch_r_bsm_alp',
+                         'pitch_lr_bsm_exLow_alp'):
+                v15_blend, v15_band = mowing_blend(name, width, 'clean-v15')
+                v16_blend, v16_band = mowing_blend(name, width, 'clean-v16')
+                self.assertEqual(v16_band, v15_band)
+                self.assertTrue(np.array_equal(v16_blend, v15_blend))
+
     def test_uniform_v9_all_bands_and_complemented_low_right(self):
         import numpy as np
         left, band = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v9')

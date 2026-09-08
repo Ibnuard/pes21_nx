@@ -1196,6 +1196,16 @@ extern volatile int g_hide_saves; // main.c: set during New Game to hide saves
 
 void *AAssetManager_open_fake(void *mgr, const char *path, int mode) {
   (void)mgr; (void)mode;
+  // This is only the Android/loose fallback, not the CRI binder lookup.
+  // Bound trace volume and explicitly label that distinction.
+  static unsigned int visual_trace_count;
+  const int trace_visual = path && visual_trace_count < 80 &&
+      (strstr(path, "u0108") || strstr(path, "u0109") ||
+       strstr(path, "e_000109") || strstr(path, "e_000108"));
+  if (trace_visual) {
+    ++visual_trace_count;
+    debugPrintf("asset-trace-v5: loose probe path=%s mode=%d\n", path, mode);
+  }
   // New Game: make GTA3LCSsf* slots look absent so game-init builds a fresh game
   if (g_hide_saves && path && strstr(path, "GTA3LCSsf")) {
     debugPrintf("AAsset: open(%s) -> HIDDEN (new game)\n", path);
@@ -1207,6 +1217,8 @@ void *AAssetManager_open_fake(void *mgr, const char *path, int mode) {
   if (embedded)
     return embedded;
   FILE *f = open_asset_with_fallback(path);
+  if (trace_visual)
+    debugPrintf("asset-trace-v5: loose result path=%s found=%d\n", path, f != NULL);
   if (!f) {
     if (path_is_mp3(path)) {
       FILE *sf = fmemopen((void *)silent_bin, silent_bin_size, "rb");

@@ -5,7 +5,7 @@ team names, compact badge slots, and native PES21 fallback rosters.
 
 ## Safety gate
 
-- Catalog content ID: `29914839e0782650`
+- Catalog content ID: `fb87564624ee677c`
 - EF10 Team.bin records: 931
 - PES21 Team.bin records: 736
 - EF10 Player.bin records: 21701
@@ -13,12 +13,13 @@ team names, compact badge slots, and native PES21 fallback rosters.
 - Team IDs present in both: 480
 - Safe shared teams with complete rosters/tactics/badges: 464
 - Retained legacy-only selector teams: 6
-- Final selector teams: 470
-- Compact atlas slots, including slot 0 and category emblems: 502
+- External PESDB Authentic teams: 10
+- Final selector teams: 480
+- Compact atlas slots, including slot 0 and category emblems: 514
 
 Newly exposed teams still use native PES21 rosters until their EF10 player data
 is converted. Existing converted EF10 rosters win first. The generated fallback
-table removes 303 stale club memberships
+table removes 299 stale club memberships
 from 136 old clubs by stable player ID; national-team
 membership is preserved. Name-only matches remain review-only to avoid deleting
 unrelated namesakes. Full EF10 conversion beyond the active roster set is a later phase.
@@ -55,7 +56,7 @@ the manifest, so high native IDs do not allocate sparse texture space.
 | DANISH LEAGUE | 10 | 0 | 10 |
 | BELGIAN LEAGUE | 12 | 0 | 12 |
 | SWISS LEAGUE | 10 | 0 | 10 |
-| OTHER EUROPE | 21 | 3 | 24 |
+| OTHER EUROPE | 21 | 4 | 25 |
 | BRAZIL SERIE A | 19 | 0 | 19 |
 | BRAZIL SERIE B | 16 | 0 | 16 |
 | ARGENTINA LEAGUE | 23 | 0 | 23 |
@@ -64,6 +65,8 @@ the manifest, so high native IDs do not allocate sparse texture space.
 | J1 LEAGUE | 20 | 0 | 20 |
 | J2 LEAGUE | 15 | 0 | 15 |
 | THAI LEAGUE | 12 | 0 | 12 |
+| OTHER ASIA CLUBS | 0 | 4 | 4 |
+| N AMERICA CLUBS | 0 | 5 | 5 |
 | WORLD / EDIT CLUBS | 2 | 0 | 2 |
 | NATIONAL EUROPE | 41 | 1 | 42 |
 | NATIONAL AFRICA | 14 | 0 | 14 |

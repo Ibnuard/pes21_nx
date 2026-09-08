@@ -5,7 +5,86 @@
   "expected_safe_team_count": 464,
   "legacy_team_ids": [59, 115, 127, 133, 134, 135],
   "external_active_clubs": [
-    {"team_id": 5738, "display_name": "INTER MIAMI CF"}
+    {
+      "team_id": 126,
+      "physical_team_id": 175,
+      "display_name": "BORUSSIA DORTMUND",
+      "short_code": "BVB",
+      "category": "other_europe",
+      "badge_source": "data/exhibition_badges/126.png"
+    },
+    {
+      "team_id": 1264,
+      "physical_team_id": 184,
+      "display_name": "CLUB AMERICA",
+      "short_code": "AME",
+      "category": "north_america_clubs",
+      "badge_source": "data/exhibition_badges/1264.png"
+    },
+    {
+      "team_id": 1700,
+      "physical_team_id": 188,
+      "display_name": "CD GUADALAJARA",
+      "short_code": "GDL",
+      "category": "north_america_clubs",
+      "badge_source": "data/exhibition_badges/1700.png"
+    },
+    {
+      "team_id": 1775,
+      "physical_team_id": 198,
+      "display_name": "PUMAS",
+      "short_code": "PUM",
+      "category": "north_america_clubs",
+      "badge_source": "data/exhibition_badges/1775.png"
+    },
+    {
+      "team_id": 1782,
+      "physical_team_id": 219,
+      "display_name": "TIGRES UANL",
+      "short_code": "TIG",
+      "category": "north_america_clubs",
+      "badge_source": "data/exhibition_badges/1782.png"
+    },
+    {
+      "team_id": 5738,
+      "physical_team_id": 2473,
+      "display_name": "INTER MIAMI CF",
+      "short_code": "MIA",
+      "category": "north_america_clubs",
+      "badge_source": "data/exhibition_badges/5738.png"
+    },
+    {
+      "team_id": 17873,
+      "physical_team_id": 67025,
+      "display_name": "AL HILAL SFC",
+      "short_code": "HIL",
+      "category": "other_asia_clubs",
+      "badge_source": "data/exhibition_badges/17873.png"
+    },
+    {
+      "team_id": 18961,
+      "physical_team_id": 68113,
+      "display_name": "AL NASSR FC",
+      "short_code": "NAS",
+      "category": "other_asia_clubs",
+      "badge_source": "data/exhibition_badges/18961.png"
+    },
+    {
+      "team_id": 20557,
+      "physical_team_id": 69709,
+      "display_name": "AL SADD SC",
+      "short_code": "SAD",
+      "category": "other_asia_clubs",
+      "badge_source": "data/exhibition_badges/20557.png"
+    },
+    {
+      "team_id": 20560,
+      "physical_team_id": 69712,
+      "display_name": "SHABAB AL AHLI DUBAI FC",
+      "short_code": "SHA",
+      "category": "other_asia_clubs",
+      "badge_source": "data/exhibition_badges/20560.png"
+    }
   ],
   "categories": [
     {
@@ -143,7 +222,7 @@
       "icon": "EUR",
       "kind": "club",
       "source_category_ids": [65542],
-      "team_ids": [133, 134, 135],
+      "team_ids": [126, 133, 134, 135],
       "badge_source": "other/emblemOther-clublEurope.png"
     },
     {
@@ -216,6 +295,7 @@
       "icon": "ASI",
       "kind": "club",
       "source_category_ids": [101, 694, 703, 65543],
+      "team_ids": [17873, 18961, 20557, 20560],
       "badge_source": "other/emblemOther-clubAsia.png",
       "omit_if_empty": true
     },
@@ -225,6 +305,7 @@
       "icon": "NAM",
       "kind": "club",
       "source_category_ids": [603, 635, 65550],
+      "team_ids": [1264, 1700, 1775, 1782, 5738],
       "badge_source": "other/emblemOther-other.png",
       "omit_if_empty": true
     },

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_by": "tools/generate_legacy_player_cleanup.py",
-  "catalog_content_id": "29914839e0782650",
+  "catalog_content_id": "fb87564624ee677c",
   "policy": {
     "scope": "club_to_club",
     "automatic_identity": "shared_player_id",
@@ -10,13 +10,13 @@
     "minimum_players_after_cleanup": 18
   },
   "counts": {
-    "active_ef10_teams": 100,
-    "active_ef10_clubs": 44,
+    "active_ef10_teams": 99,
+    "active_ef10_clubs": 43,
     "fallback_clubs": 338,
-    "external_active_clubs": 1,
-    "external_shared_players": 8,
+    "external_active_clubs": 0,
+    "external_shared_players": 0,
     "affected_fallback_clubs": 136,
-    "removed_legacy_memberships": 303,
+    "removed_legacy_memberships": 299,
     "minimum_cleaned_roster": 19,
     "name_only_review_candidates": 2
   },
@@ -126,8 +126,7 @@
     234,
     327,
     333,
-    377,
-    5738
+    377
   ],
   "active_ef10_club_team_ids": [
     100,
@@ -172,57 +171,10 @@
     234,
     327,
     333,
-    377,
-    5738
+    377
   ],
-  "external_active_clubs": [
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF"
-    }
-  ],
-  "external_shared_memberships": [
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 109842
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 118960
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 127201
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 38568
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 7511
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 34881
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 135359
-    },
-    {
-      "team_id": 5738,
-      "display_name": "INTER MIAMI CF",
-      "player_id": 40425
-    }
-  ],
+  "external_active_clubs": [],
+  "external_shared_memberships": [],
   "cleaned_player_counts": {
     "115": 25,
     "127": 31,
@@ -232,7 +184,7 @@
     "146": 28,
     "152": 25,
     "163": 24,
-    "172": 23,
+    "172": 24,
     "174": 27,
     "176": 29,
     "178": 22,
@@ -289,7 +241,7 @@
     "1207": 25,
     "1208": 27,
     "1237": 37,
-    "1239": 31,
+    "1239": 32,
     "1240": 37,
     "1241": 36,
     "1242": 28,
@@ -301,7 +253,7 @@
     "1249": 35,
     "1252": 30,
     "1255": 32,
-    "1256": 38,
+    "1256": 39,
     "1330": 26,
     "1600": 32,
     "1706": 29,
@@ -333,7 +285,7 @@
     "2616": 32,
     "2625": 32,
     "2653": 27,
-    "2722": 37,
+    "2722": 38,
     "4071": 20,
     "4123": 28,
     "4145": 27,
@@ -450,12 +402,6 @@
       "fallback_team_id": 163,
       "player_id": 126860,
       "destination_team_id": 377,
-      "match": "shared_player_id"
-    },
-    {
-      "fallback_team_id": 172,
-      "player_id": 34881,
-      "destination_team_id": 5738,
       "match": "shared_player_id"
     },
     {
@@ -1480,12 +1426,6 @@
     },
     {
       "fallback_team_id": 1239,
-      "player_id": 127201,
-      "destination_team_id": 5738,
-      "match": "shared_player_id"
-    },
-    {
-      "fallback_team_id": 1239,
       "player_id": 141562,
       "destination_team_id": 139,
       "match": "shared_player_id"
@@ -1614,12 +1554,6 @@
       "fallback_team_id": 1255,
       "player_id": 119141,
       "destination_team_id": 130,
-      "match": "shared_player_id"
-    },
-    {
-      "fallback_team_id": 1256,
-      "player_id": 109842,
-      "destination_team_id": 5738,
       "match": "shared_player_id"
     },
     {
@@ -1890,12 +1824,6 @@
       "fallback_team_id": 2722,
       "player_id": 118157,
       "destination_team_id": 139,
-      "match": "shared_player_id"
-    },
-    {
-      "fallback_team_id": 2722,
-      "player_id": 118960,
-      "destination_team_id": 5738,
       "match": "shared_player_id"
     },
     {
@@ -2209,5 +2137,5 @@
       "action": "review_only"
     }
   ],
-  "content_id": "f6097fe45b9f9ad0"
+  "content_id": "baf07830521d5c0d"
 }

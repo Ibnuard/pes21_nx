@@ -10,9 +10,6 @@
 #if PES_EXPERIMENT_INTER_MIAMI
 #define EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID 5738u
 #define EXHIBITION_INTER_MIAMI_PHYSICAL_TEAM_ID 2473u
-#define EXHIBITION_INTER_MIAMI_EF10_CATEGORY_ID 603u
-#define EXHIBITION_INTER_MIAMI_BADGE_SLOT 502u
-#define EXHIBITION_INTER_MIAMI_CATEGORY_BADGE_SLOT 496u
 
 static const uint32_t experimental_inter_miami_players[] = {
     34430u,  109842u, 118960u, 127201u, 153007u, 38568u,  160365u,
@@ -72,17 +69,6 @@ static uint32_t experimental_inter_miami_portrait_id(uint32_t player_id) {
   }
 }
 
-static const uint32_t experimental_inter_miami_category_teams[] = {
-    EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID,
-};
-
-static const ExhibitionTeamCategory experimental_inter_miami_category = {
-    "N AMERICA CLUBS",
-    "NAM",
-    experimental_inter_miami_category_teams,
-    1u,
-    EXHIBITION_INTER_MIAMI_CATEGORY_BADGE_SLOT,
-};
 #endif
 
 #endif

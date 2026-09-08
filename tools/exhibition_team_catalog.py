@@ -30,6 +30,14 @@ def load_catalog(path: Path = DEFAULT_CATALOG_PATH) -> dict[str, Any]:
     if team_ids != sorted(team_ids) or any(team_id <= 0 for team_id in team_ids):
         raise ValueError(f"{path}: team IDs must be positive and sorted")
 
+    physical_team_ids = [
+        int(team.get("physical_team_id", team["team_id"])) for team in teams
+    ]
+    if any(team_id <= 0 for team_id in physical_team_ids):
+        raise ValueError(f"{path}: physical team IDs must be positive")
+    if len(physical_team_ids) != len(set(physical_team_ids)):
+        raise ValueError(f"{path}: physical team IDs must be unique")
+
     category_team_ids = [
         int(team_id)
         for category in categories
@@ -88,6 +96,13 @@ def load_catalog(path: Path = DEFAULT_CATALOG_PATH) -> dict[str, Any]:
 
 def catalog_team_map(catalog: dict[str, Any]) -> dict[int, dict[str, Any]]:
     return {int(team["team_id"]): team for team in catalog["teams"]}
+
+
+def catalog_physical_team_map(catalog: dict[str, Any]) -> dict[int, int]:
+    return {
+        int(team["team_id"]): int(team.get("physical_team_id", team["team_id"]))
+        for team in catalog["teams"]
+    }
 
 
 def conversion_team_ids(catalog: dict[str, Any]) -> set[int]:

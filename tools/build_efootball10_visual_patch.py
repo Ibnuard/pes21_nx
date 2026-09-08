@@ -19,6 +19,8 @@ from PIL import Image, ImageFilter
 from cooked_texture import Texture
 from afp_texture_patch import read_atlas, replace_atlas
 
+NINE_BAND_PITCH_STYLES = ('clean-v15', 'clean-v16')
+
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
@@ -58,6 +60,12 @@ def diffuse_grain_source(ef10):
 
 
 def pitch_colors(style):
+    if style == 'clean-v16':
+        # Keep v15's light band while lifting the dark band closer to it.
+        return ([42,72,20], [60,96,29])
+    if style == 'clean-v15':
+        # Brighter reference-derived turf while retaining clear mowing bands.
+        return ([36,63,17], [60,96,29])
     if style in ('clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'):
         # Same mean green (61.5), stronger separation (31 instead of 21).
         # Contrast is not achieved by scaling the fine-grain layer.
@@ -170,6 +178,51 @@ def mowing_blend(name, width, style):
             return values[None,:,None],standard_band/2
         values=left_pattern(x) if name.startswith('pitch_l_') else right_pattern(x)
         band_width=standard_band
+    elif style in NINE_BAND_PITCH_STYLES:
+        # Match the nine-band EF10 layout while respecting PES21's line map:
+        # one band spans goal line -> goal-area front, two span goal-area ->
+        # penalty-box front, and six span penalty-box front -> midfield. This
+        # places mowing edges exactly under every vertical box line. Continue
+        # the three-band goal-side cadence through the texture padding.
+        scale=width/1024.0
+        band_width=(770.0/9.0)*scale
+        center_band=(530.0/6.0)*scale
+        goal_line=770.0*scale
+        goal_cycle=240.0*scale
+        goal_inner_edge=81.5*scale
+        line_edges=np.array([0.0,
+                             center_band, 2*center_band, 3*center_band,
+                             4*center_band, 5*center_band, 6*center_band,
+                             (530.0+81.5)*scale,
+                             (530.0+163.0)*scale,
+                             goal_line], dtype=np.float32)
+
+        def world_band_index(distance):
+            center_index=np.searchsorted(line_edges, distance, side='right')-1
+            goal_offset=distance-goal_line
+            goal_cycle_index=np.floor(goal_offset/goal_cycle).astype(np.int32)
+            goal_phase=np.mod(goal_offset,goal_cycle)
+            goal_index=(9+3*goal_cycle_index+
+                        (goal_phase >= goal_inner_edge).astype(np.int32)+
+                        (goal_phase >= 2*goal_inner_edge).astype(np.int32))
+            return np.where(distance < goal_line, center_index, goal_index)
+
+        def left_pattern(position):
+            return 1-(world_band_index((width-scale)-position)&1)
+
+        def right_pattern(position):
+            return world_band_index(position)&1
+
+        if '_lr_' in name:
+            half=width/2
+            left_values=left_pattern(x*2)
+            right_values=right_pattern((x-half)*2)
+            values=np.where(x < half,left_values,right_values)
+            return values[None,:,None],band_width/2
+        if name.startswith('pitch_l_'):
+            values=left_pattern(x)
+        else:
+            values=right_pattern(x)
     elif style=='clean-v9':
         # Ten EQUAL bands per painted half, not per padded texture. Stock L:
         # goal line x254, small-box line x331/332, midpoint x1024. Width 77px
@@ -256,7 +309,7 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
     style=getattr(args,'pitch_style','baseline')
     names=('pitch_l_bsm_alp','pitch_r_bsm_alp','pitch_lr_bsm_exLow_alp',
            'pitch_l_bsm_exLow_alp','pitch_r_bsm_exLow_alp','pitch2_bsm_alp_copied')
-    if style in ('mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'):
+    if style in ('mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES:
         names+=('pitch_specular_mask_l','pitch_specular_mask_r')
     if selected_names is not None:
         if not set(selected_names).issubset(names):
@@ -291,7 +344,7 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
             light=np.array(light_color,dtype=np.float32)
             rgb=np.repeat(dark*(1-blend)+light*blend,height,axis=0)
             rgb=np.asarray(Image.fromarray(np.uint8(rgb),'RGB').filter(ImageFilter.GaussianBlur(0.7)),dtype=np.float32)
-            if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'):
+            if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES:
                 if diffuse_grain.shape != (height,width):
                     raise ValueError('unexpected diffuse texture dimensions for EF10 grain')
                 # Bake subtle grain into the diffuse itself. The separate
@@ -307,7 +360,9 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                              'clean-v11':[2.8,5.6,2.1],
                              'clean-v12':[2.8,5.6,2.1],
                              'clean-v13':[2.8,5.6,2.1],
-                             'clean-v14':[2.8,5.6,2.1]}
+                              'clean-v14':[2.8,5.6,2.1],
+                              'clean-v15':[2.8,5.6,2.1],
+                              'clean-v16':[2.8,5.6,2.1]}
                 gain=np.array(gain_values[style],dtype=np.float32)
                 rgb+=diffuse_grain[:,:,None]*gain
             image=Image.fromarray(np.uint8(np.clip(np.rint(rgb),0,255)),'RGB')
@@ -372,7 +427,9 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                                                   'clean-v11':[2.8,5.6,2.1],
                                                   'clean-v12':[2.8,5.6,2.1],
                                                   'clean-v13':[2.8,5.6,2.1],
-                                                  'clean-v14':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') and not detail and not specular else None,
+                                                  'clean-v14':[2.8,5.6,2.1],
+                                                  'clean-v15':[2.8,5.6,2.1],
+                                                  'clean-v16':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES and not detail and not specular else None,
                        'right_half_phase_inverted':bool(style=='clean-v3' and name.startswith('pitch_r_')),
                        'stripe_half_band_offset':bool(style=='clean-v4' and not detail and not specular),
                        'native_seam_anchored':bool(style=='clean-v5' and not detail and not specular),
@@ -428,7 +485,7 @@ def main():
     p.add_argument('--ef10',type=Path,default=Path('local-debug/stability-visuals/ef10'))
     p.add_argument('--score-base',type=Path,default=Path('local-debug/stability-visuals/pes21-ui/game2dPes.bin'))
     p.add_argument('--output',type=Path,default=Path('local-debug/stability-visuals/built'))
-    p.add_argument('--pitch-style',choices=('baseline','mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14'),default='baseline')
+    p.add_argument('--pitch-style',choices=('baseline','mask-only','clean-v2','clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES,default='baseline')
     p.add_argument('--only',choices=('pitch','scoreboard','all'),default='all')
     p.add_argument('--etc1tool',type=Path,default=Path.home()/'AppData/Local/Android/Sdk/platform-tools/etc1tool.exe')
     args=p.parse_args()

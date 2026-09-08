@@ -103,13 +103,39 @@ def build_cleanup(
             + ", ".join(map(str, sorted(unknown_active_ids)))
         )
     active_club_ids = set(active_team_ids) & catalog_club_ids
-    fallback_club_ids = catalog_club_ids - active_club_ids
-    external_clubs = external_active_clubs or []
+    pesdb_club_ids = {
+        team_id
+        for team_id, team in team_by_id.items()
+        if team.get("roster_source") == "pesdb_authentic"
+    }
+    fallback_club_ids = catalog_club_ids - active_club_ids - pesdb_club_ids
+    requested_external_clubs = external_active_clubs or []
+    promoted_external_ids = {
+        int(team["team_id"])
+        for team in requested_external_clubs
+        if int(team["team_id"]) in team_by_id
+    }
+    invalid_promoted_ids = {
+        team_id
+        for team_id in promoted_external_ids
+        if team_by_id[team_id].get("roster_source") != "pesdb_authentic"
+    }
+    if invalid_promoted_ids:
+        raise ValueError(
+            "catalog duplicates external clubs without PESDB rosters: "
+            + ", ".join(map(str, sorted(invalid_promoted_ids)))
+        )
+    # Once an external club is promoted into the generated catalog, the
+    # PESDB-global cleanup owns it. This legacy EF10 pass must not count or
+    # process that club a second time.
+    external_clubs = [
+        team
+        for team in requested_external_clubs
+        if int(team["team_id"]) not in promoted_external_ids
+    ]
     external_club_ids = {int(team["team_id"]) for team in external_clubs}
     if not all(team_id > 0 for team_id in external_club_ids):
         raise ValueError("external active club IDs must be positive")
-    if external_club_ids & set(team_by_id):
-        raise ValueError("external active clubs must not duplicate catalog teams")
 
     ef10_players = parse_player_records(
         decode_wesys(source_paths["ef10_players"]), "ef10"

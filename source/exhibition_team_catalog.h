@@ -16,6 +16,7 @@ typedef struct {
 
 typedef struct {
   uint32_t team_id;
+  uint32_t physical_team_id;
   const char *display_name;
   uint32_t badge_slot;
 } ExhibitionTeamCatalogEntry;
@@ -51,6 +52,21 @@ static inline const char *exhibition_team_catalog_name(uint32_t team_id) {
   const ExhibitionTeamCatalogEntry *entry =
       exhibition_team_catalog_find(team_id);
   return entry ? entry->display_name : "";
+}
+
+static inline uint32_t exhibition_team_catalog_physical(uint32_t team_id) {
+  const ExhibitionTeamCatalogEntry *entry =
+      exhibition_team_catalog_find(team_id);
+  return entry ? entry->physical_team_id : team_id;
+}
+
+static inline uint32_t exhibition_team_catalog_logical(
+    uint32_t physical_team_id) {
+  for (uint32_t index = 0; index < EXHIBITION_TEAM_CATALOG_COUNT; index++) {
+    if (exhibition_team_catalog[index].physical_team_id == physical_team_id)
+      return exhibition_team_catalog[index].team_id;
+  }
+  return 0u;
 }
 
 static inline uint32_t exhibition_team_catalog_badge(uint32_t team_id) {

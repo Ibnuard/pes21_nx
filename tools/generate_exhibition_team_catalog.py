@@ -39,6 +39,9 @@ DEFAULT_SYMBOL_ROOT = Path("local-debug/cpk-emblem-check/common/render/symbol")
 DEFAULT_ACTIVE_EF10_ROSTERS = Path("source/exhibition_rosters_ef10.inc")
 DEFAULT_LEGACY_CLEANUP = Path("data/exhibition_legacy_player_cleanup.json")
 DEFAULT_LEGACY_CLEANUP_REPORT = Path("EFOOTBALL10_LEGACY_CLEANUP.md")
+DEFAULT_PESDB_ROSTERS = Path(
+    "local-debug/pesdb-efootball-authentic-rosters-current-54-shirts.json"
+)
 
 
 def resolve_from_root(root: Path, path: Path) -> Path:
@@ -123,10 +126,15 @@ def build_catalog(
     pes21_dir = resolve_from_root(root, args.pes21_dir)
     ef10_tactics_dir = resolve_from_root(root, args.ef10_tactics_dir)
     symbol_root = resolve_from_root(root, args.symbol_root)
+    pesdb_rosters_path = resolve_from_root(root, args.pesdb_rosters)
 
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if config.get("schema_version") != 1:
         raise ValueError(f"{config_path}: unsupported category schema")
+
+    external_teams = config.get("external_active_clubs", [])
+    if not isinstance(external_teams, list):
+        raise ValueError(f"{config_path}: external_active_clubs must be a list")
 
     source_paths = {
         "ef10_team": ef10_dir / "Team.bin",
@@ -144,6 +152,31 @@ def build_catalog(
         raise FileNotFoundError("missing catalog source files: " + ", ".join(missing_sources))
     if not symbol_root.is_dir():
         raise FileNotFoundError(f"missing extracted badge tree: {symbol_root}")
+    if not pesdb_rosters_path.is_file():
+        raise FileNotFoundError(
+            f"missing PESDB Authentic roster snapshot: {pesdb_rosters_path}"
+        )
+
+    pesdb_payload = json.loads(pesdb_rosters_path.read_text(encoding="utf-8"))
+    if (
+        pesdb_payload.get("schema_version") != 1
+        or pesdb_payload.get("source") != "authentic"
+        or pesdb_payload.get("authority") != "https://pesdb.net/efootball"
+    ):
+        raise ValueError(
+            f"{pesdb_rosters_path}: PESDB eFootball Authentic data is required"
+        )
+    pesdb_policy = pesdb_payload.get("policy", {})
+    if (
+        not pesdb_policy.get("pesdb_rosters_only")
+        or not pesdb_policy.get("pesdb_player_values_only")
+        or pesdb_policy.get("pes21_roster_or_value_fallback") is not False
+    ):
+        raise ValueError(f"{pesdb_rosters_path}: PESDB-only policy is missing")
+    pesdb_teams = pesdb_payload.get("teams")
+    pesdb_players = pesdb_payload.get("players")
+    if not isinstance(pesdb_teams, dict) or not isinstance(pesdb_players, dict):
+        raise ValueError(f"{pesdb_rosters_path}: teams and players must be objects")
 
     ef10_teams = parse_team_records(decode_wesys(source_paths["ef10_team"]), "ef10")
     pes21_teams = parse_team_records(decode_wesys(source_paths["pes21_team"]), "pes21")
@@ -230,7 +263,103 @@ def build_catalog(
         if find_team_badge(symbol_root, team_id) is None:
             raise ValueError(f"legacy team {team_id} has no native PES21 badge")
 
-    all_team_ids = safe_team_ids | legacy_team_ids
+    category_keys_configured = {
+        str(category["key"]) for category in config["categories"]
+    }
+    external_by_id: dict[int, dict[str, Any]] = {}
+    external_physical_ids: set[int] = set()
+    for raw_team in external_teams:
+        if not isinstance(raw_team, dict):
+            raise ValueError(f"{config_path}: external team rows must be objects")
+        team_id = int(raw_team.get("team_id", 0))
+        physical_team_id = int(raw_team.get("physical_team_id", 0))
+        if team_id <= 0 or physical_team_id <= 0:
+            raise ValueError("external logical/physical team IDs must be positive")
+        if team_id in external_by_id:
+            raise ValueError(f"duplicate external team ID: {team_id}")
+        if physical_team_id in external_physical_ids:
+            raise ValueError(f"duplicate external physical team ID: {physical_team_id}")
+        if team_id in safe_team_ids or team_id in legacy_team_ids:
+            raise ValueError(f"external team {team_id} already belongs to the catalog")
+        if team_id not in ef10_teams:
+            raise ValueError(f"external team {team_id} is absent from EF10 Team.bin")
+        if team_id in pes21_teams:
+            raise ValueError(f"external team {team_id} unexpectedly exists in PES21")
+        if team_id not in ef10_tactics:
+            raise ValueError(f"external team {team_id} has no EF10 tactics identity")
+        if physical_team_id not in pes21_teams:
+            raise ValueError(
+                f"external physical team {physical_team_id} is absent from PES21"
+            )
+        if physical_team_id not in pes21_tactics:
+            raise ValueError(
+                f"external physical team {physical_team_id} has no PES21 tactics"
+            )
+        category_key = str(raw_team.get("category", ""))
+        if category_key not in category_keys_configured:
+            raise ValueError(
+                f"external team {team_id} has unknown category {category_key!r}"
+            )
+        short_code = str(raw_team.get("short_code", ""))
+        if not re.fullmatch(r"[A-Z0-9]{1,3}", short_code):
+            raise ValueError(f"external team {team_id} has invalid short code")
+        badge_source = resolve_from_root(root, Path(str(raw_team["badge_source"])))
+        try:
+            badge_source.relative_to(root)
+        except ValueError as error:
+            raise ValueError(
+                f"external team {team_id} badge escapes the repository"
+            ) from error
+        if not badge_source.is_file():
+            raise FileNotFoundError(badge_source)
+        pesdb_team = pesdb_teams.get(str(team_id))
+        if not isinstance(pesdb_team, dict) or not pesdb_team.get("complete"):
+            raise ValueError(
+                f"external team {team_id} has no complete PESDB Authentic roster"
+            )
+        pesdb_player_ids = [int(value) for value in pesdb_team.get("player_ids", [])]
+        if len(pesdb_player_ids) < minimum_players:
+            raise ValueError(
+                f"external team {team_id} PESDB roster has only "
+                f"{len(pesdb_player_ids)} players"
+            )
+        if len(pesdb_player_ids) > maximum_players:
+            raise ValueError(
+                f"external team {team_id} PESDB roster exceeds {maximum_players}"
+            )
+        if len(pesdb_player_ids) != len(set(pesdb_player_ids)):
+            raise ValueError(f"external team {team_id} PESDB roster has duplicates")
+        missing_players = [
+            player_id
+            for player_id in pesdb_player_ids
+            if str(player_id) not in pesdb_players
+        ]
+        if missing_players:
+            raise ValueError(
+                f"external team {team_id} lacks PESDB player rows: "
+                + ", ".join(map(str, missing_players[:20]))
+            )
+        external_by_id[team_id] = {
+            **raw_team,
+            "team_id": team_id,
+            "physical_team_id": physical_team_id,
+            "display_name": ascii_display_name(str(raw_team["display_name"])),
+            "short_code": short_code,
+            "badge_source": badge_source.relative_to(root).as_posix(),
+            "pesdb_player_count": len(pesdb_player_ids),
+        }
+        external_physical_ids.add(physical_team_id)
+
+    occupied_physical_ids = safe_team_ids | legacy_team_ids
+    collisions = occupied_physical_ids & external_physical_ids
+    if collisions:
+        raise ValueError(
+            "external physical slots are already selector teams: "
+            + ", ".join(map(str, sorted(collisions)))
+        )
+
+    external_team_ids = set(external_by_id)
+    all_team_ids = safe_team_ids | legacy_team_ids | external_team_ids
     assigned: set[int] = set()
     generated_categories: list[dict[str, Any]] = []
     category_keys: set[str] = set()
@@ -308,30 +437,63 @@ def build_catalog(
     teams: list[dict[str, Any]] = []
     for team_id in sorted_team_ids:
         is_safe = team_id in safe_team_ids
-        source_record = ef10_teams[team_id] if is_safe else pes21_teams[team_id]
-        display_name = ascii_display_name(source_record.name)
+        is_external = team_id in external_by_id
+        source_record = (
+            ef10_teams[team_id]
+            if is_safe or is_external
+            else pes21_teams[team_id]
+        )
+        display_name = (
+            external_by_id[team_id]["display_name"]
+            if is_external
+            else ascii_display_name(source_record.name)
+        )
         category_key, kind, category_index, category_position = team_category[team_id]
-        badge_path = find_team_badge(symbol_root, team_id)
-        assert badge_path is not None
+        badge_path = None if is_external else find_team_badge(symbol_root, team_id)
+        assert badge_path is not None or is_external
+        physical_team_id = (
+            int(external_by_id[team_id]["physical_team_id"])
+            if is_external
+            else team_id
+        )
         teams.append(
             {
                 "team_id": team_id,
+                "physical_team_id": physical_team_id,
                 "symbol": team_symbol(team_id, display_name),
                 "display_name": display_name,
                 "source_name": source_record.name,
-                "name_source": "ef10" if is_safe else "pes21_legacy",
+                "name_source": (
+                    "ef10_identity"
+                    if is_external
+                    else ("ef10" if is_safe else "pes21_legacy")
+                ),
                 "kind": kind,
                 "category": category_key,
                 "category_index": category_index,
                 "category_position": category_position,
                 "badge_slot": badge_slots[team_id],
-                "badge_source": badge_path.relative_to(symbol_root).as_posix(),
-                "roster_source": "pes21_native" if is_safe else "legacy_manual",
+                "badge_source": (
+                    str(external_by_id[team_id]["badge_source"])
+                    if is_external
+                    else badge_path.relative_to(symbol_root).as_posix()
+                ),
+                "badge_source_root": "repo" if is_external else "symbol_root",
+                "roster_source": (
+                    "pesdb_authentic"
+                    if is_external
+                    else ("pes21_native" if is_safe else "legacy_manual")
+                ),
                 "conversion_eligible": is_safe,
                 "ef10_player_count": roster_player_count(ef10_rosters.get(team_id, [])),
                 "pes21_player_count": roster_player_count(pes21_rosters.get(team_id, [])),
+                "pesdb_player_count": (
+                    int(external_by_id[team_id]["pesdb_player_count"])
+                    if is_external
+                    else 0
+                ),
                 "has_ef10_tactics": team_id in ef10_tactics,
-                "has_pes21_tactics": team_id in pes21_tactics,
+                "has_pes21_tactics": physical_team_id in pes21_tactics,
             }
         )
 
@@ -341,7 +503,14 @@ def build_catalog(
         "policy": {
             "minimum_players": minimum_players,
             "maximum_players": maximum_players,
-            "roster_priority": ["ef10_converted", "pes21_native", "legacy_manual"],
+            "roster_priority": [
+                "pesdb_authentic",
+                "ef10_converted",
+                "pes21_native",
+                "legacy_manual",
+            ],
+            "player_data_authority": "https://pesdb.net/efootball",
+            "pes21_player_value_fallback": False,
         },
         "counts": {
             "ef10_team_records": len(ef10_teams),
@@ -351,12 +520,14 @@ def build_catalog(
             "shared_team_ids": len(common_team_ids),
             "safe_shared_teams": len(safe_team_ids),
             "legacy_teams": len(legacy_team_ids),
+            "external_pesdb_teams": len(external_team_ids),
             "selector_teams": len(all_team_ids),
             "categories": len(generated_categories),
             "badge_slots": len(all_team_ids) + len(generated_categories) + 1,
         },
         "source_sha256": {
-            key: sha256_file(path) for key, path in sorted(source_paths.items())
+            **{key: sha256_file(path) for key, path in sorted(source_paths.items())},
+            "pesdb_authentic_rosters": sha256_file(pesdb_rosters_path),
         },
         "categories": generated_categories,
         "teams": teams,
@@ -372,7 +543,7 @@ def build_catalog(
         active_rosters_path=resolve_from_root(root, args.active_ef10_rosters),
         ef10_dir=ef10_dir,
         pes21_dir=pes21_dir,
-        external_active_clubs=config.get("external_active_clubs", []),
+        external_active_clubs=[],
     )
 
     cleaned_rosters = {
@@ -447,8 +618,8 @@ def render_team_include(catalog: dict[str, Any]) -> str:
     lines.append("static const ExhibitionTeamCatalogEntry exhibition_team_catalog[] = {")
     for team in catalog["teams"]:
         lines.append(
-            f'    {{{team["team_id"]}u, "{c_string(team["display_name"])}", '
-            f'{team["badge_slot"]}u}},'
+            f'    {{{team["team_id"]}u, {team["physical_team_id"]}u, '
+            f'"{c_string(team["display_name"])}", {team["badge_slot"]}u}},'
         )
     lines.extend(["};", ""])
     return "\n".join(lines)
@@ -517,6 +688,7 @@ def render_report(
         f"- Team IDs present in both: {catalog['counts']['shared_team_ids']}",
         f"- Safe shared teams with complete rosters/tactics/badges: {catalog['counts']['safe_shared_teams']}",
         f"- Retained legacy-only selector teams: {catalog['counts']['legacy_teams']}",
+        f"- External PESDB Authentic teams: {catalog['counts']['external_pesdb_teams']}",
         f"- Final selector teams: {catalog['counts']['selector_teams']}",
         f"- Compact atlas slots, including slot 0 and category emblems: {catalog['counts']['badge_slots']}",
         "",
@@ -623,6 +795,12 @@ def main() -> None:
     parser.add_argument("--ef10-tactics-dir", type=Path, default=DEFAULT_EF10_TACTICS_DIR)
     parser.add_argument("--symbol-root", type=Path, default=DEFAULT_SYMBOL_ROOT)
     parser.add_argument(
+        "--pesdb-rosters",
+        type=Path,
+        default=DEFAULT_PESDB_ROSTERS,
+        help="complete PESDB eFootball Authentic roster snapshot",
+    )
+    parser.add_argument(
         "--active-ef10-rosters",
         type=Path,
         default=DEFAULT_ACTIVE_EF10_ROSTERS,
@@ -678,7 +856,8 @@ def main() -> None:
             print(f"generated {path}")
     print(
         f"catalog: {catalog['counts']['safe_shared_teams']} shared + "
-        f"{catalog['counts']['legacy_teams']} legacy = "
+        f"{catalog['counts']['legacy_teams']} legacy + "
+        f"{catalog['counts']['external_pesdb_teams']} PESDB external = "
         f"{catalog['counts']['selector_teams']} teams"
     )
 

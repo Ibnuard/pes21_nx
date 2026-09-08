@@ -58,6 +58,12 @@ PERF_TRACE ?= 0
 # Inter Miami original-ID/MLS integration is part of the stable runtime.
 # Keep the variable as an opt-out build switch for rollback and bisecting.
 PES_EXPERIMENT_INTER_MIAMI ?= 1
+# Current club membership/order/shirt data is sourced from PESDB Authentic.
+# Keep this detachable while the first all-team candidate is hardware-tested.
+PES_PESDB_RUNTIME_ROSTERS ?= 1
+# Use the authoritative PESDB base OVR for every imported player in custom
+# selector/Game Plan surfaces.  Set to 0 for a quick rollback to native OVR.
+PES_PESDB_AUTHORITATIVE_OVR ?= 1
 
 CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
@@ -74,6 +80,8 @@ CFLAGS	+=	-DPERF_TRACE=1
 endif
 
 CFLAGS	+=	-DPES_EXPERIMENT_INTER_MIAMI=$(PES_EXPERIMENT_INTER_MIAMI)
+CFLAGS	+=	-DPES_PESDB_RUNTIME_ROSTERS=$(PES_PESDB_RUNTIME_ROSTERS)
+CFLAGS	+=	-DPES_PESDB_AUTHORITATIVE_OVR=$(PES_PESDB_AUTHORITATIVE_OVR)
 
 CXXFLAGS	:= $(CFLAGS)
 

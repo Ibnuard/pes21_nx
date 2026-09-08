@@ -9,8 +9,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+from experimental_import_ef10_original import load_reserved_target_ids  # noqa: E402
+
+
 EF10_DIR = ROOT / "local-debug/efootball10-audit/tables/common/etc/pesdb"
 PES21_DIR = ROOT / (
     "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/pesdb"
@@ -62,6 +66,7 @@ class ExperimentalOriginalIdImportTests(unittest.TestCase):
         self.assertTrue(report["invariants"]["player_assignment_byte_identical"])
         self.assertTrue(report["invariants"]["original_ids_present"])
         self.assertTrue(report["invariants"]["donor_ids_absent"])
+        self.assertTrue(report["invariants"]["donor_ids_not_active_ef10_players"])
         self.assertTrue(report["invariants"]["install_version_ids_match_player_ids"])
         self.assertTrue(report["invariants"]["strictly_monotonic_player_ids"])
         self.assertEqual(
@@ -100,6 +105,7 @@ class ExperimentalOriginalIdImportTests(unittest.TestCase):
         self.assertEqual(len(donors), len(set(donors)))
         self.assertTrue(report["invariants"]["known_native_donor_references"] is False)
         self.assertTrue(report["invariants"]["donor_ids_removed_from_delete_list"])
+        self.assertTrue(report["invariants"]["donor_ids_not_active_ef10_players"])
 
     def test_manifest_explicitly_defers_team_integration(self) -> None:
         payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -109,6 +115,15 @@ class ExperimentalOriginalIdImportTests(unittest.TestCase):
         self.assertEqual(payload["team"]["slot_policy"], "non_selector_physical_slot")
         self.assertFalse(payload["policy"]["runtime_integration"])
         self.assertFalse(payload["policy"]["team_record_import"])
+
+    def test_reserved_target_map_protects_slots_owned_by_other_lanes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pes21-reserved-targets-") as temporary:
+            path = Path(temporary) / "surrogate-map.json"
+            path.write_text(
+                json.dumps({"map": {"8499306": 34938, "8521201": 104858}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(load_reserved_target_ids([path]), {34938, 104858})
 
 
 if __name__ == "__main__":

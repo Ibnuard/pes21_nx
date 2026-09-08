@@ -75,10 +75,13 @@ shadercache/
 *.bz2
 *.xz
 *.xapk
+*.apk
 
 # Editor and OS files
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+ss/
 .codex-*
+.tmp-*

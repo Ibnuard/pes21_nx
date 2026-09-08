@@ -34,10 +34,12 @@ from convert_efootball10_players import (
     ef10_nationality,
     ef10_player_position,
     infer_nationality_map,
+    load_pesdb_snapshot,
     pes21_name,
     pes21_player_position,
     replace_names_abilities_and_nationality,
     records,
+    validate_pesdb_release_coverage,
 )
 from exhibition_team_catalog import catalog_team_map, load_catalog
 from pesdb import (
@@ -159,6 +161,23 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return payload
 
 
+def load_reserved_target_ids(paths: Iterable[Path]) -> set[int]:
+    """Load physical player slots already claimed by another conversion lane."""
+    reserved: set[int] = set()
+    for path in paths:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"{path}: expected a JSON object")
+        raw = payload.get("map", payload.get("source_to_target", payload))
+        if not isinstance(raw, dict):
+            raise ValueError(f"{path}: expected a source-to-target map")
+        targets = {int(value) for value in raw.values()}
+        if any(value <= 0 for value in targets):
+            raise ValueError(f"{path}: target player IDs must be positive")
+        reserved.update(targets)
+    return reserved
+
+
 def select_sources(
     *,
     roster_ids: list[int],
@@ -253,11 +272,18 @@ def choose_donor(
     pes21_dir: Path,
     require_deleted: bool,
     require_position_match: bool,
+    reserved_player_ids: set[int] | None = None,
 ) -> tuple[int, dict[str, int]]:
     source_position = ef10_player_position(source_row)
+    reserved_player_ids = reserved_player_ids or set()
     candidates: list[tuple[tuple[int, int, int], int, dict[str, int]]] = []
     for donor_id in sorted(pes21_by_id):
-        if donor_id in used_donors or donor_id in assigned_ids or donor_id in special_ids:
+        if (
+            donor_id in used_donors
+            or donor_id in assigned_ids
+            or donor_id in special_ids
+            or donor_id in reserved_player_ids
+        ):
             continue
         if donor_id <= 0 or not pes21_name(pes21_by_id[donor_id]):
             continue
@@ -386,6 +412,22 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         mode=args.mode,
     )
 
+    pesdb_snapshot: dict[int, dict[str, object]] = {}
+    pesdb_snapshot_source: str | None = None
+    if args.pesdb_snapshot:
+        snapshot_path = resolve(root, args.pesdb_snapshot)
+        snapshot_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        pesdb_snapshot_source = str(snapshot_payload.get("source") or "")
+        pesdb_snapshot = load_pesdb_snapshot(snapshot_path)
+    elif args.require_pesdb:
+        raise ValueError("--require-pesdb requires --pesdb-snapshot")
+    if args.require_pesdb:
+        validate_pesdb_release_coverage(
+            pesdb_snapshot,
+            set(selected_ids),
+            source=pesdb_snapshot_source,
+        )
+
     expected_shared = manifest.get("expected_shared_player_ids")
     if expected_shared is not None and sorted(map(int, expected_shared)) != sorted(
         player_id for player_id in shared_ids
@@ -437,6 +479,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     nationality_map, nationality_diagnostics = infer_nationality_map(ef10_by_id, pes21_by_id)
     require_deleted = bool(manifest.get("policy", {}).get("require_deleted_donor", True))
     require_position = bool(manifest.get("policy", {}).get("require_position_match", True))
+    reserved_target_paths = [resolve(root, path) for path in args.reserved_target_map]
+    reserved_target_ids = load_reserved_target_ids(reserved_target_paths)
+    # Source IDs that are active in EF10 and target slots claimed by another
+    # conversion are both unsafe donors. Reusing either silently deletes a
+    # player when this artifact is merged onto the current runtime database.
+    reserved_donor_ids = set(ef10_by_id) | reserved_target_ids
 
     donor_to_source: dict[int, int] = {}
     source_to_target: dict[int, int] = {}
@@ -444,6 +492,17 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     used_donors: set[int] = set()
     for source_id in selected_ids:
         source_row = ef10_by_id[source_id]
+        pesdb_row = pesdb_snapshot.get(source_id)
+        pesdb_position = (
+            pesdb_row.get("primary_position_index")
+            if pesdb_row is not None
+            else None
+        )
+        registered_position = (
+            int(pesdb_position)
+            if pesdb_position is not None
+            else ef10_player_position(source_row)
+        )
         if source_id in pes21_by_id:
             target_id = source_id
             donor_id = None
@@ -463,6 +522,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 pes21_dir=pes21_dir,
                 require_deleted=require_deleted,
                 require_position_match=require_position,
+                reserved_player_ids=reserved_donor_ids,
             )
             if refs:
                 raise RuntimeError(f"donor {donor_id} unexpectedly has references: {refs}")
@@ -475,10 +535,13 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(f"duplicate target ID selected: {target_id}")
         source_to_target[source_id] = target_id
         converted = replace_names_abilities_and_nationality(
-            template, source_row, nationality_map
+            template,
+            source_row,
+            nationality_map,
+            pesdb_row,
         )
         if require_position:
-            converted = set_registered_position(converted, ef10_player_position(source_row))
+            converted = set_registered_position(converted, registered_position)
         converted = set_player_id(converted, target_id)
         mapping_rows.append(
             {
@@ -486,11 +549,20 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 "target_pes21_id": target_id,
                 "donor_pes21_id": donor_id,
                 "mode": mode,
-                "name": ef10_name(source_row),
-                "registered_position": ef10_player_position(source_row),
+                "name": str(
+                    pesdb_row.get("player_name", ef10_name(source_row))
+                    if pesdb_row is not None
+                    else ef10_name(source_row)
+                ),
+                "registered_position": registered_position,
                 "template_position": pes21_player_position(template),
                 "template_name": pes21_name(template),
-                "abilities": ef10_abilities(source_row),
+                "abilities": (
+                    dict(pesdb_snapshot[source_id]["base_stats"])
+                    if source_id in pesdb_snapshot
+                    else ef10_abilities(source_row)
+                ),
+                "data_source": "pesdb_efootball" if source_id in pesdb_snapshot else "ef10",
                 "ef10_nationality_code": ef10_nationality(source_row),
                 "pes21_nationality_code": nationality_map[ef10_nationality(source_row)],
                 "converted_sha256": sha256_bytes(converted),
@@ -631,6 +703,15 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "source_sha256": source_hashes,
         "output_sha256": output_hashes,
         "players": mapping_rows,
+        "player_data": {
+            "authority": "https://pesdb.net/efootball",
+            "snapshot_players": len(pesdb_snapshot),
+            "players_applied": sum(
+                source_id in pesdb_snapshot for source_id in selected_ids
+            ),
+            "release_required": bool(args.require_pesdb),
+            "snapshot_source": pesdb_snapshot_source,
+        },
         "counts": {
             "ef10_roster": len(roster_ids),
             "shared_roster_players": len(shared_ids),
@@ -657,6 +738,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "strictly_monotonic_player_ids": monotonic,
             "player_record_order_sorted_after_import": monotonic,
             "known_native_donor_references": False,
+            "donor_ids_not_active_ef10_players": not (
+                set(donor_to_source) & set(ef10_by_id)
+            ),
+            "donor_ids_not_reserved_targets": not (
+                set(donor_to_source) & reserved_target_ids
+            ),
         },
         "nationality_mapping_diagnostics": {
             str(code): nationality_diagnostics[code]
@@ -665,6 +752,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "shared_memberships": shared_memberships,
         "donor_to_original": {str(donor): source for donor, source in sorted(donor_to_source.items())},
         "warnings": warnings,
+        "reserved_target_maps": [str(path) for path in reserved_target_paths],
+        "reserved_target_ids": len(reserved_target_ids),
         "output_dir": str(output_dir),
     }
     (output_dir / "original-id-map.json").write_text(
@@ -720,6 +809,26 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--mode", choices=("canary", "xi", "full"), default="canary")
+    parser.add_argument(
+        "--pesdb-snapshot",
+        type=Path,
+        help="current PESDB eFootball snapshot keyed by EF10 source player ID",
+    )
+    parser.add_argument(
+        "--require-pesdb",
+        action="store_true",
+        help="fail unless every selected player is sourced from PESDB authentic",
+    )
+    parser.add_argument(
+        "--reserved-target-map",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "source-to-target map from another conversion lane; repeatable. "
+            "Its physical target IDs cannot be reused as retired donors"
+        ),
+    )
     args = parser.parse_args()
     build(args)
 

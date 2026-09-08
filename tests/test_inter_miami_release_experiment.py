@@ -67,13 +67,23 @@ class InterMiamiReleaseExperimentTests(unittest.TestCase):
         self.assertIn("#define PES_EXPERIMENT_INTER_MIAMI 1", header)
         self.assertIn("EXHIBITION_INTER_MIAMI_LOGICAL_TEAM_ID 5738u", header)
         self.assertIn("EXHIBITION_INTER_MIAMI_PHYSICAL_TEAM_ID 2473u", header)
-        self.assertIn("EXHIBITION_INTER_MIAMI_EF10_CATEGORY_ID 603u", header)
-        self.assertIn("EXHIBITION_INTER_MIAMI_BADGE_SLOT 502u", header)
-        self.assertIn("EXHIBITION_INTER_MIAMI_CATEGORY_BADGE_SLOT 496u", header)
-        self.assertIn('"N AMERICA CLUBS"', header)
-        self.assertIn('"NAM"', header)
-        self.assertNotIn('"EXPERIMENTAL CLUBS"', header)
-        self.assertIn("MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX 25u", hooks)
+        self.assertNotIn("EXHIBITION_INTER_MIAMI_EF10_CATEGORY_ID", header)
+        self.assertNotIn("EXHIBITION_INTER_MIAMI_BADGE_SLOT", header)
+        self.assertNotIn("EXHIBITION_INTER_MIAMI_CATEGORY_BADGE_SLOT", header)
+        catalog = json.loads(
+            (ROOT / "data" / "exhibition_team_catalog.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        team = next(row for row in catalog["teams"] if row["team_id"] == 5738)
+        self.assertEqual(team["physical_team_id"], 2473)
+        self.assertEqual(team["category"], "north_america_clubs")
+        self.assertEqual(team["roster_source"], "pesdb_authentic")
+        self.assertIn(
+            "#define MAIN_MENU_2P_LEAGUE_COUNT EXHIBITION_TEAM_CATEGORY_COUNT",
+            hooks,
+        )
+        self.assertNotIn("MAIN_MENU_2P_INTER_MIAMI_CATEGORY_INDEX", hooks)
         roster = re.search(
             r"experimental_inter_miami_players\[\] = \{(.*?)\n\};",
             header,
@@ -98,7 +108,7 @@ class InterMiamiReleaseExperimentTests(unittest.TestCase):
         self.assertIn("exhibition_native_team_id(away_raw)", hooks)
         self.assertNotIn("const uint32_t home_team_id = home_raw << 14", hooks)
         self.assertNotIn("const uint32_t away_team_id = away_raw << 14", hooks)
-        self.assertIn('return "INTER MIAMI CF";', hooks)
+        self.assertIn("return exhibition_team_catalog_name(team_id);", hooks)
 
     def test_preflight_uses_current_release_base_and_full_roster(self):
         if not inputs_available():

@@ -252,13 +252,42 @@ def pes21_abilities(record: bytes) -> dict[str, int]:
     }
 
 
+def set_pes21_english_name(row: bytearray, name: str) -> None:
+    encoded = name.encode("utf-8", errors="replace")[:60]
+    row[251:312] = encoded + b"\0" * (61 - len(encoded))
+
+
+def set_pes21_registered_position(row: bytearray, position: int) -> None:
+    if not 0 <= position <= 0x0F:
+        raise ValueError(f"PESDB registered position outside PES21 range: {position}")
+    word = struct.unpack_from("<I", row, 52)[0]
+    word = (word & ~(0x0F << 18)) | (position << 18)
+    struct.pack_into("<I", row, 52, word)
+
+
 def replace_names_abilities_and_nationality(
-    template: bytes, source: bytes, nationality_map: dict[int, int]
+    template: bytes,
+    source: bytes,
+    nationality_map: dict[int, int],
+    pesdb_override: dict[str, object] | None = None,
 ) -> bytes:
     result = bytearray(replace_names(template, source))
-    for name, value in ef10_abilities(source).items():
+    values = ef10_abilities(source)
+    if pesdb_override is not None:
+        raw_stats = pesdb_override.get("base_stats")
+        if isinstance(raw_stats, dict):
+            for name in PES21_ABILITY_BITS:
+                if name in raw_stats:
+                    values[name] = int(raw_stats[name])
+        player_name = pesdb_override.get("player_name")
+        if isinstance(player_name, str) and player_name.strip():
+            set_pes21_english_name(result, player_name.strip())
+        position = pesdb_override.get("primary_position_index")
+        if position is not None:
+            set_pes21_registered_position(result, int(position))
+    for name, value in values.items():
         if not 40 <= value <= 99:
-            raise ValueError(f"EF10 {name} value outside PES21 range: {value}")
+            raise ValueError(f"{name} value outside PES21 range: {value}")
         write_bits(result, PES21_ABILITY_BITS[name] + 1, 6, value - 40)
     source_nationality = ef10_nationality(source)
     if source_nationality not in nationality_map:
@@ -273,6 +302,70 @@ def replace_names_abilities_and_nationality(
         nationality_map[source_nationality],
     )
     return bytes(result)
+
+
+def load_pesdb_snapshot(path: Path) -> dict[int, dict[str, object]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != 1:
+        raise ValueError(f"{path}: unsupported PESDB snapshot schema")
+    snapshot_source = payload.get("source")
+    if snapshot_source not in {"authentic", "standard"}:
+        raise ValueError(f"{path}: snapshot source must be authentic or standard")
+    if payload.get("authority") != "https://pesdb.net/efootball":
+        raise ValueError(f"{path}: unexpected PESDB authority")
+    players = payload.get("players")
+    if not isinstance(players, dict):
+        raise ValueError(f"{path}: snapshot players must be an object")
+    result: dict[int, dict[str, object]] = {}
+    for key, row in players.items():
+        if not isinstance(row, dict):
+            raise ValueError(f"{path}: malformed player row {key}")
+        player_id = int(key)
+        if row.get("source") != snapshot_source:
+            raise ValueError(
+                f"{path}: player {player_id} source disagrees with snapshot"
+            )
+        row_player_id = int(row.get("source_player_id", row.get("player_id", 0)))
+        if row_player_id != player_id:
+            raise ValueError(f"{path}: player {player_id} has mismatched source ID")
+        stats = row.get("base_stats")
+        if not isinstance(stats, dict) or not set(PES21_ABILITY_BITS).issubset(stats):
+            raise ValueError(f"{path}: player {player_id} lacks verified abilities")
+        result[player_id] = row
+    return result
+
+
+def validate_pesdb_release_coverage(
+    snapshot: dict[int, dict[str, object]],
+    required_source_ids: set[int],
+    *,
+    source: str | None,
+) -> None:
+    """Fail closed unless every converted player has current PESDB data.
+
+    EF10 values remain useful for diagnostics, but allowing them into a release
+    artifact would silently violate the PESDB-only data policy.  Keep this gate
+    separate from the normal compatibility conversion so partial snapshots can
+    still be inspected without being mistaken for release input.
+    """
+    if source != "authentic":
+        raise RuntimeError(
+            "PESDB release conversion requires an authentic eFootball snapshot"
+        )
+    missing = sorted(required_source_ids - set(snapshot))
+    if missing:
+        preview = ", ".join(str(value) for value in missing[:20])
+        suffix = "..." if len(missing) > 20 else ""
+        raise RuntimeError(
+            f"PESDB snapshot is missing {len(missing)} converted players: "
+            f"{preview}{suffix}"
+        )
+    for player_id in sorted(required_source_ids):
+        row = snapshot[player_id]
+        if row.get("source") != "authentic":
+            raise RuntimeError(
+                f"PESDB player {player_id} is not from authentic eFootball data"
+            )
 
 
 def parse_ef10_assignment_rows(
@@ -507,6 +600,23 @@ def main() -> None:
             "player in an expanded all-team conversion"
         ),
     )
+    parser.add_argument(
+        "--pesdb-snapshot",
+        type=Path,
+        help=(
+            "optional snapshot from tools/import_pesdb_efootball.py; "
+            "verified current eFootball name, position, and abilities "
+            "override the older EF10 values"
+        ),
+    )
+    parser.add_argument(
+        "--require-pesdb",
+        action="store_true",
+        help=(
+            "release gate: require an authentic PESDB row for every selected "
+            "EF10 player; never fall back to EF10 values"
+        ),
+    )
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument(
         "--catalog",
@@ -519,6 +629,19 @@ def main() -> None:
     root = args.root.resolve()
     output = args.output_dir
     output.mkdir(parents=True, exist_ok=True)
+    pesdb_snapshot: dict[int, dict[str, object]] = {}
+    pesdb_snapshot_source: str | None = None
+    if args.pesdb_snapshot:
+        snapshot_path = (
+            args.pesdb_snapshot.resolve()
+            if args.pesdb_snapshot.is_absolute()
+            else (root / args.pesdb_snapshot).resolve()
+        )
+        snapshot_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        pesdb_snapshot_source = str(snapshot_payload.get("source") or "")
+        pesdb_snapshot = load_pesdb_snapshot(snapshot_path)
+    elif args.require_pesdb:
+        raise ValueError("--require-pesdb requires --pesdb-snapshot")
 
     ef10_players = records(
         decode_wesys(args.ef10_dir / "Player.bin"), EF10_PLAYER_SIZE
@@ -705,11 +828,16 @@ def main() -> None:
         mapping[source_id] = surrogate_id
         registry_mapping[source_id] = surrogate_id
         source_row = new_by_id[source_id]
+        pesdb_row = pesdb_snapshot.get(source_id)
         details.append(
             {
                 "ef10_player_id": source_id,
                 "surrogate_pes21_id": surrogate_id,
-                "name": ef10_name(source_row),
+                "name": (
+                    str(pesdb_row["player_name"])
+                    if pesdb_row is not None and pesdb_row.get("player_name")
+                    else ef10_name(source_row)
+                ),
                 "template_name": pes21_name(old_by_id[surrogate_id]),
                 "registered_position": source_position,
                 "template_position": pes21_player_position(
@@ -728,7 +856,12 @@ def main() -> None:
                 "pes21_nationality_code": nationality_map[
                     ef10_nationality(source_row)
                 ],
-                "abilities": ef10_abilities(source_row),
+                "abilities": (
+                    dict(pesdb_row["base_stats"])
+                    if pesdb_row is not None
+                    else ef10_abilities(source_row)
+                ),
+                "data_source": "pesdb_efootball" if pesdb_row is not None else "ef10",
             }
         )
 
@@ -736,9 +869,18 @@ def main() -> None:
         **{surrogate_id: source_id for source_id, surrogate_id in mapping.items()},
         **{player_id: player_id for player_id in direct_ef10_ids},
     }
+    if args.require_pesdb:
+        validate_pesdb_release_coverage(
+            pesdb_snapshot,
+            set(replacement_sources.values()),
+            source=pesdb_snapshot_source,
+        )
     replacement_by_id = {
         target_id: replace_names_abilities_and_nationality(
-            old_by_id[target_id], new_by_id[source_id], nationality_map
+            old_by_id[target_id],
+            new_by_id[source_id],
+            nationality_map,
+            pesdb_snapshot.get(source_id),
         )
         for target_id, source_id in replacement_sources.items()
     }
@@ -810,14 +952,27 @@ def main() -> None:
     validation_players: list[dict[str, object]] = []
     for target_id, source_id in sorted(replacement_sources.items()):
         source_row = new_by_id[source_id]
+        pesdb_row = pesdb_snapshot.get(source_id)
         patched_row = checked_by_id[target_id]
-        source_stats = ef10_abilities(source_row)
+        source_stats = (
+            {
+                name: int(pesdb_row["base_stats"][name])
+                for name in PES21_ABILITY_BITS
+            }
+            if pesdb_row is not None
+            else ef10_abilities(source_row)
+        )
         patched_stats = pes21_abilities(patched_row)
         if patched_stats != source_stats:
             raise RuntimeError(
                 f"ability round-trip mismatch for {source_id} -> {target_id}"
             )
-        if pes21_name(patched_row) != ef10_name(source_row):
+        expected_name = (
+            str(pesdb_row["player_name"])
+            if pesdb_row is not None and pesdb_row.get("player_name")
+            else ef10_name(source_row)
+        )
+        if pes21_name(patched_row) != expected_name:
             raise RuntimeError(f"name round-trip mismatch for {source_id}")
         source_nationality = ef10_nationality(source_row)
         target_nationality = nationality_map[source_nationality]
@@ -825,20 +980,23 @@ def main() -> None:
             raise RuntimeError(
                 f"nationality round-trip mismatch for {source_id} -> {target_id}"
             )
-        if source_id != target_id and (
-            pes21_player_position(patched_row)
-            != ef10_player_position(source_row)
-        ):
+        expected_position = (
+            int(pesdb_row["primary_position_index"])
+            if pesdb_row is not None and pesdb_row.get("primary_position_index") is not None
+            else ef10_player_position(source_row)
+        )
+        if source_id != target_id and pes21_player_position(patched_row) != expected_position:
             raise RuntimeError(f"position mismatch for surrogate {source_id}")
         validation_players.append(
             {
                 "ef10_player_id": source_id,
                 "pes21_player_id": target_id,
-                "name": ef10_name(source_row),
+                "name": expected_name,
                 "mode": "direct" if source_id == target_id else "surrogate",
                 "abilities_verified": len(source_stats),
                 "ef10_nationality_code": source_nationality,
                 "pes21_nationality_code": target_nationality,
+                "data_source": "pesdb_efootball" if pesdb_row is not None else "ef10",
             }
         )
 
@@ -851,6 +1009,12 @@ def main() -> None:
         "surrogates_globally_unassigned": True,
         "surrogate_registry": str(registry_path),
         "converted_abilities_per_player": len(PES21_ABILITY_BITS),
+        "pesdb_snapshot_players": len(pesdb_snapshot),
+        "pesdb_players_applied": sum(
+            source_id in pesdb_snapshot for source_id in replacement_sources.values()
+        ),
+        "pesdb_release_required": bool(args.require_pesdb),
+        "pesdb_snapshot_source": pesdb_snapshot_source,
         "nationalities_verified": len(validation_players),
         "nationality_code_map": {
             str(source): nationality_map[source]
@@ -884,6 +1048,12 @@ def main() -> None:
         "direct_ef10_players": len(direct_ef10_ids),
         "players_with_converted_names_and_stats": len(replacement_sources),
         "converted_abilities_per_player": len(PES21_ABILITY_BITS),
+        "pesdb_snapshot_players": len(pesdb_snapshot),
+        "pesdb_players_applied": sum(
+            source_id in pesdb_snapshot for source_id in replacement_sources.values()
+        ),
+        "pesdb_release_required": bool(args.require_pesdb),
+        "pesdb_snapshot_source": pesdb_snapshot_source,
         "players_with_converted_nationality": len(replacement_sources),
         "inferred_nationality_codes": len(nationality_map),
         "nationality_mapping_diagnostics": {

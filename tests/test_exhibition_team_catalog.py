@@ -24,6 +24,9 @@ ROSTER_INCLUDE_PATH = (
     ROOT / "source" / "exhibition_rosters_pes21_generated.inc"
 )
 EF10_ROSTER_INCLUDE_PATH = ROOT / "source" / "exhibition_rosters_ef10.inc"
+PESDB_ROSTER_INCLUDE_PATH = (
+    ROOT / "source" / "exhibition_rosters_pesdb_generated.inc"
+)
 LEGACY_CLEANUP_PATH = ROOT / "data" / "exhibition_legacy_player_cleanup.json"
 BADGE_ATLAS_PATH = ROOT / "source" / "badge_atlas.h"
 BADGE_ATLAS_BINARY_PATH = ROOT / "data" / "badge_atlas.bin"
@@ -55,9 +58,10 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         counts = self.catalog["counts"]
         self.assertEqual(counts["safe_shared_teams"], 464)
         self.assertEqual(counts["legacy_teams"], 6)
-        self.assertEqual(counts["selector_teams"], 470)
-        self.assertEqual(counts["categories"], 31)
-        self.assertEqual(counts["badge_slots"], 502)
+        self.assertEqual(counts["external_pesdb_teams"], 10)
+        self.assertEqual(counts["selector_teams"], 480)
+        self.assertEqual(counts["categories"], 33)
+        self.assertEqual(counts["badge_slots"], 514)
 
         legacy = {
             int(team["team_id"])
@@ -69,9 +73,17 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
             for team in self.teams
             if team["roster_source"] == "pes21_native"
         }
+        pesdb = {
+            int(team["team_id"])
+            for team in self.teams
+            if team["roster_source"] == "pesdb_authentic"
+        }
         self.assertEqual(legacy, LEGACY_TEAM_IDS)
         self.assertEqual(len(native), 464)
+        self.assertEqual(len(pesdb), 10)
         self.assertFalse(legacy & native)
+        self.assertFalse(pesdb & native)
+        self.assertFalse(pesdb & legacy)
         self.assertTrue(
             all(team["conversion_eligible"] == (int(team["team_id"]) in native)
                 for team in self.teams)
@@ -85,15 +97,20 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
                 self.assertTrue(team["has_ef10_tactics"])
                 self.assertTrue(team["has_pes21_tactics"])
                 self.assertEqual(team["name_source"], "ef10")
-            else:
+            elif team_id in legacy:
                 self.assertEqual(team["name_source"], "pes21_legacy")
+                self.assertTrue(team["has_pes21_tactics"])
+            else:
+                self.assertEqual(team["name_source"], "ef10_identity")
+                self.assertGreaterEqual(team["pesdb_player_count"], 18)
+                self.assertTrue(team["has_ef10_tactics"])
                 self.assertTrue(team["has_pes21_tactics"])
 
     def test_every_team_has_one_ordered_category_membership(self) -> None:
         flattened: list[int] = []
         for category_index, category in enumerate(self.categories):
             self.assertTrue(category["team_ids"])
-            self.assertEqual(category["badge_slot"], 471 + category_index)
+            self.assertEqual(category["badge_slot"], 481 + category_index)
             for category_position, raw_team_id in enumerate(category["team_ids"]):
                 team_id = int(raw_team_id)
                 team = self.team_by_id[team_id]
@@ -111,12 +128,12 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertEqual(team_ids, sorted(team_ids))
         self.assertEqual(
             [int(team["badge_slot"]) for team in self.teams],
-            list(range(1, 471)),
+            list(range(1, 481)),
         )
 
         all_slots = [int(team["badge_slot"]) for team in self.teams]
         all_slots.extend(int(category["badge_slot"]) for category in self.categories)
-        self.assertEqual(sorted(all_slots), list(range(1, 502)))
+        self.assertEqual(sorted(all_slots), list(range(1, 514)))
         for entry in [*self.teams, *self.categories]:
             badge_source = Path(str(entry["badge_source"]))
             self.assertFalse(badge_source.is_absolute())
@@ -203,19 +220,15 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertTrue(self.cleanup["policy"]["preserve_national_team_membership"])
 
         counts = self.cleanup["counts"]
-        self.assertEqual(counts["active_ef10_teams"], 100)
-        self.assertEqual(counts["active_ef10_clubs"], 44)
-        self.assertEqual(counts["external_active_clubs"], 1)
-        self.assertEqual(counts["external_shared_players"], 8)
+        self.assertEqual(counts["active_ef10_teams"], 99)
+        self.assertEqual(counts["active_ef10_clubs"], 43)
+        self.assertEqual(counts["external_active_clubs"], 0)
+        self.assertEqual(counts["external_shared_players"], 0)
         self.assertEqual(counts["affected_fallback_clubs"], 136)
-        self.assertEqual(counts["removed_legacy_memberships"], 303)
+        self.assertEqual(counts["removed_legacy_memberships"], 299)
         self.assertGreaterEqual(counts["minimum_cleaned_roster"], 18)
 
         removals = self.cleanup["removals"]
-        external_club_ids = {
-            int(team["team_id"])
-            for team in self.cleanup["external_active_clubs"]
-        }
         pairs = {
             (int(row["fallback_team_id"]), int(row["player_id"]))
             for row in removals
@@ -224,28 +237,16 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertTrue(
             all(
                 self.team_by_id[int(row["fallback_team_id"])]["kind"] == "club"
-                and (
-                    int(row["destination_team_id"]) in external_club_ids
-                    or self.team_by_id[int(row["destination_team_id"])]["kind"]
-                    == "club"
-                )
+                and self.team_by_id[int(row["destination_team_id"])]["kind"]
+                == "club"
                 and row["match"] == "shared_player_id"
                 for row in removals
             )
         )
         self.assertIn((127, 40002), pairs)
-        self.assertEqual(
-            {
-                (int(row["fallback_team_id"]), int(row["player_id"]))
-                for row in removals
-                if int(row["destination_team_id"]) == 5738
-            },
-            {
-                (172, 34881),
-                (1239, 127201),
-                (1256, 109842),
-                (2722, 118960),
-            },
+        self.assertFalse(
+            any(int(row["destination_team_id"]) == 5738 for row in removals),
+            "promoted PESDB teams belong to the global cleanup pass",
         )
         lewandowski = next(
             row
@@ -290,14 +291,57 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
                 EF10_ROSTER_INCLUDE_PATH, "exhibition_ef10_master_rosters"
             ).items()
         }
+        pesdb_rosters = {
+            team_id: players
+            for team_id, (players, _shirts) in parse_master_rosters(
+                PESDB_ROSTER_INCLUDE_PATH, "exhibition_pesdb_master_rosters"
+            ).items()
+        }
         club_team_ids = {
             int(team["team_id"]) for team in self.teams if team["kind"] == "club"
         }
+        pesdb_source = PESDB_ROSTER_INCLUDE_PATH.read_text(encoding="utf-8")
+        owner_by_target = {
+            int(player_id): int(team_id)
+            for player_id, team_id in re.findall(
+                r"\{(\d+)u, (\d+)u\}",
+                re.search(
+                    r"static const ExhibitionPesdbPlayerOwner "
+                    r"exhibition_pesdb_player_owners\[\] = \{(.*?)\n\};",
+                    pesdb_source,
+                    re.DOTALL,
+                ).group(1),
+            )
+        }
+        self.assertEqual(
+            owner_by_target,
+            {
+                player_id: team_id
+                for team_id, roster in pesdb_rosters.items()
+                for player_id in roster
+            },
+        )
 
         owner_by_player: dict[int, int] = {}
+        filtered_memberships: list[tuple[int, int, int]] = []
         for team_id in sorted(club_team_ids):
-            roster = ef10_rosters.get(team_id, fallback_rosters.get(team_id, []))
+            roster = pesdb_rosters.get(
+                team_id, ef10_rosters.get(team_id, fallback_rosters.get(team_id, []))
+            )
+            effective_roster = []
+            for player_id in roster:
+                owner_team_id = owner_by_target.get(player_id)
+                if owner_team_id and owner_team_id != team_id:
+                    filtered_memberships.append(
+                        (team_id, player_id, owner_team_id)
+                    )
+                    continue
+                effective_roster.append(player_id)
+            roster = effective_roster
             self.assertTrue(roster, f"club {team_id} has no effective roster")
+            self.assertGreaterEqual(
+                len(roster), self.catalog["policy"]["minimum_players"]
+            )
             for player_id in roster:
                 self.assertNotIn(
                     player_id,
@@ -306,6 +350,10 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
                     f"{owner_by_player.get(player_id)} and {team_id}",
                 )
                 owner_by_player[player_id] = team_id
+        self.assertIn((127, 102901, 130), filtered_memberships)
+        hooks = UE4_HOOKS_PATH.read_text(encoding="utf-8")
+        self.assertIn("exhibition_roster_player_allowed(roster, unique_id)", hooks)
+        self.assertIn("exhibition_roster_effective_player_count(roster)", hooks)
 
     def test_badge_atlas_metadata_matches_catalog(self) -> None:
         with BADGE_ATLAS_PATH.open("r", encoding="ascii") as source:
@@ -322,24 +370,25 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
             )
         }
         self.assertEqual(definitions["BADGE_CELL_SIZE"], 128)
-        self.assertEqual(definitions["BADGE_ATLAS_COLS"], 16)
-        self.assertEqual(definitions["BADGE_ATLAS_CATALOG_SLOTS"], 502)
-        self.assertEqual(definitions["BADGE_ATLAS_SLOTS"], 503)
-        self.assertEqual(definitions["BADGE_ATLAS_ROWS"], 32)
+        self.assertEqual(definitions["BADGE_ATLAS_COLS"], 32)
+        self.assertEqual(definitions["BADGE_ATLAS_CATALOG_SLOTS"], 514)
+        self.assertEqual(definitions["BADGE_ATLAS_SLOTS"], 514)
+        self.assertEqual(definitions["BADGE_ATLAS_ROWS"], 17)
         self.assertIn("extern const uint8_t badge_atlas_bin[];", header)
         self.assertIn("#define badge_atlas_rgba8 badge_atlas_bin", header)
 
         binary = BADGE_ATLAS_BINARY_PATH.read_bytes()
-        expected_size = 128 * 128 * 16 * 32 * 4
+        expected_size = 128 * 128 * 32 * 17 * 4
         self.assertEqual(len(binary), expected_size)
         self.assertEqual(binary[: 128 * 128 * 4], bytes(128 * 128 * 4))
-        slot_x = (502 % 16) * 128
-        slot_y = (502 // 16) * 128
-        experimental_alpha = bytearray()
+        last_slot = self.catalog["counts"]["badge_slots"] - 1
+        slot_x = (last_slot % 32) * 128
+        slot_y = (last_slot // 32) * 128
+        last_slot_alpha = bytearray()
         for row in range(128):
-            start = ((slot_y + row) * 2048 + slot_x) * 4
-            experimental_alpha.extend(binary[start + 3 : start + 128 * 4 : 4])
-        self.assertTrue(any(experimental_alpha))
+            start = ((slot_y + row) * 4096 + slot_x) * 4
+            last_slot_alpha.extend(binary[start + 3 : start + 128 * 4 : 4])
+        self.assertTrue(any(last_slot_alpha))
 
     def test_runtime_consumes_generated_catalog_and_roster_priority(self) -> None:
         source = UE4_HOOKS_PATH.read_text(encoding="utf-8")
@@ -351,7 +400,10 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
         self.assertIn("return exhibition_team_catalog_badge(team_id);", source)
         self.assertIn("exhibition_team_category_at(index)", source)
         self.assertIn("return category ? category->badge_slot : 0;", source)
-        self.assertIn("catalogued && roster && roster->player_count >= 11u", source)
+        self.assertIn(
+            "catalogued && exhibition_roster_effective_player_count(roster) >= 11u",
+            source,
+        )
         self.assertNotIn("static const uint32_t exhibition_category_english", source)
         self.assertNotIn("case 173u: return 153u;", source)
 
@@ -408,7 +460,10 @@ class ExhibitionTeamCatalogTests(unittest.TestCase):
 
         symbol_root = ROOT / "local-debug/cpk-emblem-check/common/render/symbol"
         for entry in [*self.teams, *self.categories]:
-            self.assertTrue((symbol_root / entry["badge_source"]).is_file())
+            source_root = entry.get("badge_source_root", "symbol_root")
+            self.assertIn(source_root, {"repo", "symbol_root"})
+            root = ROOT if source_root == "repo" else symbol_root
+            self.assertTrue((root / entry["badge_source"]).is_file())
 
 
 if __name__ == "__main__":

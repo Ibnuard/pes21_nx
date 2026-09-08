@@ -7,14 +7,14 @@ because unrelated players can share a display name.
 
 ## Result
 
-- Cleanup content ID: `f6097fe45b9f9ad0`
-- Active EF10 rosters: 100
-- Active EF10 clubs: 44
-- External original-ID clubs: 1
-- External shared players tracked: 8
+- Cleanup content ID: `baf07830521d5c0d`
+- Active EF10 rosters: 99
+- Active EF10 clubs: 43
+- External original-ID clubs: 0
+- External shared players tracked: 0
 - Fallback clubs checked: 338
 - Affected fallback clubs: 136
-- Stale club memberships removed: 303
+- Stale club memberships removed: 299
 - Smallest cleaned roster: 19 players
 - Name-only candidates held for review: 2
 

@@ -21,7 +21,7 @@
     "focus_teams": 12
   },
   "source_sha256": {
-    "category_config": "e661411d94a8ce2d926289d73b8f353e3c4e3f0d3b0bc094deb08aa926368b35",
+    "category_config": "e379db7c4312992c2a2f40a92ba8c3e52caa4d52919109fbbf6d6d165bf45cd1",
     "ef10_assignments": "0a9d105987c97dd956dc32ff333c80276d3efb622d6d4c3319135b3b6c57b325",
     "ef10_categories": "8d48348cfc883f59864a20a860da4b2202a5e4b0ee7b63f0aec46f25b130576f",
     "ef10_players": "e0e6dfd20ea2b1ae5f291af104b7b3745884ebd23133a0941ee2402c33a22b69",
@@ -36,6 +36,13 @@
       "kind": "club",
       "focus": true,
       "source_categories": [
+        {
+          "source_category_id": null,
+          "category_key": "other_europe",
+          "category_label": "OTHER EUROPE",
+          "kind": "club",
+          "order": null
+        },
         {
           "source_category_id": 65542,
           "category_key": "other_europe",
@@ -1079,6 +1086,13 @@
       "focus": false,
       "source_categories": [
         {
+          "source_category_id": null,
+          "category_key": "north_america_clubs",
+          "category_label": "N AMERICA CLUBS",
+          "kind": "club",
+          "order": null
+        },
+        {
           "source_category_id": 65550,
           "category_key": "north_america_clubs",
           "category_label": "N AMERICA CLUBS",
@@ -1165,6 +1179,13 @@
       "focus": false,
       "source_categories": [
         {
+          "source_category_id": null,
+          "category_key": "north_america_clubs",
+          "category_label": "N AMERICA CLUBS",
+          "kind": "club",
+          "order": null
+        },
+        {
           "source_category_id": 65550,
           "category_key": "north_america_clubs",
           "category_label": "N AMERICA CLUBS",
@@ -1225,6 +1246,13 @@
       "focus": false,
       "source_categories": [
         {
+          "source_category_id": null,
+          "category_key": "north_america_clubs",
+          "category_label": "N AMERICA CLUBS",
+          "kind": "club",
+          "order": null
+        },
+        {
           "source_category_id": 65550,
           "category_key": "north_america_clubs",
           "category_label": "N AMERICA CLUBS",
@@ -1250,6 +1278,13 @@
       "kind": "club",
       "focus": false,
       "source_categories": [
+        {
+          "source_category_id": null,
+          "category_key": "north_america_clubs",
+          "category_label": "N AMERICA CLUBS",
+          "kind": "club",
+          "order": null
+        },
         {
           "source_category_id": 65550,
           "category_key": "north_america_clubs",
@@ -4310,6 +4345,13 @@
       "kind": "club",
       "focus": true,
       "source_categories": [
+        {
+          "source_category_id": null,
+          "category_key": "north_america_clubs",
+          "category_label": "N AMERICA CLUBS",
+          "kind": "club",
+          "order": null
+        },
         {
           "source_category_id": 603,
           "category_key": "north_america_clubs",
@@ -10465,6 +10507,13 @@
       "focus": true,
       "source_categories": [
         {
+          "source_category_id": null,
+          "category_key": "other_asia_clubs",
+          "category_label": "OTHER ASIA CLUBS",
+          "kind": "club",
+          "order": null
+        },
+        {
           "source_category_id": 101,
           "category_key": "other_asia_clubs",
           "category_label": "OTHER ASIA CLUBS",
@@ -10654,6 +10703,13 @@
       "kind": "club",
       "focus": true,
       "source_categories": [
+        {
+          "source_category_id": null,
+          "category_key": "other_asia_clubs",
+          "category_label": "OTHER ASIA CLUBS",
+          "kind": "club",
+          "order": null
+        },
         {
           "source_category_id": 101,
           "category_key": "other_asia_clubs",
@@ -10976,6 +11032,13 @@
       "focus": true,
       "source_categories": [
         {
+          "source_category_id": null,
+          "category_key": "other_asia_clubs",
+          "category_label": "OTHER ASIA CLUBS",
+          "kind": "club",
+          "order": null
+        },
+        {
           "source_category_id": 101,
           "category_key": "other_asia_clubs",
           "category_label": "OTHER ASIA CLUBS",
@@ -11053,6 +11116,13 @@
       "kind": "club",
       "focus": true,
       "source_categories": [
+        {
+          "source_category_id": null,
+          "category_key": "other_asia_clubs",
+          "category_label": "OTHER ASIA CLUBS",
+          "kind": "club",
+          "order": null
+        },
         {
           "source_category_id": 703,
           "category_key": "other_asia_clubs",
@@ -12382,5 +12452,5 @@
       "classification": "surrogate_required"
     }
   ],
-  "content_id": "fce0790002a3b02e"
+  "content_id": "1d627c7886a7b08e"
 }
