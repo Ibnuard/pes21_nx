@@ -205,6 +205,11 @@ class AuthoritativeOverallRuntimeTests(unittest.TestCase):
         end = self.hooks.index("\n}\n", start) + 2
         refresh = self.hooks[start:end]
         self.assertIn("exhibition_pesdb_team_rating(", refresh)
+        self.assertIn(
+            "position_average = (forward + midfield + defence + 1u) / 3u;",
+            refresh,
+        )
+        self.assertNotIn("&overall", refresh)
         self.assertLess(
             refresh.index("exhibition_pesdb_team_rating("),
             refresh.index("exhibition_get_position_overall"),

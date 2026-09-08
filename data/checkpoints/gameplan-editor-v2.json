@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "checkpoint": "gameplan-editor-v2-user-confirmed",
+  "date": "2026-09-09",
+  "status": "user-confirmed-checkpoint",
+  "verification": "User confirmed the delivered production build and requested checkpoint/commit/push; not an exhaustive hardware matrix.",
+  "branch": "update-squad",
+  "nro": {
+    "path": "local-debug/gameplan-editor-v2-production/pes21_nx.nro",
+    "mode": "production",
+    "bytes": 46719181,
+    "sha256": "5299ee3f52e6cb7a4abcc6584dcec473946b14b1058bff3508113ba03a1ff04d"
+  },
+  "compatible_obb": {
+    "path": "local-debug/eng-spa-all-kits-v3/patch.305030001.jp.nyan2021.pesam.obb",
+    "bytes": 1401395200,
+    "sha256": "b8d43077586e5459d13bc8ac20d911acff732c0c455cbdc3cbf1a02e77a0c53a",
+    "modified_by_this_checkpoint": false
+  },
+  "documentation": "GAMEPLAN_EDITOR_FIX_V2.md",
+  "dist_recovery_preserved": true
+}

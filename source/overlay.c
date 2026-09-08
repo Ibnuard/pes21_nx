@@ -405,6 +405,99 @@ static int emit_efootball_centered_fit_line(
                              weight, verts);
 }
 
+// Keep on-field labels at one readable size. Long names scroll only while the
+// player is focused, avoiding the tiny blurred text produced by fit-to-width.
+static int emit_efootball_name_line(const char *text, int len, float center_x,
+                                    float y, float max_width, float gh,
+                                    int focused, double focused_seconds,
+                                    GLfloat *verts) {
+  if (!text || len <= 0 || max_width <= 0.0f)
+    return 0;
+  const float width = measure_efootball_line(text, len, gh,
+                                             EFOOTBALL_FONT_BOLD);
+  if (width <= max_width)
+    return emit_efootball_line(text, len, center_x - width * 0.5f, y, gh,
+                               EFOOTBALL_FONT_BOLD, verts);
+  if (!focused) {
+    char clipped[64];
+    const int limit = len < (int)sizeof(clipped) - 4
+                          ? len
+                          : (int)sizeof(clipped) - 4;
+    memcpy(clipped, text, (size_t)limit);
+    clipped[limit] = '\0';
+    while (strlen(clipped) > 1) {
+      char candidate[64];
+      snprintf(candidate, sizeof(candidate), "%s...", clipped);
+      if (measure_efootball_line(candidate, (int)strlen(candidate), gh,
+                                 EFOOTBALL_FONT_BOLD) <= max_width)
+        break;
+      clipped[strlen(clipped) - 1] = '\0';
+    }
+    strcat(clipped, "...");
+    const float clipped_width = measure_efootball_line(
+        clipped, (int)strlen(clipped), gh, EFOOTBALL_FONT_BOLD);
+    return emit_efootball_line(clipped, (int)strlen(clipped),
+                               center_x - clipped_width * 0.5f, y, gh,
+                               EFOOTBALL_FONT_BOLD, verts);
+  }
+  const float travel = width - max_width;
+  const float speed = gh * 1.8f;
+  const float duration = travel / speed;
+  const float pause = 0.85f;
+  const float phase = (float)fmod(focused_seconds,
+                                 2.0 * (duration + pause));
+  float offset;
+  if (phase < pause)
+    offset = 0.0f;
+  else if (phase < pause + duration)
+    offset = (phase - pause) * speed;
+  else if (phase < 2.0f * pause + duration)
+    offset = travel;
+  else
+    offset = travel - (phase - 2.0f * pause - duration) * speed;
+  const float left = center_x - max_width * 0.5f;
+  const int emitted = emit_efootball_line(
+      text, len, left - offset, y, gh, EFOOTBALL_FONT_BOLD, verts);
+  const float clip_left = left * 2.0f / (float)screen_width - 1.0f;
+  const float clip_right =
+      (left + max_width) * 2.0f / (float)screen_width - 1.0f;
+  int quads = 0;
+  // Clip the existing glyph geometry and interpolate within that glyph's UVs.
+  for (int index = 0; index < emitted; index++) {
+    GLfloat quad[24];
+    memcpy(quad, verts + index * 24, sizeof(quad));
+    const float x0 = quad[0], x1 = quad[4];
+    const float u0 = quad[2], u1 = quad[6];
+    if (x1 <= clip_left || x0 >= clip_right)
+      continue;
+    for (int vertex = 0; vertex < 6; vertex++) {
+      const float x = fmaxf(clip_left, fminf(clip_right, quad[vertex * 4]));
+      quad[vertex * 4] = x;
+      quad[vertex * 4 + 2] = u0 + (x - x0) / (x1 - x0) * (u1 - u0);
+    }
+    memcpy(verts + quads * 24, quad, sizeof(quad));
+    quads++;
+  }
+  return quads;
+}
+
+static double gameplan_name_focus_seconds(uint32_t side, int active,
+                                          const char *name) {
+  static char focused_name[2][128];
+  static u64 focus_tick[2];
+  const u64 now = armGetSystemTick();
+  if (!active) {
+    focused_name[side][0] = '\0';
+    focus_tick[side] = now;
+    return 0.0;
+  }
+  if (strcmp(focused_name[side], name) != 0) {
+    snprintf(focused_name[side], sizeof(focused_name[side]), "%s", name);
+    focus_tick[side] = now;
+  }
+  return (double)armTicksToNs(now - focus_tick[side]) / 1e9;
+}
+
 static void compact_player_name(char *destination, size_t capacity,
                                 const char *source) {
   if (!destination || !capacity)
@@ -1812,6 +1905,12 @@ static void overlay_render(void) {
           half_x[side], header_y, half_w, header_h,
           verts + quads * 24);
       quads += prematch_gameplan_header_quads[side];
+      if (!custom_gameplan_exhibition || side == 0) {
+        prematch_gameplan_header_quads[side] += emit_rect(
+            half_x[side], 0.929f * (float)screen_height, half_w,
+            0.068f * (float)screen_height, verts + quads * 24);
+        quads++;
+      }
     }
 
     for (uint32_t side = 0; side < 2; side++) {
@@ -1901,9 +2000,10 @@ static void overlay_render(void) {
         prematch_gameplan_modal_quads[side] += emit_rect(
             modal_x, modal_y, modal_w, modal_h, verts + quads * 24);
         quads++;
-      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS &&
-                 pes_controller_custom_prematch_gameplan_position_picker_active(
-                     side)) {
+      } else if ((page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS &&
+                  pes_controller_custom_prematch_gameplan_position_picker_active(side)) ||
+                 (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION &&
+                  pes_controller_custom_prematch_gameplan_formation_picker_active(side))) {
         const float modal_x = half_x[side] + 0.025f * (float)screen_width;
         const float modal_y = content_y + 0.025f * (float)screen_height;
         const float modal_w = half_w - 0.050f * (float)screen_width;
@@ -1984,8 +2084,9 @@ static void overlay_render(void) {
         const float row_x = half_x[side] + 0.025f * (float)screen_width;
         const float row_w = half_w - 0.050f * (float)screen_width;
         const float row_y = content_y + 0.155f * (float)screen_height;
-        const float row_h = 0.105f * (float)screen_height;
-        for (uint32_t row = 0; row < 3; row++) {
+        const float row_h = (pes_controller_custom_prematch_gameplan_formation_picker_active(side)
+            ? 0.044f : 0.105f) * (float)screen_height;
+        for (uint32_t row = 0; row < pes_controller_custom_prematch_gameplan_formation_row_count(side); row++) {
           prematch_gameplan_neutral_quads[side] += emit_rect(
               row_x, row_y + (float)row * row_h, row_w,
               row_h - 0.008f * (float)screen_height,
@@ -2091,7 +2192,8 @@ static void overlay_render(void) {
         const float row_x = half_x[side] + 0.025f * (float)screen_width;
         const float row_w = half_w - 0.050f * (float)screen_width;
         const float row_y = content_y + 0.155f * (float)screen_height;
-        const float row_h = 0.105f * (float)screen_height;
+        const float row_h = (pes_controller_custom_prematch_gameplan_formation_picker_active(side)
+            ? 0.044f : 0.105f) * (float)screen_height;
         prematch_gameplan_accent_quads[side] += emit_rect(
             row_x, row_y + (float)focus * row_h, row_w,
             row_h - 0.008f * (float)screen_height,
@@ -2375,7 +2477,7 @@ static void overlay_render(void) {
     const float header_name_gh = (float)screen_height / 29.0f;
     const float header_meta_gh = (float)screen_height / 36.0f;
     const float card_main_gh = (float)screen_height / 52.0f;
-    const float card_name_gh = (float)screen_height / 55.0f;
+    const float card_name_gh = roundf((float)screen_height / 36.0f);
     const float body_gh = (float)screen_height / 34.0f;
     const float small_gh = (float)screen_height / 38.0f;
     const float title_gh = (float)screen_height / 28.0f;
@@ -2424,6 +2526,17 @@ static void overlay_render(void) {
           quads - prematch_gameplan_header_text_first_quad[side];
       const int waiting =
           pes_controller_custom_prematch_gameplan_waiting(side);
+      const uint32_t field_focus =
+          pes_controller_custom_prematch_gameplan_substitute_focus(
+              side, PES_PREMATCH_GAMEPLAN_AREA_FIELD);
+      const int focus_on_field = !waiting &&
+          page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE &&
+          pes_controller_custom_prematch_gameplan_substitute_area(side) ==
+              PES_PREMATCH_GAMEPLAN_AREA_FIELD;
+      const double name_focus_seconds = gameplan_name_focus_seconds(
+          side, focus_on_field,
+          pes_controller_custom_prematch_gameplan_player_name(
+              side, 1, field_focus));
       if (waiting) {
         const float waiting_x = half_x[side] + 0.042f * (float)screen_width;
         const float waiting_y = content_y + 0.150f * (float)screen_height;
@@ -2508,13 +2621,14 @@ static void overlay_render(void) {
           const char *name =
               pes_controller_custom_prematch_gameplan_player_name(
                   side, 1, index);
-          line_quads = emit_efootball_centered_fit_line(
+          const int field_name_focused =
+              focus_on_field && field_focus == index;
+          line_quads = emit_efootball_name_line(
               name, (int)strlen(name),
               rect[0] + rect[2] * 0.5f,
               plate_y + plate_h + 0.001f * (float)screen_height,
-              rect[2] * 1.22f, card_name_gh,
-              (float)screen_height / 68.0f,
-              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+              rect[2] * 1.22f, card_name_gh, field_name_focused,
+              name_focus_seconds, verts + quads * 24);
           prematch_gameplan_white_text_quads += line_quads;
           quads += line_quads;
         }
@@ -2568,20 +2682,19 @@ static void overlay_render(void) {
           quads += line_quads;
         }
         const char *bench_title = "SUBSTITUTES";
-        const float bench_title_w = measure_efootball_line(
-            bench_title, (int)strlen(bench_title), small_gh,
-            EFOOTBALL_FONT_BOLD);
-        line_quads = emit_efootball_line(
+        line_quads = emit_efootball_centered_fit_line(
             bench_title, (int)strlen(bench_title),
-            bench_x + (bench_w - bench_title_w) * 0.5f,
-            pitch_y - small_gh - 0.003f * (float)screen_height, small_gh,
+            bench_x + bench_w * 0.5f,
+            pitch_y - small_gh - 0.003f * (float)screen_height,
+            bench_w, small_gh, (float)screen_height / 64.0f,
             EFOOTBALL_FONT_BOLD, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
       } else {
         prematch_gameplan_body_text_first_quad[side] = quads;
         if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION) {
-        const char *title = "FORMATION SETTINGS";
+        const int shape_picker = pes_controller_custom_prematch_gameplan_formation_picker_active(side);
+        const char *title = shape_picker ? "CHOOSE FORMATION" : "FORMATION SETTINGS";
         line_quads = emit_efootball_line(
             title, (int)strlen(title),
             half_x[side] + 0.025f * (float)screen_width,
@@ -2600,22 +2713,27 @@ static void overlay_render(void) {
             EFOOTBALL_FONT_BOLD, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
-        static const char *const formation_rows[3] = {
-            "FORMATION STYLE", "AUTO OFFSIDE TRAP", "AUTO SUBSTITUTE"};
+        static const char *const formation_rows[PES_PREMATCH_FORMATION_ROW_COUNT] = {
+            "FORMATION STYLE", "SHAPE PRESET", "AUTO OFFSIDE TRAP",
+            "AUTO SUBSTITUTE"};
         const float row_x = half_x[side] + 0.041f * (float)screen_width;
         const float row_w = half_w - 0.082f * (float)screen_width;
         const float row_y = content_y + 0.155f * (float)screen_height;
-        const float row_h = 0.105f * (float)screen_height;
-        for (uint32_t row = 0; row < 3; row++) {
+        const float row_h = (pes_controller_custom_prematch_gameplan_formation_picker_active(side)
+            ? 0.044f : 0.105f) * (float)screen_height;
+        for (uint32_t row = 0; row < pes_controller_custom_prematch_gameplan_formation_row_count(side); row++) {
+          const char *label = shape_picker
+              ? pes_controller_custom_prematch_gameplan_formation_value(side, row)
+              : formation_rows[row];
           line_quads = emit_efootball_line(
-              formation_rows[row], (int)strlen(formation_rows[row]), row_x,
+              label, (int)strlen(label), row_x,
               row_y + row_h * (float)row +
                   (row_h - small_gh) * 0.5f,
               small_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
           prematch_gameplan_white_text_quads += line_quads;
           quads += line_quads;
           const char *value =
-              pes_controller_custom_prematch_gameplan_formation_value(
+              shape_picker ? "" : pes_controller_custom_prematch_gameplan_formation_value(
                   side, row);
           const float value_max_w = row_w * 0.54f;
           const float value_w = fminf(
@@ -2968,26 +3086,54 @@ static void overlay_render(void) {
           pes_controller_custom_prematch_gameplan_page(side);
       if (pes_controller_custom_prematch_gameplan_waiting(side))
         continue;
-      const char *hint = "A SELECT";
+      const uint32_t profile = android_controller_profile(side);
+      const char *select_key = profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+                                   ? "DOWN" :
+                               profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT
+                                   ? "X" : "A";
+      const char *back_key = profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+                                 ? "LEFT" :
+                             profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT
+                                 ? "A" : "B";
+      const char *role_key = profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+                                 ? "UP" :
+                             profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT
+                                 ? "B" : "Y";
+      char hint[96];
       if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT)
-        hint = side ? "A SELECT" : "A SELECT   B HUB";
+        snprintf(hint, sizeof(hint), "%s SELECT   %s %s", select_key,
+                 back_key, side ? "READY" : "HUB");
       else if (page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)
-        hint = "A PICK / SWAP   B CANCEL";
+        snprintf(hint, sizeof(hint), "%s SELECT / SWAP   %s BACK",
+                 select_key, back_key);
       else if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION)
-        hint = "LEFT/RIGHT CHANGE   B BACK";
+        snprintf(hint, sizeof(hint), "%s %s   %s BACK", select_key,
+                 pes_controller_custom_prematch_gameplan_formation_picker_active(side)
+                     ? "APPLY SHAPE" : "OPEN / CHANGE", back_key);
       else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP)
-        hint = "LEFT/RIGHT SELECT   B BACK";
+        snprintf(hint, sizeof(hint), "LEFT/RIGHT SELECT   %s BACK", back_key);
       else if (pes_controller_custom_prematch_gameplan_position_picker_active(
                    side))
-        hint = "A ASSIGN   B CANCEL";
+        snprintf(hint, sizeof(hint), "%s ASSIGN   %s CANCEL", select_key, back_key);
       else
-        hint = "A CHOOSE PLAYER   B BACK";
+        snprintf(hint, sizeof(hint), "%s CHOOSE PLAYER   %s BACK",
+                 select_key, back_key);
       line_quads = emit_efootball_line(
-          hint, (int)strlen(hint), half_x[side],
-          0.943f * (float)screen_height, small_gh,
+          hint, (int)strlen(hint), half_x[side] + 0.010f * (float)screen_width,
+          0.938f * (float)screen_height, roundf((float)screen_height / 42.0f),
           EFOOTBALL_FONT_BOLD, verts + quads * 24);
       prematch_gameplan_muted_text_quads += line_quads;
       quads += line_quads;
+      if (page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
+        snprintf(hint, sizeof(hint), "HOLD %s + STICK: MOVE   RELEASE: SAVE   %s: ROLE",
+                 select_key, role_key);
+        line_quads = emit_efootball_line(
+            hint, (int)strlen(hint), half_x[side] + 0.010f * (float)screen_width,
+            0.971f * (float)screen_height, roundf((float)screen_height / 48.0f),
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        prematch_gameplan_muted_text_quads += line_quads;
+        quads += line_quads;
+      }
     }
 
     for (uint32_t side = 0; side < 2; side++) {

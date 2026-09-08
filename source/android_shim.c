@@ -2590,9 +2590,46 @@ void android_input_poll(void) {
           menu_buttons & ~previous_menu_buttons,
           menu_buttons_p2 & ~previous_menu_buttons_p2,
       };
+      const u64 gameplan_buttons[2] = {menu_buttons, menu_buttons_p2};
+      const u64 gameplan_previous_buttons[2] = {previous_menu_buttons,
+                                                previous_menu_buttons_p2};
+      const float gameplan_axis_x[2] = {axis_x, axis_x_p2};
+      const float gameplan_axis_y[2] = {axis_y, axis_y_p2};
       for (uint32_t pad = 0; pad < 2; pad++) {
         const u64 pressed = gameplan_pressed[pad];
-        if (pressed & HidNpadButton_Up)
+        const int gameplan_connected =
+            pad == 0 ? controller_connected : controller_connected_p2;
+        uint32_t current = gameplan_connected
+                               ? PES_GAMEPLAN_BUTTON_CONNECTED
+                               : 0;
+        uint32_t previous = gameplan_connected
+                                ? PES_GAMEPLAN_BUTTON_CONNECTED
+                                : 0;
+        const u64 samples[2] = {gameplan_buttons[pad],
+                                gameplan_previous_buttons[pad]};
+        for (uint32_t sample = 0; sample < 2; sample++) {
+          const u64 value = samples[sample];
+          uint32_t *mapped = sample ? &previous : &current;
+          if (value & HidNpadButton_Up) *mapped |= PES_GAMEPLAN_BUTTON_UP;
+          if (value & HidNpadButton_Down) *mapped |= PES_GAMEPLAN_BUTTON_DOWN;
+          if (value & HidNpadButton_Left) *mapped |= PES_GAMEPLAN_BUTTON_LEFT;
+          if (value & HidNpadButton_Right) *mapped |= PES_GAMEPLAN_BUTTON_RIGHT;
+          if (value & HidNpadButton_A) *mapped |= PES_GAMEPLAN_BUTTON_A;
+          if (value & HidNpadButton_B) *mapped |= PES_GAMEPLAN_BUTTON_B;
+          if (value & HidNpadButton_Y) *mapped |= PES_GAMEPLAN_BUTTON_Y;
+        }
+        pes_controller_custom_prematch_gameplan_pad_event(
+            pad, current, previous, gameplan_axis_x[pad], gameplan_axis_y[pad]);
+        if (pressed & HidNpadButton_B)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_BACK);
+        else if (pressed & HidNpadButton_Y)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_ROLE);
+        else if (pressed & HidNpadButton_A)
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_DECIDE);
+        else if (pressed & HidNpadButton_Up)
           pes_controller_custom_prematch_gameplan_input(
               pad, PES_PAUSE_INPUT_UP);
         else if (pressed & HidNpadButton_Down)
@@ -2604,12 +2641,6 @@ void android_input_poll(void) {
         else if (pressed & HidNpadButton_Right)
           pes_controller_custom_prematch_gameplan_input(
               pad, PES_PAUSE_INPUT_RIGHT);
-        else if (pressed & HidNpadButton_A)
-          pes_controller_custom_prematch_gameplan_input(
-              pad, PES_PAUSE_INPUT_DECIDE);
-        else if (pressed & HidNpadButton_B)
-          pes_controller_custom_prematch_gameplan_input(
-              pad, PES_PAUSE_INPUT_BACK);
       }
     }
     if (!set_piece_selector_isolated && !inmatch_tutorial_isolated &&

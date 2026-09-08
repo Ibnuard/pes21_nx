@@ -228,8 +228,7 @@ static uint32_t exhibition_player_overall(const void *player,
                                           uint32_t condition);
 static int exhibition_pesdb_team_rating(uint32_t team_id, uint32_t *forward,
                                         uint32_t *midfield,
-                                        uint32_t *defence,
-                                        uint32_t *overall);
+                                        uint32_t *defence);
 static uint32_t (*match_squad_data_get_order_no)(void *squad_data,
                                                  const void *player_id);
 static uint32_t (*match_squad_data_get_member_id)(void *squad_data,
@@ -246,6 +245,9 @@ static void (*match_replace_squad_player)(void *squad_data,
 static uint32_t (*match_squad_data_get_tactics)(void *squad_data);
 static void (*match_squad_data_set_tactics)(void *squad_data,
                                              uint32_t tactics);
+static void (*match_squad_data_set_formation)(
+    void *squad_data, uint32_t tactics, const void *formation);
+static void *(*match_formation_copy_assign)(void *destination, const void *source);
 static TmpdbFormationValue (*match_squad_data_get_formation)(
     const void *squad_data, uint32_t tactics);
 static const uint8_t *(*match_formation_get_position)(
@@ -256,6 +258,15 @@ static uint32_t (*match_formation_get_role)(const void *formation,
 static uint32_t (*match_squad_data_get_player_role_position)(
     const void *squad_data, uint32_t member_id, const void *player_id,
     const uint32_t *tactics);
+// The native setter omits PlayerId; its fourth argument is the tactics pointer.
+static void (*match_squad_data_set_player_role_position)(
+    void *squad_data, uint32_t role, uint32_t member_id,
+    const uint32_t *tactics);
+static void (*match_formation_set_position)(void *formation, uint32_t order_no,
+                                            const void *position,
+                                            uint32_t phase);
+static void (*match_formation_set_role)(void *formation, uint32_t order_no,
+                                        uint32_t role, uint32_t phase);
 static uint32_t (*match_squad_data_get_team_power)(
     const void *squad_data);
 static float (*match_squad_data_calc_chemistry)(
@@ -742,6 +753,9 @@ typedef struct {
   uint32_t selected_index;
   uint32_t formation_focus;
   uint32_t tactics;
+  uint32_t formation_preset;
+  uint32_t formation_picker_open;
+  uint32_t formation_picker_focus;
   uint32_t auto_substitute;
   uint32_t auto_offside;
   uint32_t team_power;
@@ -755,6 +769,13 @@ typedef struct {
   uint32_t position_focus;
   uint32_t position_picker_open;
   uint32_t position_picker_focus;
+  uint32_t position_dragging;
+  uint32_t position_drag_index;
+  uint32_t position_drag_dirty;
+  float position_drag_x;
+  float position_drag_y;
+  uint64_t position_drag_tick;
+  uint64_t position_drag_update_tick;
   uint32_t waiting;
   TmpdbMatchPlanSettingsValue settings;
   char formation_label[16];
@@ -762,6 +783,9 @@ typedef struct {
 
 static PrematchGameplanSide exhibition_gameplan_sides[2];
 static _Alignas(4) uint32_t exhibition_gameplan_custom_action[2];
+static _Alignas(4) uint32_t exhibition_gameplan_raw_buttons[2];
+static _Alignas(4) int32_t exhibition_gameplan_raw_axis_x[2];
+static _Alignas(4) int32_t exhibition_gameplan_raw_axis_y[2];
 #define PREMATCH_GAMEPLAN_PORTRAIT_MAX_BYTES (1024u * 1024u)
 static _Alignas(8) uintptr_t
     exhibition_gameplan_portrait_pending[2][PREMATCH_GAMEPLAN_MAX_PLAYERS];
@@ -1263,28 +1287,23 @@ static uint32_t main_menu_2p_team_selector_focused_team(uint32_t pad) {
 
 static uint32_t main_menu_2p_team_selector_grade_half_steps(
     uint32_t overall) {
-  if (exhibition_overall_to_grade) {
-    const float grade = exhibition_overall_to_grade(overall);
-    if (isfinite(grade) && grade >= 1.0f && grade <= 5.0f)
-      return (uint32_t)(grade * 2.0f + 0.5f);
-  }
-  // Exact mobile convOverallToGrade thresholds. Keep this fallback local so
-  // the selector remains usable if a compatible binary hides that symbol.
+  // Custom selector scale for the visible FW/MF/DF mean, not the native
+  // full-squad grade curve. Keep this monotonic and identical for both sources.
   if (overall > 87u)
     return 10u;
   if (overall > 82u)
     return 9u;
   if (overall > 79u)
     return 8u;
-  if (overall > 76u)
+  if (overall >= 73u)
     return 7u;
-  if (overall > 73u)
+  if (overall >= 67u)
     return 6u;
-  if (overall > 71u)
+  if (overall >= 62u)
     return 5u;
-  if (overall > 69u)
+  if (overall >= 57u)
     return 4u;
-  if (overall > 66u)
+  if (overall >= 52u)
     return 3u;
   return 2u;
 }
@@ -1320,11 +1339,14 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
     uint32_t midfield = 0;
     uint32_t defence = 0;
     uint32_t grade_half_steps = 0;
-    uint32_t overall = 0;
+    uint32_t position_average = 0;
     if (team_id && exhibition_pesdb_team_rating(
-                       team_id, &forward, &midfield, &defence, &overall)) {
+                       team_id, &forward, &midfield, &defence)) {
+      // Keep the stars tied to the three visible position bars instead of the
+      // generated PESDB overall, which includes the full starting XI.
+      position_average = (forward + midfield + defence + 1u) / 3u;
       grade_half_steps =
-          main_menu_2p_team_selector_grade_half_steps(overall);
+          main_menu_2p_team_selector_grade_half_steps(position_average);
     } else if (team_id && exhibition_get_position_overall) {
       // BroadRoleKind in this PES21 mobile database is ordered DEF/MF/FW.
       // Selector data stores the compact master ID (100 = Arsenal), whereas
@@ -1337,9 +1359,9 @@ static void main_menu_2p_team_selector_refresh_ratings(void) {
       forward = exhibition_get_position_overall(&native_team_id, 2u);
       if (forward <= 100u && midfield <= 100u && defence <= 100u &&
           forward && midfield && defence) {
-        overall = (forward + midfield + defence + 1u) / 3u;
+        position_average = (forward + midfield + defence + 1u) / 3u;
         grade_half_steps =
-            main_menu_2p_team_selector_grade_half_steps(overall);
+            main_menu_2p_team_selector_grade_half_steps(position_average);
       } else {
         forward = 0;
         midfield = 0;
@@ -2483,8 +2505,7 @@ static uint32_t exhibition_player_overall(const void *player,
 
 static int exhibition_pesdb_team_rating(uint32_t team_id, uint32_t *forward,
                                         uint32_t *midfield,
-                                        uint32_t *defence,
-                                        uint32_t *overall) {
+                                        uint32_t *defence) {
 #if PES_PESDB_RUNTIME_ROSTERS
   const ExhibitionPesdbTeamRating *rating =
       exhibition_find_pesdb_team_rating(team_id);
@@ -2496,16 +2517,12 @@ static int exhibition_pesdb_team_rating(uint32_t team_id, uint32_t *forward,
     *midfield = rating->midfield;
   if (defence)
     *defence = rating->defence;
-  if (overall)
-    *overall = rating->overall;
-  return rating->forward && rating->midfield && rating->defence &&
-         rating->overall;
+  return rating->forward && rating->midfield && rating->defence;
 #else
   (void)team_id;
   (void)forward;
   (void)midfield;
   (void)defence;
-  (void)overall;
   return 0;
 #endif
 }
@@ -5051,12 +5068,59 @@ static const char *prematch_gameplan_role_label(uint32_t role) {
   return role < sizeof(labels) / sizeof(labels[0]) ? labels[role] : "SUB";
 }
 
+typedef struct {
+  const char *label;
+  uint8_t role[11];
+  uint8_t x[11];
+  uint8_t y[11];
+} PrematchFormationPreset;
+
+// Native Vector2C stores {depth, width}: depth 0..48 increases toward attack,
+// width 0..105 increases to the right. Roles follow prematch_gameplan_role_label.
+static const PrematchFormationPreset prematch_formation_presets[] = {
+    {"4-3-3", {0,2,1,1,3,5,4,5,9,12,10},
+      {52,10,38,67,95,25,52,80,26,52,78},
+      {2,12,12,12,12,25,25,25,42,42,42}},
+    {"4-2-3-1", {0,2,1,1,3,4,4,6,8,7,12},
+      {52,10,38,67,95,35,70,14,52,91,52},
+      {2,12,12,12,12,23,23,34,34,34,44}},
+    {"4-4-2", {0,2,1,1,3,6,5,5,7,12,12},
+      {52,10,38,67,95,12,36,68,92,35,70},
+      {2,12,12,12,12,25,25,25,25,42,42}},
+    {"4-1-4-1", {0,2,1,1,3,4,6,5,5,7,12},
+      {52,10,38,67,95,52,12,36,68,92,52},
+      {2,12,12,12,12,22,32,32,32,32,44}},
+    {"4-3-1-2", {0,2,1,1,3,5,4,5,8,12,12},
+      {52,10,38,67,95,25,52,80,52,38,67},
+      {2,12,12,12,12,25,25,25,33,42,42}},
+    {"4-2-2-2", {0,2,1,1,3,4,4,8,8,12,12},
+      {52,10,38,67,95,35,70,30,74,40,64},
+      {2,12,12,12,12,23,23,31,31,42,42}},
+    {"3-5-2", {0,1,1,1,6,5,4,5,7,12,12},
+      {52,20,52,84,15,36,52,68,89,38,67},
+      {2,12,12,12,24,24,24,24,24,42,42}},
+    {"3-4-3", {0,1,1,1,6,5,5,7,9,12,10},
+      {52,20,52,84,12,36,68,92,28,52,76},
+      {2,12,12,12,25,25,25,25,42,42,42}},
+    {"5-3-2", {0,2,1,1,1,3,5,4,5,12,12},
+      {52,8,30,52,74,97,25,52,80,38,67},
+      {2,16,12,12,12,16,27,25,27,42,42}},
+    {"5-4-1", {0,2,1,1,1,3,6,5,5,7,12},
+      {52,8,30,52,74,97,12,36,68,93,52},
+      {2,16,12,12,12,16,29,27,27,29,42}},
+};
+
+#define PREMATCH_FORMATION_PRESET_COUNT \
+    (sizeof(prematch_formation_presets) / sizeof(prematch_formation_presets[0]))
+#define PREMATCH_ROLE_OPTION_COUNT 13u
+
 static void prematch_gameplan_reset_side(PrematchGameplanSide *state) {
   if (!state)
     return;
   memset(state, 0, sizeof(*state));
   state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
   state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+  state->formation_preset = PREMATCH_FORMATION_PRESET_COUNT;
   strcpy(state->formation_label, "--");
 }
 
@@ -5195,6 +5259,12 @@ static void exhibition_gameplan_reset(void) {
     prematch_gameplan_clear_portrait_pending(side);
     exhibition_gameplan_portrait_retry_tick[side] = 0;
     __atomic_store_n(&exhibition_gameplan_custom_action[side], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_gameplan_raw_buttons[side], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_gameplan_raw_axis_x[side], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_gameplan_raw_axis_y[side], 0,
                      __ATOMIC_RELEASE);
     prematch_gameplan_reset_side(&exhibition_gameplan_sides[side]);
   }
@@ -5348,6 +5418,37 @@ static void prematch_gameplan_build_formation_label(
              "%u-%u-%u", defenders, midfielders, forwards);
   else
     strcpy(state->formation_label, "--");
+}
+
+static void prematch_gameplan_detect_preset(PrematchGameplanSide *state) {
+  state->formation_preset = PREMATCH_FORMATION_PRESET_COUNT;
+  if (state->field_count != 11)
+    return;
+  for (uint32_t preset = 0; preset < PREMATCH_FORMATION_PRESET_COUNT;
+       preset++) {
+    const PrematchFormationPreset *shape = &prematch_formation_presets[preset];
+    uint32_t used = 0;
+    for (uint32_t slot = 0; slot < 11; slot++) {
+      const uint8_t x = (uint8_t)((shape->x[slot] * 255u + 52u) / 105u);
+      const uint8_t y = (uint8_t)(255u - (shape->y[slot] * 255u + 24u) / 48u);
+      for (uint32_t index = 0; index < 11; index++) {
+        const PrematchGameplanPlayer *player =
+            prematch_gameplan_nth_player_const(state, 1, index);
+        if (!(used & (1u << index)) && player &&
+            player->role == shape->role[slot] &&
+            player->pitch_x == x && player->pitch_y == y) {
+          used |= 1u << index;
+          break;
+        }
+      }
+    }
+    if (used == 0x7ffu) {
+      state->formation_preset = preset;
+      snprintf(state->formation_label, sizeof(state->formation_label),
+               "%s", shape->label);
+      return;
+    }
+  }
 }
 
 static void prematch_gameplan_refresh_side(uint32_t side) {
@@ -5511,6 +5612,7 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
       prematch_gameplan_team_spirit(squad_data, state->tactics);
   state->auto_preview_valid = 0;
   prematch_gameplan_build_formation_label(state);
+  prematch_gameplan_detect_preset(state);
   prematch_gameplan_load_portraits(side);
 }
 
@@ -5599,6 +5701,162 @@ static void prematch_gameplan_save_and_refresh(uint32_t side) {
   prematch_gameplan_refresh_side(side);
 }
 
+static void prematch_gameplan_store_formation(void *squad, uint32_t tactics,
+                                             const TmpdbFormationValue *formation) {
+  if (!squad || tactics > 1 || !match_squad_data_set_formation ||
+      !match_formation_copy_assign)
+    return;
+  // Audited SquadData::GetFormation reads +0x1cc with 0x90 tactics stride.
+  // SetFormation only updates roles. Copy the owning Formation as well so
+  // refresh and SaveSquadData retain coordinates, isolated per side/tactics.
+  match_formation_copy_assign((unsigned char *)squad + 0x1cc + tactics * 0x90,
+                              formation);
+  match_squad_data_set_formation(squad, tactics, formation);
+}
+
+static void prematch_gameplan_cycle_role(uint32_t side) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (state->substitute_area != PES_PREMATCH_GAMEPLAN_AREA_FIELD ||
+      state->position_dragging || !state->squad_data ||
+      !match_squad_data_get_formation || !match_squad_data_set_formation ||
+      !match_formation_set_role || !match_squad_data_set_player_role_position)
+    return;
+  PrematchGameplanPlayer *player =
+      prematch_gameplan_nth_player(state, 1, state->field_focus);
+  if (!player || player->order_no >= 11 || player->role == 0)
+    return;
+  const uint32_t role = player->role < PREMATCH_ROLE_OPTION_COUNT - 1
+                            ? player->role + 1u : 1u;
+  TmpdbFormationValue formation =
+      match_squad_data_get_formation(state->squad_data, state->tactics);
+  match_formation_set_role(&formation, player->order_no, role, 0);
+  prematch_gameplan_store_formation(state->squad_data, state->tactics, &formation);
+  match_squad_data_set_player_role_position(
+      state->squad_data, role, player->member_id, &state->tactics);
+  prematch_gameplan_save_and_refresh(side);
+}
+
+static void prematch_gameplan_apply_preset(uint32_t side) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (!state->squad_data || state->field_count != 11 ||
+      state->formation_preset >= PREMATCH_FORMATION_PRESET_COUNT ||
+      !match_squad_data_get_formation || !match_squad_data_set_formation ||
+      !match_formation_set_position || !match_formation_set_role ||
+      !match_squad_data_set_player_role_position)
+    return;
+  const PrematchFormationPreset *preset =
+      &prematch_formation_presets[state->formation_preset];
+  TmpdbFormationValue formation =
+      match_squad_data_get_formation(state->squad_data, state->tactics);
+  uint32_t assigned[11];
+  uint32_t used = 0;
+  // Prefer each player's current role, then its line and nearby position.
+  // Squad order is not a role index (teams use different native slot orders).
+  for (uint32_t slot = 0; slot < 11; slot++) {
+    uint32_t best = PREMATCH_GAMEPLAN_NO_SELECTION;
+    uint32_t best_score = UINT32_MAX;
+    for (uint32_t index = 0; index < 11; index++) {
+      const PrematchGameplanPlayer *player =
+          prematch_gameplan_nth_player_const(state, 1, index);
+      if (!player || player->order_no >= 11 || (used & (1u << index)))
+        continue;
+      const int dx = (int)player->pitch_x -
+                     (int)((preset->x[slot] * 255u + 52u) / 105u);
+      const int dy = (int)player->pitch_y -
+                     (int)(255u - (preset->y[slot] * 255u + 24u) / 48u);
+      uint32_t score = (uint32_t)(dx * dx + dy * dy);
+      if (player->role != preset->role[slot])
+        score += 200000u;
+      if (prematch_gameplan_layout_lane(player->role) !=
+          prematch_gameplan_layout_lane(preset->role[slot]))
+        score += 400000u;
+      if ((player->role == 0) != (slot == 0))
+        score += 1000000u;
+      if (score < best_score) {
+        best = index;
+        best_score = score;
+      }
+    }
+    if (best == PREMATCH_GAMEPLAN_NO_SELECTION)
+      return;
+    assigned[slot] = best;
+    used |= 1u << best;
+  }
+  for (uint32_t slot = 0; slot < 11; slot++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_nth_player_const(state, 1, assigned[slot]);
+    const uint8_t position[2] = {preset->y[slot], preset->x[slot]};
+    match_formation_set_position(&formation, player->order_no, position, 0);
+    match_formation_set_role(&formation, player->order_no, preset->role[slot], 0);
+  }
+  prematch_gameplan_store_formation(state->squad_data, state->tactics, &formation);
+  for (uint32_t slot = 0; slot < 11; slot++) {
+    const PrematchGameplanPlayer *player =
+        prematch_gameplan_nth_player_const(state, 1, assigned[slot]);
+    match_squad_data_set_player_role_position(
+        state->squad_data, preset->role[slot], player->member_id,
+        &state->tactics);
+  }
+  state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+  state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+  prematch_gameplan_save_and_refresh(side);
+}
+
+static void prematch_gameplan_drag_field(uint32_t side, uint32_t buttons,
+                                         int32_t axis_x, int32_t axis_y,
+                                         uint64_t now) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (!state->squad_data || !match_squad_data_set_formation ||
+      !match_squad_data_get_formation || !match_formation_get_position ||
+      !match_formation_set_position || !state->field_count)
+    return;
+  PrematchGameplanPlayer *player =
+      prematch_gameplan_nth_player(state, 1, state->position_drag_index);
+  if (!player || player->order_no >= 11)
+    return;
+  float dx = (float)axis_x / 32767.0f;
+  float dy = (float)axis_y / 32767.0f;
+  if (!axis_x)
+    dx = ((buttons & PES_GAMEPLAN_BUTTON_RIGHT) != 0) -
+         ((buttons & PES_GAMEPLAN_BUTTON_LEFT) != 0);
+  if (!axis_y)
+    dy = ((buttons & PES_GAMEPLAN_BUTTON_DOWN) != 0) -
+         ((buttons & PES_GAMEPLAN_BUTTON_UP) != 0);
+  const float seconds = fminf(
+      (float)armTicksToNs(now - state->position_drag_update_tick) / 1e9f, 0.05f);
+  state->position_drag_update_tick = now;
+  state->position_drag_x = fminf(255.0f, fmaxf(0.0f,
+      state->position_drag_x + dx * 96.0f * seconds));
+  state->position_drag_y = fminf(255.0f, fmaxf(0.0f,
+      state->position_drag_y + dy * 96.0f * seconds));
+  // Invert and scale the overlay coordinates back into native Vector2C.
+  const uint8_t position[2] = {
+      (uint8_t)((255.0f - state->position_drag_y) * 48.0f / 255.0f + 0.5f),
+      (uint8_t)(state->position_drag_x * 105.0f / 255.0f + 0.5f)};
+  TmpdbFormationValue formation =
+      match_squad_data_get_formation(state->squad_data, state->tactics);
+  const uint8_t *previous =
+      match_formation_get_position(&formation, player->order_no, 0);
+  if (!previous || memcmp(position, previous, sizeof(position)) == 0)
+    return;
+  match_formation_set_position(&formation, player->order_no, position, 0);
+  prematch_gameplan_store_formation(state->squad_data, state->tactics,
+                                 &formation);
+  player->pitch_x = (uint8_t)((position[1] * 255u + 52u) / 105u);
+  player->pitch_y = (uint8_t)(255u - (position[0] * 255u + 24u) / 48u);
+  state->formation_preset = PREMATCH_FORMATION_PRESET_COUNT;
+  state->position_drag_dirty = 1;
+}
+
+static void prematch_gameplan_finish_drag(uint32_t side) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  state->position_dragging = 0;
+  if (state->position_drag_dirty) {
+    state->position_drag_dirty = 0;
+    prematch_gameplan_save_and_refresh(side);
+  }
+}
+
 static void prematch_gameplan_apply_position(uint32_t side) {
   if (side > 1)
     return;
@@ -5665,6 +5923,61 @@ static void prematch_gameplan_swap(uint32_t side) {
   prematch_gameplan_save_and_refresh(side);
   debugPrintf("native 2P Game Plan: side=%u swapped %s <-> %s\n",
               side, field_name, bench_name);
+}
+
+static void prematch_gameplan_swap_field(uint32_t side, uint32_t first_index,
+                                         uint32_t second_index) {
+  if (side > 1 || first_index == second_index)
+    return;
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  PrematchGameplanPlayer *first =
+      prematch_gameplan_nth_player(state, 1, first_index);
+  PrematchGameplanPlayer *second =
+      prematch_gameplan_nth_player(state, 1, second_index);
+  if (!state->squad_data || !first || !second ||
+      first->order_no >= 11 || second->order_no >= 11 ||
+      !match_squad_data_get_formation || !match_formation_get_position ||
+      !match_formation_set_position || !match_squad_data_set_formation ||
+      !match_formation_get_role || !match_formation_set_role ||
+      !match_squad_data_set_player_role_position)
+    return;
+  TmpdbFormationValue formation =
+      match_squad_data_get_formation(state->squad_data, state->tactics);
+  const uint8_t *first_pos =
+      match_formation_get_position(&formation, first->order_no, 0);
+  const uint8_t *second_pos =
+      match_formation_get_position(&formation, second->order_no, 0);
+  if (!first_pos || !second_pos)
+    return;
+  uint16_t first_packed = 0;
+  uint16_t second_packed = 0;
+  memcpy(&first_packed, first_pos, sizeof(first_packed));
+  memcpy(&second_packed, second_pos, sizeof(second_packed));
+  match_formation_set_position(&formation, first->order_no, &second_packed, 0);
+  match_formation_set_position(&formation, second->order_no, &first_packed, 0);
+  if (match_formation_get_role) {
+    const uint32_t first_role =
+        match_formation_get_role(&formation, first->order_no, 0);
+    const uint32_t second_role =
+        match_formation_get_role(&formation, second->order_no, 0);
+    if (match_formation_set_role) {
+      match_formation_set_role(&formation, first->order_no, second_role, 0);
+      match_formation_set_role(&formation, second->order_no, first_role, 0);
+    }
+    if (match_squad_data_set_player_role_position) {
+      match_squad_data_set_player_role_position(
+          state->squad_data, second_role, first->member_id,
+          &state->tactics);
+      match_squad_data_set_player_role_position(
+          state->squad_data, first_role, second->member_id,
+          &state->tactics);
+    }
+  }
+  prematch_gameplan_store_formation(state->squad_data, state->tactics,
+                                 &formation);
+  state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+  state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+  prematch_gameplan_save_and_refresh(side);
 }
 
 static void prematch_gameplan_move_field(PrematchGameplanSide *state,
@@ -5940,7 +6253,15 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
 static void prematch_gameplan_process_substitute(uint32_t side,
                                                   uint32_t action) {
   PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (state->position_dragging &&
+      (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_DOWN ||
+       action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_RIGHT))
+    return;
   if (action == PES_PAUSE_INPUT_BACK) {
+    if (state->position_dragging) {
+      prematch_gameplan_finish_drag(side);
+      return;
+    }
     if (state->selected_area != PREMATCH_GAMEPLAN_NO_SELECTION) {
       state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
       state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
@@ -5949,20 +6270,40 @@ static void prematch_gameplan_process_substitute(uint32_t side,
     }
     return;
   }
+  if (action == PES_PAUSE_INPUT_ROLE) {
+    // Y cycles the focused on-field player's role immediately, matching the
+    // console shortcut without forcing a second modal over the pitch.
+    prematch_gameplan_cycle_role(side);
+    return;
+  }
   if (action == PES_PAUSE_INPUT_DECIDE) {
+    // A is also the console drag modifier. A pending hold is resolved by the
+    // raw pad event on release; do not turn the initial press into a swap.
+    if (state->position_dragging)
+      return;
     const uint32_t current =
         state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD
             ? state->field_focus
             : state->bench_focus;
+    if (!prematch_gameplan_nth_player(
+            state, state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD,
+            current))
+      return;
+    if (state->selected_area == state->substitute_area &&
+        state->selected_index == current) {
+      state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+      state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+      return;
+    }
     if (state->selected_area == PREMATCH_GAMEPLAN_NO_SELECTION ||
         state->selected_area == state->substitute_area) {
+      if (state->selected_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD &&
+          state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD) {
+        prematch_gameplan_swap_field(side, state->selected_index, current);
+        return;
+      }
       state->selected_area = state->substitute_area;
       state->selected_index = current;
-      if (state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD &&
-          state->bench_count)
-        state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_BENCH;
-      else if (state->field_count)
-        state->substitute_area = PES_PREMATCH_GAMEPLAN_AREA_FIELD;
     } else {
       prematch_gameplan_swap(side);
     }
@@ -5995,19 +6336,56 @@ static void prematch_gameplan_process_substitute(uint32_t side,
 static void prematch_gameplan_process_formation(uint32_t side,
                                                  uint32_t action) {
   PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (state->formation_picker_open) {
+    if (action == PES_PAUSE_INPUT_BACK) {
+      state->formation_picker_open = 0;
+    } else if (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_LEFT) {
+      state->formation_picker_focus = state->formation_picker_focus
+          ? state->formation_picker_focus - 1 : PREMATCH_FORMATION_PRESET_COUNT - 1;
+    } else if (action == PES_PAUSE_INPUT_DOWN || action == PES_PAUSE_INPUT_RIGHT) {
+      state->formation_picker_focus = (state->formation_picker_focus + 1) % PREMATCH_FORMATION_PRESET_COUNT;
+    } else if (action == PES_PAUSE_INPUT_DECIDE) {
+      state->formation_preset = state->formation_picker_focus;
+      prematch_gameplan_apply_preset(side);
+      state->formation_picker_open = 0;
+    }
+    return;
+  }
   if (action == PES_PAUSE_INPUT_BACK) {
     state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
   } else if (action == PES_PAUSE_INPUT_UP) {
     state->formation_focus = state->formation_focus
                                  ? state->formation_focus - 1
-                                 : 2;
+                                 : PES_PREMATCH_FORMATION_ROW_COUNT - 1;
   } else if (action == PES_PAUSE_INPUT_DOWN) {
-    state->formation_focus = (state->formation_focus + 1) % 3;
+    state->formation_focus =
+        (state->formation_focus + 1) % PES_PREMATCH_FORMATION_ROW_COUNT;
   } else if (action == PES_PAUSE_INPUT_LEFT ||
              action == PES_PAUSE_INPUT_RIGHT ||
              action == PES_PAUSE_INPUT_DECIDE) {
-    prematch_gameplan_toggle_formation_setting(
-        side, state->formation_focus);
+    if (state->formation_focus == 1 &&
+        (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_RIGHT)) {
+      const uint32_t count = PREMATCH_FORMATION_PRESET_COUNT;
+      state->formation_preset = action == PES_PAUSE_INPUT_LEFT
+                                    ? (state->formation_preset &&
+                                       state->formation_preset < count
+                                           ? state->formation_preset - 1
+                                           : count - 1)
+                                    : (state->formation_preset < count
+                                           ? (state->formation_preset + 1) % count
+                                           : 0);
+      prematch_gameplan_apply_preset(side);
+    } else if (state->formation_focus >= 2) {
+      prematch_gameplan_toggle_formation_setting(
+          side, state->formation_focus - 1);
+    } else if (state->formation_focus == 1 &&
+               action == PES_PAUSE_INPUT_DECIDE) {
+      state->formation_picker_focus = state->formation_preset < PREMATCH_FORMATION_PRESET_COUNT
+          ? state->formation_preset : 0;
+      state->formation_picker_open = 1;
+    } else {
+      prematch_gameplan_toggle_formation_setting(side, state->formation_focus);
+    }
   }
 }
 
@@ -6076,13 +6454,82 @@ static void exhibition_gameplan_process_pending(void) {
       exhibition_gameplan_portrait_retry_tick[side] = now;
       prematch_gameplan_load_portraits(side);
     }
-    const uint32_t action = __atomic_exchange_n(
+    uint32_t action = __atomic_exchange_n(
         &exhibition_gameplan_custom_action[side], 0, __ATOMIC_ACQ_REL);
+    // Low byte: current buttons. The next two bytes latch press/release
+    // edges until consumed, even if HID polls more often than the game thread.
+    const uint32_t packet = __atomic_fetch_and(
+        &exhibition_gameplan_raw_buttons[side], 0xffu, __ATOMIC_ACQ_REL);
     if (side == 1 && pes_controller_exhibition_single_controller_mode())
       continue;
+    PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+    const uint32_t sample = packet & 0xffu;
+    const uint32_t pressed = (packet >> 8) & 0xffu;
+    const uint32_t released = (packet >> 16) & 0xffu;
+    const int connected = (sample & PES_GAMEPLAN_BUTTON_CONNECTED) != 0;
+    const int page_substitute =
+        state->page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE;
+    if (!connected) {
+      prematch_gameplan_finish_drag(side);
+      continue;
+    } else if (page_substitute && state->substitute_area ==
+                              PES_PREMATCH_GAMEPLAN_AREA_FIELD) {
+      // Field A belongs entirely to the gesture. The normal DECIDE press is
+      // used by menu rows/bench, and must never also select on this page.
+      if (action == PES_PAUSE_INPUT_DECIDE)
+        action = 0;
+      if (action == PES_PAUSE_INPUT_BACK && state->position_dragging) {
+        prematch_gameplan_finish_drag(side);
+        continue;
+      }
+      if ((pressed & PES_GAMEPLAN_BUTTON_A) &&
+          !(sample & PES_GAMEPLAN_BUTTON_B) && !state->position_dragging) {
+        state->position_drag_index = state->field_focus;
+        state->position_dragging = 2; // hold candidate
+        state->position_drag_tick = now;
+        state->position_drag_update_tick = now;
+        state->position_drag_dirty = 0;
+        const PrematchGameplanPlayer *player =
+            prematch_gameplan_nth_player_const(
+                state, 1, state->position_drag_index);
+        if (player) {
+          state->position_drag_x = (float)player->pitch_x;
+          state->position_drag_y = (float)player->pitch_y;
+        }
+      }
+      if (state->position_dragging == 2 &&
+          (sample & PES_GAMEPLAN_BUTTON_A)) {
+        const uint64_t held_ns = armTicksToNs(now - state->position_drag_tick);
+        if (held_ns >= 220000000ULL) {
+          state->position_dragging = 1;
+          state->position_drag_update_tick = now;
+          state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
+          state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
+        }
+      }
+      if (state->position_dragging == 1 &&
+          (sample & PES_GAMEPLAN_BUTTON_A)) {
+        const int32_t ax = __atomic_load_n(&exhibition_gameplan_raw_axis_x[side],
+                                           __ATOMIC_ACQUIRE);
+        const int32_t ay = __atomic_load_n(&exhibition_gameplan_raw_axis_y[side],
+                                           __ATOMIC_ACQUIRE);
+        prematch_gameplan_drag_field(side, sample, ax, ay, now);
+      }
+      if (state->position_dragging)
+        action = 0;
+      if (((released & PES_GAMEPLAN_BUTTON_A) ||
+           !(sample & PES_GAMEPLAN_BUTTON_A)) &&
+          state->position_dragging == 2) {
+        state->position_dragging = 0;
+        prematch_gameplan_process_substitute(side, PES_PAUSE_INPUT_DECIDE);
+      } else if (((released & PES_GAMEPLAN_BUTTON_A) ||
+                  !(sample & PES_GAMEPLAN_BUTTON_A)) &&
+                 state->position_dragging == 1) {
+        prematch_gameplan_finish_drag(side);
+      }
+    }
     if (!action)
       continue;
-    PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
     if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT)
       prematch_gameplan_process_root(side, action);
     else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)
@@ -6198,7 +6645,18 @@ int pes_controller_custom_prematch_gameplan_substitute_selected(
 
 uint32_t pes_controller_custom_prematch_gameplan_formation_focus(
     uint32_t pad) {
-  return pad < 2 ? exhibition_gameplan_sides[pad].formation_focus : 0;
+  if (pad > 1) return 0;
+  const PrematchGameplanSide *state = &exhibition_gameplan_sides[pad];
+  return state->formation_picker_open ? state->formation_picker_focus : state->formation_focus;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_formation_picker_active(uint32_t pad) {
+  return pad < 2 && exhibition_gameplan_sides[pad].formation_picker_open;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_formation_row_count(uint32_t pad) {
+  return pes_controller_custom_prematch_gameplan_formation_picker_active(pad)
+      ? PREMATCH_FORMATION_PRESET_COUNT : PES_PREMATCH_FORMATION_ROW_COUNT;
 }
 
 const char *pes_controller_custom_prematch_gameplan_formation_value(
@@ -6206,11 +6664,18 @@ const char *pes_controller_custom_prematch_gameplan_formation_value(
   if (pad > 1)
     return "";
   const PrematchGameplanSide *state = &exhibition_gameplan_sides[pad];
+  if (state->formation_picker_open)
+    return row < PREMATCH_FORMATION_PRESET_COUNT ? prematch_formation_presets[row].label : "";
   if (row == 0)
     return state->tactics ? "< DEFENSIVE >" : "< ATTACKING >";
-  if (row == 1)
-    return state->auto_offside ? "< ON >" : "< OFF >";
+  if (row == 1) {
+    if (state->formation_preset < PREMATCH_FORMATION_PRESET_COUNT)
+      return prematch_formation_presets[state->formation_preset].label;
+    return state->formation_label;
+  }
   if (row == 2)
+    return state->auto_offside ? "< ON >" : "< OFF >";
+  if (row == 3)
     return state->auto_substitute ? "< ON >" : "< OFF >";
   return "";
 }
@@ -8887,6 +9352,31 @@ void pes_controller_custom_prematch_gameplan_input(uint32_t pad,
   if (pad < 2 && pes_controller_custom_prematch_gameplan_active() && action)
     __atomic_store_n(&exhibition_gameplan_custom_action[pad], action,
                      __ATOMIC_RELEASE);
+}
+
+void pes_controller_custom_prematch_gameplan_pad_event(
+    uint32_t pad, uint32_t buttons, uint32_t previous_buttons,
+    float axis_x, float axis_y) {
+  if (pad > 1 || !pes_controller_custom_prematch_gameplan_active())
+    return;
+  const uint32_t current = buttons & 0xffu;
+  const uint32_t previous = previous_buttons & 0xffu;
+  const int32_t qx = (int32_t)(axis_x * 32767.0f);
+  const int32_t qy = (int32_t)(axis_y * 32767.0f);
+  __atomic_store_n(&exhibition_gameplan_raw_axis_x[pad], qx,
+                   __ATOMIC_RELAXED);
+  __atomic_store_n(&exhibition_gameplan_raw_axis_y[pad], qy,
+                   __ATOMIC_RELAXED);
+  const uint32_t edges = ((current & ~previous) << 8) |
+                         ((previous & ~current) << 16);
+  uint32_t pending = __atomic_load_n(&exhibition_gameplan_raw_buttons[pad],
+                                     __ATOMIC_RELAXED);
+  uint32_t next;
+  do {
+    next = (pending & ~0xffu) | current | edges;
+  } while (!__atomic_compare_exchange_n(&exhibition_gameplan_raw_buttons[pad],
+                                         &pending, next, 0,
+                                         __ATOMIC_RELEASE, __ATOMIC_RELAXED));
 }
 
 static uint32_t pes_exhibition_strategy_update(void *window,
@@ -13682,6 +14172,11 @@ void install_ue4_hooks(so_module *module) {
   match_squad_data_set_tactics =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb9SquadData14SetTacticsKindENS_5Coach11TacticsKindE");
+  match_squad_data_set_formation =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadData12SetFormationENS_5Coach11TacticsKindERKNS_9FormationE");
+  match_formation_copy_assign = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb9FormationaSERKS0_");
   match_squad_data_get_formation =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData12GetFormationENS_5Coach11TacticsKindE");
@@ -13694,6 +14189,15 @@ void install_ue4_hooks(so_module *module) {
   match_squad_data_get_player_role_position =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData21GetPlayerRolePositionE8MemberIdRKNS_8PlayerIdERKNS_5Coach11TacticsKindE");
+  match_squad_data_set_player_role_position =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9SquadData21SetPlayerRolePositionE8Position8MemberIdRKNS_5Coach11TacticsKindE");
+  match_formation_set_position =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9Formation11SetPositionEhRKN4math8Vector2CEh");
+  match_formation_set_role =
+      (void *)so_find_addr_rx(module,
+          "_ZN5tmpdb9Formation7SetRoleEh8Positionh");
   match_squad_data_get_team_power =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData12GetTeamPowerEv");

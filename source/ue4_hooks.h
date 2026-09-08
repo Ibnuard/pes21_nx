@@ -72,6 +72,7 @@ typedef struct {
 #define PES_PAUSE_INPUT_BACK 4u
 #define PES_PAUSE_INPUT_LEFT 5u
 #define PES_PAUSE_INPUT_RIGHT 6u
+#define PES_PAUSE_INPUT_ROLE 7u
 
 void install_ue4_hooks(so_module *module);
 void pes_controller_friend_press_update(int held, uint64_t now_ms);
@@ -256,12 +257,28 @@ void pes_controller_custom_postmatch_input(uint32_t action);
 #define PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP 3u
 #define PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS 4u
 #define PES_PREMATCH_GAMEPLAN_ACTION_COUNT 4u
+#define PES_PREMATCH_FORMATION_ROW_COUNT 4u
+uint32_t pes_controller_custom_prematch_gameplan_formation_picker_active(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_formation_row_count(uint32_t pad);
 #define PES_PREMATCH_GAMEPLAN_POSITION_COUNT 9u
 #define PES_PREMATCH_GAMEPLAN_AREA_FIELD 0u
 #define PES_PREMATCH_GAMEPLAN_AREA_BENCH 1u
 int pes_controller_custom_prematch_gameplan_active(void);
 void pes_controller_custom_prematch_gameplan_input(uint32_t pad,
                                                     uint32_t action);
+// Raw menu samples are kept separate from one-shot navigation actions so a
+// held A can become a drag gesture without losing the release edge.
+#define PES_GAMEPLAN_BUTTON_UP (1u << 0)
+#define PES_GAMEPLAN_BUTTON_DOWN (1u << 1)
+#define PES_GAMEPLAN_BUTTON_LEFT (1u << 2)
+#define PES_GAMEPLAN_BUTTON_RIGHT (1u << 3)
+#define PES_GAMEPLAN_BUTTON_A (1u << 4)
+#define PES_GAMEPLAN_BUTTON_B (1u << 5)
+#define PES_GAMEPLAN_BUTTON_Y (1u << 6)
+#define PES_GAMEPLAN_BUTTON_CONNECTED (1u << 7)
+void pes_controller_custom_prematch_gameplan_pad_event(
+    uint32_t pad, uint32_t buttons, uint32_t previous_buttons,
+    float axis_x, float axis_y);
 uint32_t pes_controller_custom_prematch_gameplan_page(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_root_focus(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_field_count(uint32_t pad);
