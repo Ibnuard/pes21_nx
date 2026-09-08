@@ -84,12 +84,19 @@ typedef struct {
   size_t expected_size;
 } RuntimeFile;
 
+#define PATCH_OBB_PATH "patch.305030001.jp.nyan2021.pesam.obb"
+#define PATCH_OBB_PESDB_CANDIDATE_V4_SIZE 1391525888ULL
+#define PATCH_OBB_PESDB_CANDIDATE_V5_SIZE 1391521792ULL
+#define PATCH_OBB_PESDB_CANDIDATE_V6_KITS_SIZE 1391630336ULL
+#define PATCH_OBB_NATIVE_LICENSE_KITS_V2_SIZE 1393688576ULL
+#define PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE 1393788928ULL
+
 static const RuntimeFile required_runtime_files[] = {
   { AVS_SO_NAME, 491032 },
   { AFP_SO_NAME, 1401216 },
   { UE4_SO_NAME, 157571792 },
   { "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak", 459211124 },
-  { "patch.305030001.jp.nyan2021.pesam.obb", 1391120384 },
+  { PATCH_OBB_PATH, 1391120384 },
   { "Download/dt530_mobile_bra_all.cpk", 173204 },
   { "Download/dt530_mobile_can_all.cpk", 165480 },
   { "Download/dt530_mobile_eng_all.cpk", 198701 },
@@ -160,8 +167,16 @@ static void check_data(void) {
     const RuntimeFile *required = &required_runtime_files[i];
     struct stat st;
     const int stat_rc = stat(required->path, &st);
-    if (stat_rc == 0 && S_ISREG(st.st_mode) &&
-        (size_t)st.st_size == required->expected_size)
+    const size_t actual_size = stat_rc == 0 ? (size_t)st.st_size : 0;
+    const int size_matches =
+        actual_size == required->expected_size ||
+        (!strcmp(required->path, PATCH_OBB_PATH) &&
+         (actual_size == PATCH_OBB_PESDB_CANDIDATE_V4_SIZE ||
+          actual_size == PATCH_OBB_PESDB_CANDIDATE_V5_SIZE ||
+          actual_size == PATCH_OBB_PESDB_CANDIDATE_V6_KITS_SIZE ||
+          actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V2_SIZE ||
+          actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE));
+    if (stat_rc == 0 && S_ISREG(st.st_mode) && size_matches)
       continue;
 
     if (!first_bad)

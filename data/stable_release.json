@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "release": "native-license-v7-madrid-preserve-order",
+  "status": "stable-user-hardware-confirmed",
+  "verification": "User confirmed recovery v6 Barca kit, celebration and pause; then confirmed Madrid v7 stable.",
+  "dist": "dist/pes21_nx",
+  "source_artifacts": "local-debug/native-license-v7-madrid-preserve-order",
+  "files": {
+    "pes21_nx.nro": {
+      "mode": "production",
+      "bytes": 46715085,
+      "sha256": "af5887f8b3a24e5b0eae1685dc0b9e42af6d64c1db6a2830a13e3b4b0e6698e0"
+    },
+    "patch.305030001.jp.nyan2021.pesam.obb": {
+      "bytes": 1393788928,
+      "sha256": "206720b6c6378dad462d9aa5de2e2e9207992826f70158948175106282b92904"
+    }
+  },
+  "migration_guide": "KITS_LOGOS_STABLE_MIGRATION.md",
+  "full_ef10_face_transfer_complete": false
+}

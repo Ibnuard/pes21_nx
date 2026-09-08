@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "experiment": "barcelona_real_madrid_pc_to_pes21_mobile_kit",
+  "teams": [
+    {
+      "name": "FC Barcelona",
+      "team_id": 108,
+      "official_name": "FC Barcelona",
+      "short_code": "BAR",
+      "texture_prefix": "u0108",
+      "license_flag_before": 15,
+      "license_flag_after": 15,
+      "kits": [
+        {
+          "kind": "1st",
+          "suffix": "p1",
+          "descriptor": {
+            "size": 120,
+            "sha256": "d540d33c565338753f3cc0239aece7ffb6cf01dfbd2dd9ef98a1b83d515dad4f"
+          },
+          "body": {
+            "width": 2048,
+            "height": 2048,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "bb7a7d065a8c17ea1a602f66b0686e71080b96efbda5e4ebade2a14321260498"
+          },
+          "back": {
+            "width": 2048,
+            "height": 256,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "8db50ec8532d79db8209196da921bba282480f9080c9e9d52ad27031507eb2e7"
+          }
+        },
+        {
+          "kind": "2nd",
+          "suffix": "p2",
+          "descriptor": {
+            "size": 120,
+            "sha256": "808e8f528368f8e5113350ca2ac450d9b4f93a99cd30bd023b89e581d962e674"
+          },
+          "body": {
+            "width": 2048,
+            "height": 2048,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "76f1d7c1e12a0e3f540a7377cc8b6f8e801a054d0eeb37519577039dddd1665e"
+          },
+          "back": {
+            "width": 2048,
+            "height": 256,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "1a9660fc39d45a059fcde9b76a35610c7477a20ecf7b3677fa143da9ae80fa08"
+          }
+        },
+        {
+          "kind": "GK1st",
+          "suffix": "g1",
+          "descriptor": {
+            "size": 120,
+            "sha256": "5493d273edf433d035a8239e171c6e2c9184f7d6f4d336c5d11287acc6891566"
+          },
+          "body": {
+            "width": 2048,
+            "height": 2048,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "f9a536bf8ced498797272cf6da095fcd439f8941749d36c51d91f6da5b1a3117"
+          },
+          "back": {
+            "width": 2048,
+            "height": 256,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "9f273c4e559c10efddaab6e65e1a7e86781d70dbd4eda025d3255eb75bcab677"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Real Madrid CF",
+      "team_id": 109,
+      "official_name": "Real Madrid CF",
+      "short_code": "RMA",
+      "texture_prefix": "u0109",
+      "license_flag_before": 4,
+      "license_flag_after": 15,
+      "kits": [
+        {
+          "kind": "1st",
+          "suffix": "p1",
+          "descriptor": {
+            "size": 120,
+            "sha256": "672ebb3ad5cb384fa912fbdaa58c833ae942fcb9d6a02e0ed8994db70cce2b6f"
+          },
+          "body": {
+            "width": 2048,
+            "height": 2048,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "1ea746761606e669918292bcc4840a9171901b2010fcef1fa7816a8355db4ede"
+          },
+          "back": {
+            "width": 4096,
+            "height": 512,
+            "pixel_format": "DXT5",
+            "mip_count": 13,
+            "sha256": "b9bbe549372ea1f2a12bf541e1e98f92587ec78266a45594e7507c7542bc90f2"
+          }
+        },
+        {
+          "kind": "2nd",
+          "suffix": "p2",
+          "descriptor": {
+            "size": 120,
+            "sha256": "b0c71dffa90adc54d0244fed2f4b16e03b7ce05fe29a4081c9227823753c1ac3"
+          },
+          "body": {
+            "width": 2048,
+            "height": 2048,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "522de801039e3a1178ea49c19df224f0ad00c629439b6d748c78d3c74fb576e5"
+          },
+          "back": {
+            "width": 2048,
+            "height": 256,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "0114971be4810a7c50a20d56fb937731f211cb6655291db6cf5277add4e309db"
+          }
+        },
+        {
+          "kind": "GK1st",
+          "suffix": "g1",
+          "descriptor": {
+            "size": 120,
+            "sha256": "986fdee744762fadb4673735100ee669f370b36f634dd18fb246faf0f0723a99"
+          },
+          "body": {
+            "width": 2048,
+            "height": 2048,
+            "pixel_format": "DXT5",
+            "mip_count": 12,
+            "sha256": "dd305e0d8267db9a81bb17c4f4ebbcdfd77c57a46177db4d215267f8f73ebcc3"
+          },
+          "back": {
+            "width": 4096,
+            "height": 512,
+            "pixel_format": "DXT5",
+            "mip_count": 13,
+            "sha256": "8c3ab7a4578bc5a6d4e1bb84b2b0f003e677deb0220361c3786ca14d1f2acee3"
+          }
+        }
+      ]
+    }
+  ],
+  "policy": {
+    "runtime_integration": false,
+    "allow_anisotropic_resize": true,
+    "allow_unverified_atlas_transform": false,
+    "allow_cpk_member_addition": true,
+    "additive_repacker_scope": "detached_canary_only",
+    "converted_assets_are_runtime_ready": false,
+    "stable_dist_overwrite": false
+  },
+  "football_life": {
+    "root": "D:/Games/SP Football Life 2026",
+    "archive_precedence": [
+      { "key": "dt34", "path": "Data/dt34_g4.cpk", "precedence": 0 },
+      { "key": "season_a", "path": "download/data_s2526a.cpk", "precedence": 1 },
+      { "key": "season_b", "path": "download/data_s2526b.cpk", "precedence": 2 },
+      { "key": "season_c", "path": "download/data_s2526c.cpk", "precedence": 3 }
+    ],
+    "texture_root": "Asset/model/character/uniform/texture/#windx11/"
+  },
+  "licensing": {
+    "manifest": "data/eng_spa_license_overrides.json",
+    "team_source_policy": "extract_from_selected_dt200",
+    "team_record_size": 1532,
+    "team_id_offset": 8,
+    "license_flag_offset": 84
+  },
+  "pes21_mobile": {
+    "dt120_source": "local-debug/real-madrid-mobile-kit-canary/mobile-source/dt120_mobile_all.cpk",
+    "dt120_source_sha256": "e5c53b21dcfb4aa1db8cf4f01ec932ea8b3b250120728cb347c6902873286c31",
+    "dt200_source": "local-debug/pesdb-famous-teams-candidate-v5/base-dt200_mobile_all.cpk",
+    "dt200_source_sha256": "f7fce4ceb9e6092f0b66effe4664f0835c7a18b4f649a98dafe81fe42171c996",
+    "body_member_template": "Models/character/Uniform16/D/{prefix}{suffix}.png",
+    "back_member_template": "Models/character/Uniform16/Font/{prefix}{suffix}_back.png",
+    "descriptor_member_template": "common/etc/uniform/team/{team_id}/{team_id}_DEF_{kind}_realUni.bin",
+    "team_member": "common/etc/pesdb/Team.bin"
+  },
+  "atlas_transform": {
+    "status": "verified_same_part_layout",
+    "version": "uniform16-anisotropic-v1",
+    "source_size": [2048, 2048],
+    "target_size": [256, 384],
+    "scale_x": 0.125,
+    "scale_y": 0.1875,
+    "resampling": "bicubic",
+    "crop": null,
+    "part_reordering": false,
+    "body_output": { "mode": "P", "colors": 256, "dither": false },
+    "back_output": {
+      "target_size": [320, 40],
+      "mode": "RGBA",
+      "resampling": "bicubic"
+    },
+    "evidence": {
+      "paired_edit_masks": 158,
+      "pc_mask_size": [1024, 1024],
+      "mobile_mask_size": [256, 384],
+      "mean_alpha_mae_bicubic": 0.2947795240184929,
+      "mean_exact_alpha_ratio_bicubic": 0.9893100271748088
+    }
+  }
+}

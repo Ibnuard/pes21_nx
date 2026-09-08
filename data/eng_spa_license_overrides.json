@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "content_id": "7b20abd4880ef07f",
+  "scope": "england_spain_2025_26",
+  "generated_pack": "local-debug/eng-spa-license-pack",
+  "policy": {
+    "runtime_integration": false,
+    "patch_existing_team_rows_only": true,
+    "preserve_unrelated_team_bytes": true,
+    "selector_names_are_separate": true,
+    "sunderland_team_record_addition": "pending",
+    "kit_status": "source_ready_conversion_pending",
+    "direct_pc_ftex_transplant": false,
+    "requires_mobile_cooked_texture_template": true,
+    "cpk_repacker_can_add_members": false
+  },
+  "team_table": {
+    "schema": "pes21_mobile",
+    "record_size": 1532,
+    "team_id_offset": 8,
+    "english_name_offset": 368,
+    "english_name_size": 70,
+    "short_code_offsets": [
+      882,
+      1382
+    ],
+    "short_code_size": 4
+  },
+  "sources": {
+    "pes21_mobile_team": {
+      "path": "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/pesdb/Team.bin",
+      "sha256": "fb8af24390415fe59a476a9e935661f1a27ded18e2c19cc01c9b0bcbee980642"
+    },
+    "football_life_team": {
+      "path": "local-debug/licensing-eng-spa-audit/football-life-Team.bin",
+      "sha256": "2c577d3f4fe0cf064bcae757fd0dc3b7649ff26df7f7d44c8c9535bc808a5cec"
+    },
+    "football_life_competition_entry": {
+      "path": "local-debug/licensing-eng-spa-audit/football-life-CompetitionEntry.bin",
+      "sha256": "dfa5376e6d0bfa4d297db1ad2a2a8b9339ff5743325f0e1e91281703e27fc392"
+    },
+    "kit_cpks": [
+      {
+        "key": "dt34_base",
+        "path": "Data/dt34_g4.cpk",
+        "precedence": 0
+      },
+      {
+        "key": "season_a",
+        "path": "download/data_s2526a.cpk",
+        "precedence": 1
+      },
+      {
+        "key": "season_b",
+        "path": "download/data_s2526b.cpk",
+        "precedence": 2
+      },
+      {
+        "key": "season_c",
+        "path": "download/data_s2526c.cpk",
+        "precedence": 3
+      }
+    ],
+    "descriptor_member_template": "common/character0/model/character/uniform/team/{team_id}/{team_id}_DEF_{kind}_realUni.bin",
+    "texture_member_template": "Asset/model/character/uniform/texture/#windx11/{texture}.ftex",
+    "mobile_uniform_root": "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/uniform/team"
+  },
+  "leagues": [
+    {
+      "key": "english_premier_league",
+      "label": "ENGLISH PREMIER LEAGUE",
+      "football_life_competition_id": 9,
+      "catalog_category": "english_league",
+      "teams": [
+        {
+          "team_id": 101,
+          "order": 1,
+          "official_name": "Arsenal FC",
+          "short_code": "ARS",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 107,
+          "order": 2,
+          "official_name": "Aston Villa FC",
+          "short_code": "AVL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 4071,
+          "order": 3,
+          "official_name": "AFC Bournemouth",
+          "short_code": "BOU",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 4180,
+          "order": 4,
+          "official_name": "Brentford FC",
+          "short_code": "BRE",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 377,
+          "order": 5,
+          "official_name": "Brighton & Hove Albion",
+          "short_code": "BHA",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 378,
+          "order": 6,
+          "official_name": "Burnley FC",
+          "short_code": "BUR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 102,
+          "order": 7,
+          "official_name": "Chelsea FC",
+          "short_code": "CHE",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 382,
+          "order": 8,
+          "official_name": "Crystal Palace FC",
+          "short_code": "CRY",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 177,
+          "order": 9,
+          "official_name": "Everton FC",
+          "short_code": "EVE",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 178,
+          "order": 10,
+          "official_name": "Fulham FC",
+          "short_code": "FUL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 103,
+          "order": 11,
+          "official_name": "Liverpool FC",
+          "short_code": "LIV",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 104,
+          "order": 12,
+          "official_name": "Leeds United",
+          "short_code": "LEE",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 173,
+          "order": 13,
+          "official_name": "Manchester City",
+          "short_code": "MCI",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 100,
+          "order": 14,
+          "official_name": "Manchester United",
+          "short_code": "MUN",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 106,
+          "order": 15,
+          "official_name": "Newcastle United",
+          "short_code": "NEW",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 389,
+          "order": 16,
+          "official_name": "Nottingham Forest",
+          "short_code": "FOR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 396,
+          "order": 17,
+          "official_name": "Sunderland AFC",
+          "short_code": "SUN",
+          "catalog_integration": "pending",
+          "team_bin_policy": "pending_team_record"
+        },
+        {
+          "team_id": 179,
+          "order": 18,
+          "official_name": "Tottenham Hotspur",
+          "short_code": "TOT",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 105,
+          "order": 19,
+          "official_name": "West Ham United",
+          "short_code": "WHU",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 208,
+          "order": 20,
+          "official_name": "Wolverhampton Wanderers",
+          "short_code": "WOL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        }
+      ]
+    },
+    {
+      "key": "spanish_laliga",
+      "label": "LALIGA",
+      "football_life_competition_id": 11,
+      "catalog_category": "spanish_league",
+      "teams": [
+        {
+          "team_id": 4145,
+          "order": 1,
+          "official_name": "Deportivo Alaves",
+          "short_code": "ALV",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 258,
+          "order": 2,
+          "official_name": "Athletic Bilbao",
+          "short_code": "ATH",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 108,
+          "order": 3,
+          "official_name": "FC Barcelona",
+          "short_code": "BAR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 194,
+          "order": 4,
+          "official_name": "Real Betis",
+          "short_code": "BET",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 361,
+          "order": 5,
+          "official_name": "Elche CF",
+          "short_code": "ELC",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 259,
+          "order": 6,
+          "official_name": "RCD Espanyol",
+          "short_code": "ESP",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 362,
+          "order": 7,
+          "official_name": "Getafe CF",
+          "short_code": "GET",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 2187,
+          "order": 8,
+          "official_name": "Girona FC",
+          "short_code": "GIR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 366,
+          "order": 9,
+          "official_name": "Levante UD",
+          "short_code": "LEV",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 261,
+          "order": 10,
+          "official_name": "RCD Mallorca",
+          "short_code": "MLL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 172,
+          "order": 11,
+          "official_name": "Atletico Madrid",
+          "short_code": "ATM",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 109,
+          "order": 12,
+          "official_name": "Real Madrid CF",
+          "short_code": "RMA",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 263,
+          "order": 13,
+          "official_name": "CA Osasuna",
+          "short_code": "OSA",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 4260,
+          "order": 14,
+          "official_name": "Real Oviedo",
+          "short_code": "OVI",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 265,
+          "order": 15,
+          "official_name": "Sevilla FC",
+          "short_code": "SEV",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 196,
+          "order": 16,
+          "official_name": "Real Sociedad",
+          "short_code": "RSO",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 110,
+          "order": 17,
+          "official_name": "Valencia CF",
+          "short_code": "VAL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 370,
+          "order": 18,
+          "official_name": "Rayo Vallecano",
+          "short_code": "RAY",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 195,
+          "order": 19,
+          "official_name": "Celta de Vigo",
+          "short_code": "CEL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 267,
+          "order": 20,
+          "official_name": "Villarreal CF",
+          "short_code": "VIL",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        }
+      ]
+    }
+  ]
+}

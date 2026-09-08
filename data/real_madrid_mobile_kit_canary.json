@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "experiment": "real_madrid_pc_to_pes21_mobile_kit",
+  "team": {
+    "name": "Real Madrid",
+    "team_id": 109,
+    "source_texture_prefix": "u0109p1",
+    "mobile_texture_prefix": "u0109p1"
+  },
+  "policy": {
+    "runtime_integration": false,
+    "allow_anisotropic_resize": true,
+    "allow_unverified_atlas_transform": false,
+    "allow_cpk_member_addition": false,
+    "converted_assets_are_runtime_ready": false
+  },
+  "football_life": {
+    "root": "D:/Games/SP Football Life 2026",
+    "archive_precedence": [
+      {
+        "key": "dt34",
+        "path": "Data/dt34_g4.cpk",
+        "precedence": 0
+      },
+      {
+        "key": "season_a",
+        "path": "download/data_s2526a.cpk",
+        "precedence": 1
+      },
+      {
+        "key": "season_b",
+        "path": "download/data_s2526b.cpk",
+        "precedence": 2
+      },
+      {
+        "key": "season_c",
+        "path": "download/data_s2526c.cpk",
+        "precedence": 3
+      }
+    ],
+    "descriptor_member": "common/character0/model/character/uniform/team/109/109_DEF_1st_realUni.bin",
+    "texture_root": "Asset/model/character/uniform/texture/#windx11/",
+    "textures": {
+      "body": {
+        "member": "u0109p1.ftex",
+        "width": 2048,
+        "height": 2048,
+        "pixel_format": "DXT5",
+        "mip_count": 12,
+        "sha256": "1ea746761606e669918292bcc4840a9171901b2010fcef1fa7816a8355db4ede"
+      },
+      "back": {
+        "member": "u0109p1_back.ftex",
+        "width": 4096,
+        "height": 512,
+        "pixel_format": "DXT5",
+        "mip_count": 13,
+        "sha256": "b9bbe549372ea1f2a12bf541e1e98f92587ec78266a45594e7507c7542bc90f2"
+      },
+      "leg": {
+        "member": "u0109p1_leg.ftex",
+        "width": 2048,
+        "height": 256,
+        "pixel_format": "DXT5",
+        "mip_count": 12,
+        "sha256": "fb73faf38f986771ffbc13d8cbbe19fd6d723d249e7c684a9c3fcfbaf12c51f9"
+      },
+      "name": {
+        "member": "u0109p1_name.ftex",
+        "width": 2048,
+        "height": 512,
+        "pixel_format": "DXT5",
+        "mip_count": 12,
+        "sha256": "a2d069805431bd12f581861ebc46deeebf19c17105a1fe8b745865090e0748a9"
+      },
+      "material": {
+        "member": "u0109p1_srm.ftex",
+        "width": 2048,
+        "height": 2048,
+        "pixel_format": "DXT1",
+        "mip_count": 12,
+        "sha256": "20c97fa4522cbb95966dc4058c0d0c3c264d46c9d8be7e1cbb8505359a67c04e"
+      }
+    },
+    "descriptor": {
+      "size": 120,
+      "sha256": "672ebb3ad5cb384fa912fbdaa58c833ae942fcb9d6a02e0ed8994db70cce2b6f",
+      "texture_name_offsets": [40, 56, 88, 104],
+      "texture_name_size": 16
+    }
+  },
+  "pes21_mobile": {
+    "reference_team_id": 108,
+    "reference_texture_prefix": "u0108p1",
+    "body": {
+      "member": "Models/character/Uniform16/D/u0108p1.png",
+      "width": 256,
+      "height": 384,
+      "mode": "P"
+    },
+    "back": {
+      "member": "Models/character/Uniform16/Font/u0108p1_back.png",
+      "width": 320,
+      "height": 40,
+      "mode": "RGBA"
+    },
+    "target_members": [
+      "Models/character/Uniform16/D/u0109p1.png",
+      "Models/character/Uniform16/Font/u0109p1_back.png",
+      "common/etc/uniform/team/109/109_DEF_1st_realUni.bin"
+    ],
+    "generic_descriptor": {
+      "member": "common/etc/uniform/team/109/109_DEF_1st.bin",
+      "size": 96
+    },
+    "real_descriptor_template": {
+      "member": "common/etc/uniform/team/108/108_DEF_1st_realUni.bin",
+      "size": 120,
+      "texture_name_offsets": [40, 56, 88, 104],
+      "texture_name_size": 16
+    }
+  },
+  "atlas_transform": {
+    "status": "verified_same_part_layout",
+    "version": "uniform16-anisotropic-v1",
+    "source_size": [
+      2048,
+      2048
+    ],
+    "target_size": [
+      256,
+      384
+    ],
+    "scale_x": 0.125,
+    "scale_y": 0.1875,
+    "resampling": "bicubic",
+    "crop": null,
+    "part_reordering": false,
+    "body_output": {
+      "mode": "P",
+      "colors": 256,
+      "dither": false
+    },
+    "back_output": {
+      "target_size": [
+        320,
+        40
+      ],
+      "mode": "RGBA",
+      "resampling": "bicubic"
+    },
+    "evidence": {
+      "paired_edit_masks": 158,
+      "pc_mask_size": [
+        1024,
+        1024
+      ],
+      "mobile_mask_size": [
+        256,
+        384
+      ],
+      "mean_alpha_mae_bicubic": 0.2947795240184929,
+      "mean_exact_alpha_ratio_bicubic": 0.9893100271748088
+    }
+  }
+}
