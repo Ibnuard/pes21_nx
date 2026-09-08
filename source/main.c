@@ -85,18 +85,20 @@ typedef struct {
 } RuntimeFile;
 
 #define PATCH_OBB_PATH "patch.305030001.jp.nyan2021.pesam.obb"
+#define PATCH_OBB_ORIGINAL_SIZE 1391120384ULL
 #define PATCH_OBB_PESDB_CANDIDATE_V4_SIZE 1391525888ULL
 #define PATCH_OBB_PESDB_CANDIDATE_V5_SIZE 1391521792ULL
 #define PATCH_OBB_PESDB_CANDIDATE_V6_KITS_SIZE 1391630336ULL
 #define PATCH_OBB_NATIVE_LICENSE_KITS_V2_SIZE 1393688576ULL
 #define PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE 1393788928ULL
+#define PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE 1401395200ULL
 
 static const RuntimeFile required_runtime_files[] = {
   { AVS_SO_NAME, 491032 },
   { AFP_SO_NAME, 1401216 },
   { UE4_SO_NAME, 157571792 },
   { "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak", 459211124 },
-  { PATCH_OBB_PATH, 1391120384 },
+  { PATCH_OBB_PATH, PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE },
   { "Download/dt530_mobile_bra_all.cpk", 173204 },
   { "Download/dt530_mobile_can_all.cpk", 165480 },
   { "Download/dt530_mobile_eng_all.cpk", 198701 },
@@ -159,6 +161,8 @@ static const RuntimeFile required_runtime_files[] = {
 
 static void check_data(void) {
   const char *first_bad = NULL;
+  long long first_bad_actual = -1;
+  size_t first_bad_expected = 0;
   size_t bad_count = 0;
 
   for (size_t i = 0;
@@ -171,16 +175,21 @@ static void check_data(void) {
     const int size_matches =
         actual_size == required->expected_size ||
         (!strcmp(required->path, PATCH_OBB_PATH) &&
-         (actual_size == PATCH_OBB_PESDB_CANDIDATE_V4_SIZE ||
+         (actual_size == PATCH_OBB_ORIGINAL_SIZE ||
+          actual_size == PATCH_OBB_PESDB_CANDIDATE_V4_SIZE ||
           actual_size == PATCH_OBB_PESDB_CANDIDATE_V5_SIZE ||
           actual_size == PATCH_OBB_PESDB_CANDIDATE_V6_KITS_SIZE ||
           actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V2_SIZE ||
-          actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE));
+          actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE ||
+          actual_size == PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE));
     if (stat_rc == 0 && S_ISREG(st.st_mode) && size_matches)
       continue;
 
-    if (!first_bad)
+    if (!first_bad) {
       first_bad = required->path;
+      first_bad_actual = stat_rc == 0 ? (long long)st.st_size : -1LL;
+      first_bad_expected = required->expected_size;
+    }
     bad_count++;
     debugPrintf("runtime validation failed: %s expected=%zu actual=%lld\n",
                 required->path, required->expected_size,
@@ -189,8 +198,11 @@ static void check_data(void) {
 
   if (bad_count)
     fatal_error("Loose runtime data is incomplete.\nFirst bad file:\n%s\n"
+                "Actual bytes: %lld (-1 = missing)\n"
+                "Expected/current bytes: %zu\n"
+                "Build: ENG-SPA size-fix v1\n"
                 "Missing/corrupt files: %zu",
-                first_bad, bad_count);
+                first_bad, first_bad_actual, first_bad_expected, bad_count);
 
   debugPrintf("runtime validation: %zu loose files OK\n",
               sizeof(required_runtime_files) / sizeof(required_runtime_files[0]));
