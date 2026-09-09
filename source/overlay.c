@@ -3125,7 +3125,7 @@ static void overlay_render(void) {
       prematch_gameplan_muted_text_quads += line_quads;
       quads += line_quads;
       if (page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
-        snprintf(hint, sizeof(hint), "HOLD %s + STICK: MOVE   RELEASE: SAVE   %s: ROLE",
+        snprintf(hint, sizeof(hint), "HOLD %s + STICK: AUTO ROLE   RELEASE: SAVE   %s: ZONE ROLE",
                  select_key, role_key);
         line_quads = emit_efootball_line(
             hint, (int)strlen(hint), half_x[side] + 0.010f * (float)screen_width,

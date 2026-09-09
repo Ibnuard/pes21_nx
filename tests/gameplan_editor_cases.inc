@@ -29,6 +29,9 @@ static void setup(void) {
       mock_set_role(&mock_squads[side].formation[0], i, p->role[slot], 0);
     }
     mock_squads[side].formation[1] = mock_squads[side].formation[0];
+    s->default_formation[0] = mock_squads[side].formation[0];
+    s->default_formation[1] = mock_squads[side].formation[1];
+    s->default_formation_valid = 1;
     prematch_gameplan_refresh_side(side);
     previous[side] = PES_GAMEPLAN_BUTTON_CONNECTED;
     pes_controller_custom_prematch_gameplan_pad_event(side, previous[side], 0, 0, 0);
@@ -271,6 +274,50 @@ static void test_names(void) {
   assert(gameplan_name_focus_seconds(0, 1, "Messi") == 0.0);
   assert(gameplan_name_focus_seconds(0, 0, "Messi") == 0.0);
 }
+static void test_zones(void) {
+  // Every possible outfield role is normalized to the requested zone.
+  for (uint32_t role = 1; role < 13; role++) {
+    for (uint32_t cycle = 0; cycle < 2; cycle++) {
+      uint32_t r = prematch_gameplan_zone_role(role, 52, 42, cycle);
+      assert(r == 11 || r == 12);
+      r = prematch_gameplan_zone_role(role, 52, 26, cycle);
+      assert(r == 4 || r == 5 || r == 8);
+      assert(prematch_gameplan_zone_role(role, 52, 12, cycle) == 1);
+      r = prematch_gameplan_zone_role(role, 10, 12, cycle);
+      assert(r == 1 || r == 2);
+      r = prematch_gameplan_zone_role(role, 95, 42, cycle);
+      assert(r == 10 || r == 11 || r == 12);
+    }
+  }
+  assert(prematch_gameplan_zone_role(0, 52, 48, 1) == 0);
+  assert(prematch_gameplan_zone_role(8, 52, 35, 0) == 8);
+  assert(prematch_gameplan_zone_role(8, 52, 36, 0) == 11);
+  assert(prematch_gameplan_zone_role(11, 52, 36, 1) == 12);
+  assert(prematch_gameplan_zone_role(12, 52, 36, 1) == 11);
+  assert(prematch_gameplan_zone_role(8, 52, 17, 0) == 1);
+  assert(prematch_gameplan_zone_role(1, 52, 18, 0) == 4);
+  PrematchGameplanSide *s = &exhibition_gameplan_sides[0];
+  // Drag a central AMF over the forward boundary; verify after release/refresh.
+  s->field_focus = 5;
+  const uint8_t amf[2] = {35,52};
+  mock_set_position(&mock_squads[0].formation[0], 5, amf, 0);
+  mock_set_role(&mock_squads[0].formation[0], 5, 8, 0);
+  prematch_gameplan_refresh_side(0);
+  begin_drag(0);
+  for (int i=0; i<15; i++) { sample(0, PES_GAMEPLAN_BUTTON_A, 0, -1); tick(16); }
+  sample(0, 0, 0, 0); tick(16);
+  assert(s->players[5].role == 11 || s->players[5].role == 12);
+  assert(strncmp(s->formation_label, "CUSTOM ", 7) == 0);
+  TmpdbFormationValue opponent = mock_squads[1].formation[0];
+  TmpdbFormationValue defensive = mock_squads[0].formation[1];
+  s->formation_picker_open = 1;
+  s->formation_picker_focus = PREMATCH_FORMATION_PRESET_COUNT;
+  prematch_gameplan_process_formation(0, PES_PAUSE_INPUT_DECIDE);
+  assert(!s->formation_picker_open && !s->custom_shape[0]);
+  assert(memcmp(&mock_squads[0].formation[0], &s->default_formation[0], sizeof(TmpdbFormationValue)) == 0);
+  assert(memcmp(&mock_squads[0].formation[1], &defensive, sizeof(defensive)) == 0);
+  assert(memcmp(&mock_squads[1].formation[0], &opponent, sizeof(opponent)) == 0);
+}
 static void test_ratings(void) {
   assert(main_menu_2p_team_selector_grade_half_steps((70+68+65+1)/3) == 6);
   assert(main_menu_2p_team_selector_grade_half_steps((74+66+67+1)/3) == 6);
@@ -293,6 +340,7 @@ int main(int argc, char **argv) {
   else if (!strcmp(argv[1], "profiles")) test_profiles();
   else if (!strcmp(argv[1], "names")) test_names();
   else if (!strcmp(argv[1], "ratings")) test_ratings();
+  else if (!strcmp(argv[1], "zones")) test_zones();
   else return 1;
   return 0;
 }

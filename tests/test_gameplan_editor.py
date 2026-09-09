@@ -78,7 +78,8 @@ class GameplanEditorTests(unittest.TestCase):
                 "prematch_gameplan_build_formation_label", "prematch_gameplan_detect_preset")],
             (ROOT / "tests/gameplan_editor_stubs.inc").read_text(),
             *[function(hooks, name) for name in (
-                "prematch_gameplan_save_and_refresh", "prematch_gameplan_store_formation", "prematch_gameplan_cycle_role",
+                "prematch_gameplan_save_and_refresh", "prematch_gameplan_store_formation",
+                "prematch_gameplan_zone_role", "prematch_gameplan_reset_default", "prematch_gameplan_cycle_role",
                 "prematch_gameplan_apply_preset", "prematch_gameplan_drag_field",
                 "prematch_gameplan_finish_drag", "prematch_gameplan_swap_field",
                 "prematch_gameplan_move_field", "prematch_gameplan_process_substitute",
@@ -143,6 +144,9 @@ class GameplanEditorTests(unittest.TestCase):
 
     def test_club_stars_follow_visible_average_monotonically(self):
         self.run_case("ratings")
+
+    def test_zone_roles_and_reset_default(self):
+        self.run_case("zones")
 
 
 if __name__ == "__main__":
