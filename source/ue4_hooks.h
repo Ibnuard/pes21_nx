@@ -414,6 +414,8 @@ void pes_controller_2p_team_selector_pad_event(uint32_t pad,
 #define PES_2P_PREMATCH_HUB_PAGE_STADIUM 2u
 int pes_controller_2p_prematch_hub_active(void);
 int pes_controller_2p_transition_active(void);
+uint32_t pes_controller_pause_transition(void);
+int pes_controller_gameplan_bench_locked(uint32_t pad, uint32_t index);
 #define PES_2P_TRANSITION_NONE 0u
 #define PES_2P_TRANSITION_LOADING 1u
 #define PES_2P_TRANSITION_VS 2u

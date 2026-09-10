@@ -727,6 +727,8 @@ static uint32_t live_match_single_controller;
 static void *(*live_squad_player_get_player)(void *, uint32_t);
 static _Alignas(8) uint64_t pause_open_cover_tick;
 static _Alignas(8) uint64_t pause_editor_transition_tick;
+static _Alignas(8) uint64_t pause_resume_transition_tick;
+static uint64_t live_substitution_locked[2];
 static _Alignas(4) uint32_t live_gameplan_returning_to_pause;
 static const void *(*pause_stats_team)(const void *, uint32_t);
 static uint32_t (*pause_stats_data)(const void *, uint32_t, uint32_t);
@@ -784,6 +786,9 @@ static void (*live_gameplan_footer)(void *, uint32_t);
 static int (*live_squad_can_reserve)(void *, uint32_t, uint32_t);
 static int (*live_squad_reserve)(void *, uint32_t, uint32_t);
 static uint32_t (*live_squad_reserved_member)(const void *, uint32_t);
+// Audited ChangeReservedInfo: in, out, reason, alreadyChanged (four bytes).
+static const uint8_t *(*live_squad_reservation_info)(const void *, uint32_t);
+static void (*live_squad_cancel_reservation)(void *, uint32_t);
 #define EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES 2048u
 // Stock Strategy reconstructs HOME while entering its editor. Keep deep-copy
 // snapshots of both custom squads so that reconstruction cannot erase hub edits.
@@ -2324,6 +2329,8 @@ static void exhibition_publish_prepared_matchplan(void) {
 }
 
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
+  memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
+  __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&live_gameplan_returning_to_pause, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
   live_match_single_controller = !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE);
@@ -5818,6 +5825,55 @@ static void prematch_gameplan_detect_preset(PrematchGameplanSide *state) {
   }
 }
 
+static void live_gameplan_lock_substitutions(uint32_t side, int commit) {
+  if (side > 1 || !live_squad_reservation_info) return;
+  void *squad = exhibition_gameplan_sides[side].squad_data;
+  if (!squad) return;
+  for (uint32_t i = 0; i < 6; ++i) {
+    const uint8_t *info = live_squad_reservation_info(squad, i);
+    if (info && info[0] < PREMATCH_GAMEPLAN_MAX_PLAYERS &&
+        info[1] < PREMATCH_GAMEPLAN_MAX_PLAYERS && (commit || info[3]))
+      live_substitution_locked[side] |= 1ULL << info[1];
+  }
+}
+
+static int live_gameplan_change_substitution(uint32_t side, uint32_t field,
+                                            uint32_t bench) {
+  if (side > 1 || field >= PREMATCH_GAMEPLAN_MAX_PLAYERS ||
+      bench >= PREMATCH_GAMEPLAN_MAX_PLAYERS ||
+      (live_substitution_locked[side] & (1ULL << bench))) return 0;
+  void *squad = exhibition_gameplan_sides[side].squad_data;
+  if (!squad || !live_squad_can_reserve || !live_squad_reserve) return 0;
+  // The displayed starter may still be a native bench member. Cancel its
+  // pending pair before validating the replacement against native eligibility.
+  uint32_t slot = 6, original_out = field, previous_in = field;
+  if (live_squad_reservation_info && live_squad_cancel_reservation) {
+    for (uint32_t i = 0; i < 6; ++i) {
+      const uint8_t *info = live_squad_reservation_info(squad, i);
+      if (info && !info[3] && info[0] == field &&
+          info[1] < PREMATCH_GAMEPLAN_MAX_PLAYERS) {
+        if (live_substitution_locked[side] & (1ULL << info[1])) return 0;
+        slot = i; original_out = info[1]; previous_in = info[0];
+        break;
+      }
+    }
+  }
+  if (slot < 6) {
+    live_squad_cancel_reservation(squad, slot);
+    if (bench == original_out) return 1; // undo, including at the substitution limit
+  }
+  const int allowed = live_squad_can_reserve(squad, original_out, bench);
+  const int reserved = allowed && live_squad_reserve(squad, original_out, bench);
+  if (!reserved && slot < 6) {
+    // A rejected edit must leave the user's previous pending choice intact.
+    const int restored = live_squad_reserve(squad, original_out, previous_in);
+    debugPrintf("pause-v20: restore pending side=%u restored=%d\n", side, restored);
+  }
+  debugPrintf("pause-v20: pending side=%u field=%u out=%u in=%u accepted=%d\n",
+      side, field, original_out, bench, reserved);
+  return reserved;
+}
+
 static void live_gameplan_project_reservations(PrematchGameplanSide *state) {
   if (!state || !state->squad_data || !live_squad_reserved_member) return;
   uint64_t projected = 0;
@@ -6000,8 +6056,10 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
     for (uint32_t index = 0; index < state->player_count; index++)
       state->players[index].starting = index < state->field_count;
   }
-  if (live_gameplan_window || live_gameplan_open_requested)
+  if (live_gameplan_window || live_gameplan_open_requested) {
+    live_gameplan_lock_substitutions(side, 0);
     live_gameplan_project_reservations(state);
+  }
   prematch_gameplan_sort_players(state);
   // Preserve the native Attacking/Defensive coordinates whenever the team
   // supplies a usable formation. The old unconditional lane pass flattened
@@ -6396,10 +6454,7 @@ static void prematch_gameplan_swap(uint32_t side) {
     // CanReserved / SetMemberChangeReserved enforce the game's substitution rules.
     const uint32_t out = match_squad_data_get_member_id(state->squad_data, field->player_id);
     const uint32_t in = match_squad_data_get_member_id(state->squad_data, bench->player_id);
-    const int allowed = live_squad_can_reserve && live_squad_can_reserve(state->squad_data, out, in);
-    const int reserved = allowed && live_squad_reserve && live_squad_reserve(state->squad_data, out, in);
-    debugPrintf("pause-v19: substitution side=%u out=%u in=%u allowed=%d reserved=%d\n",
-        side, out, in, allowed, reserved);
+    const int reserved = live_gameplan_change_substitution(side, out, in);
     if (!reserved)
       return;
   } else {
@@ -6695,6 +6750,9 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
     if (state->waiting && (pes_controller_exhibition_single_controller_mode() ||
         exhibition_gameplan_sides[1u - side].waiting)) {
       void *window = live_gameplan_window;
+      live_gameplan_lock_substitutions(0, 1);
+      if (!pes_controller_exhibition_single_controller_mode())
+        live_gameplan_lock_substitutions(1, 1);
       exhibition_save_matchplan_sides(pes_controller_exhibition_single_controller_mode() ? 1u : 3u);
       // Publish the opaque Pause cover before taking down the editor. Native
       // Footer/WindowMobile animate for several frames before Pause is ready.
@@ -6792,6 +6850,8 @@ static void prematch_gameplan_process_substitute(uint32_t side,
         state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD
             ? state->field_focus
             : state->bench_focus;
+    if (state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_BENCH &&
+        pes_controller_gameplan_bench_locked(side, current)) return;
     if (!prematch_gameplan_nth_player(
             state, state->substitute_area == PES_PREMATCH_GAMEPLAN_AREA_FIELD,
             current))
@@ -7084,6 +7144,12 @@ const char *pes_controller_custom_prematch_gameplan_player_name(
   const PrematchGameplanPlayer *player =
       prematch_gameplan_public_player(pad, starting, index);
   return player ? player->name : "";
+}
+
+int pes_controller_gameplan_bench_locked(uint32_t pad, uint32_t index) {
+  const PrematchGameplanPlayer *p = prematch_gameplan_public_player(pad, 0, index);
+  return live_gameplan_window && p && p->member_id < PREMATCH_GAMEPLAN_MAX_PLAYERS &&
+      (live_substitution_locked[pad] & (1ULL << p->member_id)) != 0;
 }
 
 const char *pes_controller_custom_prematch_gameplan_player_role(
@@ -10748,6 +10814,16 @@ static uint32_t match_demo_skip_main_common(
   return result;
 }
 
+static void pause_resume_reveal(void) {
+  const uint64_t tick = __atomic_load_n(&pause_resume_transition_tick, __ATOMIC_ACQUIRE);
+  if (!tick || __atomic_load_n(&match_pause_skin_ready, __ATOMIC_ACQUIRE)) return;
+  const uint64_t now = armGetSystemTick();
+  const uint64_t seen = __atomic_load_n(&match_pause_seen_tick, __ATOMIC_ACQUIRE);
+  if (armTicksToNs(now - tick) >= 300000000ULL &&
+      (!seen || armTicksToNs(now - seen) >= 200000000ULL))
+    __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
+}
+
 static void kickoff_loading_reveal(void) {
   if (!__atomic_exchange_n(&kickoff_loading_armed, 0, __ATOMIC_ACQ_REL)) return;
   if (__atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE) !=
@@ -10775,7 +10851,10 @@ static uint32_t pes_match_demo_skip_main(void *unit, const void *input,
   const uint32_t result = match_demo_skip_main_common(
       unit, input, kind, match_demo_skip_main_original,
       &match_demo_skip_owner, &match_demo_skip_seen_tick);
-  if (unit && *((uint8_t *)unit + 24)) kickoff_loading_reveal();
+  if (unit && *((uint8_t *)unit + 24)) {
+    kickoff_loading_reveal();
+    pause_resume_reveal();
+  }
   return result;
 }
 
@@ -12293,11 +12372,12 @@ uint32_t pes_inplay_ball_position_broadcast(
 }
 
 int pes_controller_custom_pause_active(void) {
-  return __atomic_load_n(&match_pause_custom_active,
+  return !pes_controller_pause_transition() && __atomic_load_n(&match_pause_custom_active,
                          __ATOMIC_ACQUIRE) != 0;
 }
 
 int pes_controller_pause_skin_active(void) {
+  if (pes_controller_pause_transition()) return 1;
   const uint64_t transition = __atomic_load_n(&pause_editor_transition_tick, __ATOMIC_ACQUIRE);
   if (transition && armTicksToNs(armGetSystemTick() - transition) < 5000000000ULL &&
       !__atomic_load_n(&exhibition_gameplan_custom_active, __ATOMIC_ACQUIRE)) return 1;
@@ -12309,6 +12389,17 @@ int pes_controller_pause_skin_active(void) {
       armTicksToNs(armGetSystemTick() - seen) < 250000000ULL &&
       pes_controller_virtual_cursor_context() == PES_VIRTUAL_CURSOR_PAUSE &&
       !pes_controller_pause_camera_active();
+}
+
+uint32_t pes_controller_pause_transition(void) {
+  const uint64_t now = armGetSystemTick();
+  const uint64_t resume = __atomic_load_n(&pause_resume_transition_tick, __ATOMIC_ACQUIRE);
+  if (resume && armTicksToNs(now - resume) < 5000000000ULL) return 3;
+  const uint64_t editor = __atomic_load_n(&pause_editor_transition_tick, __ATOMIC_ACQUIRE);
+  if (editor && armTicksToNs(now - editor) < 15000000000ULL &&
+      !__atomic_load_n(&exhibition_gameplan_custom_active, __ATOMIC_ACQUIRE))
+    return __atomic_load_n(&live_gameplan_returning_to_pause, __ATOMIC_ACQUIRE) ? 2 : 1;
+  return 0;
 }
 
 uint32_t pes_controller_pause_skin_focus(void) {
@@ -12652,6 +12743,7 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
         focus = (focus + 1u) % 3u;
       __atomic_store_n(&match_pause_custom_focus, focus, __ATOMIC_RELEASE);
       if (action == PES_PAUSE_INPUT_BACK && match_pause_pad_event_back) {
+        __atomic_store_n(&pause_resume_transition_tick, armGetSystemTick(), __ATOMIC_RELEASE);
         __atomic_store_n(&pause_open_cover_tick, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
         match_pause_pad_event_back(window);
@@ -12689,8 +12781,10 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
     }
     if (__atomic_exchange_n(&match_pause_back_requested, 0,
                             __ATOMIC_ACQ_REL) &&
-        match_pause_pad_event_back)
+        match_pause_pad_event_back) {
+      __atomic_store_n(&pause_resume_transition_tick, armGetSystemTick(), __ATOMIC_RELEASE);
       match_pause_pad_event_back(window);
+    }
   }
   return match_pause_update_resume;
 }
@@ -12835,8 +12929,10 @@ uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
     mode = PES_MOBILE_CONTROL_OFFENSE;
   __atomic_store_n(&mobile_control_mode, (uint32_t)mode, __ATOMIC_RELEASE);
   // Fallback for matches configured without an entrance cinematic.
-  if (mode == PES_MOBILE_CONTROL_OFFENSE || mode == PES_MOBILE_CONTROL_DEFENSE)
+  if (mode == PES_MOBILE_CONTROL_OFFENSE || mode == PES_MOBILE_CONTROL_DEFENSE) {
     kickoff_loading_reveal();
+    pause_resume_reveal();
+  }
   __atomic_store_n(&mobile_control_seen_tick, now, __ATOMIC_RELEASE);
   // MatchSetup owns normal rule commits. Reassert only when ScreenTap resumes
   // after a lifecycle gap (half/extra-time, suspend or menu hand-off). Calling
@@ -14986,6 +15082,10 @@ void install_ue4_hooks(so_module *module) {
       "_ZN5tmpdb9SquadData23SetMemberChangeReservedE8MemberIdS1_");
   live_squad_reserved_member = (void *)so_find_addr_rx(module,
       "_ZNK5tmpdb9SquadData19GetReservedMemberIdE8MemberId");
+  live_squad_reservation_info = (void *)so_find_addr_rx(module,
+      "_ZNK5tmpdb9SquadData21GetChangeReservedInfoEh");
+  live_squad_cancel_reservation = (void *)so_find_addr_rx(module,
+      "_ZN5tmpdb9SquadData22SetChangeReserveCancelEj");
   live_gameplan_footer = (void *)so_find_addr_rx(module,
       "_ZN4menu15MyClubSquadEdit19PadEventFooterTouchEN10menusystem17MOBILE_FOOTER_KEYE");
   match_squad_data_is_starting =

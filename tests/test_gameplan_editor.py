@@ -71,6 +71,7 @@ class GameplanEditorTests(unittest.TestCase):
             "static int pes_controller_exhibition_single_controller_mode(void) { return 0; }\n"
             "static void prematch_gameplan_load_portraits(uint32_t s) { (void)s; }\n"
             "static void live_gameplan_poll_portraits(void) {}\n"
+            "static int pes_controller_gameplan_bench_locked(uint32_t side, uint32_t index) {return 0;}\n"
             "#define debugPrintf(...) ((void)0)",
             *[function(hooks, name) for name in (
                 "main_menu_2p_team_selector_grade_half_steps",

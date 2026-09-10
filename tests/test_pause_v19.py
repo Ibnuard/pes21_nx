@@ -192,6 +192,9 @@ int main(void) {
 static PrematchGameplanSide exhibition_gameplan_sides[2], authoritative;
 static void *live_gameplan_window=(void*)1;
 static unsigned allowed=1,reserves,saves,replacements,pending;
+static uint64_t live_substitution_locked[2];
+static const uint8_t *(*live_squad_reservation_info)(const void *, uint32_t);
+static void (*live_squad_cancel_reservation)(void *, uint32_t);
 static uint32_t match_squad_data_get_order_no(void *s,const void *key) {return *(const unsigned char*)key==8 ? 8 : 14;}
 static uint32_t match_squad_data_get_member_id(void *s,const void *key) {return *(const unsigned char*)key;}
 static void match_swap_member_info_construct(void *p,uint32_t o,uint32_t m,const void *k) {}
@@ -212,6 +215,7 @@ static void prematch_gameplan_save_and_refresh(uint32_t side) {
  live_gameplan_project_reservations(&exhibition_gameplan_sides[side]);
 }
 '''
+        code += function(hooks, 'live_gameplan_change_substitution')
         code += function(hooks, 'prematch_gameplan_swap')
         code += r'''
 int main(void) {

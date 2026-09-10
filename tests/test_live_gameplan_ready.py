@@ -36,6 +36,7 @@ static uint64_t pause_editor_transition_tick;
 static uint32_t live_gameplan_returning_to_pause;
 static uint64_t armGetSystemTick(void) { return 12345; }
 static void live_gameplan_cancel_portraits(void) {}
+static void live_gameplan_lock_substitutions(uint32_t side, int commit) {}
 static int pes_controller_exhibition_single_controller_mode(void) {return single_player;}
 static void exhibition_save_matchplan_sides(uint32_t mask) {saved = mask;}
 static void exhibition_publish_prepared_matchplan(void) {published++;}

@@ -1508,6 +1508,7 @@ static void overlay_render(void) {
   const int custom_gameplan_exhibition =
       custom_gameplan && pes_controller_exhibition_single_controller_mode();
   const int pause_skin = pes_controller_pause_skin_active();
+  const uint32_t pause_transition = pes_controller_pause_transition();
   const int custom_info_popup = pes_controller_custom_info_popup_active() && !pause_skin;
   // Match Settings is a modal child of the hub.  Let the existing settings
   // renderer own the foreground while retaining the hub as its visual host.
@@ -1727,6 +1728,9 @@ static void overlay_render(void) {
   int pause_stats_panel = 0, pause_stats_text = 0, pause_stats_quads = 0;
   int pause_background = 0, pause_badges = 0, pause_header = 0, pause_header_count = 0;
   int pause_skin_focus = -1;
+  int pause_transition_text = 0, pause_transition_text_count = 0;
+  int pause_transition_spinner = 0, pause_transition_spinner_count = 0;
+  int gameplan_locked_rows = 0, gameplan_locked_row_count = 0;
   RoundedRectStyle pause_skin_style = {0};
   int gameplan_cursor_quads = 0;
   enum {
@@ -6044,8 +6048,8 @@ static void overlay_render(void) {
       quads += emit_round_rect_quad(x, y, w, h, verts + quads * 24);
     }
     pause_stats_panel = quads;
-    quads += emit_round_rect_quad(0.025f * screen_width, 0.265f * screen_height,
-        0.95f * screen_width, 0.465f * screen_height, verts + quads * 24);
+    quads += emit_round_rect_quad(0.18f * screen_width, 0.265f * screen_height,
+        0.64f * screen_width, 0.465f * screen_height, verts + quads * 24);
     pause_skin_text = quads;
     for (int i = 0; i < 3; ++i) {
       const float x = (0.025f + i * 0.3225f) * screen_width;
@@ -6077,7 +6081,7 @@ static void overlay_render(void) {
           snprintf(number, sizeof(number), row == 0 ? "%u%%" : "%u", value);
         else snprintf(number, sizeof(number), "--");
         n = emit_efootball_line(number, (int)strlen(number),
-            (side ? 0.78f : 0.22f) * screen_width -
+            (side ? 0.74f : 0.26f) * screen_width -
             measure_efootball_line(number, (int)strlen(number), gh, EFOOTBALL_FONT_BOLD) * 0.5f,
             y, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
         quads += n; pause_stats_quads += n;
@@ -6090,6 +6094,40 @@ static void overlay_render(void) {
             EFOOTBALL_FONT_BOLD)) * 0.5f, 0.93f * screen_height, helper_h,
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += n; pause_stats_quads += n;
+  }
+  if (custom_gameplan) {
+    gameplan_locked_rows = quads;
+    for (uint32_t side = 0; side < 2; ++side) {
+      for (uint32_t slot = 0; slot < prematch_gameplan_bench_visible[side]; ++slot) {
+        if (!pes_controller_gameplan_bench_locked(side, prematch_gameplan_bench_start[side] + slot)) continue;
+        const float *r = prematch_gameplan_bench_rect[side][slot];
+        const int n = emit_rect(r[0], r[1], r[2], r[3], verts + quads * 24);
+        quads += n; gameplan_locked_row_count += n;
+      }
+    }
+  }
+  if (pause_skin && pause_transition) {
+    const char *message = pause_transition == 1 ? "OPENING GAME PLAN" :
+                          pause_transition == 2 ? "RETURNING TO PAUSE" : "RESUMING MATCH";
+    const float gh = screen_height / 28.0f;
+    pause_transition_text = quads;
+    pause_transition_text_count = emit_efootball_centered_fit_line(message, (int)strlen(message),
+        screen_width * 0.5f, screen_height * 0.52f, screen_width * 0.7f,
+        gh, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += pause_transition_text_count;
+    const uint64_t freq = armGetSystemTickFreq();
+    const float phase = freq ? (float)(armGetSystemTick() % freq) / freq * 6.2831853f : 0;
+    const float radius = screen_height * 0.025f;
+    pause_transition_spinner = quads;
+    for (uint32_t i = 0; i < 8; ++i) {
+      const float a = phase + i * 0.43f;
+      const int n = emit_segment(screen_width * 0.5f + cosf(a) * radius,
+          screen_height * 0.44f + sinf(a) * radius,
+          screen_width * 0.5f + cosf(a + 0.25f) * radius,
+          screen_height * 0.44f + sinf(a + 0.25f) * radius,
+          screen_height * 0.004f, verts + quads * 24);
+      quads += n; pause_transition_spinner_count += n;
+    }
   }
   if (!quads)
     return;
@@ -6856,7 +6894,7 @@ static void overlay_render(void) {
       glDrawArrays(GL_TRIANGLES, pause_skin_cards[i] * 6, 6);
     }
     use_rounded_rect(NULL);
-    const RoundedRectStyle stats_style = {0.95f * screen_width, 0.465f * screen_height,
+    const RoundedRectStyle stats_style = {0.64f * screen_width, 0.465f * screen_height,
                                           0.024f * screen_height};
     use_rounded_rect(&stats_style);
     glUniform4f(gl.loc_color, 0.02f, 0.06f, 0.10f, 0.76f);
@@ -6870,7 +6908,30 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, pause_stats_text * 6, pause_stats_quads * 6);
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
-  if (gameplan_cursor_quads) {
+  if (gameplan_locked_row_count) {
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform4f(gl.loc_color, 0.43f, 0.46f, 0.51f, 0.68f);
+    glDrawArrays(GL_TRIANGLES, gameplan_locked_rows * 6, gameplan_locked_row_count * 6);
+    glUniform1f(gl.loc_solid, 0.0f);
+  }
+  if (pause_skin && pause_transition) {
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform4f(gl.loc_color, 1, 1, 1, 1);
+    glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+    glDrawArrays(GL_TRIANGLES, pause_background * 6, 6);
+    glUniform1f(gl.loc_image, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glDrawArrays(GL_TRIANGLES, pause_transition_text * 6, pause_transition_text_count * 6);
+    glUniform1f(gl.loc_solid, 1.0f);
+    glDrawArrays(GL_TRIANGLES, pause_transition_spinner * 6, pause_transition_spinner_count * 6);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+  }
+  if (gameplan_cursor_quads && !pause_transition) {
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform1f(gl.loc_circle, 0.0f);
     glUniform1f(gl.loc_round_rect, 0.0f);
