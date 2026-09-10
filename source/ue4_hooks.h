@@ -242,6 +242,8 @@ void pes_controller_set_piece_selector_move(int direction);
 void pes_controller_set_piece_selector_input(uint32_t action);
 void pes_controller_pause_back_request(void);
 int pes_controller_custom_pause_active(void);
+int pes_controller_pause_skin_active(void);
+uint32_t pes_controller_pause_skin_focus(void);
 void pes_controller_custom_pause_input(uint32_t action);
 int pes_controller_pause_camera_active(void);
 void pes_controller_pause_camera_input(uint32_t action);
@@ -260,6 +262,8 @@ void pes_controller_custom_postmatch_input(uint32_t action);
 #define PES_PREMATCH_FORMATION_ROW_COUNT 4u
 uint32_t pes_controller_custom_prematch_gameplan_formation_picker_active(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_formation_row_count(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_formation_scroll(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_formation_option_active(uint32_t pad, uint32_t row);
 #define PES_PREMATCH_GAMEPLAN_POSITION_COUNT 9u
 #define PES_PREMATCH_GAMEPLAN_AREA_FIELD 0u
 #define PES_PREMATCH_GAMEPLAN_AREA_BENCH 1u
@@ -478,6 +482,9 @@ uint32_t pes_controller_custom_video_settings_focus(void);
 const char *pes_controller_custom_video_settings_label(uint32_t index);
 const char *pes_controller_custom_video_settings_value(uint32_t index);
 int pes_controller_custom_info_popup_active(void);
+int pes_controller_pause_stat(uint32_t side, uint32_t row, uint32_t *value);
+int pes_controller_pause_score(uint32_t side, uint32_t *value);
+int pes_controller_live_gameplan_active(void);
 const char *pes_controller_custom_info_popup_title(void);
 uint32_t pes_controller_custom_info_popup_line_count(void);
 const char *pes_controller_custom_info_popup_line(uint32_t index);

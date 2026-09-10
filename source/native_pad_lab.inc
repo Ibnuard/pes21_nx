@@ -109,6 +109,7 @@ static uint32_t native_lab_gauge_active_mask;
 // native_lab_active_action is intentionally zero. Without this mask the input
 // poll cleared a newly pressed gauge before its next charge sample arrived.
 static uint32_t native_lab_gauge_charging_mask;
+static uint32_t native_lab_gauge_missing_hold_frames[2];
 static uint32_t native_lab_gauge_power_milli_p2;
 static uint32_t native_lab_gauge_power_milli_by_pad[2];
 static uint32_t native_lab_gauge_linger_frames_by_pad[2];
@@ -367,6 +368,7 @@ static void native_pad_lab_reset(void) {
   __atomic_store_n(&native_lab_gauge_linger_frames, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_gauge_active_mask, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_gauge_charging_mask, 0, __ATOMIC_RELEASE);
+  memset(native_lab_gauge_missing_hold_frames, 0, sizeof(native_lab_gauge_missing_hold_frames));
   __atomic_store_n(&native_lab_gauge_power_milli_p2, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_gauge_power_milli_by_pad[0], 0,
                    __ATOMIC_RELEASE);
@@ -466,6 +468,7 @@ static void native_pad_lab_reset(void) {
 static void native_lab_gauge_clear_pad(uint32_t pad) {
   if (pad > 1)
     return;
+  __atomic_store_n(&native_lab_gauge_missing_hold_frames[pad], 0, __ATOMIC_RELEASE);
   // BallInfo/action completion (or the cancellation safety timeout) releases
   // the trajectory snapshot along with the pad-owned gauge state.
   native_lab_clear_trajectory_cache(pad);
@@ -633,6 +636,18 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
   const uint32_t previous_buttons = __atomic_exchange_n(
       &native_lab_previous_buttons[port], connected ? buttons : 0,
       __ATOMIC_ACQ_REL);
+  // A tackle can destroy the native charge unit without its Release callback.
+  // Do not let that orphaned charging flag bypass the expiry path forever.
+  // Four polls tolerate the input/game-thread handoff on a normal release.
+  if (__atomic_load_n(&native_lab_gauge_charging_mask, __ATOMIC_ACQUIRE) &
+      (1u << port)) {
+    if (connected && (buttons & 15u)) {
+      __atomic_store_n(&native_lab_gauge_missing_hold_frames[port], 0, __ATOMIC_RELEASE);
+    } else if (__atomic_add_fetch(&native_lab_gauge_missing_hold_frames[port],
+                                  1u, __ATOMIC_ACQ_REL) >= 4u) {
+      native_lab_gauge_clear_pad(port);
+    }
+  }
   uint32_t anchor_ttl = __atomic_load_n(
       &native_lab_gauge_anchor_ttl[port], __ATOMIC_ACQUIRE);
   if (anchor_ttl)
@@ -1482,6 +1497,14 @@ static void native_lab_list_update(void *list, const void *input,
   const void *cursor = *(void *const *)((const char *)input + 0x08);
   int32_t route_pad = 0;
   memcpy(&route_pad, (const char *)cursor + 16, sizeof(route_pad));
+  if (route_pad == 0 || route_pad == 1) {
+    uint32_t player_no;
+    memcpy(&player_no, (const char *)input + 0x24, sizeof(player_no));
+    const uint32_t gauge_player = __atomic_load_n(
+        &native_lab_gauge_player_no_by_pad[route_pad], __ATOMIC_ACQUIRE);
+    if (gauge_player <= 21u && player_no <= 21u && gauge_player != player_no)
+      native_lab_gauge_clear_pad((uint32_t)route_pad);
+  }
   if (route_pad == 0 || route_pad == 1)
     __atomic_fetch_or(&native_lab_debug_route_player_mask, 1u << route_pad,
                       __ATOMIC_RELAXED);

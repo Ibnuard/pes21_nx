@@ -70,6 +70,7 @@ class GameplanEditorTests(unittest.TestCase):
             "static int pes_controller_custom_prematch_gameplan_active(void) { return 1; }\n"
             "static int pes_controller_exhibition_single_controller_mode(void) { return 0; }\n"
             "static void prematch_gameplan_load_portraits(uint32_t s) { (void)s; }\n"
+            "static void live_gameplan_poll_portraits(void) {}\n"
             "#define debugPrintf(...) ((void)0)",
             *[function(hooks, name) for name in (
                 "main_menu_2p_team_selector_grade_half_steps",
@@ -85,6 +86,10 @@ class GameplanEditorTests(unittest.TestCase):
                 "prematch_gameplan_move_field", "prematch_gameplan_process_substitute",
                 "prematch_gameplan_process_formation", "exhibition_gameplan_process_pending",
                 "pes_controller_custom_prematch_gameplan_input",
+                "pes_controller_custom_prematch_gameplan_formation_picker_active",
+                "pes_controller_custom_prematch_gameplan_formation_row_count",
+                "pes_controller_custom_prematch_gameplan_formation_scroll",
+                "pes_controller_custom_prematch_gameplan_formation_option_active",
                 "pes_controller_custom_prematch_gameplan_pad_event")],
             "typedef uint64_t u64;\n"
             "typedef struct { int32_t x, y; } HidAnalogStickState;\n"
@@ -101,6 +106,9 @@ class GameplanEditorTests(unittest.TestCase):
             *[function(overlay, name) for name in (
                 "measure_efootball_line", "emit_efootball_line",
                 "emit_efootball_name_line", "gameplan_name_focus_seconds")],
+            "static uint32_t kickoff_loading_armed, main_menu_2p_transition_kind, main_menu_2p_transition_active;\n"
+            "enum { MAIN_MENU_2P_TRANSITION_NONE=0, MAIN_MENU_2P_TRANSITION_VS=2 };",
+            function(hooks, "kickoff_loading_reveal"),
             (ROOT / "tests/gameplan_editor_cases.inc").read_text(),
         ])
         cfile = Path(cls.temp.name) / "gameplan-test.c"
@@ -147,6 +155,12 @@ class GameplanEditorTests(unittest.TestCase):
 
     def test_zone_roles_and_reset_default(self):
         self.run_case("zones")
+
+    def test_compact_formation_scroll_and_active_selection(self):
+        self.run_case("popup")
+
+    def test_loading_reveal_is_one_shot_and_preserves_other_transitions(self):
+        self.run_case("loading")
 
 
 if __name__ == "__main__":

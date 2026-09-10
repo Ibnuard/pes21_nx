@@ -508,5 +508,19 @@ int main(void) {
                                          10.0f, 0.0f, 20.0f);
   assert(!(native_lab_gauge_active_mask & 1u));
   puts("native-pad routing: pass (scope, types, actions, history, reset, bounds)");
+  // Cancelled charge: native Release is never called after losing the ball.
+  native_pad_lab_reset();
+  native_lab_gauge_active_mask = 3u;
+  native_lab_gauge_charging_mask = 3u;
+  for (int i = 0; i < 3; i++) {
+    pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+    assert(native_lab_gauge_active_mask & 1u);
+  }
+  pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
+  assert(!(native_lab_gauge_active_mask & 1u));
+  assert(native_lab_gauge_active_mask & 2u);
+  for (int i = 0; i < 10; i++)
+    pes_controller_native_pad_lab_debug_input(1, 1u, 0, 0, 0, 0, 1);
+  assert(native_lab_gauge_active_mask & 2u);
   return 0;
 }

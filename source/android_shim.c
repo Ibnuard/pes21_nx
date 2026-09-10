@@ -2510,7 +2510,9 @@ void android_input_poll(void) {
             &desired, axis_x, axis_y, have_left_stick, buttons,
             gameplay_active, control_mode, &controller_snapshot, now_ms);
       }
-      if (gameplan_cursor_active) {
+      if (!custom_prematch_gameplan_active && (gameplan_cursor_active ||
+          (cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
+           pes_controller_custom_pause_active()))) {
         if (cursor_context == PES_VIRTUAL_CURSOR_PAUSE &&
             pes_controller_custom_pause_active()) {
           const u64 pause_menu_buttons =
@@ -2518,7 +2520,18 @@ void android_input_poll(void) {
           const u64 pause_menu_previous =
               pause_cursor_p2 ? previous_menu_buttons_p2
                               : previous_menu_buttons;
-          const u64 pressed = pause_menu_buttons & ~pause_menu_previous;
+          u64 pressed = pause_menu_buttons & ~pause_menu_previous;
+          static int pause_stick_direction;
+          static uint64_t pause_stick_repeat_ms;
+          const int direction = fabsf(cursor_axis_x) > fabsf(cursor_axis_y)
+              ? (cursor_axis_x > 0.55f ? 4 : cursor_axis_x < -0.55f ? 3 : 0)
+              : (cursor_axis_y > 0.55f ? 1 : cursor_axis_y < -0.55f ? 2 : 0);
+          if (direction && (direction != pause_stick_direction || now_ms >= pause_stick_repeat_ms)) {
+            pressed |= direction == 1 ? HidNpadButton_Up : direction == 2 ? HidNpadButton_Down :
+                       direction == 3 ? HidNpadButton_Left : HidNpadButton_Right;
+            pause_stick_repeat_ms = now_ms + (direction != pause_stick_direction ? 350 : 150);
+          }
+          pause_stick_direction = direction;
           if (pressed & HidNpadButton_Up)
             pes_controller_custom_pause_input(PES_PAUSE_INPUT_UP);
           else if (pressed & HidNpadButton_Down)

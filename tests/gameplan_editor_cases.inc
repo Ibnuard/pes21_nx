@@ -329,6 +329,45 @@ static void test_ratings(void) {
     assert(grade >= 2 && grade <= 10);
   }
 }
+static void test_popup(void) {
+  for (uint32_t side = 0; side < 2; side++) {
+    PrematchGameplanSide *s = &exhibition_gameplan_sides[side];
+    s->formation_picker_open = 0;
+    assert(pes_controller_custom_prematch_gameplan_formation_scroll(side) == 0);
+    assert(pes_controller_custom_prematch_gameplan_formation_row_count(side) == 4);
+    s->formation_picker_open = 1;
+    s->formation_preset = 3; s->tactics = 0; s->custom_shape[0] = 0;
+    for (uint32_t focus = 0; focus <= PREMATCH_FORMATION_PRESET_COUNT; focus++) {
+      s->formation_picker_focus = focus;
+      uint32_t start = pes_controller_custom_prematch_gameplan_formation_scroll(side);
+      assert(pes_controller_custom_prematch_gameplan_formation_row_count(side) == 5);
+      assert(start <= focus && focus < start + 5);
+      assert(start + 5 <= PREMATCH_FORMATION_PRESET_COUNT + 1);
+      assert(pes_controller_custom_prematch_gameplan_formation_option_active(side, 3));
+      assert(!pes_controller_custom_prematch_gameplan_formation_option_active(side, 10));
+    }
+    assert(pes_controller_custom_prematch_gameplan_formation_scroll(side) == 6);
+    s->custom_shape[0] = 1;
+    assert(!pes_controller_custom_prematch_gameplan_formation_option_active(side, 3));
+  }
+  assert(!pes_controller_custom_prematch_gameplan_formation_option_active(2, 3));
+}
+static void test_loading(void) {
+  main_menu_2p_transition_kind = 2; main_menu_2p_transition_active = 1;
+  kickoff_loading_armed = 0;
+  kickoff_loading_reveal();
+  assert(main_menu_2p_transition_active == 1);
+  kickoff_loading_armed = 1;
+  kickoff_loading_reveal();
+  assert(!main_menu_2p_transition_active && !main_menu_2p_transition_kind && !kickoff_loading_armed);
+  main_menu_2p_transition_kind = 1; main_menu_2p_transition_active = 1;
+  kickoff_loading_reveal();
+  assert(main_menu_2p_transition_active == 1);
+  kickoff_loading_armed = 1;
+  kickoff_loading_reveal();
+  assert(main_menu_2p_transition_active == 1 && main_menu_2p_transition_kind == 1);
+  assert(!kickoff_loading_armed);
+}
 int main(int argc, char **argv) {
   assert(argc == 2); setup();
   if (!strcmp(argv[1], "tap")) test_tap();
@@ -341,6 +380,8 @@ int main(int argc, char **argv) {
   else if (!strcmp(argv[1], "names")) test_names();
   else if (!strcmp(argv[1], "ratings")) test_ratings();
   else if (!strcmp(argv[1], "zones")) test_zones();
+  else if (!strcmp(argv[1], "popup")) test_popup();
+  else if (!strcmp(argv[1], "loading")) test_loading();
   else return 1;
   return 0;
 }

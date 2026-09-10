@@ -1507,7 +1507,8 @@ static void overlay_render(void) {
       pes_controller_custom_prematch_gameplan_active();
   const int custom_gameplan_exhibition =
       custom_gameplan && pes_controller_exhibition_single_controller_mode();
-  const int custom_info_popup = pes_controller_custom_info_popup_active();
+  const int pause_skin = pes_controller_pause_skin_active();
+  const int custom_info_popup = pes_controller_custom_info_popup_active() && !pause_skin;
   // Match Settings is a modal child of the hub.  Let the existing settings
   // renderer own the foreground while retaining the hub as its visual host.
   const int custom_2p_prematch_hub =
@@ -1598,12 +1599,13 @@ static void overlay_render(void) {
   const int gameplan_cursor =
       !custom_2p_transition && !set_piece_selector && !tutorial_play_active &&
       pes_controller_gameplan_cursor_position(&gameplan_cursor_x,
-                                              &gameplan_cursor_y);
+                                              &gameplan_cursor_y) &&
+      !pause_skin && !pes_controller_custom_prematch_gameplan_active();
 
   const int modal_match_frontend =
       virtual_cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
       virtual_cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN ||
-      pause_camera_active;
+      pause_camera_active || pes_controller_custom_prematch_gameplan_active();
   if (modal_match_frontend) {
     // Pause and its Game Plan/Camera children own the foreground. Keep the
     // set-play state latched underneath, but suppress its mapper until the
@@ -1720,6 +1722,12 @@ static void overlay_render(void) {
   int cinematic_helper_text_first_quad = 0;
   int cinematic_helper_text_quads = 0;
   int gameplan_cursor_first_quad = 0;
+  int pause_skin_cards[3] = {0};
+  int pause_skin_text = 0, pause_skin_text_quads = 0;
+  int pause_stats_panel = 0, pause_stats_text = 0, pause_stats_quads = 0;
+  int pause_background = 0, pause_badges = 0, pause_header = 0, pause_header_count = 0;
+  int pause_skin_focus = -1;
+  RoundedRectStyle pause_skin_style = {0};
   int gameplan_cursor_quads = 0;
   enum {
     PREMATCH_GAMEPLAN_FIELD_SLOTS = 11,
@@ -1852,6 +1860,7 @@ static void overlay_render(void) {
   RoundedRectStyle prematch_gameplan_panel_style = {0};
   RoundedRectStyle prematch_gameplan_action_style = {0};
   RoundedRectStyle prematch_gameplan_waiting_style = {0};
+  RoundedRectStyle prematch_gameplan_modal_style[2] = {{0}};
   if (custom_gameplan) {
     const float margin_x = 0.018f * (float)screen_width;
     const float center_gap = 0.014f * (float)screen_width;
@@ -1997,7 +2006,8 @@ static void overlay_render(void) {
         const float modal_w = half_w - 0.070f * (float)screen_width;
         const float modal_h = 0.505f * (float)screen_height;
         prematch_gameplan_modal_first_quad[side] = quads;
-        prematch_gameplan_modal_quads[side] += emit_rect(
+        prematch_gameplan_modal_style[side] = (RoundedRectStyle){modal_w, modal_h, 0.022f * (float)screen_height};
+        prematch_gameplan_modal_quads[side] += emit_round_rect_quad(
             modal_x, modal_y, modal_w, modal_h, verts + quads * 24);
         quads++;
       } else if ((page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS &&
@@ -2007,9 +2017,11 @@ static void overlay_render(void) {
         const float modal_x = half_x[side] + 0.025f * (float)screen_width;
         const float modal_y = content_y + 0.025f * (float)screen_height;
         const float modal_w = half_w - 0.050f * (float)screen_width;
-        const float modal_h = content_h - 0.050f * (float)screen_height;
+        const float modal_h = page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION
+            ? 0.470f * (float)screen_height : content_h - 0.050f * (float)screen_height;
         prematch_gameplan_modal_first_quad[side] = quads;
-        prematch_gameplan_modal_quads[side] += emit_rect(
+        prematch_gameplan_modal_style[side] = (RoundedRectStyle){modal_w, modal_h, 0.022f * (float)screen_height};
+        prematch_gameplan_modal_quads[side] += emit_round_rect_quad(
             modal_x, modal_y, modal_w, modal_h, verts + quads * 24);
         quads++;
       }
@@ -2085,7 +2097,7 @@ static void overlay_render(void) {
         const float row_w = half_w - 0.050f * (float)screen_width;
         const float row_y = content_y + 0.155f * (float)screen_height;
         const float row_h = (pes_controller_custom_prematch_gameplan_formation_picker_active(side)
-            ? 0.044f : 0.105f) * (float)screen_height;
+            ? 0.060f : 0.105f) * (float)screen_height;
         for (uint32_t row = 0; row < pes_controller_custom_prematch_gameplan_formation_row_count(side); row++) {
           prematch_gameplan_neutral_quads[side] += emit_rect(
               row_x, row_y + (float)row * row_h, row_w,
@@ -2188,12 +2200,13 @@ static void overlay_render(void) {
       prematch_gameplan_accent_first_quad[side] = quads;
       if (!waiting && page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION) {
         const uint32_t focus =
-            pes_controller_custom_prematch_gameplan_formation_focus(side);
+            pes_controller_custom_prematch_gameplan_formation_focus(side) -
+            pes_controller_custom_prematch_gameplan_formation_scroll(side);
         const float row_x = half_x[side] + 0.025f * (float)screen_width;
         const float row_w = half_w - 0.050f * (float)screen_width;
         const float row_y = content_y + 0.155f * (float)screen_height;
         const float row_h = (pes_controller_custom_prematch_gameplan_formation_picker_active(side)
-            ? 0.044f : 0.105f) * (float)screen_height;
+            ? 0.060f : 0.105f) * (float)screen_height;
         prematch_gameplan_accent_quads[side] += emit_rect(
             row_x, row_y + (float)focus * row_h, row_w,
             row_h - 0.008f * (float)screen_height,
@@ -2695,21 +2708,28 @@ static void overlay_render(void) {
         if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION) {
         const int shape_picker = pes_controller_custom_prematch_gameplan_formation_picker_active(side);
         const char *title = shape_picker ? "CHOOSE FORMATION" : "FORMATION SETTINGS";
+        const float title_width = measure_efootball_line(title, (int)strlen(title), title_gh, EFOOTBALL_FONT_STENCIL);
         line_quads = emit_efootball_line(
             title, (int)strlen(title),
-            half_x[side] + 0.025f * (float)screen_width,
-            content_y + 0.025f * (float)screen_height, title_gh,
+            half_x[side] + (shape_picker ? (half_w - title_width) * 0.5f : 0.025f * (float)screen_width),
+            content_y + (shape_picker ? 0.055f : 0.025f) * (float)screen_height, title_gh,
             EFOOTBALL_FONT_STENCIL, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
-        char formation[32];
+        char formation[64];
         snprintf(formation, sizeof(formation), "CURRENT SHAPE  %s",
                  pes_controller_custom_prematch_gameplan_formation_label(
                      side));
+        if (shape_picker) {
+          snprintf(formation, sizeof(formation), "CURRENT %s   |   %u / 11",
+              pes_controller_custom_prematch_gameplan_formation_label(side),
+              pes_controller_custom_prematch_gameplan_formation_focus(side) + 1u);
+        }
+        const float formation_width = measure_efootball_line(formation, (int)strlen(formation), body_gh, EFOOTBALL_FONT_BOLD);
         line_quads = emit_efootball_line(
             formation, (int)strlen(formation),
-            half_x[side] + 0.025f * (float)screen_width,
-            content_y + 0.085f * (float)screen_height, body_gh,
+            half_x[side] + (shape_picker ? (half_w - formation_width) * 0.5f : 0.025f * (float)screen_width),
+            content_y + (shape_picker ? 0.105f : 0.085f) * (float)screen_height, body_gh,
             EFOOTBALL_FONT_BOLD, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
@@ -2720,16 +2740,20 @@ static void overlay_render(void) {
         const float row_w = half_w - 0.082f * (float)screen_width;
         const float row_y = content_y + 0.155f * (float)screen_height;
         const float row_h = (pes_controller_custom_prematch_gameplan_formation_picker_active(side)
-            ? 0.044f : 0.105f) * (float)screen_height;
+            ? 0.060f : 0.105f) * (float)screen_height;
         for (uint32_t row = 0; row < pes_controller_custom_prematch_gameplan_formation_row_count(side); row++) {
+          const uint32_t option = row + pes_controller_custom_prematch_gameplan_formation_scroll(side);
           const char *label = shape_picker
-              ? pes_controller_custom_prematch_gameplan_formation_value(side, row)
+              ? pes_controller_custom_prematch_gameplan_formation_value(side, option)
               : formation_rows[row];
+          const int active = shape_picker && pes_controller_custom_prematch_gameplan_formation_option_active(side, option);
+          if (active) prematch_gameplan_picker_active_text_first[side][0] = quads;
           line_quads = emit_efootball_line(
               label, (int)strlen(label), row_x,
               row_y + row_h * (float)row +
                   (row_h - small_gh) * 0.5f,
               small_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          if (active) prematch_gameplan_picker_active_text_quads[side][0] = line_quads;
           prematch_gameplan_white_text_quads += line_quads;
           quads += line_quads;
           const char *value =
@@ -2982,11 +3006,13 @@ static void overlay_render(void) {
       if (!waiting && (!custom_gameplan_exhibition || side == 0))
         for (uint32_t action = 0;
              action < PES_PREMATCH_GAMEPLAN_ACTION_COUNT; action++) {
+          const char *action_label = action == 2 && pes_controller_live_gameplan_active()
+                                         ? "AUTO LOCKED" : action_labels[action];
           const float width = measure_efootball_line(
-              action_labels[action], (int)strlen(action_labels[action]),
+              action_label, (int)strlen(action_label),
               action_gh, EFOOTBALL_FONT_BOLD);
           line_quads = emit_efootball_line(
-              action_labels[action], (int)strlen(action_labels[action]),
+              action_label, (int)strlen(action_label),
               half_x[side] + (action_w + action_gap) * (float)action +
                   (action_w - width) * 0.5f,
               action_y + (action_h - action_gh) * 0.5f, action_gh,
@@ -3002,7 +3028,8 @@ static void overlay_render(void) {
       prematch_gameplan_focus_text_first_quad[side] = quads;
       line_quads = 0;
       if (!waiting && (!custom_gameplan_exhibition || side == 0)) {
-        const char *focused_action = action_labels[root_focus];
+        const char *focused_action = root_focus == 2 && pes_controller_live_gameplan_active()
+                                        ? "AUTO LOCKED" : action_labels[root_focus];
         const float focused_action_w = measure_efootball_line(
             focused_action, (int)strlen(focused_action), action_gh,
             EFOOTBALL_FONT_BOLD);
@@ -3102,14 +3129,14 @@ static void overlay_render(void) {
       char hint[96];
       if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT)
         snprintf(hint, sizeof(hint), "%s SELECT   %s %s", select_key,
-                 back_key, side ? "READY" : "HUB");
+                 back_key, pes_controller_live_gameplan_active() ? "READY / PAUSE" : (side ? "READY" : "HUB"));
       else if (page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE)
         snprintf(hint, sizeof(hint), "%s SELECT / SWAP   %s BACK",
                  select_key, back_key);
       else if (page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION)
         snprintf(hint, sizeof(hint), "%s %s   %s BACK", select_key,
                  pes_controller_custom_prematch_gameplan_formation_picker_active(side)
-                     ? "APPLY SHAPE" : "OPEN / CHANGE", back_key);
+                     ? "APPLY / UP-DOWN SCROLL" : "OPEN / CHANGE", back_key);
       else if (page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP)
         snprintf(hint, sizeof(hint), "LEFT/RIGHT SELECT   %s BACK", back_key);
       else if (pes_controller_custom_prematch_gameplan_position_picker_active(
@@ -3667,6 +3694,7 @@ static void overlay_render(void) {
           loading_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
       custom_white_text_quads += loading_quads;
       quads += loading_quads;
+    }
       const float center_x = 0.956f * (float)screen_width;
       const float center_y = 0.905f * (float)screen_height;
       const float radius = 0.017f * (float)screen_height;
@@ -3688,7 +3716,6 @@ static void overlay_render(void) {
             verts + quads * 24);
         quads++;
       }
-    }
   } else if (custom_hub_settings_popup) {
     // Match Settings is a child of the pre-match hub, but it gets its own
     // console-style page: dark title band, light selected row, blue value
@@ -5968,6 +5995,102 @@ static void overlay_render(void) {
           (int)((power_milli * (uint32_t)segment_count + 999u) / 1000u);
     }
   }
+  if (pause_skin) {
+    pause_background = quads;
+    quads += emit_image_rect(0, 0, screen_width, screen_height, verts + quads * 24);
+    pause_badges = quads;
+    const float badge = screen_height * 0.16f;
+    for (uint32_t side = 0; side < 2; ++side)
+      quads += emit_badge(pes_controller_2p_prematch_hub_badge(side),
+          (side ? 0.92f : 0.08f) * screen_width - badge * 0.5f,
+          screen_height * 0.065f, badge, badge, verts + quads * 24);
+    pause_header = quads;
+    const char *heading = "PAUSE MENU";
+    float gh = screen_height / 30.0f;
+    quads += emit_efootball_line(heading, (int)strlen(heading),
+        (screen_width - measure_efootball_line(heading, (int)strlen(heading), gh, EFOOTBALL_FONT_STENCIL)) * 0.5f,
+        screen_height * 0.026f, gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+    for (uint32_t side = 0; side < 2; ++side) {
+      const char *team = pes_controller_2p_prematch_hub_team_name(side);
+      gh = screen_height / 34.0f;
+      float tw = measure_efootball_line(team, (int)strlen(team), gh, EFOOTBALL_FONT_STENCIL);
+      if (tw > screen_width * 0.25f) { gh *= screen_width * 0.25f / tw; tw = screen_width * 0.25f; }
+      quads += emit_efootball_line(team, (int)strlen(team),
+          (side ? 0.735f : 0.265f) * screen_width - tw * 0.5f,
+          screen_height * 0.125f, gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      uint32_t score; char score_text[16];
+      if (pes_controller_pause_score(side, &score)) snprintf(score_text, sizeof(score_text), "%u", score);
+      else snprintf(score_text, sizeof(score_text), "--");
+      gh = screen_height / 12.0f;
+      tw = measure_efootball_line(score_text, (int)strlen(score_text), gh, EFOOTBALL_FONT_BOLD);
+      quads += emit_efootball_line(score_text, (int)strlen(score_text),
+          (side ? 0.55f : 0.45f) * screen_width - tw * 0.5f,
+          screen_height * 0.10f, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    }
+    pause_header_count = quads - pause_header;
+    const float w = 0.305f * screen_width, h = 0.105f * screen_height;
+    pause_skin_style = (RoundedRectStyle){w, h, 0.018f * screen_height};
+    static const char *const labels[] = {"GAME PLAN", "CAMERA SETTINGS", "TOP MENU"};
+    for (int i = 0; i < 3; ++i) {
+      const float x = (0.025f + i * 0.3225f) * screen_width;
+      const float y = 0.780f * screen_height;
+      if (pes_controller_pause_skin_focus() == (uint32_t)i)
+        pause_skin_focus = i;
+      else if (gameplan_cursor && gameplan_cursor_x * screen_width >= x &&
+          gameplan_cursor_x * screen_width <= x + w &&
+          gameplan_cursor_y * screen_height >= y && gameplan_cursor_y * screen_height <= y + h)
+        pause_skin_focus = i;
+      pause_skin_cards[i] = quads;
+      quads += emit_round_rect_quad(x, y, w, h, verts + quads * 24);
+    }
+    pause_stats_panel = quads;
+    quads += emit_round_rect_quad(0.025f * screen_width, 0.265f * screen_height,
+        0.95f * screen_width, 0.465f * screen_height, verts + quads * 24);
+    pause_skin_text = quads;
+    for (int i = 0; i < 3; ++i) {
+      const float x = (0.025f + i * 0.3225f) * screen_width;
+      const float y = 0.780f * screen_height;
+      const float gh = screen_height / 29.0f;
+      const int n = emit_efootball_line(labels[i], (int)strlen(labels[i]),
+          x + (w - measure_efootball_line(labels[i], (int)strlen(labels[i]), gh,
+                  EFOOTBALL_FONT_STENCIL)) * 0.5f, y + (h - gh) * 0.5f, gh,
+          EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      quads += n; pause_skin_text_quads += n;
+    }
+    pause_stats_text = quads;
+    static const char *const stats_labels[8] = {
+        "POSSESSION", "SHOTS", "FOULS", "CORNER KICKS",
+        "FREE KICKS", "PASSES", "TACKLES", "SAVES"};
+    for (int row = -1; row < 8; ++row) {
+      const char *label = row < 0 ? "MATCH STATS" : stats_labels[row];
+      const float gh = screen_height / (row < 0 ? 27.0f : 33.0f);
+      const float y = (row < 0 ? 0.287f : 0.35f + row * 0.044f) * screen_height;
+      int n = emit_efootball_line(label, (int)strlen(label),
+          (screen_width - measure_efootball_line(label, (int)strlen(label), gh,
+              EFOOTBALL_FONT_BOLD)) * 0.5f, y, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      quads += n; pause_stats_quads += n;
+      if (row < 0) continue;
+      for (uint32_t side = 0; side < 2; ++side) {
+        uint32_t value;
+        char number[24];
+        if (pes_controller_pause_stat(side, (uint32_t)row, &value))
+          snprintf(number, sizeof(number), row == 0 ? "%u%%" : "%u", value);
+        else snprintf(number, sizeof(number), "--");
+        n = emit_efootball_line(number, (int)strlen(number),
+            (side ? 0.78f : 0.22f) * screen_width -
+            measure_efootball_line(number, (int)strlen(number), gh, EFOOTBALL_FONT_BOLD) * 0.5f,
+            y, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        quads += n; pause_stats_quads += n;
+      }
+    }
+    const char *helper = "LEFT / RIGHT  SELECT     A  CONFIRM     B  RESUME MATCH";
+    const float helper_h = screen_height / 34.0f;
+    int n = emit_efootball_line(helper, (int)strlen(helper),
+        (screen_width - measure_efootball_line(helper, (int)strlen(helper), helper_h,
+            EFOOTBALL_FONT_BOLD)) * 0.5f, 0.93f * screen_height, helper_h,
+        EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += n; pause_stats_quads += n;
+  }
   if (!quads)
     return;
 
@@ -6080,10 +6203,13 @@ static void overlay_render(void) {
                    prematch_gameplan_line_quads[side] * 6);
 
     glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.88f);
-    for (uint32_t side = 0; side < 2; side++)
+    for (uint32_t side = 0; side < 2; side++) {
+      use_rounded_rect(&prematch_gameplan_modal_style[side]);
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_modal_first_quad[side] * 6,
                    prematch_gameplan_modal_quads[side] * 6);
+    }
+    use_rounded_rect(NULL);
     glUniform4f(gl.loc_color, 0.94f, 0.97f, 1.0f, 0.76f);
     for (uint32_t side = 0; side < 2; side++)
       glDrawArrays(GL_TRIANGLES,
@@ -6702,6 +6828,46 @@ static void overlay_render(void) {
     glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
     glDrawArrays(GL_TRIANGLES, cinematic_helper_text_first_quad * 6,
                  cinematic_helper_text_quads * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+  }
+  if (pause_skin) {
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+    glDrawArrays(GL_TRIANGLES, pause_background * 6, 6);
+    glBindTexture(GL_TEXTURE_2D, gl.badge_tex);
+    glDrawArrays(GL_TRIANGLES, pause_badges * 6, 12);
+    glUniform1f(gl.loc_image, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glDrawArrays(GL_TRIANGLES, pause_header * 6, pause_header_count * 6);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_circle, 0.0f);
+    glUniform1f(gl.loc_cursor, 0.0f);
+    use_rounded_rect(&pause_skin_style);
+    for (int i = 0; i < 3; ++i) {
+      if (i == pause_skin_focus) glUniform4f(gl.loc_color, 0.12f, 0.75f, 0.93f, 1.0f);
+      else glUniform4f(gl.loc_color, 0.93f, 0.95f, 0.99f, 0.98f);
+      glDrawArrays(GL_TRIANGLES, pause_skin_cards[i] * 6, 6);
+    }
+    use_rounded_rect(NULL);
+    const RoundedRectStyle stats_style = {0.95f * screen_width, 0.465f * screen_height,
+                                          0.024f * screen_height};
+    use_rounded_rect(&stats_style);
+    glUniform4f(gl.loc_color, 0.02f, 0.06f, 0.10f, 0.76f);
+    glDrawArrays(GL_TRIANGLES, pause_stats_panel * 6, 6);
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glUniform4f(gl.loc_color, 0.02f, 0.05f, 0.14f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, pause_skin_text * 6, pause_skin_text_quads * 6);
+    glUniform4f(gl.loc_color, 0.95f, 0.97f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, pause_stats_text * 6, pause_stats_quads * 6);
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (gameplan_cursor_quads) {

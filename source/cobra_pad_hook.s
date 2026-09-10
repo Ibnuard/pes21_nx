@@ -200,25 +200,26 @@ pes_match_goal_demo_update_hook:
     .global pes_match_pause_update_hook
     .type pes_match_pause_update_hook, %function
 pes_match_pause_update_hook:
-    sub sp, sp, #0x50
-    stp x0, x1, [sp, #0x00]
-    stp x2, x3, [sp, #0x10]
-    stp x4, x5, [sp, #0x20]
-    stp x6, x7, [sp, #0x30]
-    stp x29, x30, [sp, #0x40]
+    stp x29, x30, [sp, #-48]!
+    stp x19, x20, [sp, #16]
+    mov x19, x0
+    mov x20, x1
+    bl .Lpause_original
+    str x0, [sp, #32]
+    mov x0, x19
+    mov x1, x20
     bl pes_match_pause_update_entry
-    mov x17, x0
-    ldp x29, x30, [sp, #0x40]
-    ldp x6, x7, [sp, #0x30]
-    ldp x4, x5, [sp, #0x20]
-    ldp x2, x3, [sp, #0x10]
-    ldp x0, x1, [sp, #0x00]
-    add sp, sp, #0x50
-
+    ldr x0, [sp, #32]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #48
+    ret
+.Lpause_original:
     sub sp, sp, #0x50
     stp x23, x22, [sp, #32]
     stp x21, x20, [sp, #48]
     stp x19, x30, [sp, #64]
+    adrp x17, match_pause_update_resume
+    ldr x17, [x17, #:lo12:match_pause_update_resume]
     br x17
 
     .size pes_match_pause_update_hook, .-pes_match_pause_update_hook
@@ -230,20 +231,22 @@ pes_match_pause_update_hook:
 // MyClubSquadEdit's vtable entry is an adjustor thunk in this build, so hook
 // the concrete method entry and replay its four displaced prologue words.
 pes_match_squad_edit_update_hook:
-    sub sp, sp, #0x50
-    stp x0, x1, [sp, #0x00]
-    stp x2, x3, [sp, #0x10]
-    stp x4, x5, [sp, #0x20]
-    stp x6, x7, [sp, #0x30]
-    stp x29, x30, [sp, #0x40]
+    // Complete native initialization/animation before reading its squad and
+    // hiding its root. The old pre-update callback was overwritten by native.
+    stp x29, x30, [sp, #-48]!
+    stp x19, x20, [sp, #16]
+    mov x19, x0
+    mov x20, x1
+    bl .Lmatch_squad_original
+    str x0, [sp, #32]
+    mov x0, x19
+    mov x1, x20
     bl pes_match_squad_edit_update_entry
-    ldp x29, x30, [sp, #0x40]
-    ldp x6, x7, [sp, #0x30]
-    ldp x4, x5, [sp, #0x20]
-    ldp x2, x3, [sp, #0x10]
-    ldp x0, x1, [sp, #0x00]
-    add sp, sp, #0x50
-
+    ldr x0, [sp, #32]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #48
+    ret
+.Lmatch_squad_original:
     sub sp, sp, #0xa0
     stp x28, x27, [sp, #64]
     stp x26, x25, [sp, #80]
