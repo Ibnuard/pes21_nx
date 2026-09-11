@@ -1732,7 +1732,8 @@ static void overlay_render(void) {
   int pause_confirm_backdrop = 0, pause_confirm_panel = 0;
   int pause_confirm_buttons[2] = {0, 0};
   int pause_confirm_title = 0, pause_confirm_message = 0;
-  int pause_confirm_button_text = 0, pause_confirm_button_text_quads = 0;
+  int pause_confirm_button_text[2] = {0, 0};
+  int pause_confirm_button_text_quads[2] = {0, 0};
   int pause_confirm_title_quads = 0, pause_confirm_message_quads = 0;
   RoundedRectStyle pause_confirm_panel_style = {0};
   RoundedRectStyle pause_confirm_button_style = {0};
@@ -6132,52 +6133,52 @@ static void overlay_render(void) {
     }
   }
   if (pause_skin && pes_controller_pause_top_menu_confirm_active()) {
-    const float panel_x = 0.285f * screen_width;
-    const float panel_y = 0.305f * screen_height;
-    const float panel_w = 0.430f * screen_width;
-    const float panel_h = 0.315f * screen_height;
-    const float button_w = 0.165f * screen_width;
-    const float button_h = 0.070f * screen_height;
-    const float button_y = panel_y + 0.205f * screen_height;
+    const float panel_x = 0.195f * screen_width;
+    const float panel_y = 0.235f * screen_height;
+    const float panel_w = 0.610f * screen_width;
+    const float panel_h = 0.455f * screen_height;
+    const float button_w = 0.225f * screen_width;
+    const float button_h = 0.090f * screen_height;
+    const float button_y = panel_y + 0.305f * screen_height;
     pause_confirm_backdrop = quads;
     quads += emit_rect(0, 0, screen_width, screen_height, verts + quads * 24);
-    pause_confirm_panel_style = (RoundedRectStyle){panel_w, panel_h, 0.025f * screen_height};
+    pause_confirm_panel_style = (RoundedRectStyle){panel_w, panel_h, 0.032f * screen_height};
     pause_confirm_panel = quads;
     quads += emit_round_rect_quad(panel_x, panel_y, panel_w, panel_h, verts + quads * 24);
-    pause_confirm_button_style = (RoundedRectStyle){button_w, button_h, 0.016f * screen_height};
+    pause_confirm_button_style = (RoundedRectStyle){button_w, button_h, 0.020f * screen_height};
     pause_confirm_buttons[0] = quads;
-    quads += emit_round_rect_quad(panel_x + 0.045f * screen_width, button_y,
+    quads += emit_round_rect_quad(panel_x + 0.060f * screen_width, button_y,
         button_w, button_h, verts + quads * 24);
     pause_confirm_buttons[1] = quads;
-    quads += emit_round_rect_quad(panel_x + panel_w - 0.045f * screen_width - button_w,
+    quads += emit_round_rect_quad(panel_x + panel_w - 0.060f * screen_width - button_w,
         button_y, button_w, button_h, verts + quads * 24);
-    const float title_h = screen_height / 25.0f;
-    const float message_h = screen_height / 39.0f;
+    const float title_h = screen_height / 21.0f;
+    const float message_h = screen_height / 32.0f;
     pause_confirm_title = quads;
     pause_confirm_title_quads = emit_efootball_centered_fit_line(
         "RETURN TO TOP MENU?", 19, screen_width * 0.5f,
-        panel_y + 0.075f * screen_height, panel_w * 0.88f,
+        panel_y + 0.090f * screen_height, panel_w * 0.88f,
         title_h, title_h, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
     quads += pause_confirm_title_quads;
     pause_confirm_message = quads;
     const char *confirm_message = "LEAVE THE MATCH AND RETURN TO HOME?";
     pause_confirm_message_quads = emit_efootball_centered_fit_line(
         confirm_message, (int)strlen(confirm_message), screen_width * 0.5f,
-        panel_y + 0.145f * screen_height, panel_w * 0.90f,
+        panel_y + 0.185f * screen_height, panel_w * 0.90f,
         message_h, message_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += pause_confirm_message_quads;
-    pause_confirm_button_text = quads;
     const char *const confirm_labels[2] = {"CONFIRM", "CANCEL"};
     for (int i = 0; i < 2; ++i) {
-      const float bx = i == 0 ? panel_x + 0.045f * screen_width
-                              : panel_x + panel_w - 0.045f * screen_width - button_w;
+      const float bx = i == 0 ? panel_x + 0.060f * screen_width
+                              : panel_x + panel_w - 0.060f * screen_width - button_w;
       const float bw = measure_efootball_line(confirm_labels[i],
           (int)strlen(confirm_labels[i]), message_h, EFOOTBALL_FONT_STENCIL);
+      pause_confirm_button_text[i] = quads;
       const int n = emit_efootball_line(confirm_labels[i],
           (int)strlen(confirm_labels[i]), bx + (button_w - bw) * 0.5f,
           button_y + (button_h - message_h) * 0.5f, message_h,
           EFOOTBALL_FONT_STENCIL, verts + quads * 24);
-      quads += n; pause_confirm_button_text_quads += n;
+      quads += n; pause_confirm_button_text_quads[i] = n;
     }
   }
   if (!quads)
@@ -6988,7 +6989,7 @@ static void overlay_render(void) {
     glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f, 0.56f);
     glDrawArrays(GL_TRIANGLES, pause_confirm_backdrop * 6, 6);
     use_rounded_rect(&pause_confirm_panel_style);
-    glUniform4f(gl.loc_color, 0.03f, 0.07f, 0.14f, 0.98f);
+    glUniform4f(gl.loc_color, 0.97f, 0.98f, 1.0f, 0.99f);
     glDrawArrays(GL_TRIANGLES, pause_confirm_panel * 6, 6);
     use_rounded_rect(&pause_confirm_button_style);
     const uint32_t confirm_focus = pes_controller_pause_top_menu_confirm_focus();
@@ -6996,17 +6997,23 @@ static void overlay_render(void) {
       if ((uint32_t)i == confirm_focus)
         glUniform4f(gl.loc_color, 0.10f, 0.70f, 0.92f, 1.0f);
       else
-        glUniform4f(gl.loc_color, 0.12f, 0.17f, 0.27f, 1.0f);
+        glUniform4f(gl.loc_color, 0.89f, 0.92f, 0.97f, 1.0f);
       glDrawArrays(GL_TRIANGLES, pause_confirm_buttons[i] * 6, 6);
     }
     use_rounded_rect(NULL);
     glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
-    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 1.0f);
+    glUniform4f(gl.loc_color, 0.025f, 0.065f, 0.12f, 1.0f);
     glDrawArrays(GL_TRIANGLES, pause_confirm_title * 6, pause_confirm_title_quads * 6);
     glDrawArrays(GL_TRIANGLES, pause_confirm_message * 6, pause_confirm_message_quads * 6);
-    glDrawArrays(GL_TRIANGLES, pause_confirm_button_text * 6,
-                 pause_confirm_button_text_quads * 6);
+    for (int i = 0; i < 2; ++i) {
+      if ((uint32_t)i == confirm_focus)
+        glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+      else
+        glUniform4f(gl.loc_color, 0.025f, 0.065f, 0.12f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, pause_confirm_button_text[i] * 6,
+                   pause_confirm_button_text_quads[i] * 6);
+    }
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (gameplan_cursor_quads && !pause_transition) {

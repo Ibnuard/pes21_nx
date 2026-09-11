@@ -96,7 +96,7 @@ int main(void) {
         code = r'''
 #include <assert.h>
 #include <stdint.h>
-static uint64_t now, pause_resume_transition_tick, pause_editor_transition_tick, match_pause_seen_tick;
+static uint64_t now, pause_resume_transition_tick, pause_editor_transition_tick, pause_top_menu_transition_tick, match_pause_seen_tick;
 static uint32_t exhibition_gameplan_custom_active, live_gameplan_returning_to_pause, match_pause_skin_ready;
 static uint64_t armGetSystemTick(void) {return now;}
 static uint64_t armTicksToNs(uint64_t t) {return t;}
@@ -119,6 +119,8 @@ int main(void) {
  now+=250000000ULL; pause_resume_reveal(); assert(!pes_controller_pause_transition());
  pause_resume_transition_tick=now; now+=6000000000ULL;
  assert(!pes_controller_pause_transition());
+ pause_top_menu_transition_tick=now; assert(pes_controller_pause_transition()==4);
+ now+=16000000000ULL; assert(!pes_controller_pause_transition());
  return 0;
 }
 '''

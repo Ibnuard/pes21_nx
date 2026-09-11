@@ -726,6 +726,7 @@ static void *(*live_squad_player_get_player)(void *, uint32_t);
 static _Alignas(8) uint64_t pause_open_cover_tick;
 static _Alignas(8) uint64_t pause_editor_transition_tick;
 static _Alignas(8) uint64_t pause_resume_transition_tick;
+static _Alignas(8) uint64_t pause_top_menu_transition_tick;
 static uint64_t live_substitution_locked[2];
 static _Alignas(4) uint32_t live_gameplan_returning_to_pause;
 static const void *(*pause_stats_team)(const void *, uint32_t);
@@ -2333,6 +2334,7 @@ static void exhibition_publish_prepared_matchplan(void) {
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
   __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&live_gameplan_returning_to_pause, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
   live_match_single_controller = !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE);
@@ -9419,6 +9421,10 @@ void pes_main_menu_simplify(void *window) {
                 root, match_page);
     logged = 1;
   }
+  // The custom cover is released only after the four-tile Match page has
+  // actually been rebuilt. Clearing it in the Pause destructor was too early
+  // and exposed the stock Pause exit animation for several frames.
+  __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
 }
 
 uintptr_t pes_main_menu_selected_entry(void *window,
@@ -12404,6 +12410,9 @@ uint32_t pes_controller_pause_top_menu_confirm_focus(void) {
 
 uint32_t pes_controller_pause_transition(void) {
   const uint64_t now = armGetSystemTick();
+  const uint64_t top_menu = __atomic_load_n(&pause_top_menu_transition_tick,
+                                             __ATOMIC_ACQUIRE);
+  if (top_menu && armTicksToNs(now - top_menu) < 15000000000ULL) return 4;
   const uint64_t resume = __atomic_load_n(&pause_resume_transition_tick, __ATOMIC_ACQUIRE);
   if (resume && armTicksToNs(now - resume) < 5000000000ULL) return 3;
   const uint64_t editor = __atomic_load_n(&pause_editor_transition_tick, __ATOMIC_ACQUIRE);
@@ -12766,6 +12775,8 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
           // ExecEventDecide would create the stock confirmation dialog again.
           __atomic_store_n(&match_pause_top_menu_confirm, 0,
                            __ATOMIC_RELEASE);
+          __atomic_store_n(&pause_top_menu_transition_tick,
+                           armGetSystemTick(), __ATOMIC_RELEASE);
           match_pause_go_top_menu(window);
           return match_pause_update_resume;
         }

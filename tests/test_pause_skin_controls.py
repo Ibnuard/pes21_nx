@@ -47,6 +47,9 @@ class PauseSkinTests(unittest.TestCase):
         direct = function(hooks, 'match_pause_go_top_menu')
         self.assertIn('vtable[0x1cu]', direct)
         self.assertIn('send_flow_event(window, 0, "match_topmenu")', direct)
+        self.assertIn('pause_top_menu_transition_tick', pause)
+        simplify = function(hooks, 'pes_main_menu_simplify')
+        self.assertIn('&pause_top_menu_transition_tick, 0', simplify)
         self.assertIn('focus == 2u', pause)
 
     def test_live_editor_uses_native_reservations_and_not_bootstrap(self):
