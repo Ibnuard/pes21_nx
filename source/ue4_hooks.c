@@ -202,8 +202,6 @@ static void (*exhibition_match_set_ex)(void *match, uint32_t enabled);
 static uint32_t (*exhibition_match_is_pk)(const void *match);
 static void (*exhibition_match_set_pk)(void *match, uint32_t enabled);
 static void (*match_pause_pad_event_back)(void *window);
-static void (*match_pause_exec_event_decide)(void *window,
-                                              const void *event_name);
 static void (*matchplan_squad_load)(void);
 static void (*matchplan_squad_save)(void);
 static void *(*match_squad_data_copy_assign)(void *destination,
@@ -1040,6 +1038,10 @@ static _Alignas(4) uint32_t match_pause_back_requested;
 static _Alignas(4) uint32_t match_pause_custom_active;
 static _Alignas(4) uint32_t match_pause_custom_focus;
 static _Alignas(4) uint32_t match_pause_skin_ready;
+// Top Menu is confirmed locally so the stock confirmation dialog never
+// flashes through the custom pause skin.  0 = confirm, 1 = cancel.
+static _Alignas(4) uint32_t match_pause_top_menu_confirm;
+static _Alignas(4) uint32_t match_pause_top_menu_confirm_focus;
 static uint32_t (*pause_header_init_original)(void *);
 static uint32_t (*pause_guide_update_original)(void *, uint32_t);
 static int (*pause_node_get_position)(void *, float *);
@@ -12391,6 +12393,15 @@ int pes_controller_pause_skin_active(void) {
       !pes_controller_pause_camera_active();
 }
 
+int pes_controller_pause_top_menu_confirm_active(void) {
+  return __atomic_load_n(&match_pause_top_menu_confirm, __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_pause_top_menu_confirm_focus(void) {
+  return __atomic_load_n(&match_pause_top_menu_confirm_focus,
+                         __ATOMIC_ACQUIRE) & 1u;
+}
+
 uint32_t pes_controller_pause_transition(void) {
   const uint64_t now = armGetSystemTick();
   const uint64_t resume = __atomic_load_n(&pause_resume_transition_tick, __ATOMIC_ACQUIRE);
@@ -12506,18 +12517,19 @@ static uint32_t pes_match_pause_camera_update(void *window,
   return result;
 }
 
-static void match_pause_dispatch_event(void *window, const char *name) {
-  if (!window || !name || !match_pause_exec_event_decide)
+static void match_pause_go_top_menu(void *window) {
+  if (!window)
     return;
-  const size_t length = strlen(name);
-  if (length > 22)
+  // MatchPause::ChildPopupEndCallBack takes this exact branch after the stock
+  // Yes/No dialog returns YES: vtable + 0xe0, event 0, "match_topmenu".
+  // Calling the accepted branch directly lets our custom dialog replace the
+  // native dialog behaviorally as well as visually.
+  const uintptr_t *vtable = *(const uintptr_t *const *)window;
+  if (!vtable || !vtable[0x1cu])
     return;
-  // Cobra uses libc++'s 24-byte short-string layout here: the low bit is the
-  // long-string tag and the remaining first byte stores twice the length.
-  unsigned char event_name[24] = {0};
-  event_name[0] = (unsigned char)(length << 1);
-  memcpy(event_name + 1, name, length);
-  match_pause_exec_event_decide(window, event_name);
+  void (*send_flow_event)(void *, uint32_t, const char *) =
+      (void *)vtable[0x1cu];
+  send_flow_event(window, 0, "match_topmenu");
 }
 
 static void match_result_dispatch_event(void *window, const char *name) {
@@ -12737,6 +12749,28 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
     const uint32_t action = __atomic_exchange_n(&match_pause_custom_action, 0, __ATOMIC_ACQ_REL);
     uint32_t focus = pes_controller_pause_skin_focus();
     if (skin_ready) {
+      if (pes_controller_pause_top_menu_confirm_active()) {
+        if (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_UP ||
+            action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DOWN) {
+          __atomic_store_n(&match_pause_top_menu_confirm_focus,
+                           pes_controller_pause_top_menu_confirm_focus() ^ 1u,
+                           __ATOMIC_RELEASE);
+        } else if (action == PES_PAUSE_INPUT_BACK ||
+                   (action == PES_PAUSE_INPUT_DECIDE &&
+                    pes_controller_pause_top_menu_confirm_focus() == 1u)) {
+          __atomic_store_n(&match_pause_top_menu_confirm, 0,
+                           __ATOMIC_RELEASE);
+        } else if (action == PES_PAUSE_INPUT_DECIDE &&
+                   pes_controller_pause_top_menu_confirm_focus() == 0u) {
+          // Enter the accepted callback branch directly. Going through
+          // ExecEventDecide would create the stock confirmation dialog again.
+          __atomic_store_n(&match_pause_top_menu_confirm, 0,
+                           __ATOMIC_RELEASE);
+          match_pause_go_top_menu(window);
+          return match_pause_update_resume;
+        }
+        return match_pause_update_resume;
+      }
       if (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_UP)
         focus = focus ? focus - 1u : 2u;
       else if (action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DOWN)
@@ -12747,6 +12781,14 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
         __atomic_store_n(&pause_open_cover_tick, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
         match_pause_pad_event_back(window);
+        return match_pause_update_resume;
+      }
+      if (action == PES_PAUSE_INPUT_DECIDE && focus == 2u) {
+        __atomic_store_n(&match_pause_top_menu_confirm, 1,
+                         __ATOMIC_RELEASE);
+        // Default to Cancel, matching the console's safe confirmation flow.
+        __atomic_store_n(&match_pause_top_menu_confirm_focus, 1,
+                         __ATOMIC_RELEASE);
         return match_pause_update_resume;
       }
       if (action == PES_PAUSE_INPUT_DECIDE && match_pause_choice_touch) {
@@ -12806,6 +12848,8 @@ static void pes_match_pause_destroyed(void *window) {
   __atomic_store_n(&match_pause_custom_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_action, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_focus, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_pause_top_menu_confirm, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_pause_top_menu_confirm_focus, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_page, MATCH_PAUSE_PAGE_ROOT,
                    __ATOMIC_RELEASE);
   // Preserve ownership across Pause -> MyClubSquadEdit. The native Pause
@@ -15029,10 +15073,6 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(module, "_ZN4menu10MatchPause12PadEventBackEv");
   match_pause_choice_touch = (void *)so_find_addr_rx(module,
       "_ZN4menu22MatchTouchIconMenuBase13PadEventTouchERKN10menusystem14TouchEventInfoE");
-  match_pause_exec_event_decide =
-      (void *)so_find_addr_rx(module,
-          "_ZN4menu10MatchPause15ExecEventDecideERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
-
   // Keep the native full-screen Pause frontend, but omit the three mobile
   // icons that do not belong to the Switch flow: Controls List, General
   // Settings and Sound. MatchTouchMenuInitParam then lays out the remaining

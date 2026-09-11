@@ -1728,8 +1728,14 @@ static void overlay_render(void) {
   int pause_stats_panel = 0, pause_stats_text = 0, pause_stats_quads = 0;
   int pause_background = 0, pause_badges = 0, pause_header = 0, pause_header_count = 0;
   int pause_skin_focus = -1;
-  int pause_transition_text = 0, pause_transition_text_count = 0;
   int pause_transition_spinner = 0, pause_transition_spinner_count = 0;
+  int pause_confirm_backdrop = 0, pause_confirm_panel = 0;
+  int pause_confirm_buttons[2] = {0, 0};
+  int pause_confirm_title = 0, pause_confirm_message = 0;
+  int pause_confirm_button_text = 0, pause_confirm_button_text_quads = 0;
+  int pause_confirm_title_quads = 0, pause_confirm_message_quads = 0;
+  RoundedRectStyle pause_confirm_panel_style = {0};
+  RoundedRectStyle pause_confirm_button_style = {0};
   int gameplan_locked_rows = 0, gameplan_locked_row_count = 0;
   RoundedRectStyle pause_skin_style = {0};
   int gameplan_cursor_quads = 0;
@@ -6107,26 +6113,71 @@ static void overlay_render(void) {
     }
   }
   if (pause_skin && pause_transition) {
-    const char *message = pause_transition == 1 ? "OPENING GAME PLAN" :
-                          pause_transition == 2 ? "RETURNING TO PAUSE" : "RESUMING MATCH";
-    const float gh = screen_height / 28.0f;
-    pause_transition_text = quads;
-    pause_transition_text_count = emit_efootball_centered_fit_line(message, (int)strlen(message),
-        screen_width * 0.5f, screen_height * 0.52f, screen_width * 0.7f,
-        gh, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
-    quads += pause_transition_text_count;
     const uint64_t freq = armGetSystemTickFreq();
     const float phase = freq ? (float)(armGetSystemTick() % freq) / freq * 6.2831853f : 0;
-    const float radius = screen_height * 0.025f;
+    // Keep transition feedback deliberately quiet: the custom background is
+    // the entire cover and only a small console-style spinner remains.
+    const float spinner_x = screen_width * 0.955f;
+    const float spinner_y = screen_height * 0.905f;
+    const float radius = screen_height * 0.017f;
     pause_transition_spinner = quads;
     for (uint32_t i = 0; i < 8; ++i) {
       const float a = phase + i * 0.43f;
-      const int n = emit_segment(screen_width * 0.5f + cosf(a) * radius,
-          screen_height * 0.44f + sinf(a) * radius,
-          screen_width * 0.5f + cosf(a + 0.25f) * radius,
-          screen_height * 0.44f + sinf(a + 0.25f) * radius,
-          screen_height * 0.004f, verts + quads * 24);
+      const int n = emit_segment(spinner_x + cosf(a) * radius,
+          spinner_y + sinf(a) * radius,
+          spinner_x + cosf(a + 0.25f) * radius,
+          spinner_y + sinf(a + 0.25f) * radius,
+          screen_height * 0.0035f, verts + quads * 24);
       quads += n; pause_transition_spinner_count += n;
+    }
+  }
+  if (pause_skin && pes_controller_pause_top_menu_confirm_active()) {
+    const float panel_x = 0.285f * screen_width;
+    const float panel_y = 0.305f * screen_height;
+    const float panel_w = 0.430f * screen_width;
+    const float panel_h = 0.315f * screen_height;
+    const float button_w = 0.165f * screen_width;
+    const float button_h = 0.070f * screen_height;
+    const float button_y = panel_y + 0.205f * screen_height;
+    pause_confirm_backdrop = quads;
+    quads += emit_rect(0, 0, screen_width, screen_height, verts + quads * 24);
+    pause_confirm_panel_style = (RoundedRectStyle){panel_w, panel_h, 0.025f * screen_height};
+    pause_confirm_panel = quads;
+    quads += emit_round_rect_quad(panel_x, panel_y, panel_w, panel_h, verts + quads * 24);
+    pause_confirm_button_style = (RoundedRectStyle){button_w, button_h, 0.016f * screen_height};
+    pause_confirm_buttons[0] = quads;
+    quads += emit_round_rect_quad(panel_x + 0.045f * screen_width, button_y,
+        button_w, button_h, verts + quads * 24);
+    pause_confirm_buttons[1] = quads;
+    quads += emit_round_rect_quad(panel_x + panel_w - 0.045f * screen_width - button_w,
+        button_y, button_w, button_h, verts + quads * 24);
+    const float title_h = screen_height / 25.0f;
+    const float message_h = screen_height / 39.0f;
+    pause_confirm_title = quads;
+    pause_confirm_title_quads = emit_efootball_centered_fit_line(
+        "RETURN TO TOP MENU?", 19, screen_width * 0.5f,
+        panel_y + 0.075f * screen_height, panel_w * 0.88f,
+        title_h, title_h, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+    quads += pause_confirm_title_quads;
+    pause_confirm_message = quads;
+    const char *confirm_message = "LEAVE THE MATCH AND RETURN TO HOME?";
+    pause_confirm_message_quads = emit_efootball_centered_fit_line(
+        confirm_message, (int)strlen(confirm_message), screen_width * 0.5f,
+        panel_y + 0.145f * screen_height, panel_w * 0.90f,
+        message_h, message_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += pause_confirm_message_quads;
+    pause_confirm_button_text = quads;
+    const char *const confirm_labels[2] = {"CONFIRM", "CANCEL"};
+    for (int i = 0; i < 2; ++i) {
+      const float bx = i == 0 ? panel_x + 0.045f * screen_width
+                              : panel_x + panel_w - 0.045f * screen_width - button_w;
+      const float bw = measure_efootball_line(confirm_labels[i],
+          (int)strlen(confirm_labels[i]), message_h, EFOOTBALL_FONT_STENCIL);
+      const int n = emit_efootball_line(confirm_labels[i],
+          (int)strlen(confirm_labels[i]), bx + (button_w - bw) * 0.5f,
+          button_y + (button_h - message_h) * 0.5f, message_h,
+          EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      quads += n; pause_confirm_button_text_quads += n;
     }
   }
   if (!quads)
@@ -6924,11 +6975,38 @@ static void overlay_render(void) {
     glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
     glDrawArrays(GL_TRIANGLES, pause_background * 6, 6);
     glUniform1f(gl.loc_image, 0.0f);
-    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
-    glDrawArrays(GL_TRIANGLES, pause_transition_text * 6, pause_transition_text_count * 6);
     glUniform1f(gl.loc_solid, 1.0f);
+    glUniform4f(gl.loc_color, 0.92f, 0.96f, 1.0f, 0.94f);
     glDrawArrays(GL_TRIANGLES, pause_transition_spinner * 6, pause_transition_spinner_count * 6);
     glUniform1f(gl.loc_solid, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+  }
+  if (pause_skin && pes_controller_pause_top_menu_confirm_active()) {
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform4f(gl.loc_color, 0.0f, 0.0f, 0.0f, 0.56f);
+    glDrawArrays(GL_TRIANGLES, pause_confirm_backdrop * 6, 6);
+    use_rounded_rect(&pause_confirm_panel_style);
+    glUniform4f(gl.loc_color, 0.03f, 0.07f, 0.14f, 0.98f);
+    glDrawArrays(GL_TRIANGLES, pause_confirm_panel * 6, 6);
+    use_rounded_rect(&pause_confirm_button_style);
+    const uint32_t confirm_focus = pes_controller_pause_top_menu_confirm_focus();
+    for (int i = 0; i < 2; ++i) {
+      if ((uint32_t)i == confirm_focus)
+        glUniform4f(gl.loc_color, 0.10f, 0.70f, 0.92f, 1.0f);
+      else
+        glUniform4f(gl.loc_color, 0.12f, 0.17f, 0.27f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, pause_confirm_buttons[i] * 6, 6);
+    }
+    use_rounded_rect(NULL);
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, pause_confirm_title * 6, pause_confirm_title_quads * 6);
+    glDrawArrays(GL_TRIANGLES, pause_confirm_message * 6, pause_confirm_message_quads * 6);
+    glDrawArrays(GL_TRIANGLES, pause_confirm_button_text * 6,
+                 pause_confirm_button_text_quads * 6);
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (gameplan_cursor_quads && !pause_transition) {

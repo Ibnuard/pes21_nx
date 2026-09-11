@@ -34,6 +34,21 @@ class PauseSkinTests(unittest.TestCase):
         overlay = (ROOT / 'source/overlay.c').read_text()
         self.assertIn('pes_controller_custom_info_popup_active() && !pause_skin', overlay)
 
+    def test_transition_is_spinner_only_and_top_menu_is_custom_confirmed(self):
+        overlay = (ROOT / 'source/overlay.c').read_text()
+        self.assertNotIn('pause_transition_text', overlay)
+        self.assertIn('spinner_x = screen_width * 0.955f', overlay)
+        self.assertIn('pause_confirm_backdrop', overlay)
+        self.assertIn('RETURN TO TOP MENU?', overlay)
+        hooks = (ROOT / 'source/ue4_hooks.c').read_text()
+        pause = function(hooks, 'pes_match_pause_update_entry')
+        self.assertIn('match_pause_top_menu_confirm', pause)
+        self.assertIn('match_pause_go_top_menu(window)', pause)
+        direct = function(hooks, 'match_pause_go_top_menu')
+        self.assertIn('vtable[0x1cu]', direct)
+        self.assertIn('send_flow_event(window, 0, "match_topmenu")', direct)
+        self.assertIn('focus == 2u', pause)
+
     def test_live_editor_uses_native_reservations_and_not_bootstrap(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()
         child = function(hooks, 'pes_match_squad_edit_update_entry')

@@ -244,6 +244,8 @@ void pes_controller_pause_back_request(void);
 int pes_controller_custom_pause_active(void);
 int pes_controller_pause_skin_active(void);
 uint32_t pes_controller_pause_skin_focus(void);
+int pes_controller_pause_top_menu_confirm_active(void);
+uint32_t pes_controller_pause_top_menu_confirm_focus(void);
 void pes_controller_custom_pause_input(uint32_t action);
 int pes_controller_pause_camera_active(void);
 void pes_controller_pause_camera_input(uint32_t action);
