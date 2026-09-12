@@ -255,6 +255,19 @@ void pes_controller_fix_demo_skip_request(void);
 int pes_controller_fix_demo_skip_active(void);
 int pes_controller_custom_postmatch_active(void);
 void pes_controller_custom_postmatch_input(uint32_t action);
+// Half/full time result surfaces. 0 = none, 1 = half stats, 2 = half menu,
+// 3 = full stats, 4 = full menu. Cards are resolved from the match state.
+#define PES_MATCH_RESULT_SURFACE_NONE 0u
+#define PES_MATCH_RESULT_SURFACE_HALF_STATS 1u
+#define PES_MATCH_RESULT_SURFACE_HALF_MENU 2u
+#define PES_MATCH_RESULT_SURFACE_FULL_STATS 3u
+#define PES_MATCH_RESULT_SURFACE_FULL_MENU 4u
+uint32_t pes_controller_match_result_skin(void);
+uint32_t pes_controller_match_result_card_count(void);
+const char *pes_controller_match_result_card_label(uint32_t index);
+uint32_t pes_controller_match_result_focus(void);
+const char *pes_controller_match_result_heading(void);
+uint32_t pes_controller_match_result_transition(void);
 #define PES_PREMATCH_GAMEPLAN_PAGE_ROOT 0u
 #define PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE 1u
 #define PES_PREMATCH_GAMEPLAN_PAGE_FORMATION 2u

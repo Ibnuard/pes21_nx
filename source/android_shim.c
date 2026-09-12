@@ -1406,12 +1406,30 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   }
   const int back_active = back_until_ms > now_ms;
 
-  if (b_pressed && (cursor_context == PES_VIRTUAL_CURSOR_HALF_TIME ||
-                    cursor_context == PES_VIRTUAL_CURSOR_HALF_PREVIEW ||
-                    cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME))
+  const int result_context = cursor_context == PES_VIRTUAL_CURSOR_HALF_TIME ||
+                             cursor_context == PES_VIRTUAL_CURSOR_HALF_PREVIEW ||
+                             cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME;
+  // With a custom result surface up, the cards own A and the D-pad. Without one
+  // the original native footer routing stays in place.
+  const int result_skin =
+      result_context &&
+      pes_controller_match_result_skin() != PES_MATCH_RESULT_SURFACE_NONE;
+  if (b_pressed && result_context)
     pes_controller_result_input(PES_PAUSE_INPUT_BACK);
-  if (a_pressed && cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME)
+  if (a_pressed &&
+      (cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME || result_skin))
     pes_controller_result_input(PES_PAUSE_INPUT_DECIDE);
+  if (result_skin && connected) {
+    const u64 result_pressed = buttons & ~previous_buttons;
+    if (result_pressed & HidNpadButton_Left)
+      pes_controller_result_input(PES_PAUSE_INPUT_LEFT);
+    else if (result_pressed & HidNpadButton_Right)
+      pes_controller_result_input(PES_PAUSE_INPUT_RIGHT);
+    else if (result_pressed & HidNpadButton_Up)
+      pes_controller_result_input(PES_PAUSE_INPUT_UP);
+    else if (result_pressed & HidNpadButton_Down)
+      pes_controller_result_input(PES_PAUSE_INPUT_DOWN);
+  }
 
   if (cursor_held && !back_active)
     touch_state_append(desired, FAKE_POINTER_GAMEPLAN_CURSOR,

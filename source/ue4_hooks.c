@@ -481,6 +481,16 @@ static const char *main_menu_titles[4] = {
 static const char *main_menu_descriptions[4] = {
     "Local match", "Credits and support", "Native 2P Lab",
     "Graphics and FPS"};
+
+static uint32_t main_menu_native_to_visual(uint32_t native_index) {
+  static const uint8_t native_to_visual[4] = {0, 3, 1, 2};
+  return native_index < 4 ? native_to_visual[native_index] : 0;
+}
+
+static uint32_t main_menu_visual_to_native(uint32_t visual_index) {
+  static const uint8_t visual_to_native[4] = {0, 2, 3, 1};
+  return visual_index < 4 ? visual_to_native[visual_index] : 0;
+}
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
 static void (*virtual_pad_set_color)(void *movie_clip, float red, float green,
@@ -1083,6 +1093,16 @@ static _Alignas(4) uint32_t match_postmatch_custom_page;
 static _Alignas(4) uint32_t match_postmatch_custom_focus;
 static _Alignas(4) uint32_t match_postmatch_custom_action;
 static void *match_postmatch_window;
+// The half/full time result pages are drawn by the custom overlay with the
+// exact pause layout; only the card row changes with the match state.
+static _Alignas(4) uint32_t match_result_surface;
+static _Alignas(4) uint32_t match_result_surface_focus;
+static _Alignas(4) uint32_t match_result_skin_ready;
+static _Alignas(4) uint32_t match_result_final_seen;
+static _Alignas(4) uint32_t match_result_half_menu_seen;
+static _Alignas(4) uint32_t match_postmatch_from_result;
+static _Alignas(8) uint64_t match_result_action_tick;
+static _Alignas(8) uint64_t match_result_cover_tick;
 static _Alignas(8) uint64_t match_result_seen_tick;
 static _Alignas(8) uint64_t match_result_started_tick;
 static _Alignas(8) uint64_t match_gameplan_seen_tick;
@@ -1152,6 +1172,17 @@ enum {
   MATCH_POSTMATCH_PAGE_GAMEPLAN = 1,
   MATCH_POSTMATCH_PAGE_SUBSTITUTION = 2,
   MATCH_POSTMATCH_PAGE_FORMATION = 3,
+};
+
+// Every custom result flow covers both native pages: the stats overview and
+// the following menu. The stats pages carry a single continuation card, the
+// menu pages carry the cards the match state allows.
+enum {
+  MATCH_RESULT_SURFACE_NONE = 0,
+  MATCH_RESULT_SURFACE_HALF_STATS = 1,
+  MATCH_RESULT_SURFACE_HALF_MENU = 2,
+  MATCH_RESULT_SURFACE_FULL_STATS = 3,
+  MATCH_RESULT_SURFACE_FULL_MENU = 4,
 };
 
 enum {
@@ -2339,6 +2370,15 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
   live_match_single_controller = !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE);
   __atomic_store_n(&pause_stats_seen, 0, __ATOMIC_RELEASE);
+  // A fresh match restarts the half/full time flow from the first overview.
+  __atomic_store_n(&match_result_surface, MATCH_RESULT_SURFACE_NONE,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_surface_focus, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_skin_ready, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_final_seen, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_half_menu_seen, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_postmatch_from_result, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
   // Keep the VS card over native loading. Only a live cinematic/gameplay
   // callback may reveal the match, never an estimated loading duration.
   __atomic_store_n(&kickoff_loading_armed,
@@ -7778,12 +7818,13 @@ int pes_controller_menu_physical_tap(float normalized_x,
     }
     return 0;
   }
-  if (pes_main_menu_controller_active()) {
-    if (normalized_x >= 0.02f && normalized_x <= 0.98f &&
-        normalized_y >= 0.20f && normalized_y <= 0.95f) {
-      const uint32_t column = normalized_x >= 0.50f ? 1u : 0u;
-      const uint32_t row = normalized_y >= 0.70f ? 1u : 0u;
-      main_menu_apply_focus(row * 2u + column);
+    if (pes_main_menu_controller_active()) {
+      if (normalized_x >= 0.055f && normalized_x <= 0.505f &&
+          normalized_y >= 0.315f && normalized_y <= 0.835f) {
+        uint32_t row = (uint32_t)((normalized_y - 0.315f) / 0.135f);
+      if (row > 3u)
+        row = 3u;
+      main_menu_apply_focus(main_menu_visual_to_native(row));
     }
     return 1;
   }
@@ -9303,15 +9344,12 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
   }
 
   main_menu_focus_repeat_ms = now;
-  uint32_t next = main_menu_focus_index;
-  if (direction == 1 && next >= 2)
-    next -= 2;
-  else if (direction == 2 && next < 2)
-    next += 2;
-  else if (direction == 3 && (next & 1))
-    next--;
-  else if (direction == 4 && !(next & 1))
-    next++;
+  uint32_t visual = main_menu_native_to_visual(main_menu_focus_index);
+  if ((direction == 1 || direction == 3) && visual > 0u)
+    visual--;
+  else if ((direction == 2 || direction == 4) && visual < 3u)
+    visual++;
+  const uint32_t next = main_menu_visual_to_native(visual);
   if (next != main_menu_focus_index)
     main_menu_apply_focus(next);
 }
@@ -10477,6 +10515,8 @@ static void match_pause_apply_owner_side(void) {
 }
 
 static void match_result_process_controller_input(void *window);
+static void match_result_set_surface(uint32_t surface);
+static void match_result_prepare_skin(void *window);
 
 // MyClubSquadEdit is the authoritative native Game Plan frontend for both
 // pre-match and the Pause child. Keep one heartbeat on its real update method
@@ -10583,6 +10623,14 @@ void pes_match_team_stats_update_entry(void *window) {
   match_result_window = window;
   __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
+  // The same native class hosts the overview before the half-time menu and the
+  // one before the full-time menu; the half menu having been seen already is
+  // what separates the two.
+  match_result_set_surface(
+      __atomic_load_n(&match_result_half_menu_seen, __ATOMIC_ACQUIRE)
+          ? MATCH_RESULT_SURFACE_FULL_STATS
+          : MATCH_RESULT_SURFACE_HALF_STATS);
+  match_result_prepare_skin(window);
   pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_PREVIEW, 56753, 61734);
   match_result_process_controller_input(window);
 }
@@ -10832,6 +10880,15 @@ static void pause_resume_reveal(void) {
     __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
 }
 
+// Live gameplay is the authoritative end of a result cover. Dropping it here
+// rather than only on a timeout keeps the next period from starting behind it.
+static void match_result_cover_reveal(void) {
+  if (__atomic_load_n(&match_result_action_tick, __ATOMIC_ACQUIRE))
+    __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
+  if (__atomic_load_n(&match_result_cover_tick, __ATOMIC_ACQUIRE))
+    __atomic_store_n(&match_result_cover_tick, 0, __ATOMIC_RELEASE);
+}
+
 static void kickoff_loading_reveal(void) {
   if (!__atomic_exchange_n(&kickoff_loading_armed, 0, __ATOMIC_ACQ_REL)) return;
   if (__atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE) !=
@@ -10862,6 +10919,7 @@ static uint32_t pes_match_demo_skip_main(void *unit, const void *input,
   if (unit && *((uint8_t *)unit + 24)) {
     kickoff_loading_reveal();
     pause_resume_reveal();
+    match_result_cover_reveal();
   }
   return result;
 }
@@ -12558,6 +12616,110 @@ void pes_controller_result_input(uint32_t action) {
     __atomic_store_n(&match_result_input_action, action, __ATOMIC_RELEASE);
 }
 
+enum {
+  MATCH_RESULT_ACTION_NEXT = 0,
+  MATCH_RESULT_ACTION_PENALTIES = 1,
+  MATCH_RESULT_ACTION_GAME_PLAN = 2,
+  MATCH_RESULT_ACTION_BACK_TO_MENU = 3,
+};
+
+// One resolver feeds both the renderer and the input handler so a drawn card
+// can never point at a different action than the one A dispatches.
+static uint32_t match_result_action_list(uint32_t surface, uint32_t *actions) {
+  if (!actions || surface == MATCH_RESULT_SURFACE_NONE)
+    return 0;
+  const int final_result =
+      __atomic_load_n(&match_result_final_seen, __ATOMIC_ACQUIRE) != 0;
+  uint32_t home = 0, away = 0;
+  const int scores =
+      pes_controller_pause_score(0, &home) && pes_controller_pause_score(1, &away);
+  const int drawn = !scores || home == away;
+  const int extra_time =
+      __atomic_load_n(&exhibition_settings_extra_time, __ATOMIC_ACQUIRE) != 0;
+  const int penalties =
+      __atomic_load_n(&exhibition_settings_penalties, __ATOMIC_ACQUIRE) != 0;
+  const int second_period =
+      __atomic_load_n(&match_result_half_menu_seen, __ATOMIC_ACQUIRE) != 0;
+  switch (surface) {
+    case MATCH_RESULT_SURFACE_HALF_STATS:
+      actions[0] = MATCH_RESULT_ACTION_NEXT;
+      return 1;
+    case MATCH_RESULT_SURFACE_HALF_MENU:
+      actions[0] = MATCH_RESULT_ACTION_GAME_PLAN;
+      actions[1] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+      return 2;
+    case MATCH_RESULT_SURFACE_FULL_STATS:
+      // Penalties can only follow a draw once regulation and any extra time
+      // are done, so the label stays Next everywhere else.
+      actions[0] = (!final_result && second_period && drawn && !extra_time &&
+                    penalties)
+                       ? MATCH_RESULT_ACTION_PENALTIES
+                       : MATCH_RESULT_ACTION_NEXT;
+      return 1;
+    case MATCH_RESULT_SURFACE_FULL_MENU:
+      if (final_result) {
+        actions[0] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+        return 1;
+      }
+      if (drawn && extra_time) {
+        actions[0] = MATCH_RESULT_ACTION_NEXT;
+        actions[1] = MATCH_RESULT_ACTION_GAME_PLAN;
+        actions[2] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+        return 3;
+      }
+      if (drawn && penalties) {
+        actions[0] = MATCH_RESULT_ACTION_PENALTIES;
+        actions[1] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+        return 2;
+      }
+      actions[0] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+static void match_result_set_surface(uint32_t surface) {
+  if (__atomic_exchange_n(&match_result_surface, surface, __ATOMIC_ACQ_REL) ==
+      surface)
+    return;
+  __atomic_store_n(&match_result_surface_focus, 0, __ATOMIC_RELEASE);
+  // A page that has just appeared still owns its native nodes for a frame or
+  // two. Cover it with the custom transition until our alpha writes land.
+  __atomic_store_n(&match_result_cover_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
+}
+
+// The native result pages keep their background; the tile list is removed at
+// init time. Hiding the window surface as well keeps the stock footer from
+// peeking through the custom skin, and a missing helper stays fail-open.
+static void match_result_prepare_skin(void *window) {
+  if (!window || !match_node_set_alpha)
+    return;
+  int hidden = 0;
+  if (exhibition_window_get_window) {
+    void *surface = exhibition_window_get_window(window);
+    if (surface) {
+      match_node_set_alpha(surface, 0.0f);
+      hidden = 1;
+    }
+  }
+  // The stats table lives on the layout root, not the window surface, so the
+  // native rows stay visible unless the root is hidden as well.
+  if (match_setplay_get_root) {
+    void *root = match_setplay_get_root(window);
+    if (root) {
+      match_node_set_alpha(root, 0.0f);
+      hidden = 1;
+    }
+  }
+  // Fail open: with no node to hide the native page must keep working on its
+  // own rather than be covered by a custom surface that cannot replace it.
+  if (hidden)
+    __atomic_store_n(&match_result_skin_ready, 1, __ATOMIC_RELEASE);
+}
+
 static void match_result_process_controller_input(void *window) {
   const uint32_t action = __atomic_exchange_n(
       &match_result_input_action, 0, __ATOMIC_ACQ_REL);
@@ -12565,21 +12727,103 @@ static void match_result_process_controller_input(void *window) {
     return;
   const uint32_t context =
       __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
-  // The final MatchResultMainMenu intentionally has no tiles. Its remaining
-  // native Next footer was unreliable through a coordinate-only synthetic
-  // tap after the tiles were removed. Dispatch footer key 0 on the result UI
-  // thread so the stock frontend selects next/onlineNext and enters its own
-  // control-wait state exactly as a real footer tap would.
-  const int final_next = action == PES_PAUSE_INPUT_DECIDE &&
-                         context == PES_VIRTUAL_CURSOR_FULL_TIME;
-  if (action != PES_PAUSE_INPUT_BACK && !final_next)
+  if (!action)
     return;
+  const uint32_t surface =
+      __atomic_load_n(&match_result_surface, __ATOMIC_ACQUIRE);
+  uint32_t actions[4] = {0};
+  const uint32_t count = match_result_action_list(surface, actions);
+  if (!count || !__atomic_load_n(&match_result_skin_ready, __ATOMIC_ACQUIRE)) {
+    // Fail open: without a custom surface the stock behaviour is preserved.
+    const int final_next = action == PES_PAUSE_INPUT_DECIDE &&
+                           context == PES_VIRTUAL_CURSOR_FULL_TIME;
+    if (action != PES_PAUSE_INPUT_BACK && !final_next)
+      return;
+    __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_result_exit_requested, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
+                     __ATOMIC_RELEASE);
+    match_result_window = NULL;
+    if (final_next && match_result_footer_touch)
+      match_result_footer_touch(window, 0u);
+    else
+      match_result_dispatch_event(window, "match_topmenu");
+    return;
+  }
+  uint32_t focus =
+      __atomic_load_n(&match_result_surface_focus, __ATOMIC_ACQUIRE) % count;
+  if (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_UP) {
+    __atomic_store_n(&match_result_surface_focus,
+                     focus ? focus - 1u : count - 1u, __ATOMIC_RELEASE);
+    return;
+  }
+  if (action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DOWN) {
+    __atomic_store_n(&match_result_surface_focus, (focus + 1u) % count,
+                     __ATOMIC_RELEASE);
+    return;
+  }
+  uint32_t chosen;
+  if (action == PES_PAUSE_INPUT_BACK) {
+    // B is a shortcut for a card that is already on screen, never a hidden
+    // action: the stats pages only offer a continuation, so B does nothing
+    // there and their helper row advertises A alone.
+    uint32_t index = count;
+    for (uint32_t i = 0; i < count; ++i)
+      if (actions[i] == MATCH_RESULT_ACTION_BACK_TO_MENU) {
+        index = i;
+        break;
+      }
+    if (index >= count)
+      return;
+    chosen = MATCH_RESULT_ACTION_BACK_TO_MENU;
+  } else if (action == PES_PAUSE_INPUT_DECIDE) {
+    chosen = actions[focus];
+  } else {
+    return;
+  }
+  if (chosen == MATCH_RESULT_ACTION_GAME_PLAN) {
+    match_gameplan_refresh_players(1);
+    __atomic_store_n(&match_gameplan_focus, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_postmatch_custom_page,
+                     MATCH_POSTMATCH_PAGE_GAMEPLAN, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_postmatch_from_result, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_postmatch_custom_active, 1, __ATOMIC_RELEASE);
+    match_postmatch_window = window;
+    return;
+  }
+  // Continuing holds the custom cover over the native page that is about to be
+  // rebuilt. Back to Menu is excluded: the Top Menu owns its own transition and
+  // must not sit behind a match cover.
+  if (chosen != MATCH_RESULT_ACTION_BACK_TO_MENU)
+    __atomic_store_n(&match_result_action_tick, armGetSystemTick(),
+                     __ATOMIC_RELEASE);
+  if (chosen != MATCH_RESULT_ACTION_BACK_TO_MENU &&
+      surface != MATCH_RESULT_SURFACE_FULL_MENU) {
+    // PadEventFooterTouch was resolved on MatchResultMainMenu; the team-stats
+    // and half-time windows are different classes and must not be passed to
+    // it. Their native Next footer is reachable under the cursor, so the
+    // synthetic tap the input thread already issues for A stays the path here
+    // and only the cover is ours.
+    __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+    return;
+  }
   __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_exit_requested, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_skin_ready, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_surface, MATCH_RESULT_SURFACE_NONE,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_surface_focus, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   match_result_window = NULL;
-  if (final_next && match_result_footer_touch)
+  if (chosen == MATCH_RESULT_ACTION_BACK_TO_MENU) {
+    match_result_dispatch_event(window, "match_topmenu");
+    return;
+  }
+  // Next and Penalties on the final menu are the same native continuation: the
+  // tile list is removed, so footer key 0 is the proven path that makes the
+  // stock frontend select next/onlineNext and enter its control-wait state.
+  if (match_result_footer_touch)
     match_result_footer_touch(window, 0u);
   else
     match_result_dispatch_event(window, "match_topmenu");
@@ -12588,6 +12832,88 @@ static void match_result_process_controller_input(void *window) {
 int pes_controller_custom_postmatch_active(void) {
   return __atomic_load_n(&match_postmatch_custom_active,
                          __ATOMIC_ACQUIRE) != 0;
+}
+
+uint32_t pes_controller_match_result_skin(void) {
+  if (__atomic_load_n(&match_postmatch_custom_active, __ATOMIC_ACQUIRE))
+    return MATCH_RESULT_SURFACE_NONE;
+  if (!__atomic_load_n(&match_result_skin_ready, __ATOMIC_ACQUIRE))
+    return MATCH_RESULT_SURFACE_NONE;
+  const uint32_t surface =
+      __atomic_load_n(&match_result_surface, __ATOMIC_ACQUIRE);
+  if (surface == MATCH_RESULT_SURFACE_NONE)
+    return MATCH_RESULT_SURFACE_NONE;
+  // The result pages update every frame, so a stale heartbeat means the page is
+  // gone and the overlay must stop drawing over gameplay.
+  const uint64_t seen =
+      __atomic_load_n(&match_result_seen_tick, __ATOMIC_ACQUIRE);
+  if (!seen || armTicksToNs(armGetSystemTick() - seen) >= 250000000ULL)
+    return MATCH_RESULT_SURFACE_NONE;
+  return surface;
+}
+
+uint32_t pes_controller_match_result_card_count(void) {
+  uint32_t actions[4] = {0};
+  return match_result_action_list(pes_controller_match_result_skin(), actions);
+}
+
+const char *pes_controller_match_result_card_label(uint32_t index) {
+  uint32_t actions[4] = {0};
+  const uint32_t count =
+      match_result_action_list(pes_controller_match_result_skin(), actions);
+  if (index >= count)
+    return "";
+  switch (actions[index]) {
+    case MATCH_RESULT_ACTION_NEXT:
+      return "NEXT";
+    case MATCH_RESULT_ACTION_PENALTIES:
+      return "PENALTIES";
+    case MATCH_RESULT_ACTION_GAME_PLAN:
+      return "GAME PLAN";
+    case MATCH_RESULT_ACTION_BACK_TO_MENU:
+      return "BACK TO MENU";
+    default:
+      return "";
+  }
+}
+
+uint32_t pes_controller_match_result_focus(void) {
+  const uint32_t count = pes_controller_match_result_card_count();
+  if (!count)
+    return 0;
+  return __atomic_load_n(&match_result_surface_focus, __ATOMIC_ACQUIRE) % count;
+}
+
+// Non-zero while the custom background plus spinner should own the frame: the
+// native result page is either still building its own nodes or being torn down
+// after a continuation, and in both windows its stats layout can flash through.
+uint32_t pes_controller_match_result_transition(void) {
+  const uint64_t now = armGetSystemTick();
+  const uint64_t acted =
+      __atomic_load_n(&match_result_action_tick, __ATOMIC_ACQUIRE);
+  if (acted && armTicksToNs(now - acted) < 3000000000ULL)
+    return 1;
+  if (__atomic_load_n(&match_result_surface, __ATOMIC_ACQUIRE) ==
+      MATCH_RESULT_SURFACE_NONE)
+    return 0;
+  const uint64_t cover =
+      __atomic_load_n(&match_result_cover_tick, __ATOMIC_ACQUIRE);
+  if (!cover)
+    return 0;
+  return armTicksToNs(now - cover) < 450000000ULL ? 1u : 0u;
+}
+
+const char *pes_controller_match_result_heading(void) {
+  switch (pes_controller_match_result_skin()) {
+    case MATCH_RESULT_SURFACE_HALF_STATS:
+    case MATCH_RESULT_SURFACE_HALF_MENU:
+      return "HALF TIME";
+    case MATCH_RESULT_SURFACE_FULL_STATS:
+    case MATCH_RESULT_SURFACE_FULL_MENU:
+      return "FULL TIME";
+    default:
+      return "";
+  }
 }
 
 void pes_controller_custom_postmatch_input(uint32_t action) {
@@ -12635,6 +12961,18 @@ static void match_postmatch_process_input(void *window) {
       match_gameplan_focus = (focus + 1) % 3;
     } else if (action == PES_PAUSE_INPUT_BACK ||
                (action == PES_PAUSE_INPUT_DECIDE && focus == 2)) {
+      if (__atomic_exchange_n(&match_postmatch_from_result, 0,
+                              __ATOMIC_ACQ_REL)) {
+        // Game Plan was opened from a custom result menu, so leaving it goes
+        // back to that menu instead of the standalone postmatch root.
+        __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&match_postmatch_custom_action, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&match_postmatch_custom_page,
+                         MATCH_POSTMATCH_PAGE_ROOT, __ATOMIC_RELEASE);
+        __atomic_store_n(&match_result_surface_focus, 0, __ATOMIC_RELEASE);
+        match_postmatch_window = NULL;
+        return;
+      }
       __atomic_store_n(&match_postmatch_custom_page,
                        MATCH_POSTMATCH_PAGE_ROOT, __ATOMIC_RELEASE);
       __atomic_store_n(&match_postmatch_custom_focus, 0,
@@ -12704,8 +13042,13 @@ static void pes_match_result_update(void *window) {
     // MatchResultMainMenu is the second/final result page. Refresh FULL_TIME
     // unconditionally here; checking the previous cursor context made a
     // single stale gameplay poll permanently disable A and its helper.
-    if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE))
+    if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE)) {
+      if (!pes_controller_custom_postmatch_active()) {
+        match_result_set_surface(MATCH_RESULT_SURFACE_FULL_MENU);
+        match_result_prepare_skin(window);
+      }
       pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 56753, 61734);
+    }
   }
   match_result_process_controller_input(window);
   if (window && pes_controller_custom_postmatch_active()) {
@@ -12900,16 +13243,16 @@ uintptr_t pes_match_result_full_entry(void *result, const char *name,
     if (listener)
       memcpy(&final_result, (unsigned char *)listener + 0x18ff3,
              sizeof(final_result));
+    __atomic_store_n(&match_result_final_seen, final_result ? 1u : 0u,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+    match_result_set_surface(MATCH_RESULT_SURFACE_FULL_MENU);
+    match_result_prepare_skin(result);
     if (final_result) {
-      // Final result keeps the native background but no longer owns a custom
-      // post-match frontend. The result tile list is removed at init time;
-      // B still returns directly to the Top Menu through result input.
-      __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
       // Keep the native bottom-right Next footer reachable with A while the
       // result tile list itself stays hidden. B is handled as Top Menu.
       pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 56753, 61734);
     } else {
-      __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
       pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 32768, 32768);
     }
   }
@@ -12921,9 +13264,15 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
   (void)name;
   (void)modal;
   if (result) {
+    __atomic_store_n(&match_result_exit_requested, 0, __ATOMIC_RELEASE);
     match_result_window = result;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
+    // Reaching the half-time menu is the marker that the next overview and
+    // menu belong to the full-time flow.
+    __atomic_store_n(&match_result_half_menu_seen, 1, __ATOMIC_RELEASE);
+    match_result_set_surface(MATCH_RESULT_SURFACE_HALF_MENU);
+    match_result_prepare_skin(result);
     pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_TIME, 32768, 32768);
   }
   return match_result_half_resume;
@@ -12934,6 +13283,8 @@ uintptr_t pes_match_result_half_update_entry(void *result) {
     match_result_window = result;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
+    match_result_set_surface(MATCH_RESULT_SURFACE_HALF_MENU);
+    match_result_prepare_skin(result);
     pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_TIME, 32768, 32768);
     match_result_process_controller_input(result);
   }
