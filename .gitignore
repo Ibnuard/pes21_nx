@@ -32,6 +32,7 @@
 !data/silent.bin
 !data/badge_atlas.bin
 !data/main_menu_*.bin
+!data/switch_button_*.bin
 /assets/
 /Download/
 /PesMobile/

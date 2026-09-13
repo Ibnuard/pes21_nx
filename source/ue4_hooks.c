@@ -294,6 +294,11 @@ static uint32_t (*match_pause_camera_update_original)(void *window,
 static void (*match_result_exec_event_decide)(void *window,
                                                const void *event_name);
 static void (*match_result_footer_touch)(void *window, uint32_t footer_key);
+static void (*match_stats_footer_touch)(void *window, uint32_t footer_key);
+static int (*match_stats_init_original)(void *window);
+static void (*match_half_exec_event_decide)(void *window, const void *name);
+static void (*match_result_control_wait)(void *window, int waiting);
+static uint32_t match_result_extra_time_started;
 static void (*match_result_update_original)(void *window);
 static void **match_listener_instance;
 static uint32_t (*match_ball_position_broadcast_original)(
@@ -400,6 +405,8 @@ static uint32_t (*match_cursor_name_get_position_original)(
     void *model, uint32_t index, Match2DVector3 *position);
 static void (*match_model_project_pos_3d_to_screen)(
     void *model, Match2DVector3 position, float *screen_x, float *screen_y);
+static float (*match_projection_display_width)(void);
+static float (*match_projection_display_height)(void);
 static void *(*exhibition_holder_get_duplicate)(void *holder,
                                                  uint32_t index);
 static void (*exhibition_node_set_visible)(void *node, uint32_t visible,
@@ -1035,6 +1042,7 @@ static _Alignas(8) uint64_t match_goal_demo_pad_seen_tick;
 static _Alignas(4) uint32_t match_goal_demo_player_goal;
 static _Alignas(4) uint32_t match_goal_demo_owner_known;
 static _Alignas(4) uint32_t match_goal_demo_helper_consumed;
+static _Alignas(4) uint32_t match_goal_demo_action_request;
 // Generic cinematic detector.  Replay/GoalDemo transition hooks are kept
 // disabled because their object layouts differ between mobile builds; this
 // state is inferred from the safe mobile-control heartbeat instead.
@@ -1079,6 +1087,142 @@ static uint32_t match_gameplan_bench_count;
 static _Alignas(8) uint64_t match_pause_camera_seen_tick;
 static _Alignas(4) uint32_t match_pause_camera_action;
 static void *match_pause_camera_window;
+static uint32_t pause_settings_focus;
+static uint32_t pause_settings_stamina = 1, pause_settings_chant = 1, pause_settings_commentary = 1;
+static void (*pause_settings_volume)(uint32_t kind, float volume);
+static uint32_t (*pause_stamina_disp_original)(void *model, uint32_t index);
+static uint32_t pause_stamina_disp(void *model, uint32_t index) {
+  return __atomic_load_n(&pause_settings_stamina, __ATOMIC_ACQUIRE)
+      ? pause_stamina_disp_original(model, index) : 0;
+}
+// ModelStaminaGauge owns four Model2DData instances. GetColor/ExecOther in the
+// shipped binary establish the pairing unambiguously: indices 0/1 are the
+// coloured, stamina-powered fills and indices 2/3 are the constant black
+// backing plates. Keep the native transform and fill renderer completely
+// untouched; only suppress Draw for the two backing-model pointers. This is
+// also deliberately free of a swap-time replacement, avoiding the one-frame
+// phase difference that made the former custom bar shake above moving players.
+static void (*pause_stamina_draw_original)(void *data, void *command);
+static void *(*pause_stamina_get_model_original)(void *model,
+                                                  uint32_t index);
+static _Alignas(8) uintptr_t pause_stamina_model_by_index[4];
+static void (*pause_stamina_canvas_draw_item_original)(void *canvas,
+                                                        void *item);
+static uintptr_t pause_stamina_canvas_fill_return;
+static uintptr_t pause_stamina_canvas_backing_return;
+#if defined(DEBUG_LOG) && DEBUG_LOG
+static _Alignas(4) uint32_t pause_stamina_plate_hidden_mask;
+static _Alignas(4) uint32_t pause_stamina_fill_expand_samples;
+#endif
+
+uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
+                                     uint32_t capacity) {
+  (void)bars;
+  (void)capacity;
+  // Retained as a compatibility ABI for older build products. Native stamina
+  // is now the only visible implementation.
+  return 0;
+}
+
+static void *pause_stamina_get_model(void *model, uint32_t index) {
+  void *data = pause_stamina_get_model_original(model, index);
+  if (index < 4u)
+    __atomic_store_n(&pause_stamina_model_by_index[index],
+                     (uintptr_t)data, __ATOMIC_RELEASE);
+  return data;
+}
+
+// Inspect the final native triangles without changing their geometry. A thin
+// visible line does not prove the submitted fill is thin: the stamina renderer
+// also submits an internal black pass, separate from ModelStaminaGauge 2/3.
+static int pause_stamina_canvas_bounds(void *item, float bounds[4]) {
+  if (!item)
+    return 0;
+  void *triangles = NULL;
+  int32_t count = 0;
+  memcpy(&triangles, (char *)item + 0x50, sizeof(triangles));
+  memcpy(&count, (char *)item + 0x58, sizeof(count));
+  if (!triangles || count <= 0 || count > 64)
+    return 0;
+
+  float min_x = 1.0e30f, max_x = -1.0e30f;
+  float min_y = 1.0e30f, max_y = -1.0e30f;
+  for (int32_t triangle = 0; triangle < count; ++triangle) {
+    for (uint32_t vertex = 0; vertex < 3; ++vertex) {
+      const char *address = (const char *)triangles +
+                            triangle * 96 + vertex * 32;
+      float x = 0.0f, y = 0.0f;
+      memcpy(&x, address, sizeof(x));
+      memcpy(&y, address + 4, sizeof(y));
+      if (!isfinite(x) || !isfinite(y) || fabsf(x) > 8192.0f ||
+          fabsf(y) > 8192.0f)
+        return 0;
+      if (x < min_x) min_x = x;
+      if (x > max_x) max_x = x;
+      if (y < min_y) min_y = y;
+      if (y > max_y) max_y = y;
+    }
+  }
+
+  bounds[0] = min_x;
+  bounds[1] = min_y;
+  bounds[2] = max_x;
+  bounds[3] = max_y;
+  return 1;
+}
+
+static void pause_stamina_canvas_draw_item(void *canvas, void *item) {
+  const uintptr_t caller = (uintptr_t)__builtin_return_address(0);
+  const int backing = caller == pause_stamina_canvas_backing_return;
+  if (backing || caller == pause_stamina_canvas_fill_return) {
+#if defined(DEBUG_LOG) && DEBUG_LOG
+    if (__atomic_fetch_add(&pause_stamina_fill_expand_samples, 1u,
+                           __ATOMIC_RELAXED) < 32u) {
+      float bounds[4] = {0};
+      const int valid = pause_stamina_canvas_bounds(item, bounds);
+      debugPrintf("STAMINA canvas %s valid=%d bounds=%.2f,%.2f..%.2f,%.2f\n",
+                  backing ? "backing suppressed" : "fill native", valid,
+                  bounds[0], bounds[1], bounds[2], bounds[3]);
+    }
+#endif
+    // This is the black pass inside IsStaminaGauge, not the separate 2/3
+    // models already suppressed above. Test occlusion without modifying the
+    // fill, matrix, depth state, texture or any shared model vertex data.
+    if (backing)
+      return;
+  }
+  pause_stamina_canvas_draw_item_original(canvas, item);
+}
+
+static void pause_stamina_draw(void *data, void *command) {
+  if (!data) {
+    pause_stamina_draw_original(data, command);
+    return;
+  }
+  for (uint32_t index = 2; index < 4; ++index) {
+    if ((uintptr_t)data != __atomic_load_n(&pause_stamina_model_by_index[index],
+                                           __ATOMIC_ACQUIRE))
+      continue;
+#if defined(DEBUG_LOG) && DEBUG_LOG
+    const uint32_t bit = 1u << index;
+    const uint32_t previous = __atomic_fetch_or(
+        &pause_stamina_plate_hidden_mask, bit, __ATOMIC_RELAXED);
+    if (!(previous & bit)) {
+      debugPrintf("STAMINA native backing hidden index=%u data=%p; "
+                  "fill indices 0/1 remain native\n", index, data);
+    }
+#endif
+    // Do not mutate the model or shared render state. Merely omit this one
+    // backing draw, then let the native fill at indices 0/1 render normally.
+    return;
+  }
+  pause_stamina_draw_original(data, command);
+}
+uint32_t pes_controller_pause_settings_focus(void) { return pause_settings_focus; }
+const char *pes_controller_pause_settings_label(uint32_t index) {
+  static const char *const labels[] = {"CAMERA", "SHOW STAMINA", "CHANT SFX", "COMMENTARY"};
+  return index < 4 ? labels[index] : "";
+}
 static _Alignas(4) uint32_t match_gameplan_pause_route;
 static _Alignas(4) uint32_t match_result_input_action;
 static _Alignas(4) uint32_t match_result_exit_requested;
@@ -1100,8 +1244,10 @@ static _Alignas(4) uint32_t match_result_surface_focus;
 static _Alignas(4) uint32_t match_result_skin_ready;
 static _Alignas(4) uint32_t match_result_final_seen;
 static _Alignas(4) uint32_t match_result_half_menu_seen;
+static _Alignas(4) uint32_t match_result_page;
 static _Alignas(4) uint32_t match_postmatch_from_result;
 static _Alignas(8) uint64_t match_result_action_tick;
+static _Alignas(8) uint64_t match_result_handoff_tick;
 static _Alignas(8) uint64_t match_result_cover_tick;
 static _Alignas(8) uint64_t match_result_seen_tick;
 static _Alignas(8) uint64_t match_result_started_tick;
@@ -1185,6 +1331,85 @@ enum {
   MATCH_RESULT_SURFACE_FULL_MENU = 4,
 };
 
+// Which native class is on screen. The drawn surface answers "what does this
+// break look like"; the page answers "whose methods may be called", and the
+// two no longer agree once an intermission turns out to be full time.
+enum {
+  MATCH_RESULT_PAGE_NONE = 0,
+  MATCH_RESULT_PAGE_STATS = 1,
+  MATCH_RESULT_PAGE_INTERVAL = 2,
+  MATCH_RESULT_PAGE_FINAL = 3,
+};
+
+// match::MatchPhase, as named by match::registry::GetMatchPhaseString.
+enum {
+  MATCH_PHASE_HALFTIME = 2,
+  MATCH_PHASE_EX_TIME = 4,
+  MATCH_PHASE_EX_INTERVAL = 6,
+  MATCH_PHASE_PREV_PKMATCH = 8,
+  MATCH_PHASE_PKMATCH = 9,
+  MATCH_PHASE_END = 10,
+  MATCH_PHASE_INVALID = 0xffffffffu,
+};
+
+// match2D::Utility::Function::GetPhaseStartMinute walks exactly this chain:
+// GlobalRegistry::s_pInstance -> MatchInfo at +0x4f0 -> MatchPhase at +0x1168.
+// Every link is checked because the registry is torn down between matches.
+static uint32_t match_result_current_phase(void) {
+  if (!match_global_registry_get_instance)
+    return MATCH_PHASE_INVALID;
+  const void *registry = match_global_registry_get_instance();
+  if (!registry)
+    return MATCH_PHASE_INVALID;
+  const void *info = NULL;
+  memcpy(&info, (const uint8_t *)registry + 0x4f0, sizeof(info));
+  if (!info)
+    return MATCH_PHASE_INVALID;
+  uint32_t phase = MATCH_PHASE_INVALID;
+  memcpy(&phase, (const uint8_t *)info + 0x1168, sizeof(phase));
+  return phase > MATCH_PHASE_END ? MATCH_PHASE_INVALID : phase;
+}
+
+// MatchResultTeamStats and MatchResultMainMenuHalfTime are both reused for
+// every break in play. Only HALFTIME and EX_INTERVAL resume the same segment;
+// EX_TIME, PREV_PKMATCH and END are full-time surfaces that either offer a
+// continuation or end the match. Without a readable phase this falls back to
+// the "half-time menu already seen" latch that shipped before.
+static uint32_t match_result_interval_surface(uint32_t half, uint32_t full) {
+  const uint32_t phase = match_result_current_phase();
+  if (phase == MATCH_PHASE_INVALID)
+    return __atomic_load_n(&match_result_half_menu_seen, __ATOMIC_ACQUIRE)
+               ? full : half;
+  return phase == MATCH_PHASE_HALFTIME || phase == MATCH_PHASE_EX_INTERVAL
+             ? half : full;
+}
+
+// True from the moment a card is confirmed until the next page announces
+// itself. A page that has been told to continue or to leave is already being
+// torn down, so re-arming its surface, skin or cursor fights the native
+// transition and can leave the flow stranded on the match scene. The window is
+// bounded so a page that never announces itself cannot disable the skin for
+// good; it self-heals into the previous always-re-arm behaviour.
+static int match_result_handoff_active(void) {
+  const uint64_t tick =
+      __atomic_load_n(&match_result_handoff_tick, __ATOMIC_ACQUIRE);
+  if (!tick)
+    return 0;
+  if (armTicksToNs(armGetSystemTick() - tick) < 3000000000ULL)
+    return 1;
+  __atomic_store_n(&match_result_handoff_tick, 0, __ATOMIC_RELEASE);
+  return 0;
+}
+
+// A freshly constructed result page owns the surface again.
+static void match_result_clear_handoff(void) {
+  __atomic_store_n(&match_result_handoff_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_exit_requested, 0, __ATOMIC_RELEASE);
+  // Readiness belongs to the native page that produced it. The next result
+  // page must hide its own nodes before the transition can be uncovered.
+  __atomic_store_n(&match_result_skin_ready, 0, __ATOMIC_RELEASE);
+}
+
 enum {
   MAIN_MENU_INFO_CLOSED = 0,
   MAIN_MENU_INFO_CREDITS = 1,
@@ -1245,6 +1470,7 @@ static void exhibition_set_matchmaking_visible(void *window,
 static uint64_t exhibition_search_focus_now_ms(void);
 static void exhibition_select_team(uint32_t side, uint32_t team_id);
 static void exhibition_adjust_match_setting(int direction);
+static uint32_t exhibition_match_settings_first_index(void);
 static uint64_t main_menu_focus_now_ms(void);
 static void pes_exhibition_strategy_footer(void *window,
                                            uint32_t footer_key);
@@ -1994,8 +2220,9 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
     return;
 
   if (__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE)) {
+    const uint32_t first_index = exhibition_match_settings_first_index();
     if (pressed & (1u << 10)) {
-      if (exhibition_popup_focus_index > 0)
+      if (exhibition_popup_focus_index > first_index)
         exhibition_popup_focus_index--;
     } else if (pressed & (1u << 11)) {
       if (exhibition_popup_focus_index + 1 < PES_MATCH_SETTINGS_COUNT)
@@ -2363,6 +2590,7 @@ static void exhibition_publish_prepared_matchplan(void) {
 }
 
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
+  match_result_extra_time_started = 0;
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
   __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
@@ -2377,6 +2605,10 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   __atomic_store_n(&match_result_skin_ready, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_final_seen, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_half_menu_seen, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_NONE,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_handoff_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_exit_requested, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_postmatch_from_result, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
   // Keep the VS card over native loading. Only a live cinematic/gameplay
@@ -2385,6 +2617,11 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
       __atomic_load_n(&main_menu_2p_transition_active, __ATOMIC_ACQUIRE) &&
       __atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE) ==
           MAIN_MENU_2P_TRANSITION_VS, __ATOMIC_RELEASE);
+  // MatchSetup starts constructing native tips/cards but is not proof that a
+  // cinematic or gameplay frame is ready.  Keep the custom VS surface opaque
+  // while those pages load; pes_prematch_card_need_disp or the first live
+  // ScreenTap heartbeat is the authoritative reveal point.  Clearing the
+  // transition here leaked the native "Next Player Indicator" loading card.
   // MatchSetup reads both tmpdb::Match and matchPlan::Data immediately after
   // this hook. Publish the final two-sided squad/tactics state first, then
   // reassert rules and kits that stock setup helpers may have normalized.
@@ -2417,7 +2654,7 @@ static int exhibition_refresh_match_settings(void) {
                             : 10;
   if (time_zone > 1)
     time_zone = 0;
-  if (match_time < 5 || match_time > 10)
+  if (match_time != 3 && (match_time < 5 || match_time > 10))
     match_time = 10;
 
   exhibition_settings_match = match;
@@ -2471,9 +2708,9 @@ static void exhibition_adjust_match_setting(int direction) {
     value = __atomic_load_n(&exhibition_settings_match_time,
                             __ATOMIC_ACQUIRE);
     if (direction < 0)
-      value = value <= 5 ? 10 : value - 1;
+      value = value <= 3 ? 10 : value <= 5 ? 3 : value - 1;
     else
-      value = value >= 10 ? 5 : value + 1;
+      value = value >= 10 ? 3 : value < 5 ? 5 : value + 1;
     if (exhibition_match_set_match_time)
       exhibition_match_set_match_time(match, value);
     __atomic_store_n(&exhibition_settings_match_time, value,
@@ -2492,16 +2729,21 @@ static void exhibition_adjust_match_setting(int direction) {
       exhibition_match_set_pk(match, value);
     __atomic_store_n(&exhibition_settings_penalties, value,
                      __ATOMIC_RELEASE);
-  } else if (focus == 4) {
-    value = !__atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE);
-    __atomic_store_n(&config.player_cursor_show, value, __ATOMIC_RELEASE);
-    write_config(CONFIG_NAME);
   } else {
     return;
   }
 
   debugPrintf("exhibition: custom Match Settings row=%u value=%u\n", focus,
               value);
+}
+
+static uint32_t exhibition_match_settings_first_index(void) {
+  // In the two-player pre-match hub there is no CPU opponent, so the native
+  // COM-level row is omitted. Keep the backing state indexed as 1..3; the
+  // public overlay API below translates it to three compact visible rows.
+  return __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE)
+             ? 1u
+             : 0u;
 }
 
 static uint32_t pes_exhibition_is_test_match(void) {
@@ -4578,7 +4820,8 @@ void pes_exhibition_search_pad_event(uint32_t buttons,
       return;
     }
     if (settings_popup) {
-      if (direction == 1 && exhibition_popup_focus_index > 0)
+      const uint32_t first_index = exhibition_match_settings_first_index();
+      if (direction == 1 && exhibition_popup_focus_index > first_index)
         exhibition_popup_focus_index--;
       else if (direction == 2 && exhibition_popup_focus_index + 1 < PES_MATCH_SETTINGS_COUNT)
         exhibition_popup_focus_index++;
@@ -5112,29 +5355,30 @@ int pes_controller_custom_match_settings_active(void) {
 }
 
 uint32_t pes_controller_custom_match_settings_focus(void) {
-  return exhibition_popup_focus_index < PES_MATCH_SETTINGS_COUNT ? exhibition_popup_focus_index : 0;
+  const uint32_t first_index = exhibition_match_settings_first_index();
+  return exhibition_popup_focus_index >= first_index &&
+                 exhibition_popup_focus_index < PES_MATCH_SETTINGS_COUNT
+             ? exhibition_popup_focus_index - first_index
+             : 0;
+}
+
+uint32_t pes_controller_custom_match_settings_count(void) {
+  return PES_MATCH_SETTINGS_COUNT - exhibition_match_settings_first_index();
 }
 
 const char *pes_controller_custom_match_settings_label(uint32_t index) {
   static const char *const labels[] = {
-      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES", "PLAYER CURSOR"};
-  static const char *const hub_labels[] = {
-      "COM LEVEL", "MATCH TIME", "OVERTIME", "PENALTIES", "PLAYER CURSOR"};
-  if (__atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE))
-    return index < PES_MATCH_SETTINGS_COUNT ? hub_labels[index] : "";
-  return index < PES_MATCH_SETTINGS_COUNT ? labels[index] : "";
+      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES"};
+  const uint32_t native_index =
+      index + exhibition_match_settings_first_index();
+  return native_index < PES_MATCH_SETTINGS_COUNT ? labels[native_index] : "";
 }
 
 const char *pes_controller_custom_match_settings_value(uint32_t index) {
+  // Add the diagnostic duration without replacing any stock option.
   static const char *const match_time_labels[] = {
       "5 MIN", "6 MIN", "7 MIN", "8 MIN", "9 MIN", "10 MIN"};
-  if (index == 0 &&
-      __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE)) {
-    const uint32_t level = __atomic_load_n(&exhibition_cpu_level_value,
-                                           __ATOMIC_ACQUIRE);
-    return level < EXHIBITION_CPU_LEVEL_COUNT ? exhibition_cpu_level_labels[level]
-                                               : exhibition_cpu_level_labels[2];
-  }
+  index += exhibition_match_settings_first_index();
   if (index == 0)
     return __atomic_load_n(&exhibition_settings_time_zone,
                            __ATOMIC_ACQUIRE)
@@ -5143,6 +5387,7 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
   if (index == 1) {
     const uint32_t minutes = __atomic_load_n(&exhibition_settings_match_time,
                                              __ATOMIC_ACQUIRE);
+    if (minutes == 3) return "3 MIN";
     return minutes >= 5 && minutes <= 10 ? match_time_labels[minutes - 5]
                                          : "10 MIN";
   }
@@ -5156,9 +5401,6 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
                            __ATOMIC_ACQUIRE)
                ? "ON"
                : "OFF";
-  if (index == 4)
-    return __atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE)
-               ? "SHOW" : "HIDE";
   return "";
 }
 
@@ -7259,6 +7501,10 @@ uint32_t pes_controller_custom_prematch_gameplan_substitute_focus(
              : exhibition_gameplan_sides[pad].field_focus;
 }
 
+uint32_t pes_controller_custom_prematch_gameplan_drag_state(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].position_dragging : 0;
+}
+
 int pes_controller_custom_prematch_gameplan_substitute_selected(
     uint32_t pad, uint32_t area, uint32_t index) {
   return pad < 2 && exhibition_gameplan_sides[pad].selected_area == area &&
@@ -7684,6 +7930,9 @@ int pes_controller_menu_scroll_request(void) {
                              __ATOMIC_ACQ_REL);
 }
 
+static void main_menu_activate_choice(uint32_t choice);
+static _Alignas(4) uint32_t main_menu_confirm_pending;
+
 void pes_controller_menu_tap(float normalized_x, float normalized_y) {
   if (pes_controller_start_prompt(NULL, NULL)) {
     // The first A is the start-screen confirmation. Clear this one-shot
@@ -7703,6 +7952,11 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
     // The A release that opened Settings must not immediately flip Graphics.
     if (!opened || now < opened || now - opened >= 140)
       main_menu_video_adjust(2);
+    return;
+  }
+  if (pes_main_menu_controller_active()) {
+    __atomic_store_n(&main_menu_confirm_pending,
+                     pes_main_menu_focus_index() + 1u, __ATOMIC_RELEASE);
     return;
   }
   if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
@@ -7826,7 +8080,9 @@ int pes_controller_menu_physical_tap(float normalized_x,
         row = 3u;
       main_menu_apply_focus(main_menu_visual_to_native(row));
     }
-    return 1;
+    // Custom tiles consume touch locally. Never replay these coordinates
+    // against the unrelated native tile grid or an invisible native dialog.
+    return 0;
   }
   if (__atomic_load_n(&exhibition_nested_popup_open, __ATOMIC_ACQUIRE)) {
     // Keep the custom focus aligned with a physical row selection while the
@@ -7919,6 +8175,8 @@ int pes_controller_menu_physical_tap(float normalized_x,
 
   const int hub_mode =
       __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE) != 0;
+  const uint32_t settings_count =
+      pes_controller_custom_match_settings_count();
   const float settings_row_y =
       hub_mode ? PES_HUB_MATCH_SETTINGS_ROW_Y : PES_MATCH_SETTINGS_ROW_Y;
   const float settings_row_step = hub_mode
@@ -7934,14 +8192,15 @@ int pes_controller_menu_physical_tap(float normalized_x,
   if (normalized_x >= 0.18f && normalized_x <= 0.82f &&
       normalized_y >= settings_row_y &&
       normalized_y < settings_row_y +
-                          settings_row_step * PES_MATCH_SETTINGS_COUNT) {
+                          settings_row_step * settings_count) {
     int index = (int)floorf((normalized_y - settings_row_y) /
                             settings_row_step);
     if (index < 0)
       index = 0;
-    if (index >= (int)PES_MATCH_SETTINGS_COUNT)
-      index = (int)PES_MATCH_SETTINGS_COUNT - 1;
-    exhibition_popup_focus_index = (uint32_t)index;
+    if (index >= (int)settings_count)
+      index = (int)settings_count - 1;
+    exhibition_popup_focus_index =
+        (uint32_t)index + exhibition_match_settings_first_index();
     exhibition_popup_focus_direction = 0;
     pes_controller_menu_tap(normalized_x, normalized_y);
   }
@@ -8662,7 +8921,7 @@ static void exhibition_open_match_settings(void *window) {
   __atomic_store_n(&exhibition_nested_popup_kind, EXHIBITION_NESTED_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_nested_back_pending, 0, __ATOMIC_RELEASE);
-  exhibition_popup_focus_index = 0;
+  exhibition_popup_focus_index = exhibition_match_settings_first_index();
   exhibition_popup_focus_direction = 0;
   __atomic_store_n(&exhibition_custom_popup_opened_ms,
                    exhibition_search_focus_now_ms(), __ATOMIC_RELEASE);
@@ -9472,18 +9731,25 @@ uintptr_t pes_main_menu_selected_entry(void *window,
 
   uint32_t choice = UINT32_MAX;
   memcpy(&choice, (const unsigned char *)touch_info + 8, sizeof(choice));
+  if (choice >= 4)
+    return main_menu_selected_resume;
+  main_menu_activate_choice(choice);
+  return 0;
+}
+
+static void main_menu_activate_choice(uint32_t choice) {
   if (choice == 0) {
     // Exhibition now shares the two-panel selector with the local 2P flow,
     // but stages HOME then COM on one controller before entering the hub.
     __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 1,
                      __ATOMIC_RELEASE);
     main_menu_2p_team_selector_open();
-    return 0;
+    return;
   }
 
   if (choice == 1) {
     main_menu_info_open(MAIN_MENU_INFO_CREDITS);
-    return 0;
+    return;
   }
 
   if (choice == 2) {
@@ -9492,7 +9758,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
       // leaves the four-tile Match page focused on 2P.  Do not arm a partial
       // session and do not fall back to the old custom/touch-only popup.
       debugPrintf("native 2P lab: not armed; two controller slots required\n");
-      return 0;
+      return;
     }
     __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 0,
                      __ATOMIC_RELEASE);
@@ -9503,7 +9769,7 @@ uintptr_t pes_main_menu_selected_entry(void *window,
     if (!__atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE))
       __atomic_store_n(&exhibition_away_team_id, 114, __ATOMIC_RELEASE);
     main_menu_2p_team_selector_open();
-    return 0;
+    return;
   }
 
   if (choice == 3) {
@@ -9511,9 +9777,8 @@ uintptr_t pes_main_menu_selected_entry(void *window,
     __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                      __ATOMIC_RELEASE);
-    return 0;
+    return;
   }
-  return main_menu_selected_resume;
 }
 
 static void *exhibition_find_holder_node(void *holder, const char *name) {
@@ -10617,21 +10882,39 @@ int pes_controller_gameplan_pause_route(void) {
 // The first half-time page is MatchResultTeamStats. It precedes
 // MatchResultMainMenuHalfTime, so it needs its own cursor lifetime even though
 // both pages use the same bottom-right native Next footer.
+static int pes_match_stats_init(void *window) {
+  match_result_clear_handoff();
+  __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_STATS,
+                   __ATOMIC_RELEASE);
+  match_result_set_surface(match_result_interval_surface(
+      MATCH_RESULT_SURFACE_HALF_STATS, MATCH_RESULT_SURFACE_FULL_STATS));
+  __atomic_store_n(&match_result_seen_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+  const int ready = match_stats_init_original(window);
+  // InitMobile runs before the first displayed frame, unlike Update. Keep
+  // the cover while font/layout initialization retries, then hide native nodes.
+  match_result_prepare_skin(window);
+  if (!ready)
+    __atomic_store_n(&match_result_cover_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+  return ready;
+}
+
 void pes_match_team_stats_update_entry(void *window) {
   if (!window)
     return;
-  match_result_window = window;
-  __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
-                   __ATOMIC_RELEASE);
-  // The same native class hosts the overview before the half-time menu and the
-  // one before the full-time menu; the half menu having been seen already is
-  // what separates the two.
-  match_result_set_surface(
-      __atomic_load_n(&match_result_half_menu_seen, __ATOMIC_ACQUIRE)
-          ? MATCH_RESULT_SURFACE_FULL_STATS
-          : MATCH_RESULT_SURFACE_HALF_STATS);
-  match_result_prepare_skin(window);
-  pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_PREVIEW, 56753, 61734);
+  if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE) &&
+      !match_result_handoff_active()) {
+    match_result_window = window;
+    __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
+                     __ATOMIC_RELEASE);
+    // The same native class hosts the overview before the half-time menu and
+    // the one before the full-time menu; the live match phase separates them.
+    __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_STATS,
+                     __ATOMIC_RELEASE);
+    match_result_set_surface(match_result_interval_surface(
+        MATCH_RESULT_SURFACE_HALF_STATS, MATCH_RESULT_SURFACE_FULL_STATS));
+    match_result_prepare_skin(window);
+    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_PREVIEW, 56753, 61734);
+  }
   match_result_process_controller_input(window);
 }
 
@@ -10758,6 +11041,8 @@ static void match_replay_publish(void *replay) {
   __atomic_store_n(&match_goal_demo_owner_known, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_action_request,
+                   PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
   __atomic_store_n(&match_replay_feedback_value, PES_REPLAY_FEEDBACK_NONE,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_replay_feedback_tick, 0, __ATOMIC_RELEASE);
@@ -10883,6 +11168,17 @@ static void pause_resume_reveal(void) {
 // Live gameplay is the authoritative end of a result cover. Dropping it here
 // rather than only on a timeout keeps the next period from starting behind it.
 static void match_result_cover_reveal(void) {
+  const uint64_t handoff =
+      __atomic_load_n(&match_result_handoff_tick, __ATOMIC_ACQUIRE);
+  if (handoff &&
+      armTicksToNs(armGetSystemTick() - handoff) < 3000000000ULL)
+    return;
+  // Gameplay units continue ticking behind result frontends. Until the newly
+  // announced page has hidden its native nodes, that heartbeat is stale and
+  // must not release the inter-page cover.
+  if (__atomic_load_n(&match_result_surface, __ATOMIC_ACQUIRE) != 0u &&
+      !__atomic_load_n(&match_result_skin_ready, __ATOMIC_ACQUIRE))
+    return;
   if (__atomic_load_n(&match_result_action_tick, __ATOMIC_ACQUIRE))
     __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
   if (__atomic_load_n(&match_result_cover_tick, __ATOMIC_ACQUIRE))
@@ -10956,6 +11252,8 @@ uintptr_t pes_match_replay_check_skip_entry(void *replay,
     __atomic_store_n(&match_goal_demo_owner_known, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_goal_demo_action_request,
+                     PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
     const uint32_t cursor =
         __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
     if (cursor != PES_VIRTUAL_CURSOR_GAMEPLAN)
@@ -11026,15 +11324,24 @@ static uint32_t pes_match_goal_demo_is_own_goal(void *goal_demo) {
 uintptr_t pes_match_goal_demo_init_entry(void *goal_demo) {
   (void)goal_demo;
   __atomic_store_n(&match_goal_demo_helper_consumed, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_action_request,
+                   PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
   return match_goal_demo_init_resume;
+}
+
+void pes_controller_goal_demo_request(uint32_t action) {
+  if (action != PES_GOAL_DEMO_ACTION_SKIP &&
+      action != PES_GOAL_DEMO_ACTION_CELEBRATE)
+    return;
+  __atomic_store_n(&match_goal_demo_action_request, action, __ATOMIC_RELEASE);
 }
 
 void pes_controller_goal_demo_consume(void) {
   __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
 
   // Hide only the cached presentation bit immediately. Keep the semantic
-  // GoalDemo surface alive so its synthetic A/B touch can complete the full
-  // 90 ms DOWN/MOVE/UP sequence instead of being released after one frame.
+  // GoalDemo surface alive until the queued native event is consumed by the
+  // game's UI thread.
   uint64_t word = __atomic_load_n(&match_controller_surface_word,
                                   __ATOMIC_ACQUIRE);
   for (;;) {
@@ -11133,9 +11440,27 @@ static void pes_match_goal_button_update(void *window) {
       !match_node_set_alpha || !match_setplay_get_root)
     return;
 
-  // Visual alpha only. NeedDisp and the ButtonObject remain alive so the
-  // existing 90 ms celebration/skip touch bridge stays functional for both
-  // local players while only our bottom-right Joy-Con helper is visible.
+  // ButtonGoalPerformance::PadEventTouchSub maps its two actions to these exact
+  // TaskManager events. Dispatch the queued controller action here on the same
+  // UI thread, avoiding the old coordinate-based synthetic touch completely.
+  const uint32_t action = __atomic_exchange_n(
+      &match_goal_demo_action_request, PES_GOAL_DEMO_ACTION_NONE,
+      __ATOMIC_ACQ_REL);
+  if (action != PES_GOAL_DEMO_ACTION_NONE &&
+      match_task_manager_get_instance && match_task_manager_push_msg_event) {
+    void *manager = match_task_manager_get_instance();
+    if (manager) {
+      const uint32_t event = action == PES_GOAL_DEMO_ACTION_SKIP
+                                 ? 0x01050067u
+                                 : 0x01050066u;
+      match_task_manager_push_msg_event(manager, event, NULL);
+      debugPrintf("asset-trace-v5: goal native event action=%u event=%08x\n",
+                  action, event);
+    }
+  }
+
+  // Keep the stock ButtonObject alive but visually transparent; the only
+  // visible legend is now the Switch-sprite overlay.
   void *root = match_setplay_get_root(window);
   if (root)
     match_node_set_alpha(root, 0.0f);
@@ -12550,12 +12875,28 @@ static uint32_t pes_match_pause_camera_update(void *window,
   if (!window)
     return result;
   match_pause_camera_window = window;
+  if (match_setplay_get_root && match_node_set_alpha) {
+    void *root = match_setplay_get_root(window);
+    if (root) match_node_set_alpha(root, 0.0f);
+  }
   __atomic_store_n(&match_pause_camera_seen_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
   const uint32_t action = __atomic_exchange_n(
       &match_pause_camera_action, 0, __ATOMIC_ACQ_REL);
-  if (action == PES_PAUSE_INPUT_LEFT ||
-      action == PES_PAUSE_INPUT_RIGHT) {
+  if (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_DOWN) {
+    pause_settings_focus = (pause_settings_focus + (action == PES_PAUSE_INPUT_UP ? 3u : 1u)) % 4u;
+  } else if (action == PES_PAUSE_INPUT_LEFT ||
+      action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DECIDE) {
+    if (pause_settings_focus) {
+      uint32_t *value = pause_settings_focus == 1 ? &pause_settings_stamina :
+          pause_settings_focus == 2 ? &pause_settings_chant : &pause_settings_commentary;
+      const uint32_t enabled = !__atomic_load_n(value, __ATOMIC_ACQUIRE);
+      __atomic_store_n(value, enabled, __ATOMIC_RELEASE);
+      // Native categories: 2=Commentary, 3=Crowd (chants and cheers).
+      if (pause_settings_focus > 1 && pause_settings_volume)
+        pause_settings_volume(pause_settings_focus == 2 ? 3u : 2u, enabled ? 1.0f : 0.0f);
+      return result;
+    }
     uint32_t count = 0;
     uint32_t current = match_pause_camera_page(window, &count);
     // Some builds expose the camera vector only after the first registry
@@ -12577,11 +12918,39 @@ static uint32_t pes_match_pause_camera_update(void *window,
     }
   } else if (action == PES_PAUSE_INPUT_BACK &&
              match_pause_camera_footer) {
+    __atomic_store_n(&live_gameplan_returning_to_pause, 1,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&pause_editor_transition_tick, armGetSystemTick(),
+                     __ATOMIC_RELEASE);
     __atomic_store_n(&match_pause_camera_seen_tick, 0, __ATOMIC_RELEASE);
     match_pause_camera_window = NULL;
     match_pause_camera_footer(window, 1);
   }
   return result;
+}
+
+const char *pes_controller_pause_settings_value(uint32_t index) {
+  if (index == 0) {
+    uint32_t count = 0;
+    uint32_t current = match_pause_camera_page(match_pause_camera_window, &count);
+    int32_t *types = NULL;
+    if (match_pause_camera_window)
+      memcpy(&types, (unsigned char *)match_pause_camera_window + 536, sizeof(types));
+    // Native InitSwf indexes cameraType_* by enum, not by page number.
+    if (types && current < count) {
+      switch (types[current]) {
+      case 0: return "MEDIUM";
+      case 1: return "LONG";
+      case 2: return "WIDE";
+      case 5: return "DYNAMIC WIDE";
+      case 7: return "LIVE BROADCAST";
+      case 12: return "STADIUM";
+      }
+    }
+    return "CAMERA";
+  }
+  const uint32_t enabled = index == 1 ? pause_settings_stamina : index == 2 ? pause_settings_chant : pause_settings_commentary;
+  return enabled ? "ON" : "OFF";
 }
 
 static void match_pause_go_top_menu(void *window) {
@@ -12608,7 +12977,11 @@ static void match_result_dispatch_event(void *window, const char *name) {
   unsigned char event_name[24] = {0};
   event_name[0] = (unsigned char)(length << 1);
   memcpy(event_name + 1, name, length);
-  match_result_exec_event_decide(window, event_name);
+  if (__atomic_load_n(&match_result_page, __ATOMIC_ACQUIRE) ==
+          MATCH_RESULT_PAGE_INTERVAL && match_half_exec_event_decide)
+    match_half_exec_event_decide(window, event_name);
+  else
+    match_result_exec_event_decide(window, event_name);
 }
 
 void pes_controller_result_input(uint32_t action) {
@@ -12621,6 +12994,7 @@ enum {
   MATCH_RESULT_ACTION_PENALTIES = 1,
   MATCH_RESULT_ACTION_GAME_PLAN = 2,
   MATCH_RESULT_ACTION_BACK_TO_MENU = 3,
+  MATCH_RESULT_ACTION_OVERTIME = 4,
 };
 
 // One resolver feeds both the renderer and the input handler so a drawn card
@@ -12638,32 +13012,48 @@ static uint32_t match_result_action_list(uint32_t surface, uint32_t *actions) {
       __atomic_load_n(&exhibition_settings_extra_time, __ATOMIC_ACQUIRE) != 0;
   const int penalties =
       __atomic_load_n(&exhibition_settings_penalties, __ATOMIC_ACQUIRE) != 0;
-  const int second_period =
-      __atomic_load_n(&match_result_half_menu_seen, __ATOMIC_ACQUIRE) != 0;
   switch (surface) {
     case MATCH_RESULT_SURFACE_HALF_STATS:
       actions[0] = MATCH_RESULT_ACTION_NEXT;
       return 1;
     case MATCH_RESULT_SURFACE_HALF_MENU:
       actions[0] = MATCH_RESULT_ACTION_GAME_PLAN;
-      actions[1] = MATCH_RESULT_ACTION_BACK_TO_MENU;
-      return 2;
+      actions[1] = MATCH_RESULT_ACTION_NEXT;
+      actions[2] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+      return 3;
     case MATCH_RESULT_SURFACE_FULL_STATS:
-      // Penalties can only follow a draw once regulation and any extra time
-      // are done, so the label stays Next everywhere else.
-      actions[0] = (!final_result && second_period && drawn && !extra_time &&
-                    penalties)
-                       ? MATCH_RESULT_ACTION_PENALTIES
-                       : MATCH_RESULT_ACTION_NEXT;
+      actions[0] = MATCH_RESULT_ACTION_NEXT;
       return 1;
     case MATCH_RESULT_SURFACE_FULL_MENU:
       if (final_result) {
         actions[0] = MATCH_RESULT_ACTION_BACK_TO_MENU;
         return 1;
       }
-      if (drawn && extra_time) {
-        actions[0] = MATCH_RESULT_ACTION_NEXT;
-        actions[1] = MATCH_RESULT_ACTION_GAME_PLAN;
+      // The phase the match has already advanced into names the continuation
+      // outright, so extra time and penalties never have to be inferred from
+      // the exhibition settings plus a draw. END means the match is over
+      // whatever those settings say.
+      switch (match_result_current_phase()) {
+        case MATCH_PHASE_EX_TIME:
+          // Only a segment that is still to be played can be prepared for.
+          actions[0] = MATCH_RESULT_ACTION_GAME_PLAN;
+          actions[1] = MATCH_RESULT_ACTION_OVERTIME;
+          actions[2] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+          return 3;
+        case MATCH_PHASE_PREV_PKMATCH:
+          actions[0] = MATCH_RESULT_ACTION_PENALTIES;
+          actions[1] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+          return 2;
+        case MATCH_PHASE_END:
+          actions[0] = MATCH_RESULT_ACTION_BACK_TO_MENU;
+          return 1;
+        default:
+          break;
+      }
+      // Fail back to the settings when the registry cannot be read.
+      if (drawn && extra_time && !match_result_extra_time_started) {
+        actions[0] = MATCH_RESULT_ACTION_GAME_PLAN;
+        actions[1] = MATCH_RESULT_ACTION_OVERTIME;
         actions[2] = MATCH_RESULT_ACTION_BACK_TO_MENU;
         return 3;
       }
@@ -12688,7 +13078,6 @@ static void match_result_set_surface(uint32_t surface) {
   // two. Cover it with the custom transition until our alpha writes land.
   __atomic_store_n(&match_result_cover_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
-  __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
 }
 
 // The native result pages keep their background; the tile list is removed at
@@ -12697,6 +13086,10 @@ static void match_result_set_surface(uint32_t surface) {
 static void match_result_prepare_skin(void *window) {
   if (!window || !match_node_set_alpha)
     return;
+  if (__atomic_load_n(&live_gameplan_returning_to_pause, __ATOMIC_ACQUIRE) &&
+      !live_gameplan_window) {
+    __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
+  }
   int hidden = 0;
   if (exhibition_window_get_window) {
     void *surface = exhibition_window_get_window(window);
@@ -12716,14 +13109,25 @@ static void match_result_prepare_skin(void *window) {
   }
   // Fail open: with no node to hide the native page must keep working on its
   // own rather than be covered by a custom surface that cannot replace it.
-  if (hidden)
-    __atomic_store_n(&match_result_skin_ready, 1, __ATOMIC_RELEASE);
+  if (hidden) {
+    const uint32_t was_ready = __atomic_exchange_n(
+        &match_result_skin_ready, 1, __ATOMIC_ACQ_REL);
+    if (!was_ready) {
+      // The new page is safe now. Retain a brief settling frame cover, then
+      // stop using the longer handoff timeout from the page we just left.
+      __atomic_store_n(&match_result_cover_tick, armGetSystemTick(),
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&match_result_action_tick, 0, __ATOMIC_RELEASE);
+    }
+  }
 }
 
 static void match_result_process_controller_input(void *window) {
   const uint32_t action = __atomic_exchange_n(
       &match_result_input_action, 0, __ATOMIC_ACQ_REL);
   if (!window)
+    return;
+  if (match_result_handoff_active())
     return;
   const uint32_t context =
       __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
@@ -12782,13 +13186,15 @@ static void match_result_process_controller_input(void *window) {
     return;
   }
   if (chosen == MATCH_RESULT_ACTION_GAME_PLAN) {
-    match_gameplan_refresh_players(1);
-    __atomic_store_n(&match_gameplan_focus, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&match_postmatch_custom_page,
-                     MATCH_POSTMATCH_PAGE_GAMEPLAN, __ATOMIC_RELEASE);
-    __atomic_store_n(&match_postmatch_from_result, 1, __ATOMIC_RELEASE);
-    __atomic_store_n(&match_postmatch_custom_active, 1, __ATOMIC_RELEASE);
-    match_postmatch_window = window;
+    __atomic_store_n(&live_gameplan_returning_to_pause, 0, __ATOMIC_RELEASE);
+    live_gameplan_open_requested = 1;
+    __atomic_store_n(&pause_editor_transition_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+    // Native result flow calls this event "plan". Hydrate its squad child
+    // through the same live editor path used by Pause, never the old modal.
+    match_result_dispatch_event(window, "plan");
+    // MatchTouchIconMenuBase::PadEventTouch normally performs this handshake
+    // after its virtual event callback; direct custom dispatch must do so too.
+    if (match_result_control_wait) match_result_control_wait(window, 1);
     return;
   }
   // Continuing holds the custom cover over the native page that is about to be
@@ -12797,29 +13203,49 @@ static void match_result_process_controller_input(void *window) {
   if (chosen != MATCH_RESULT_ACTION_BACK_TO_MENU)
     __atomic_store_n(&match_result_action_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_handoff_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+  if (chosen == MATCH_RESULT_ACTION_OVERTIME)
+    match_result_extra_time_started = 1;
+  const uint32_t page = __atomic_load_n(&match_result_page, __ATOMIC_ACQUIRE);
   if (chosen != MATCH_RESULT_ACTION_BACK_TO_MENU &&
-      surface != MATCH_RESULT_SURFACE_FULL_MENU) {
-    // PadEventFooterTouch was resolved on MatchResultMainMenu; the team-stats
-    // and half-time windows are different classes and must not be passed to
-    // it. Their native Next footer is reachable under the cursor, so the
-    // synthetic tap the input thread already issues for A stays the path here
-    // and only the cover is ours.
+      page != MATCH_RESULT_PAGE_FINAL) {
     __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+    if (page == MATCH_RESULT_PAGE_INTERVAL) {
+      if (match_result_footer_touch) match_result_footer_touch(window, 0u);
+    } else if (match_stats_footer_touch) {
+      match_stats_footer_touch(window, 0u);
+    }
     return;
   }
   __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_exit_requested, 1, __ATOMIC_RELEASE);
-  __atomic_store_n(&match_result_skin_ready, 0, __ATOMIC_RELEASE);
-  __atomic_store_n(&match_result_surface, MATCH_RESULT_SURFACE_NONE,
-                   __ATOMIC_RELEASE);
   __atomic_store_n(&match_result_surface_focus, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
-  match_result_window = NULL;
   if (chosen == MATCH_RESULT_ACTION_BACK_TO_MENU) {
-    match_result_dispatch_event(window, "match_topmenu");
+    __atomic_store_n(&pause_top_menu_transition_tick, armGetSystemTick(),
+                     __ATOMIC_RELEASE);
+    debugPrintf("result-exit-v3: dispatch exit window=%p page=%u "
+                "surface=%u phase=%u\n", window, page, surface,
+                match_result_current_phase());
+    // Use exactly the bottom-right A footer route from the original result
+    // UI. Its key-0 entry owns the event name (next/onlineNext/etc.) for this
+    // flow; a literal match_topmenu may not exist in the final event table.
+    if (page == MATCH_RESULT_PAGE_FINAL) {
+      if (match_result_footer_touch) match_result_footer_touch(window, 0u);
+    } else
+      match_pause_go_top_menu(window);
+    // The final footer performs its own SetControlWaitMobile handshake.
+    if (page != MATCH_RESULT_PAGE_FINAL && match_result_control_wait)
+      match_result_control_wait(window, 1);
+    debugPrintf("result-exit-v3: exit dispatch returned page=%u\n", page);
     return;
   }
+  __atomic_store_n(&match_result_skin_ready, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_result_surface, MATCH_RESULT_SURFACE_NONE,
+                   __ATOMIC_RELEASE);
+  match_result_window = NULL;
   // Next and Penalties on the final menu are the same native continuation: the
   // tile list is removed, so footer key 0 is the proven path that makes the
   // stock frontend select next/onlineNext and enter its control-wait state.
@@ -12829,12 +13255,19 @@ static void match_result_process_controller_input(void *window) {
     match_result_dispatch_event(window, "match_topmenu");
 }
 
+uint32_t pes_controller_match_result_handoff(void) {
+  return match_result_handoff_active() ? 1u : 0u;
+}
+
 int pes_controller_custom_postmatch_active(void) {
   return __atomic_load_n(&match_postmatch_custom_active,
                          __ATOMIC_ACQUIRE) != 0;
 }
 
 uint32_t pes_controller_match_result_skin(void) {
+  if (live_gameplan_open_requested || live_gameplan_window ||
+      __atomic_load_n(&exhibition_gameplan_custom_active, __ATOMIC_ACQUIRE))
+    return MATCH_RESULT_SURFACE_NONE;
   if (__atomic_load_n(&match_postmatch_custom_active, __ATOMIC_ACQUIRE))
     return MATCH_RESULT_SURFACE_NONE;
   if (!__atomic_load_n(&match_result_skin_ready, __ATOMIC_ACQUIRE))
@@ -12867,11 +13300,13 @@ const char *pes_controller_match_result_card_label(uint32_t index) {
     case MATCH_RESULT_ACTION_NEXT:
       return "NEXT";
     case MATCH_RESULT_ACTION_PENALTIES:
-      return "PENALTIES";
+      return "GO TO PENALTIES";
+    case MATCH_RESULT_ACTION_OVERTIME:
+      return "GO TO OVERTIME";
     case MATCH_RESULT_ACTION_GAME_PLAN:
       return "GAME PLAN";
     case MATCH_RESULT_ACTION_BACK_TO_MENU:
-      return "BACK TO MENU";
+      return "TOP TO MENU";
     default:
       return "";
   }
@@ -12888,7 +13323,17 @@ uint32_t pes_controller_match_result_focus(void) {
 // native result page is either still building its own nodes or being torn down
 // after a continuation, and in both windows its stats layout can flash through.
 uint32_t pes_controller_match_result_transition(void) {
+  if (__atomic_load_n(&exhibition_gameplan_custom_active, __ATOMIC_ACQUIRE))
+    return 0;
   const uint64_t now = armGetSystemTick();
+  // Leaving for the Top Menu from a result surface: the pause cover is gated on
+  // the pause skin, so without this the bare match scene was visible until the
+  // main menu finished building. The tick is released by the Match page rebuild.
+  const uint64_t top_menu =
+      __atomic_load_n(&pause_top_menu_transition_tick, __ATOMIC_ACQUIRE);
+  if (__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE) &&
+      top_menu && armTicksToNs(now - top_menu) < 15000000000ULL)
+    return 1;
   const uint64_t acted =
       __atomic_load_n(&match_result_action_tick, __ATOMIC_ACQUIRE);
   if (acted && armTicksToNs(now - acted) < 3000000000ULL)
@@ -13033,8 +13478,18 @@ static void match_postmatch_process_input(void *window) {
 }
 
 static void pes_match_result_update(void *window) {
+  static uint32_t exit_wait_frames;
   if (match_result_update_original)
     match_result_update_original(window);
+  if (__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE)) {
+    exit_wait_frames++;
+    if (exit_wait_frames <= 5u || exit_wait_frames % 300u == 0u)
+      debugPrintf("result-exit-v3: final page still updating frame=%u "
+                  "window=%p phase=%u\n", exit_wait_frames, window,
+                  match_result_current_phase());
+  } else {
+    exit_wait_frames = 0;
+  }
   if (window) {
     match_result_window = window;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
@@ -13042,8 +13497,11 @@ static void pes_match_result_update(void *window) {
     // MatchResultMainMenu is the second/final result page. Refresh FULL_TIME
     // unconditionally here; checking the previous cursor context made a
     // single stale gameplay poll permanently disable A and its helper.
-    if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE)) {
+    if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE) &&
+        !match_result_handoff_active()) {
       if (!pes_controller_custom_postmatch_active()) {
+        __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_FINAL,
+                         __ATOMIC_RELEASE);
         match_result_set_surface(MATCH_RESULT_SURFACE_FULL_MENU);
         match_result_prepare_skin(window);
       }
@@ -13234,7 +13692,7 @@ uintptr_t pes_match_result_full_entry(void *result, const char *name,
   (void)name;
   (void)modal;
   if (result) {
-    __atomic_store_n(&match_result_exit_requested, 0, __ATOMIC_RELEASE);
+    match_result_clear_handoff();
     match_result_window = result;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
@@ -13246,8 +13704,9 @@ uintptr_t pes_match_result_full_entry(void *result, const char *name,
     __atomic_store_n(&match_result_final_seen, final_result ? 1u : 0u,
                      __ATOMIC_RELEASE);
     __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_FINAL,
+                     __ATOMIC_RELEASE);
     match_result_set_surface(MATCH_RESULT_SURFACE_FULL_MENU);
-    match_result_prepare_skin(result);
     if (final_result) {
       // Keep the native bottom-right Next footer reachable with A while the
       // result tile list itself stays hidden. B is handled as Top Menu.
@@ -13264,30 +13723,45 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
   (void)name;
   (void)modal;
   if (result) {
-    __atomic_store_n(&match_result_exit_requested, 0, __ATOMIC_RELEASE);
+    match_result_clear_handoff();
     match_result_window = result;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
     // Reaching the half-time menu is the marker that the next overview and
     // menu belong to the full-time flow.
+    __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_INTERVAL,
+                     __ATOMIC_RELEASE);
+    const uint32_t surface = match_result_interval_surface(
+        MATCH_RESULT_SURFACE_HALF_MENU, MATCH_RESULT_SURFACE_FULL_MENU);
+    match_result_set_surface(surface);
     __atomic_store_n(&match_result_half_menu_seen, 1, __ATOMIC_RELEASE);
-    match_result_set_surface(MATCH_RESULT_SURFACE_HALF_MENU);
-    match_result_prepare_skin(result);
-    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_TIME, 32768, 32768);
+    pes_virtual_cursor_activate(surface == MATCH_RESULT_SURFACE_HALF_MENU
+                                    ? PES_VIRTUAL_CURSOR_HALF_TIME
+                                    : PES_VIRTUAL_CURSOR_FULL_TIME,
+                                32768, 32768);
   }
   return match_result_half_resume;
 }
 
 uintptr_t pes_match_result_half_update_entry(void *result) {
-  if (result) {
+  if (result && !__atomic_load_n(&match_result_exit_requested,
+                                 __ATOMIC_ACQUIRE) &&
+      !match_result_handoff_active()) {
     match_result_window = result;
     __atomic_store_n(&match_result_seen_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
-    match_result_set_surface(MATCH_RESULT_SURFACE_HALF_MENU);
+    __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_INTERVAL,
+                     __ATOMIC_RELEASE);
+    const uint32_t surface = match_result_interval_surface(
+        MATCH_RESULT_SURFACE_HALF_MENU, MATCH_RESULT_SURFACE_FULL_MENU);
+    match_result_set_surface(surface);
     match_result_prepare_skin(result);
-    pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_HALF_TIME, 32768, 32768);
-    match_result_process_controller_input(result);
+    pes_virtual_cursor_activate(surface == MATCH_RESULT_SURFACE_HALF_MENU
+                                    ? PES_VIRTUAL_CURSOR_HALF_TIME
+                                    : PES_VIRTUAL_CURSOR_FULL_TIME,
+                                32768, 32768);
   }
+  match_result_process_controller_input(result);
   return match_result_half_update_resume;
 }
 
@@ -13418,6 +13892,11 @@ static void pes_set_real_pad_is_enable(void *pad_input_ptr, uint32_t pad_no,
 // Called on cobra's game thread at the end of Pad::Update's clear/touch phase,
 // immediately before the game computes clicked/released/repeated edges.
 uintptr_t cobra_pad_apply_input(void *pad_ptr) {
+  const uint32_t menu_confirm = __atomic_exchange_n(
+      &main_menu_confirm_pending, 0, __ATOMIC_ACQ_REL);
+  if (menu_confirm && pes_main_menu_controller_active() &&
+      !pes_controller_start_prompt(NULL, NULL))
+    main_menu_activate_choice(menu_confirm - 1u);
   main_menu_2p_team_selector_refresh_ratings();
   main_menu_2p_team_selector_process_pending();
   main_menu_2p_prematch_hub_process_pending();
@@ -13598,7 +14077,7 @@ static void pes_match_visual_model_action(void *manager) {
   // the resulting assist draw objects; power/name/2D HUD paths are untouched.
   if (match_visual_model_action_original)
     match_visual_model_action_original(manager);
-  int show = __atomic_load_n(&config.player_cursor_show, __ATOMIC_ACQUIRE);
+  const int show = 0;
   const uint32_t setplay_context =
       pes_controller_native_pad_lab_setplay_context();
   int native_setplay_trajectory = 0;
@@ -13606,7 +14085,6 @@ static void pes_match_visual_model_action(void *manager) {
     if (setplay_context == PES_SETPLAY_GOAL_KICK ||
         setplay_context == PES_SETPLAY_CORNER ||
         setplay_context == PES_SETPLAY_FREE_KICK) {
-      show = 0;
       native_setplay_trajectory =
           pes_controller_native_pad_lab_trajectory_enabled();
     }
@@ -13746,6 +14224,17 @@ extern void ue4_object_initializer_resize_hook(void);
 #include "friend_press.inc"
 #include "native_pad_lab.inc"
 
+static int match_gauge_project_to_overlay(float *x, float *y,
+                                          float projection_w,
+                                          float projection_h) {
+  if (!isfinite(projection_w) || !isfinite(projection_h) ||
+      projection_w <= 0.0f || projection_h <= 0.0f)
+    return 0;
+  *x *= (float)screen_width / projection_w;
+  *y *= (float)screen_height / projection_h;
+  return isfinite(*x) && isfinite(*y);
+}
+
 static uint32_t pes_match_cursor_name_get_position(
     void *model, uint32_t index, Match2DVector3 *position) {
   const uint32_t result = match_cursor_name_get_position_original
@@ -13801,6 +14290,16 @@ static uint32_t pes_match_cursor_name_get_position(
     float screen_y = 0.0f;
     match_model_project_pos_3d_to_screen(model, foot_position,
                                          &screen_x, &screen_y);
+    // ProjectPos3DToScreen uses basic::Status display units, not cfg pixels.
+    // Convert both axes independently into the overlay's logical coordinate
+    // space; the overlay then maps that space onto the actual GL viewport.
+    const float projection_w = match_projection_display_width();
+    const float projection_h = match_projection_display_height();
+    if (!match_gauge_project_to_overlay(&screen_x, &screen_y,
+                                        projection_w, projection_h)) {
+      __atomic_store_n(&native_lab_gauge_anchor_ttl[pad], 0, __ATOMIC_RELEASE);
+      continue;
+    }
     if (isfinite(screen_x) && isfinite(screen_y) &&
         fabsf(screen_x) < 100000.0f && fabsf(screen_y) < 100000.0f) {
       __atomic_store_n(&native_lab_gauge_anchor_x_milli[pad],
@@ -14434,6 +14933,10 @@ void install_ue4_hooks(so_module *module) {
       (void *)cursor_position_runtime;
   match_model_project_pos_3d_to_screen =
       (void *)so_find_addr_rx(module, project_position_symbol);
+  match_projection_display_width = (void *)so_find_addr_rx(
+      module, "_ZN5basic6Status8GetDispWEv");
+  match_projection_display_height = (void *)so_find_addr_rx(
+      module, "_ZN5basic6Status8GetDispHEv");
   match_global_registry_get_player_move =
       (void *)so_find_addr_rx(module, player_move_symbol);
   *cursor_position_slot =
@@ -14520,6 +15023,16 @@ void install_ue4_hooks(so_module *module) {
                     "MyClubMain first-access popup disable");
   const uintptr_t tutorial_clear_dialog = so_find_addr(
       module, "_ZN4menu18MyClubFlowTutorial17CreateClearDialogEv");
+  // DispTutorial is not the only entry: returning from the tutorial-backed
+  // exhibition can create another tutorial task via CreateTutorialDialog.
+  // Its native no-object branch returns false; use that branch's result so
+  // callers do not wait on a completion popup hidden under the custom menu.
+  const uintptr_t tutorial_create = so_find_addr(module,
+      "_ZN4menu10MyClubMain20CreateTutorialDialogEb");
+  patch_checked_u32(tutorial_create, 0xd10103ff, 0x2a1f03e0,
+                    "MyClubMain return tutorial task disabled");
+  patch_checked_u32(tutorial_create + 4, 0xa9037bf3, 0xd65f03c0,
+                    "MyClubMain return tutorial task skip");
   patch_checked_u32(tutorial_clear_dialog,
                     0xf81d0ff6, // str x22, [sp, #-48]!
                     0x2a1f03e0, // mov w0, wzr
@@ -15582,6 +16095,65 @@ void install_ue4_hooks(so_module *module) {
                (uintptr_t)&pes_match_squad_edit_update_hook);
   }
 
+  pause_settings_volume = (void *)so_find_addr_rx(module,
+      "_ZN5sound3sys9Interface19SetGameOptionVolumeENS1_13E_OPTVOL_TYPEEf");
+  const uintptr_t stamina_disp_runtime = so_find_addr_rx(module,
+      "_ZN7match2D6Screen17ModelStaminaGauge7GetDispEj");
+  const uintptr_t stamina_disp_code = so_find_addr(module,
+      "_ZN7match2D6Screen17ModelStaminaGauge7GetDispEj");
+  // Custom exhibition runs through tutorial mode (9). Keep native player,
+  // cursor and match-phase validity checks, but let our ON/OFF switch own
+  // visibility instead of the tutorial ban and the mobile saved hide flag.
+  patch_checked_u32(stamina_disp_code + 0x38, 0x540007c0, 0xd503201f,
+                    "Stamina allow tutorial-backed exhibition");
+  // +0x130 clears w20. Skip it and return the visibility already validated
+  // above (player/cursor/phase), at +0x134. NOP here would hide every gauge.
+  patch_checked_u32(stamina_disp_code + 0x12c, 0x34000128, 0x14000002,
+                    "Stamina custom visibility setting");
+  uintptr_t *stamina_disp_slot = find_vtable_method_slot(module,
+      "_ZTVN7match2D6Screen17ModelStaminaGaugeE", stamina_disp_runtime, 25);
+  if (stamina_disp_slot) {
+    pause_stamina_disp_original = (void *)stamina_disp_runtime;
+    *stamina_disp_slot = (uintptr_t)&pause_stamina_disp;
+  }
+  const uintptr_t stamina_get_model_runtime = so_find_addr_rx(module,
+      "_ZN7match2D6Screen17ModelStaminaGauge8GetModelEj");
+  uintptr_t *stamina_get_model_slot = find_vtable_method_slot(module,
+      "_ZTVN7match2D6Screen17ModelStaminaGaugeE",
+      stamina_get_model_runtime, 25);
+  if (!stamina_get_model_slot)
+    fatal_error("ModelStaminaGauge::GetModel vtable slot not found");
+  pause_stamina_get_model_original = (void *)stamina_get_model_runtime;
+  *stamina_get_model_slot = (uintptr_t)&pause_stamina_get_model;
+  const uintptr_t stamina_draw_plt = (uintptr_t)module->load_base + 0x38d62b0;
+  const uint32_t stamina_draw_plt_words[] = {
+      0xf002e290, 0xf941da11, 0x910ec210, 0xd61f0220};
+  pause_stamina_draw_original = (void *)so_find_addr_rx(module,
+      "_ZN5flash11Model2DData4DrawEPN5cobra2rc8render2d7CommandE");
+  if (memcmp((const void *)stamina_draw_plt, stamina_draw_plt_words,
+             sizeof(stamina_draw_plt_words)))
+    fatal_error("Unexpected Model2DData::Draw PLT at %p", (void *)stamina_draw_plt);
+  hook_arm64(stamina_draw_plt, (uintptr_t)&pause_stamina_draw);
+  // Primitive::DrawBuff's second stamina-only item is the coloured fill. Hook
+  // the shared PLT but mutate exclusively that exact return address; all
+  // cursor, name and ordinary UCanvas draws pass through byte-for-byte.
+  const uintptr_t stamina_canvas_draw_item_plt =
+      (uintptr_t)module->load_base + 0x37fffa0;
+  const uint32_t stamina_canvas_draw_item_plt_words[] = {
+      0xf002e5f0, 0xf9411611, 0x9108a210, 0xd61f0220};
+  pause_stamina_canvas_draw_item_original = (void *)so_find_addr_rx(
+      module, "_ZN7UCanvas8DrawItemER11FCanvasItem");
+  pause_stamina_canvas_fill_return =
+      (uintptr_t)module->load_virtbase + 0x3f10144;
+  pause_stamina_canvas_backing_return =
+      (uintptr_t)module->load_virtbase + 0x3f0fc74;
+  if (memcmp((const void *)stamina_canvas_draw_item_plt,
+             stamina_canvas_draw_item_plt_words,
+             sizeof(stamina_canvas_draw_item_plt_words)))
+    fatal_error("Unexpected UCanvas::DrawItem PLT at %p",
+                (void *)stamina_canvas_draw_item_plt);
+  hook_arm64(stamina_canvas_draw_item_plt,
+             (uintptr_t)&pause_stamina_canvas_draw_item);
   const uintptr_t pause_camera_update_runtime = so_find_addr_rx(
       module,
       "_ZN4menu28MatchPauseTouchCameraSetting23UpdatePostControlWindowEN10menusystem6Window10PAD_STATUSE");
@@ -15657,6 +16229,12 @@ void install_ue4_hooks(so_module *module) {
   match_result_footer_touch =
       (void *)so_find_addr_rx(module,
           "_ZN4menu22MatchTouchIconMenuBase19PadEventFooterTouchEN10menusystem17MOBILE_FOOTER_KEYE");
+  match_stats_footer_touch = (void *)so_find_addr_rx(module,
+      "_ZN4menu20MatchResultTeamStats19PadEventFooterTouchEN10menusystem17MOBILE_FOOTER_KEYE");
+  match_half_exec_event_decide = (void *)so_find_addr_rx(module,
+      "_ZN4menu27MatchResultMainMenuHalfTime15ExecEventDecideERKN5cobra3stl12basic_stringIcNSt6__ndk111char_traitsIcEENS2_9AllocatorIcEEEE");
+  match_result_control_wait = (void *)so_find_addr_rx(module,
+      "_ZN10menusystem12WindowMobile20SetControlWaitMobileEb");
   hook_arm64(result_full, (uintptr_t)&pes_match_result_full_hook);
   hook_arm64(result_half, (uintptr_t)&pes_match_result_half_hook);
 
@@ -15682,6 +16260,18 @@ void install_ue4_hooks(so_module *module) {
       "_ZN4menu20MatchResultTeamStats22UpdatePreControlWindowEv";
   const uintptr_t team_stats_update =
       so_find_addr(module, team_stats_update_symbol);
+  const uintptr_t stats_init_runtime = so_find_addr_rx(module,
+      "_ZN4menu20MatchResultTeamStats10InitMobileEv");
+  const uintptr_t stats_vtable = so_find_addr(module,
+      "_ZTVN4menu20MatchResultTeamStatsE");
+  uintptr_t *stats_init_slot = NULL;
+  for (uint32_t i = 2; i < 128; ++i) {
+    uintptr_t *slot = (uintptr_t *)(stats_vtable + i * sizeof(uintptr_t));
+    if (*slot == stats_init_runtime) { stats_init_slot = slot; break; }
+  }
+  if (!stats_init_slot) fatal_error("MatchResultTeamStats InitMobile slot not found");
+  match_stats_init_original = (void *)stats_init_runtime;
+  *stats_init_slot = (uintptr_t)&pes_match_stats_init;
   const uintptr_t team_stats_update_runtime =
       so_find_addr_rx(module, team_stats_update_symbol);
   static const uint32_t expected_team_stats_update[4] = {

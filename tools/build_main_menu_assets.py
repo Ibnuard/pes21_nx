@@ -50,6 +50,8 @@ def main() -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     copyfile(ROOT / "art" / "SwitchButton" / "A_Button.png",
              DATA / "main_menu_button_a.bin")
+    copyfile(ROOT / "art" / "SwitchButton" / "B_Button.png",
+             DATA / "main_menu_button_b.bin")
 
     background = Image.open(ART / "background-v1.png").convert("RGB")
     background = background.resize((1280, 720), Image.Resampling.LANCZOS)

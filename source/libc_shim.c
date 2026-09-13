@@ -1422,9 +1422,15 @@ void ANativeWindow_release_fake(void *win) {
 
 int ANativeWindow_setBuffersGeometry_fake(void *win, int w, int h, int format) {
   (void)format;
-  debugPrintf("ANativeWindow_setBuffersGeometry(%d, %d)\n", w, h);
-  if (w > 0 && h > 0)
-    nwindowSetDimensions((NWindow *)win, w, h);
+  // The engine's viewport/render targets follow its requested buffer size.
+  // NWindow stretches that buffer to the Switch display. Enlarging only the
+  // buffer leaves an unrendered top/right margin, not a higher-resolution game.
+  const int target_w = w > 0 ? w : screen_width;
+  const int target_h = h > 0 ? h : screen_height;
+  debugPrintf("ANativeWindow_setBuffersGeometry requested=%dx%d applied=%dx%d\n",
+              w, h, target_w, target_h);
+  if (target_w > 0 && target_h > 0)
+    nwindowSetDimensions((NWindow *)win, target_w, target_h);
   return 0;
 }
 

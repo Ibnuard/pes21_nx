@@ -214,7 +214,6 @@ enum {
   FAKE_POINTER_CONTEXT_ACTION = FAKE_POINTER_MENU,
   // Replay and menu/gameplan surfaces never coexist; reuse the final slot.
   FAKE_POINTER_REPLAY = FAKE_POINTER_MENU_BACK,
-  FAKE_POINTER_GOAL_DEMO = FAKE_POINTER_MENU_BACK,
   FAKE_POINTER_CINEMATIC = FAKE_POINTER_MENU_BACK,
   // Penalty is the only gameplay surface that may need two concurrent local
   // gestures. Menu/replay pointers never coexist with it, so keep one stable
@@ -1259,6 +1258,15 @@ static void append_native_pause_touch(FakeTouchState *desired,
 
 static void append_menu_controller_tap(FakeTouchState *desired, int a_pressed,
                                         uint64_t now_ms) {
+  // Custom main-menu actions must not depend on native touch hit-testing or
+  // a hidden tutorial dialog accepting a synthetic tap. Keep the launch
+  // prompt on its original touch route; custom pages dispatch exactly once.
+  if (pes_main_menu_controller_active() &&
+      !pes_controller_start_prompt(NULL, NULL)) {
+    if (a_pressed)
+      pes_controller_menu_tap(0.0f, 0.0f);
+    return;
+  }
   static uint64_t tap_until_ms;
   static uint32_t generation_seen;
   if (generation_seen != synthetic_input_generation) {
@@ -1344,6 +1352,7 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
                                              u64 previous_buttons,
                                              uint64_t now_ms, int cursor_context,
                                              ControllerProfile profile) {
+  static int previous_result_stick_x, previous_result_stick_y;
   static uint64_t cursor_previous_ms;
   static uint64_t play_until_ms;
   static uint64_t back_until_ms;
@@ -1411,12 +1420,13 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
                              cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME;
   // With a custom result surface up, the cards own A and the D-pad. Without one
   // the original native footer routing stays in place.
+  const int result_handoff = pes_controller_match_result_handoff() != 0;
   const int result_skin =
-      result_context &&
+      result_context && !result_handoff &&
       pes_controller_match_result_skin() != PES_MATCH_RESULT_SURFACE_NONE;
-  if (b_pressed && result_context)
+  if (b_pressed && result_context && !result_handoff)
     pes_controller_result_input(PES_PAUSE_INPUT_BACK);
-  if (a_pressed &&
+  if (a_pressed && !result_handoff &&
       (cursor_context == PES_VIRTUAL_CURSOR_FULL_TIME || result_skin))
     pes_controller_result_input(PES_PAUSE_INPUT_DECIDE);
   if (result_skin && connected) {
@@ -1429,6 +1439,22 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
       pes_controller_result_input(PES_PAUSE_INPUT_UP);
     else if (result_pressed & HidNpadButton_Down)
       pes_controller_result_input(PES_PAUSE_INPUT_DOWN);
+    // Result pages must also be navigable with the physical stick.  Treat a
+    // newly-entered cardinal direction as one D-pad press; the existing
+    // repeat timer in the menu loop handles held sticks without flooding it.
+    const int stick_x = (int)(axis_x * JOYSTICK_MAX);
+    const int stick_y = (int)(-axis_y * JOYSTICK_MAX);
+    const int stick_threshold = JOYSTICK_MAX / 3;
+    if (stick_x < -stick_threshold && previous_result_stick_x >= -stick_threshold)
+      pes_controller_result_input(PES_PAUSE_INPUT_LEFT);
+    else if (stick_x > stick_threshold && previous_result_stick_x <= stick_threshold)
+      pes_controller_result_input(PES_PAUSE_INPUT_RIGHT);
+    else if (stick_y > stick_threshold && previous_result_stick_y <= stick_threshold)
+      pes_controller_result_input(PES_PAUSE_INPUT_UP);
+    else if (stick_y < -stick_threshold && previous_result_stick_y >= -stick_threshold)
+      pes_controller_result_input(PES_PAUSE_INPUT_DOWN);
+    previous_result_stick_x = stick_x;
+    previous_result_stick_y = stick_y;
   }
 
   if (cursor_held && !back_active)
@@ -1448,6 +1474,7 @@ static void append_virtual_cursor_controller(FakeTouchState *desired,
   }
 
   if (a_pressed && play_until_ms <= now_ms &&
+      !result_skin && !result_handoff && !result_context &&
       cursor_context != PES_VIRTUAL_CURSOR_PAUSE &&
       cursor_context != PES_VIRTUAL_CURSOR_SET_PIECE_TAKER &&
       cursor_context != PES_VIRTUAL_CURSOR_FULL_TIME &&
@@ -1732,19 +1759,14 @@ static uint32_t append_replay_controller(FakeTouchState *desired,
   return skip_until_ms > now_ms ? (1u << 25) : 0;
 }
 
-static uint32_t append_goal_demo_controller(FakeTouchState *desired,
-                                            int connected, u64 buttons,
+static uint32_t append_goal_demo_controller(int connected, u64 buttons,
                                             u64 previous_buttons,
                                             int player_goal,
                                             uint64_t now_ms) {
-  static uint64_t action_until_ms;
   static uint64_t skip_until_ms;
-  static float action_x;
-  static float action_y;
   static uint32_t generation_seen;
   if (generation_seen != synthetic_input_generation) {
     generation_seen = synthetic_input_generation;
-    action_until_ms = 0;
     skip_until_ms = 0;
   }
   replay_touch_requested = 0;
@@ -1753,31 +1775,18 @@ static uint32_t append_goal_demo_controller(FakeTouchState *desired,
 
   const u64 pressed = buttons & ~previous_buttons;
   if ((pressed & HidNpadButton_B) && skip_until_ms <= now_ms) {
-    // GoalDemo's left helper is Skip. Also publish Cobra button 25 because
-    // the native minimum-time gate consumes that path on some demo variants.
-    action_x = 0.891f;
-    action_y = 0.206f;
-    action_until_ms = now_ms + 90;
+    // Queue ButtonGoalPerformance's exact native Skip event. Cobra button 25
+    // remains a native (non-touch) fallback for skip-only demo variants.
     skip_until_ms = now_ms + 90;
-    // Opponent-goal and other skip-only variants are also backed by a native
-    // ThinkUnitSkip. Queue its exact command alongside the stock goal touch.
+    pes_controller_goal_demo_request(PES_GOAL_DEMO_ACTION_SKIP);
     pes_controller_demo_skip_request();
     pes_controller_goal_demo_consume();
     pes_controller_replay_feedback_set(PES_REPLAY_FEEDBACK_B_SKIP);
-  } else if (player_goal && (pressed & HidNpadButton_A) &&
-             action_until_ms <= now_ms) {
-    action_x = 0.891f;
-    action_y = 0.344f;
-    action_until_ms = now_ms + 90;
+  } else if (player_goal && (pressed & HidNpadButton_A)) {
+    pes_controller_goal_demo_request(PES_GOAL_DEMO_ACTION_CELEBRATE);
     pes_controller_goal_demo_consume();
     pes_controller_replay_feedback_set(
         PES_REPLAY_FEEDBACK_GOAL_CELEBRATION);
-  }
-  if (action_until_ms > now_ms) {
-    touch_state_append(desired, FAKE_POINTER_GOAL_DEMO,
-                       action_x * (float)screen_width,
-                        action_y * (float)screen_height);
-    replay_touch_requested = 1;
   }
   return skip_until_ms > now_ms ? (1u << 25) : 0;
 }
@@ -2031,11 +2040,17 @@ static void emit_native_lab_pad_input(uint32_t port,
   // HidNpadButton_ZR => mapped |= 1u << 8; HidNpadButton_AnySL and
   // HidNpadButton_AnySR retain
   // the horizontal Joy-Con shoulder aliases.
-  const uint32_t mapped = native_lab_map_hid_buttons(buttons);
-  const int32_t x = connected ? left_stick->x : 0;
-  const int32_t y = connected ? left_stick->y : 0;
-  const int32_t right_x = connected ? right_stick->x : 0;
-  const int32_t right_y = connected ? right_stick->y : 0;
+  uint32_t mapped = native_lab_map_hid_buttons(buttons);
+  int32_t x = connected ? left_stick->x : 0;
+  int32_t y = connected ? left_stick->y : 0;
+  int32_t right_x = connected ? right_stick->x : 0;
+  int32_t right_y = connected ? right_stick->y : 0;
+  // Rotate/select the physical Joy-Con stick first (in the poll), then route
+  // logical LS to RS only for its set-piece camera modifier. Menus, penalties
+  // and ordinary movement retain the normal single-stick mapping.
+  pes_controller_native_pad_lab_route_camera_stick(
+      port, android_controller_profile(port) != PES_CONTROLLER_PROFILE_FULL,
+      connected, &mapped, &x, &y, &right_x, &right_y);
   const int32_t up = y > 0 ? y : 0;
   const int32_t down = y < 0 ? -y : 0;
   const int32_t left = x < 0 ? -x : 0;
@@ -2474,8 +2489,8 @@ void android_input_poll(void) {
           (buttons & ~previous_hid_buttons) |
           (buttons_p2 & ~previous_hid_buttons_p2);
       replay_pad_buttons = append_goal_demo_controller(
-          &desired, controller_connected || controller_connected_p2,
-          any_buttons, any_buttons & ~any_pressed,
+          controller_connected || controller_connected_p2, any_buttons,
+          any_buttons & ~any_pressed,
           controller_snapshot.goal_player, now_ms);
     } else if (generic_cinematic_active) {
       reset_virtual_surfaces();
@@ -2588,14 +2603,30 @@ void android_input_poll(void) {
       const u64 pause_input_buttons = pause_input_p2 ? buttons_p2 : buttons;
       const u64 pause_input_previous =
           pause_input_p2 ? previous_hid_buttons_p2 : previous_hid_buttons;
-      append_pause_camera_swipe(&desired, pause_input_connected,
-                                pause_input_buttons, pause_input_previous,
-                                now_ms);
+      // Settings owns the input; do not also synthesize a native camera swipe.
+      static int settings_direction;
+      static uint64_t settings_repeat;
+      const float sx = pause_input_p2 ? axis_x_p2 : axis_x;
+      const float sy = pause_input_p2 ? axis_y_p2 : axis_y;
+      const int direction = !pause_input_connected ? 0 :
+          sy < -0.55f ? PES_PAUSE_INPUT_UP : sy > 0.55f ? PES_PAUSE_INPUT_DOWN :
+          sx < -0.55f ? PES_PAUSE_INPUT_LEFT : sx > 0.55f ? PES_PAUSE_INPUT_RIGHT : 0;
+      if (direction && (direction != settings_direction || now_ms >= settings_repeat)) {
+        pes_controller_pause_camera_input(direction);
+        settings_repeat = now_ms + (direction != settings_direction ? 350 : 150);
+      }
+      settings_direction = direction;
       const u64 pressed = pause_input_buttons & ~pause_input_previous;
       if (pressed & HidNpadButton_Left)
         pes_controller_pause_camera_input(PES_PAUSE_INPUT_LEFT);
       else if (pressed & HidNpadButton_Right)
         pes_controller_pause_camera_input(PES_PAUSE_INPUT_RIGHT);
+      else if (pressed & HidNpadButton_Up)
+        pes_controller_pause_camera_input(PES_PAUSE_INPUT_UP);
+      else if (pressed & HidNpadButton_Down)
+        pes_controller_pause_camera_input(PES_PAUSE_INPUT_DOWN);
+      else if (pressed & HidNpadButton_A)
+        pes_controller_pause_camera_input(PES_PAUSE_INPUT_DECIDE);
       else if (pressed & HidNpadButton_B)
         pes_controller_pause_camera_input(PES_PAUSE_INPUT_BACK);
     }

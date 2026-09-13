@@ -56,15 +56,10 @@ int main(void) {
 
   // Tests run from a new temporary working directory; never user config.
   assert(read_config("missing.cfg") == -1);
-  assert(config.player_cursor_show == 1);
   config.show_fps = 1;
-  config.player_cursor_show = 0;
   assert(write_config("cursor-test.cfg") == 0);
   assert(read_config("cursor-test.cfg") == 0);
-  assert(config.player_cursor_show == 0 && config.show_fps == 1);
-  config.player_cursor_show = 1;
-  assert(write_config("cursor-test.cfg") == 0);
-  assert(read_config("cursor-test.cfg") == 0 && config.player_cursor_show == 1);
-  puts("PASS visual policy: show/hide, lifecycle, null slots, second match, shoot gauge/offside preserved, config roundtrip");
+  assert(config.show_fps == 1);
+  puts("PASS visual policy: cursor always hidden, lifecycle, null slots, second match, shoot gauge/offside preserved, config roundtrip");
   return 0;
 }

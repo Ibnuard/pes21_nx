@@ -34,7 +34,6 @@ typedef struct {
   int show_fps;
   int fuzzy_seek;
   int force_gles;
-  int player_cursor_show;
 } Config;
 
 extern Config config;

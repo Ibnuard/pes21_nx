@@ -119,7 +119,57 @@ static void setup_cursor_info(void) {
   memset(home + 0x6c, 0x5a, 0x34); // Stock support settings must be cloned.
 }
 
+static void test_single_stick_camera_routing(void) {
+  const uint32_t contexts[] = {PES_SETPLAY_CORNER, PES_SETPLAY_GOAL_KICK, PES_SETPLAY_FREE_KICK};
+  for (uint32_t pad=0; pad<2; ++pad) for (unsigned c=0; c<3; ++c) {
+    setup();
+    native_lab_debug_context=native_lab_published_setplay_context=contexts[c];
+    native_lab_debug_stock_mask=0;
+    native_lab_debug_setplay_pad=pad;
+    const float curl=.4f, height=9;
+    memcpy(&native_lab_command_curl_bits[pad], &curl, 4);
+    memcpy(&native_lab_command_vertical_bits[pad], &height, 4);
+    uint32_t buttons=(1u<<7)|(1u<<2); // R1 and Y: preserve kick button
+    int32_t x=16000,y=-12000,rx=0,ry=0;
+    pes_controller_native_pad_lab_route_camera_stick(pad,1,1,&buttons,&x,&y,&rx,&ry);
+    assert(x==0 && y==0 && rx==16000 && ry==-12000);
+    assert(buttons==(1u<<2) && (native_lab_single_camera_mask & (1u<<pad)));
+    pes_controller_native_pad_lab_debug_input(pad,buttons,x,y,rx,ry,1);
+    float stored;
+    memcpy(&stored,&native_lab_command_curl_bits[pad],4); assert(stored==curl);
+    memcpy(&stored,&native_lab_command_vertical_bits[pad],4); assert(stored==height);
+    // Release modifier: normal LS again, no stale emulated RS.
+    buttons=0; x=16000; y=-12000; rx=ry=0;
+    pes_controller_native_pad_lab_route_camera_stick(pad,1,1,&buttons,&x,&y,&rx,&ry);
+    assert(x==16000 && y==-12000 && rx==0 && ry==0);
+    assert(!(native_lab_single_camera_mask & (1u<<pad)));
+    // Full controller, non-owner, disconnected, and taker chord stay untouched.
+    for (unsigned mode=0;mode<4;mode++) {
+      buttons=(1u<<7) | (mode==3 ? 1u<<4 : 0);
+      const uint32_t before_buttons=buttons;
+      x=16000; y=-12000; rx=2345; ry=1234;
+      const uint32_t target=mode==1 ? 1-pad : pad;
+      pes_controller_native_pad_lab_route_camera_stick(target,mode!=0,mode!=2,
+          &buttons,&x,&y,&rx,&ry);
+      assert(x==16000 && y==-12000 && rx==2345 && ry==1234);
+      assert(buttons==before_buttons && !(native_lab_single_camera_mask & (1u<<target)));
+    }
+  }
+  // No camera override for throw-ins, ordinary play, or far-free-kick tactics.
+  for (unsigned mode=0;mode<3;mode++) {
+    native_lab_debug_context=mode==0 ? PES_SETPLAY_NONE : mode==1 ? PES_SETPLAY_THROW_IN : PES_SETPLAY_FREE_KICK;
+    native_lab_debug_stock_mask=mode==2 ? PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS : 0;
+    native_lab_debug_setplay_pad=0;
+    uint32_t buttons=1u<<7; int32_t x=16000,y=0,rx=0,ry=0;
+    pes_controller_native_pad_lab_route_camera_stick(0,1,1,&buttons,&x,&y,&rx,&ry);
+    assert(x==16000 && rx==0 && buttons==(1u<<7));
+  }
+  native_pad_lab_reset();
+  assert(native_lab_single_camera_mask==0);
+}
+
 int main(void) {
+  test_single_stick_camera_routing();
   setup();
   setup_cursor_info();
   pes_match_cursor_info_ready(cursor_info);
@@ -275,7 +325,7 @@ int main(void) {
 
   pes_controller_native_pad_lab_debug_input(0, 1u << 7, 0, 0, 0, 0, 1);
   pes_controller_native_pad_lab_debug_snapshot(&debug);
-  assert(debug.trajectory_enabled == 0); // Owner toggles the real trail off.
+  assert(debug.trajectory_enabled == 1); // R can no longer disable the trail.
   pes_controller_native_pad_lab_debug_input(0, 0, 0, 0, 0, 0, 1);
   pes_controller_native_pad_lab_debug_input(0, 1u << 7, 0, 0, 0, 0, 1);
   pes_controller_native_pad_lab_debug_snapshot(&debug);

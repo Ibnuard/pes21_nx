@@ -2,6 +2,9 @@
 #define __UE4_HOOKS_H__
 
 #include "so_util.h"
+uint32_t pes_controller_pause_settings_focus(void);
+const char *pes_controller_pause_settings_label(uint32_t index);
+const char *pes_controller_pause_settings_value(uint32_t index);
 
 #define PES_MOBILE_CONTROL_UNKNOWN 0
 #define PES_MOBILE_CONTROL_OFFENSE 1
@@ -49,6 +52,10 @@
 #define PES_CONTROLLER_SURFACE_REPLAY 1u
 #define PES_CONTROLLER_SURFACE_GOAL_DEMO 2u
 #define PES_CONTROLLER_SURFACE_CINEMATIC 3u
+
+#define PES_GOAL_DEMO_ACTION_NONE 0u
+#define PES_GOAL_DEMO_ACTION_SKIP 1u
+#define PES_GOAL_DEMO_ACTION_CELEBRATE 2u
 #define PES_CONTROLLER_SURFACE_SETPLAY 4u
 
 #define PES_PENALTY_NONE 0u
@@ -66,6 +73,18 @@ typedef struct {
   uint32_t replay_feedback;
 } PesControllerSnapshot;
 
+// A render-thread snapshot of the game's own ModelStaminaGauge transform.
+// The overlay consumes this POD copy without allocating or querying GL state.
+#define PES_STAMINA_BAR_CAPACITY 4u
+typedef struct {
+  float x;
+  float y;
+  float width;
+  float height;
+  float power;
+  uint32_t rgba;
+} PesStaminaBarSnapshot;
+
 #define PES_PAUSE_INPUT_UP 1u
 #define PES_PAUSE_INPUT_DOWN 2u
 #define PES_PAUSE_INPUT_DECIDE 3u
@@ -75,6 +94,8 @@ typedef struct {
 #define PES_PAUSE_INPUT_ROLE 7u
 
 void install_ue4_hooks(so_module *module);
+uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
+                                     uint32_t capacity);
 void pes_controller_friend_press_update(int held, uint64_t now_ms);
 void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,
@@ -185,6 +206,10 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
                                                int32_t right_axis_x,
                                                int32_t right_axis_y,
                                                int connected);
+// Input axes are already rotated for the active horizontal Joy-Con profile.
+void pes_controller_native_pad_lab_route_camera_stick(
+    uint32_t port, int single_horizontal, int connected, uint32_t *buttons,
+    int32_t *x, int32_t *y, int32_t *right_x, int32_t *right_y);
 void pes_controller_native_pad_lab_debug_snapshot(
     PesNativePadLabDebug *snapshot);
 void pes_controller_native_pad_lab_publish_setplay_context(uint32_t context);
@@ -194,6 +219,7 @@ int pes_controller_replay_active(void);
 int pes_controller_replay_goal_active(void);
 int pes_controller_goal_demo_active(void);
 int pes_controller_goal_demo_player_goal(void);
+void pes_controller_goal_demo_request(uint32_t action);
 void pes_controller_goal_demo_consume(void);
 void pes_controller_cinematic_update(int gameplay_active, int control_mode,
                                      int excluded, uint64_t now_ms);
@@ -268,6 +294,7 @@ const char *pes_controller_match_result_card_label(uint32_t index);
 uint32_t pes_controller_match_result_focus(void);
 const char *pes_controller_match_result_heading(void);
 uint32_t pes_controller_match_result_transition(void);
+uint32_t pes_controller_match_result_handoff(void);
 #define PES_PREMATCH_GAMEPLAN_PAGE_ROOT 0u
 #define PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE 1u
 #define PES_PREMATCH_GAMEPLAN_PAGE_FORMATION 2u
@@ -322,6 +349,7 @@ uint32_t pes_controller_custom_prematch_gameplan_substitute_area(
     uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_substitute_focus(
     uint32_t pad, uint32_t area);
+uint32_t pes_controller_custom_prematch_gameplan_drag_state(uint32_t pad);
 int pes_controller_custom_prematch_gameplan_substitute_selected(
     uint32_t pad, uint32_t area, uint32_t index);
 uint32_t pes_controller_custom_prematch_gameplan_formation_focus(
@@ -485,13 +513,14 @@ uint32_t pes_controller_custom_cpu_popup_value(void);
 uint32_t pes_controller_custom_cpu_popup_count(void);
 const char *pes_controller_custom_cpu_popup_label(uint32_t index);
 int pes_controller_custom_match_settings_active(void);
-#define PES_MATCH_SETTINGS_COUNT 5u
+#define PES_MATCH_SETTINGS_COUNT 4u
 #define PES_MATCH_SETTINGS_ROW_Y 0.225f
 #define PES_MATCH_SETTINGS_ROW_STEP 0.105f
 // The prematch hub has a taller header than the native settings popup.
 #define PES_HUB_MATCH_SETTINGS_ROW_Y 0.265f
 #define PES_HUB_MATCH_SETTINGS_ROW_STEP 0.105f
 uint32_t pes_controller_custom_match_settings_focus(void);
+uint32_t pes_controller_custom_match_settings_count(void);
 const char *pes_controller_custom_match_settings_label(uint32_t index);
 const char *pes_controller_custom_match_settings_value(uint32_t index);
 int pes_controller_custom_video_settings_active(void);

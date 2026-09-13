@@ -19,8 +19,7 @@
   CONFIG_VAR_INT(trilinear_filter); \
   CONFIG_VAR_INT(show_fps); \
   CONFIG_VAR_INT(fuzzy_seek); \
-  CONFIG_VAR_INT(force_gles); \
-  CONFIG_VAR_INT(player_cursor_show);
+  CONFIG_VAR_INT(force_gles);
 
 Config config;
 
@@ -48,7 +47,6 @@ int read_config(const char *file) {
   config.show_fps = 0;
   config.fuzzy_seek = 0;
   config.force_gles = 1;
-  config.player_cursor_show = 1;
 
   FILE *f = fopen(file, "r");
   if (f == NULL)
@@ -73,7 +71,6 @@ int read_config(const char *file) {
   } while (!feof(f));
 
   fclose(f);
-  config.player_cursor_show = config.player_cursor_show != 0;
   return 0;
 }
 

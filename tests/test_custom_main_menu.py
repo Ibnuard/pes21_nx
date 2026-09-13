@@ -11,6 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CustomMainMenuTests(unittest.TestCase):
+    def test_confirm_does_not_require_native_touch_dispatch(self):
+        shim = (ROOT / "source/android_shim.c").read_text(encoding="utf-8")
+        hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
+        tap = shim.split("static void append_menu_controller_tap(", 1)[1].split(
+            "static void append_menu_controller_back(", 1)[0]
+        self.assertIn("!pes_controller_start_prompt(NULL, NULL)", tap)
+        self.assertIn("if (a_pressed)\n      pes_controller_menu_tap(0.0f, 0.0f);\n    return;", tap)
+        self.assertIn("pes_main_menu_focus_index() + 1u", hooks)
+        self.assertIn("&main_menu_confirm_pending, 0, __ATOMIC_ACQ_REL", hooks)
+        self.assertIn("main_menu_activate_choice(menu_confirm - 1u)", hooks)
+
     def test_vertical_order_preserves_native_actions(self):
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
         self.assertRegex(
@@ -58,6 +69,30 @@ class CustomMainMenuTests(unittest.TestCase):
         icons = Image.open(ROOT / "data" / "main_menu_icons.bin")
         self.assertEqual(icons.mode, "RGBA")
         self.assertEqual(icons.getchannel("A").getextrema(), (0, 255))
+
+    def test_two_player_general_settings_omits_com_level(self):
+        hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
+        overlay = (ROOT / "source/overlay.c").read_text(encoding="utf-8")
+        self.assertIn(
+            "PES_MATCH_SETTINGS_COUNT - exhibition_match_settings_first_index()",
+            hooks,
+        )
+        self.assertIn(
+            "index + exhibition_match_settings_first_index()",
+            hooks,
+        )
+        self.assertNotIn('"COM LEVEL", "MATCH TIME"', hooks)
+        self.assertIn("pes_controller_custom_match_settings_count()", overlay)
+
+    def test_player_cursor_is_not_configurable_and_stays_hidden(self):
+        hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
+        header = (ROOT / "source/ue4_hooks.h").read_text(encoding="utf-8")
+        config = (ROOT / "source/config.c").read_text(encoding="utf-8")
+        self.assertIn("#define PES_MATCH_SETTINGS_COUNT 4u", header)
+        self.assertNotIn("PLAYER CURSOR", hooks)
+        self.assertNotIn("player_cursor_show", hooks)
+        self.assertNotIn("player_cursor_show", config)
+        self.assertIn("const int show = 0;", hooks)
 
 
 if __name__ == "__main__":

@@ -311,8 +311,8 @@ class NativeGamepadLabTests(unittest.TestCase):
             self.hooks, re.S).group(0)
 
         self.assertIn('prematch_gameplan_field_plate_first_quad[side]', page)
-        self.assertIn('emit_efootball_centered_fit_line(', page)
-        self.assertIn('const char *bench_title = "SUBSTITUTES";', page)
+        self.assertIn('emit_efootball_name_line(', page)
+        self.assertNotIn('const char *bench_title = "SUBSTITUTES";', page)
         self.assertNotIn(
             'pes_controller_custom_prematch_gameplan_position_picker_portrait_id(',
             overlay)
@@ -326,7 +326,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('prematch_gameplan_picker_foot_first_quad', page)
         self.assertIn('prematch_gameplan_picker_active_text_first', page)
         self.assertNotIn('prematch_gameplan_picker_check_first_quad', page)
-        self.assertIn('gameplan_metric_color(', draw)
+        self.assertNotIn('gameplan_metric_color(', draw)
+        self.assertIn('emit_corner_outline(', page)
+        self.assertIn('footer_labels[side][2] = "CHANGE ROLE";', page)
         self.assertIn('prematch_gameplan_bench_metric_first', draw)
         self.assertIn('prematch_gameplan_picker_metric_first', draw)
         self.assertIn('prematch_gameplan_field_role_first', draw)
@@ -519,9 +521,69 @@ class NativeGamepadLabTests(unittest.TestCase):
         for page in (settings, choices):
             self.assertNotIn('custom_action_button_quads =', page)
             self.assertNotIn('custom_back_button_quads =', page)
-            self.assertIn('const float key_y = 0.958f', page)
-            self.assertIn('0.745f * (float)screen_width', page)
-            self.assertIn('0.875f * (float)screen_width', page)
+        self.assertIn('const float key_y = 0.958f', choices)
+        self.assertIn('pause_settings_popup ? 0.9425f : 0.958f', settings)
+        self.assertIn(': 0.745f * screen_width', settings)
+        self.assertIn(': 0.875f * screen_width', settings)
+        self.assertIn('const float button_gh = helper_text_gh;', settings)
+        self.assertIn('action_label_w', settings)
+        self.assertIn('back_label_w', settings)
+
+    def test_switch_helpers_share_font_and_gameplan_context_is_content_sized(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn(
+            'const float helper_text_gh = roundf((float)screen_height / 43.0f);',
+            overlay)
+        self.assertIn('const float context_label_w = measure_efootball_line(',
+                      overlay)
+        self.assertIn('context_icon_size + context_gap +', overlay)
+        self.assertNotIn(
+            'const float context_w = 0.132f * (float)screen_width;', overlay)
+
+    def test_goal_helpers_use_native_events_without_synthetic_touch(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        android = (ROOT/'source/android_shim.c').read_text(encoding='utf-8')
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        goal_input = android.split(
+            'static uint32_t append_goal_demo_controller', 1)[1].split(
+                'static uint32_t append_cinematic_skip_controller', 1)[0]
+        self.assertNotIn('touch_state_append', goal_input)
+        self.assertNotIn('FAKE_POINTER_GOAL_DEMO', android)
+        self.assertIn('PES_GOAL_DEMO_ACTION_SKIP', goal_input)
+        self.assertIn('PES_GOAL_DEMO_ACTION_CELEBRATE', goal_input)
+        self.assertIn('0x01050067u', hooks)
+        self.assertIn('0x01050066u', hooks)
+        self.assertIn('P1  SKIP', overlay)
+        self.assertIn('P2  SKIP', overlay)
+        self.assertIn('P1  CELEBRATE', overlay)
+        self.assertIn('P2  CELEBRATE', overlay)
+
+    def test_stamina_fallback_does_not_hook_shared_canvas_items(self):
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('pause_stamina_canvas_draw_item', hooks)
+        self.assertIn('_ZN7UCanvas8DrawItemER11FCanvasItem', hooks)
+        self.assertIn('pause_stamina_canvas_fill_return', hooks)
+        self.assertIn('0x3f10144', hooks)
+        self.assertIn('pause_stamina_get_model_original', hooks)
+        self.assertIn('for (uint32_t index = 2; index < 4; ++index)', hooks)
+        self.assertIn('STAMINA native backing hidden', hooks)
+        self.assertNotIn('pause_stamina_snapshot_sequence', hooks)
+        self.assertNotIn('stamina_plate_first_quad', overlay)
+        self.assertNotIn('stamina_fill_first_quad', overlay)
+
+    def test_substitute_names_are_left_aligned_and_keep_marquee(self):
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        page = overlay.split(
+            'for (uint32_t slot = 0;\n             slot < prematch_gameplan_bench_visible[side]; slot++) {',
+            1)[1].split('\n      } else {', 1)[0]
+        self.assertIn('const float name_x = rect[0] +', page)
+        self.assertIn('name, (int)strlen(name), name_x,', page)
+        self.assertIn('name_focus_seconds, 1, verts + quads * 24', page)
+        helper = overlay.split('static int emit_efootball_name_line', 1)[1].split(
+            '\n}\n', 1)[0]
+        self.assertIn('left_aligned ? anchor_x', helper)
+        self.assertIn('const float phase = (float)fmod', helper)
 
     def test_prematch_kits_load_stock_jersey_thumbnails_and_survive_refresh(self):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
@@ -628,7 +690,7 @@ class NativeGamepadLabTests(unittest.TestCase):
             self.hooks, re.S).group(0)
         self.assertIn('exhibition_apply_selected_uniforms(NULL);', setup)
 
-    def test_kickoff_loading_cover_stops_at_native_match_setup(self):
+    def test_kickoff_loading_cover_survives_native_match_setup(self):
         pending = re.search(
             r'static void main_menu_2p_prematch_hub_process_pending\(void\) \{'
             r'.*?\n\}', self.hooks, re.S).group(0)
@@ -645,7 +707,9 @@ class NativeGamepadLabTests(unittest.TestCase):
             overlay, re.S).group(1)
         self.assertIn('if (!game_plan)', pending)
         self.assertIn('&main_menu_2p_transition_active, 1', pending)
-        self.assertIn('&main_menu_2p_transition_active, 0', match_setup)
+        self.assertNotIn('&main_menu_2p_transition_active, 0', match_setup)
+        self.assertIn('pes_prematch_card_need_disp', self.hooks)
+        self.assertIn('kickoff_loading_reveal();', self.hooks)
         self.assertNotIn('main_menu_2p_transition_active', screen_tap)
         self.assertNotIn('"LOADING MATCH"', transition)
         self.assertNotIn('custom_panel_quads =', transition)
@@ -672,7 +736,8 @@ class NativeGamepadLabTests(unittest.TestCase):
             overlay,
             r'const int pause_camera_active =\s*!custom_2p_transition')
         self.assertIn(
-            '} else if (tutorial_play_active && !custom_2p_transition) {',
+            '} else if (tutorial_play_active && !custom_2p_transition &&\n'
+            '             !pause_settings_popup) {',
             overlay)
         self.assertIn(
             'const float lineup_gh = (float)screen_height / 50.0f;',
@@ -774,13 +839,13 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertLess(first_map, first_normalize)
         self.assertIn('controller_profile_map_stick(profile_p2', poll)
 
-    def test_single_joycon_chord_helper_draws_two_badges(self):
+    def test_single_joycon_chord_helper_draws_two_switch_sprites(self):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('setplay_has_chord', overlay)
-        self.assertIn('chord_second_x', overlay)
-        self.assertRegex(overlay, r'emit_efootball_line\(\s*"R1", 2')
+        self.assertIn('const int rail = !strcmp(setplay_keys[i], "L1+R1")', overlay)
+        self.assertIn('rail ? "SL" : camera ? "SR" : kick ? "LS"', overlay)
+        self.assertIn('switch_button_texture(rail ? "SR" : camera ? "LS" : "Y")', overlay)
         self.assertRegex(overlay, r'emit_efootball_line\(\s*"\+", 1')
-        self.assertRegex(overlay, r'emit_efootball_line\(\s*"L1", 2')
+        self.assertNotRegex(overlay, r'emit_efootball_line\(\s*"[LR]1", 2')
 
     def test_exhibition_and_lab_share_native_gameplay_path_after_play(self):
         self.assertIn('if (native_pad_lab_active && gameplay_active)',
@@ -938,7 +1003,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('float axis_x = (float)raw_x / 32768.0f', camera)
         self.assertIn('const float absolute_x = fabsf(axis_x)', camera)
 
-    def test_native_command_angle_inherits_rs_camera_and_direct_ls_aim(self):
+    def test_native_command_angle_inherits_rs_camera_and_separates_ls_curl(self):
         route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
         aim = re.search(
             r'static void native_lab_apply_native_kick_angle.*?\n\}',
@@ -952,7 +1017,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('native_lab_debug_axis_x', aim)
         self.assertIn('native_lab_debug_axis_y', aim)
         self.assertNotIn('atan2f(-left_x, left_y)', aim)
-        self.assertIn('context == PES_SETPLAY_CORNER ? 75.0f : 60.0f', aim)
+        self.assertNotIn('context == PES_SETPLAY_CORNER ? 75.0f : 60.0f', aim)
+        self.assertIn('pes_setplay_curl_command(', aim)
         self.assertIn('NATIVE_LAB_TRAJECTORY_MAX_ELEVATION_DEGREES', aim)
         self.assertIn('(char *)unit + 0x44', aim)
         self.assertIn('(char *)unit + 0x38, &desired', aim)
@@ -960,9 +1026,10 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('native_lab_base_angle_bits[pad]', route)
         self.assertIn('native_lab_stable_setplay_base_angle(', aim)
         self.assertIn('int same_target', aim)
-        self.assertIn('float desired = base_angle + camera_yaw_degrees', aim)
+        self.assertIn('float desired = base_angle - camera_yaw_degrees', aim)
+        self.assertIn('native_lab_camera_heading_bits[pad]', aim)
         self.assertIn('native_lab_left_aim_latched_mask', aim)
-        self.assertIn('memcpy(&desired, &previous_bits', aim)
+        self.assertNotIn('memcpy(&desired, &previous_bits', aim)
         self.assertNotIn('touch_state_append', aim)
         command = re.search(
             r'static void native_lab_adjust_kick.*?\n\}', route, re.S
@@ -991,8 +1058,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
         self.assertNotIn('CAMERA LOCK', overlay)
-        self.assertIn('"TRAJECTORY ON"', overlay)
-        self.assertIn('setplay_keys[4] = "R";', overlay)
+        self.assertNotIn('"TRAJECTORY ON"', overlay)
+        self.assertNotIn('"TRAJECTORY OFF"', overlay)
+        self.assertNotIn('setplay_keys[4] = "R";', overlay)
         throw_helper = re.search(
             r'else if \(native_setplay_debug &&\s*'
             r'setplay_context == PES_SETPLAY_THROW_IN\).*?'
@@ -1086,7 +1154,7 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('pes_controller_setplay_context()', detector)
         self.assertIn('has_setplay_unit', detector)
 
-    def test_real_setplay_trajectory_uses_ls_angle_and_stock_cross_renderer(self):
+    def test_real_setplay_trajectory_is_always_on_and_uses_stock_cross_renderer(self):
         route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')
         trajectory = re.search(
             r'static void native_lab_publish_setplay_trajectory\('
@@ -1095,7 +1163,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('native_lab_command_angle_bits[pad]', trajectory)
         self.assertIn('native_lab_draw_pass_line(0x50u', trajectory)
         self.assertIn('0xffu', trajectory)
-        self.assertIn('(buttons & (1u << 7))', route)
+        self.assertNotIn('__atomic_fetch_xor(&native_lab_trajectory_enabled', route)
+        self.assertIn('pes_setplay_bend_point(', trajectory)
         self.assertIn('PES_NATIVE_LAB_STOCK_MOBILE_KICK', route)
         self.assertIn('native_lab_publish_setplay_trajectory(input, screen_2d)',
                       route)
@@ -1148,8 +1217,9 @@ class NativeGamepadLabTests(unittest.TestCase):
                          re.search(r'static void native_lab_penalty_update_2d.*?\n\}',
                                    route, re.S).group(0))
         self.assertIn('"SET PENALTY TAKER"', overlay)
-        self.assertIn('"P1 KICKER (LS + Y)"', overlay)
-        self.assertIn('"P2 GOALKEEPER (LS)"', overlay)
+        self.assertIn('"P1 KICKER"', overlay)
+        self.assertIn('"P2 GOALKEEPER"', overlay)
+        self.assertIn('setplay_keys[setplay_helper_count] = "LS+Y"', overlay)
         penalty_block = re.search(
             r'if \(!setplay_helper_count && penalty_helper_active\).*?\n  \}',
             overlay, re.S).group(0)
@@ -1182,17 +1252,22 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('native_lab_pending_kick_action', bridge)
         self.assertIn('*kick_power = native_power', bridge)
         self.assertIn('native_lab_command_vertical_bits[pad]', bridge)
-        self.assertIn('close_free_kick_shoot', bridge)
+        self.assertIn('requested_flight', bridge)
         self.assertIn('native_lab_free_kick_elevation_bits[pad]', bridge)
+        self.assertIn('native_lab_setplay_flight_curl_bits[pad]', bridge)
         self.assertIn('native_lab_free_kick_elevation_mask', bridge)
         injection = re.search(
             r'static void native_lab_ball_injection\(.*?\n\}',
             route, re.S).group(0)
         self.assertIn('native_lab_ball_injection_original', injection)
-        self.assertIn('PES_SETPLAY_FREE_KICK', injection)
-        self.assertIn('sqrtf(velocity[0] * velocity[0] + velocity[2] * velocity[2])',
-                      injection)
-        self.assertIn('velocity[1] = vertical', injection)
+        self.assertIn('native_lab_free_kick_player[candidate]', injection)
+        self.assertNotIn('native_lab_debug_context', injection)
+        self.assertNotIn('velocity[1] =', injection)
+        self.assertNotIn('spin[1] =', injection)
+        self.assertIn('SETPLAY flight observe', injection)
+        self.assertNotIn(
+            '__atomic_fetch_sub(&native_lab_free_kick_elevation_linger',
+            injection)
         install = route[route.index('static int install_native_lab_action_debug'):]
         self.assertIn('GetBallInjectionSpeedAndRotation', install)
         self.assertIn('(uintptr_t)module->load_base + 0x38b4850', install)
