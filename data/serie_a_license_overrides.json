@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "scope": "serie_a_2025_26",
+  "generated_pack": "local-debug/serie-a-license-pack",
+  "policy": {
+    "runtime_integration": false,
+    "patch_existing_team_rows_only": true,
+    "preserve_unrelated_team_bytes": true,
+    "selector_names_are_separate": true,
+    "expected_team_count": 20,
+    "pending_team_record_ids": [4219],
+    "kit_status": "source_ready_conversion_pending",
+    "direct_pc_ftex_transplant": false,
+    "requires_mobile_cooked_texture_template": true,
+    "cpk_repacker_can_add_members": false
+  },
+  "team_table": {
+    "schema": "pes21_mobile",
+    "record_size": 1532,
+    "team_id_offset": 8,
+    "english_name_offset": 368,
+    "english_name_size": 70,
+    "short_code_offsets": [882, 1382],
+    "short_code_size": 4
+  },
+  "sources": {
+    "pes21_mobile_team": {
+      "path": "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/pesdb/Team.bin"
+    },
+    "football_life_team": {
+      "path": "local-debug/licensing-eng-spa-audit/football-life-Team.bin",
+      "sha256": "2c577d3f4fe0cf064bcae757fd0dc3b7649ff26df7f7d44c8c9535bc808a5cec"
+    },
+    "football_life_competition_entry": {
+      "path": "local-debug/licensing-eng-spa-audit/football-life-CompetitionEntry.bin",
+      "sha256": "dfa5376e6d0bfa4d297db1ad2a2a8b9339ff5743325f0e1e91281703e27fc392"
+    },
+    "kit_cpks": [
+      {"key": "dt34_base", "path": "Data/dt34_g4.cpk", "precedence": 0},
+      {"key": "season_a", "path": "download/data_s2526a.cpk", "precedence": 1},
+      {"key": "season_b", "path": "download/data_s2526b.cpk", "precedence": 2},
+      {"key": "season_c", "path": "download/data_s2526c.cpk", "precedence": 3}
+    ],
+    "descriptor_member_template": "common/character0/model/character/uniform/team/{team_id}/{team_id}_DEF_{kind}_realUni.bin",
+    "texture_member_template": "Asset/model/character/uniform/texture/#windx11/{texture}.ftex",
+    "mobile_uniform_root": "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/uniform/team"
+  },
+  "leagues": [
+    {
+      "key": "serie_a",
+      "label": "SERIE A",
+      "football_life_competition_id": 10,
+      "catalog_category": "serie_a",
+      "teams": [
+        {"team_id": 234, "order": 1, "official_name": "Atalanta BC", "short_code": "ATA", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 186, "order": 2, "official_name": "Bologna FC", "short_code": "BOL", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 320, "order": 3, "official_name": "Cagliari Calcio", "short_code": "CAG", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 4219, "order": 4, "official_name": "Como 1907", "short_code": "COM", "catalog_integration": "pending", "team_bin_policy": "pending_team_record"},
+        {"team_id": 4220, "order": 5, "official_name": "US Cremonese", "short_code": "CRE", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 124, "order": 6, "official_name": "ACF Fiorentina", "short_code": "FIO", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 323, "order": 7, "official_name": "Genoa CFC", "short_code": "GEN", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 336, "order": 8, "official_name": "Hellas Verona", "short_code": "VER", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 120, "order": 9, "official_name": "Juventus FC", "short_code": "JUV", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 122, "order": 10, "official_name": "SS Lazio", "short_code": "LAZ", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 4237, "order": 11, "official_name": "US Lecce", "short_code": "LEC", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 119, "order": 12, "official_name": "Inter Milan", "short_code": "INT", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 121, "order": 13, "official_name": "AC Milan", "short_code": "MIL", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 327, "order": 14, "official_name": "SSC Napoli", "short_code": "NAP", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 123, "order": 15, "official_name": "Parma Calcio", "short_code": "PAR", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 4241, "order": 16, "official_name": "Pisa Sporting Club", "short_code": "PIS", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 125, "order": 17, "official_name": "AS Roma", "short_code": "ROM", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 1919, "order": 18, "official_name": "US Sassuolo", "short_code": "SAS", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 333, "order": 19, "official_name": "Torino FC", "short_code": "TOR", "catalog_integration": "existing", "team_bin_policy": "patch_existing"},
+        {"team_id": 190, "order": 20, "official_name": "Udinese Calcio", "short_code": "UDI", "catalog_integration": "existing", "team_bin_policy": "patch_existing"}
+      ]
+    }
+  ]
+}

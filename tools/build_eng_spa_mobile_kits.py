@@ -5,10 +5,13 @@ resolved at source and materialized under each native kit's unique mobile name.
 Original inner TOC order/IDs are retained and additions appended with Sorted=0.
 """
 import argparse
+import io
 import json
+import re
 import shutil
 import struct
 from pathlib import Path
+from PIL import Image
 
 from build_barca_real_madrid_mobile_kit_canary import (
     cpk_inventory, decode_wesys_payload, descriptor_texture_names, package_cpk,
@@ -53,8 +56,9 @@ def build(args):
         raise FileExistsError('use a fresh output; stable dist is never overwritten')
     out.mkdir(parents=True)
     manifest = json.loads((ROOT/'data/barca_real_madrid_mobile_kit_canary.json').read_text())
-    license_map = json.loads((ROOT/'data/eng_spa_license_overrides.json').read_text())
+    license_map = json.loads(args.license_manifest.read_text())
     teams = [dict(t, league=league['label']) for league in license_map['leagues'] for t in league['teams']]
+    preserved = {int(value) for value in args.preserve_teams.split(',') if value.strip()}
     ids = [t['team_id'] for t in teams]
     if len(ids) != len(set(ids)):
         raise ValueError('duplicate team mapping')
@@ -73,11 +77,11 @@ def build(args):
     old_flags = {struct.unpack_from('<I', raw, o+8)[0]: raw[o+84] for o in range(0, len(raw), 1532)}
     payloads = {label: {} for label in bases}
     report = dict(base_sha256=sha256_file(args.base_obb), runtime_tested=False,
-                  preserved_stable_teams=[108, 109], teams=[], pending_native_slots=[])
+                  preserved_stable_teams=sorted(preserved), teams=[], pending_native_slots=[])
     flags = set()
     for team in teams:
         tid = team['team_id']
-        if tid in (108, 109):
+        if tid in preserved:
             report['teams'].append(dict(team, status='preserved_hardware_verified', kits=[]))
             continue
         row = dict(team, status='converted' if tid in active else 'assets_only_missing_native_slot', kits=[])
@@ -100,7 +104,8 @@ def build(args):
                 data, provenance = winning_member(indexes, source)
                 image, metadata = decode_ftex_top(data)
                 # FL shared EPL fonts use a 2x-resolution version of the same 8:1 atlas.
-                expected = {(2048, 2048)} if role == 'body' else {(2048, 256), (4096, 512)}
+                expected = ({(1024, 1024), (2048, 2048)} if role == 'body' else
+                            {(1024, 128), (2048, 256), (4096, 512)})
                 if image.size not in expected:
                     raise ValueError(f'{source}: unverified layout size {image.size}, expected {expected}')
                 converted = image_png_bytes((convert_body if role == 'body' else convert_back)(image, manifest['atlas_transform']))
@@ -136,7 +141,35 @@ def build(args):
                         payloads['dt240'][target] = member_payload(bases['dt240'], source)
         report['teams'].append(row)
         print(f"Converted {tid} {team['official_name']}: {row['status']}", flush=True)
-    payloads['dt200'][team_member], report['kit_flags'] = enable_real_kits(original_team, flags)
+    team_input = args.patched_team.read_bytes() if args.patched_team else original_team
+    payloads['dt200'][team_member], report['kit_flags'] = enable_real_kits(team_input, flags)
+    if args.player_bin:
+        payloads['dt200']['common/etc/pesdb/Player.bin'] = args.player_bin.read_bytes()
+    if args.tactics_bin:
+        payloads['dt200']['common/etc/pesdb/TacticsFormation.bin'] = args.tactics_bin.read_bytes()
+
+    if args.identity_overrides:
+        identities = json.loads(args.identity_overrides.read_text())
+        for identity in identities:
+            tid = int(identity['team_id'])
+            if tid not in active:
+                continue
+            crest_path = ROOT / identity['badge_source']
+            with Image.open(crest_path) as source_image:
+                crest = source_image.convert('RGBA')
+                pattern = re.compile(rf'common/render/symbol/flag/e_{tid:06d}_.*\.png$')
+                names = [name for name in inventories['dt240'] if pattern.fullmatch(name)]
+                if not names:
+                    raise ValueError(f'{tid}: no native crest members to update')
+                for name in names:
+                    with Image.open(io.BytesIO(member_payload(bases['dt240'], name))) as old:
+                        size = old.size
+                    buffer = io.BytesIO()
+                    crest.resize(size, Image.Resampling.LANCZOS).save(buffer, format='PNG')
+                    payloads['dt240'][name] = buffer.getvalue()
+        report['native_crests_updated'] = sorted(
+            int(row['team_id']) for row in identities if int(row['team_id']) in active
+        )
     (out/'asset-report.json').write_text(json.dumps(report, indent=2)+'\n')
     if args.assets_only:
         return
@@ -158,6 +191,10 @@ def build(args):
         report[label] = restore_order(Path(merged['candidate']), final, names)
         report[label]['payload_validation'] = validate_cpk(bases[label], final, actions, data)
         replacements[f'Expansion/{label}_mobile_all.cpk'] = final
+    if args.portrait_cpk:
+        replacements['Expansion/dt241_mobile_all.cpk'] = args.portrait_cpk
+        report['portraits'] = dict(
+            source=str(args.portrait_cpk), sha256=sha256_file(args.portrait_cpk))
     obb = out/args.base_obb.name
     mode, note = package_outer_obb(args.base_obb, obb, replacements)
     report['obb'] = validate_outer_obb(args.base_obb, obb, replacements, packaging_mode=mode)
@@ -175,6 +212,14 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base-obb', type=Path, default=ROOT/'dist/pes21_nx/patch.305030001.jp.nyan2021.pesam.obb')
     p.add_argument('--base-nro', type=Path, default=ROOT/'dist/pes21_nx/pes21_nx.nro')
+    p.add_argument('--license-manifest', type=Path,
+                   default=ROOT/'data/eng_spa_license_overrides.json')
+    p.add_argument('--preserve-teams', default='108,109')
+    p.add_argument('--patched-team', type=Path)
+    p.add_argument('--player-bin', type=Path)
+    p.add_argument('--tactics-bin', type=Path)
+    p.add_argument('--portrait-cpk', type=Path)
+    p.add_argument('--identity-overrides', type=Path)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--assets-only', action='store_true')
     build(p.parse_args())

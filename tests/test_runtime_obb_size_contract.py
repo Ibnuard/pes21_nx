@@ -6,18 +6,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT/'source/main.c').read_text()
 OBB = ROOT/'local-debug/eng-spa-all-kits-v3/patch.305030001.jp.nyan2021.pesam.obb'
+SERIE_A_OBB = ROOT/'local-debug/serie-a-all-kits-v2/patch.305030001.jp.nyan2021.pesam.obb'
 
 
 class RuntimeObbSizeContractTests(unittest.TestCase):
     def test_current_size_is_primary_expectation(self):
-        self.assertIn('{ PATCH_OBB_PATH, PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE }', SOURCE)
-        size = int(re.search(r'#define PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE (\d+)ULL', SOURCE)[1])
-        self.assertEqual(size, 1401395200)
+        self.assertIn('{ PATCH_OBB_PATH, PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE }', SOURCE)
+        size = int(re.search(r'#define PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE (\d+)ULL', SOURCE)[1])
+        self.assertEqual(size, 1403275264)
 
     @unittest.skipUnless(OBB.is_file(), 'local proprietary OBB unavailable')
     def test_actual_artifact_matches_allowance(self):
-        size = int(re.search(r'#define PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE (\d+)ULL', SOURCE)[1])
-        self.assertEqual(OBB.stat().st_size, size)
+        old_size = int(re.search(r'#define PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE (\d+)ULL', SOURCE)[1])
+        self.assertEqual(OBB.stat().st_size, old_size)
+        if SERIE_A_OBB.is_file():
+            new_size = int(re.search(r'#define PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE (\d+)ULL', SOURCE)[1])
+            self.assertEqual(SERIE_A_OBB.stat().st_size, new_size)
 
     def test_keeps_recovery_sizes_and_actionable_error(self):
         self.assertIn('actual_size == PATCH_OBB_ORIGINAL_SIZE', SOURCE)

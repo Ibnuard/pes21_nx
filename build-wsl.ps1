@@ -48,6 +48,7 @@ tar -C "$PES21_NX_PROJECT_ROOT" \
   --exclude='data/*.json' --exclude=data/exhibition_badges \
   --exclude=local-inputs --exclude=local-debug \
   --exclude=.codex-dex --exclude=.codex-jadx --exclude=.codex-pak \
+  --exclude='.tmp*' \
   --exclude=clean-package-removed --exclude=logs --exclude='$out' \
   --exclude=prepared_assets --exclude=EFOOTBALL10_extracted \
   --exclude=offline-responses --exclude=runtime-unused-cpk \

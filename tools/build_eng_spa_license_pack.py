@@ -155,11 +155,17 @@ def flatten_manifest_teams(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         if sorted(orders) != list(range(1, len(teams) + 1)):
             raise ValueError(f"{league_key}: team order must be contiguous from 1")
 
-    if len(flattened) != 40:
-        raise ValueError(f"expected 40 teams, found {len(flattened)}")
+    policy = manifest.get("policy", {})
+    expected_count = int(policy.get("expected_team_count", 40))
+    if len(flattened) != expected_count:
+        raise ValueError(f"expected {expected_count} teams, found {len(flattened)}")
     pending = [row for row in flattened if row["team_bin_policy"] == "pending_team_record"]
-    if [row["team_id"] for row in pending] != [396]:
-        raise ValueError("Sunderland (396) must be the sole pending team-record target")
+    expected_pending = [int(value) for value in
+                        policy.get("pending_team_record_ids", [396])]
+    if sorted(row["team_id"] for row in pending) != sorted(expected_pending):
+        raise ValueError(
+            f"pending team-record targets must be {sorted(expected_pending)}"
+        )
     return flattened
 
 
@@ -775,9 +781,9 @@ def render_report(
 ) -> str:
     by_team = {int(row["team_id"]): row for row in kit_report["teams"]}
     lines = [
-        "# English and Spanish License Pack",
+        f"# {manifest.get('scope', 'Club')} License Pack",
         "",
-        "This generated pack stages official English/Spanish club names and the",
+        "This generated pack stages official club names and the",
         "Football Life kit source inventory without touching runtime source, CPK/OBB",
         "archives, the NRO build, or stable release files.",
         "",
@@ -788,15 +794,15 @@ def render_report(
         f"- Existing target rows patched: {team_report['patched_team_rows']}",
         f"- Unrelated rows byte-identical: {team_report['unrelated_rows_byte_identical']}",
         f"- Pending missing team IDs: {', '.join(map(str, team_report['pending_missing_team_ids']))}",
-        f"- Kit descriptor sources complete: {kit_report['counts']['descriptor_complete_teams']}/40",
-        f"- Kit base-texture sources complete: {kit_report['counts']['texture_complete_teams']}/40",
+        f"- Kit descriptor sources complete: {kit_report['counts']['descriptor_complete_teams']}/{team_report['target_count']}",
+        f"- Kit base-texture sources complete: {kit_report['counts']['texture_complete_teams']}/{team_report['target_count']}",
         "- Runtime integration: deferred",
         "- PC FTEX to mobile cooked-texture conversion: pending",
         "",
         "## Generated local output",
         "",
         "- `Team.bin`: 736-row PES21 table with only official name/code fields changed",
-        "- `selector-name-overrides.json`: official uppercase selector labels, including pending Sunderland",
+        "- `selector-name-overrides.json`: official uppercase selector labels and pending-slot status",
         "- `kit-source-manifest.json`: winning descriptor/texture member per CPK precedence",
         "- `validation-report.json`: hashes, byte-preservation checks, and safety warnings",
         "",
@@ -831,12 +837,11 @@ def render_report(
 
     lines.extend(
         [
-            "## Sunderland gate",
+            "## Missing native-slot gate",
             "",
-            "Football Life contains Sunderland AFC as team `396`, but the tested PES21",
-            "mobile Team.bin has no row `396` and the current selector has no safe native",
-            "entry for it. The generator records Sunderland as the twentieth English team",
-            "but does not append/replace a Team.bin row and does not edit the selector.",
+            f"Football Life contains the pending IDs {team_report['pending_missing_team_ids']}, but the tested",
+            "PES21 mobile Team.bin has no corresponding row. The generator records these",
+            "teams but does not append or replace a Team.bin row.",
             "",
             "A later runtime phase must choose a validated physical slot or prove that all",
             "required database, roster, tactics, badge, uniform, and CPK member additions are",
@@ -844,14 +849,14 @@ def render_report(
             "",
             "## Kit boundary",
             "",
-            "All 40 targets have four 120-byte Football Life real-uniform descriptors and",
+            f"All {team_report['target_count']} targets have four 120-byte Football Life real-uniform descriptors and",
             "matching base FTEX textures. The source winner is resolved per member with",
             "`dt34_g4.cpk < data_s2526a.cpk < data_s2526b.cpk < data_s2526c.cpk`.",
             "",
             "That is source readiness, not mobile readiness. PES21 Mobile uses UE4 cooked",
             "texture assets while the Football Life files are PC FTEX. Raw FTEX replacement",
             "is therefore prohibited. The existing CPK repacker also replaces known member",
-            "names only; it cannot create Sunderland's absent members. A conversion phase",
+            "names only; it cannot create an absent native team slot. A conversion phase",
             "must decode FTEX, preserve alpha/material channels, encode against a verified",
             "PES21 Mobile uniform texture template, repack a detachable test archive, and",
             "validate in Ryujinx/hardware before broad rollout.",
@@ -950,7 +955,7 @@ def build_pack(args: argparse.Namespace) -> dict[str, Any]:
     }
     report: dict[str, Any] = {
         "schema_version": 1,
-        "pack": "eng_spa_license_pack",
+        "pack": str(manifest.get("scope", "club_license_pack")),
         "manifest_content_id": manifest["content_id"],
         "runtime_integration": False,
         "source": {
@@ -986,7 +991,7 @@ def build_pack(args: argparse.Namespace) -> dict[str, Any]:
         },
         "warnings": [
             "This pack is data-only; runtime selector and Makefile integration are intentionally deferred.",
-            "Sunderland AFC remains pending because PES21 Team.bin has no team 396 row.",
+            f"Missing native Team.bin IDs remain pending: {team_report['pending_missing_team_ids']}.",
             "Football Life PC uniform descriptors/textures are indexed for conversion, not transplanted into mobile assets.",
         ],
     }

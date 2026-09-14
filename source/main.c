@@ -92,13 +92,14 @@ typedef struct {
 #define PATCH_OBB_NATIVE_LICENSE_KITS_V2_SIZE 1393688576ULL
 #define PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE 1393788928ULL
 #define PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE 1401395200ULL
+#define PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE 1403275264ULL
 
 static const RuntimeFile required_runtime_files[] = {
   { AVS_SO_NAME, 491032 },
   { AFP_SO_NAME, 1401216 },
   { UE4_SO_NAME, 157571792 },
   { "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak", 459211124 },
-  { PATCH_OBB_PATH, PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE },
+  { PATCH_OBB_PATH, PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE },
   { "Download/dt530_mobile_bra_all.cpk", 173204 },
   { "Download/dt530_mobile_can_all.cpk", 165480 },
   { "Download/dt530_mobile_eng_all.cpk", 198701 },
@@ -181,7 +182,8 @@ static void check_data(void) {
           actual_size == PATCH_OBB_PESDB_CANDIDATE_V6_KITS_SIZE ||
           actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V2_SIZE ||
           actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE ||
-          actual_size == PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE));
+          actual_size == PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE ||
+          actual_size == PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE));
     if (stat_rc == 0 && S_ISREG(st.st_mode) && size_matches)
       continue;
 
