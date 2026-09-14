@@ -1,0 +1,700 @@
+{
+  "schema_version": 1,
+  "scope": "all_national_teams_all_regions",
+  "policy": {
+    "runtime_integration": true,
+    "preserve_existing_team_rows": true,
+    "patch_real_kit_flag_only": true,
+    "expected_team_count": 89,
+    "kit_variants": [
+      "1st",
+      "2nd",
+      "GK1st"
+    ]
+  },
+  "sources": {
+    "kit_cpks": [
+      {
+        "key": "dt34_base",
+        "path": "Data/dt34_g4.cpk",
+        "precedence": 0
+      },
+      {
+        "key": "season_a",
+        "path": "download/data_s2526a.cpk",
+        "precedence": 1
+      },
+      {
+        "key": "season_b",
+        "path": "download/data_s2526b.cpk",
+        "precedence": 2
+      },
+      {
+        "key": "season_c",
+        "path": "download/data_s2526c.cpk",
+        "precedence": 3
+      }
+    ]
+  },
+  "leagues": [
+    {
+      "key": "national_europe",
+      "label": "NATIONAL EUROPE",
+      "catalog_category": "national_europe",
+      "teams": [
+        {
+          "team_id": 1,
+          "order": 1,
+          "official_name": "Republic of Ireland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 2,
+          "order": 2,
+          "official_name": "Northern Ireland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 3,
+          "order": 3,
+          "official_name": "Scotland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 4,
+          "order": 4,
+          "official_name": "Wales",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 5,
+          "order": 5,
+          "official_name": "England",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 6,
+          "order": 6,
+          "official_name": "Portugal",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 7,
+          "order": 7,
+          "official_name": "Spain",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 8,
+          "order": 8,
+          "official_name": "France",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 9,
+          "order": 9,
+          "official_name": "Belgium",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 10,
+          "order": 10,
+          "official_name": "Netherlands",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 11,
+          "order": 11,
+          "official_name": "Switzerland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 12,
+          "order": 12,
+          "official_name": "Italy",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 13,
+          "order": 13,
+          "official_name": "Czechia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 14,
+          "order": 14,
+          "official_name": "Germany",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 15,
+          "order": 15,
+          "official_name": "Denmark",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 16,
+          "order": 16,
+          "official_name": "Norway",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 17,
+          "order": 17,
+          "official_name": "Sweden",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 18,
+          "order": 18,
+          "official_name": "Finland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 19,
+          "order": 19,
+          "official_name": "Poland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 20,
+          "order": 20,
+          "official_name": "Slovakia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 21,
+          "order": 21,
+          "official_name": "Austria",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 22,
+          "order": 22,
+          "official_name": "Hungary",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 23,
+          "order": 23,
+          "official_name": "Slovenia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 24,
+          "order": 24,
+          "official_name": "Croatia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 26,
+          "order": 25,
+          "official_name": "Romania",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 27,
+          "order": 26,
+          "official_name": "Bulgaria",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 28,
+          "order": 27,
+          "official_name": "Greece",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 29,
+          "order": 28,
+          "official_name": "Turkiye",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 30,
+          "order": 29,
+          "official_name": "Ukraine",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 31,
+          "order": 30,
+          "official_name": "Russia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 59,
+          "order": 31,
+          "official_name": "LATVIA",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1164,
+          "order": 32,
+          "official_name": "Israel",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1165,
+          "order": 33,
+          "official_name": "Albania",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1168,
+          "order": 34,
+          "official_name": "Azerbaijan",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1171,
+          "order": 35,
+          "official_name": "Cyprus",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1174,
+          "order": 36,
+          "official_name": "Georgia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1175,
+          "order": 37,
+          "official_name": "Iceland",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1176,
+          "order": 38,
+          "official_name": "Kazakhstan",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1180,
+          "order": 39,
+          "official_name": "North Macedonia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1181,
+          "order": 40,
+          "official_name": "Malta",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1550,
+          "order": 41,
+          "official_name": "Serbia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1551,
+          "order": 42,
+          "official_name": "Montenegro",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        }
+      ]
+    },
+    {
+      "key": "national_africa",
+      "label": "NATIONAL AFRICA",
+      "catalog_category": "national_africa",
+      "teams": [
+        {
+          "team_id": 32,
+          "order": 1,
+          "official_name": "Morocco",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 33,
+          "order": 2,
+          "official_name": "Tunisia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 34,
+          "order": 3,
+          "official_name": "Egypt",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 35,
+          "order": 4,
+          "official_name": "Nigeria",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 36,
+          "order": 5,
+          "official_name": "Cameroon",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 37,
+          "order": 6,
+          "official_name": "South Africa",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 38,
+          "order": 7,
+          "official_name": "Senegal",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1040,
+          "order": 8,
+          "official_name": "Algeria",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1044,
+          "order": 9,
+          "official_name": "Burkina Faso",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1051,
+          "order": 10,
+          "official_name": "Cote D'Ivoire",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1058,
+          "order": 11,
+          "official_name": "Ghana",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1059,
+          "order": 12,
+          "official_name": "Guinea",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1067,
+          "order": 13,
+          "official_name": "Mali",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1083,
+          "order": 14,
+          "official_name": "Zambia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        }
+      ]
+    },
+    {
+      "key": "national_north_america",
+      "label": "NATIONAL NORTH AMERICA",
+      "catalog_category": "national_north_america",
+      "teams": [
+        {
+          "team_id": 39,
+          "order": 1,
+          "official_name": "United States",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 40,
+          "order": 2,
+          "official_name": "Mexico",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 41,
+          "order": 3,
+          "official_name": "Jamaica",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 42,
+          "order": 4,
+          "official_name": "Costa Rica",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 43,
+          "order": 5,
+          "official_name": "Honduras",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1113,
+          "order": 6,
+          "official_name": "Panama",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        }
+      ]
+    },
+    {
+      "key": "national_south_america",
+      "label": "NATIONAL SOUTH AMERICA",
+      "catalog_category": "national_south_america",
+      "teams": [
+        {
+          "team_id": 44,
+          "order": 1,
+          "official_name": "Colombia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 45,
+          "order": 2,
+          "official_name": "Brazil",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 46,
+          "order": 3,
+          "official_name": "Peru",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 47,
+          "order": 4,
+          "official_name": "Chile",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 48,
+          "order": 5,
+          "official_name": "Paraguay",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 49,
+          "order": 6,
+          "official_name": "Uruguay",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 50,
+          "order": 7,
+          "official_name": "Argentina",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 51,
+          "order": 8,
+          "official_name": "Ecuador",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1128,
+          "order": 9,
+          "official_name": "Bolivia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1129,
+          "order": 10,
+          "official_name": "Venezuela",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        }
+      ]
+    },
+    {
+      "key": "national_asia_oceania",
+      "label": "NATIONAL ASIA OCEANIA",
+      "catalog_category": "national_asia_oceania",
+      "teams": [
+        {
+          "team_id": 52,
+          "order": 1,
+          "official_name": "Japan",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 53,
+          "order": 2,
+          "official_name": "Korea Republic",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 54,
+          "order": 3,
+          "official_name": "China PR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 55,
+          "order": 4,
+          "official_name": "IR Iran",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 56,
+          "order": 5,
+          "official_name": "Saudi Arabia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 57,
+          "order": 6,
+          "official_name": "Australia",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1010,
+          "order": 7,
+          "official_name": "Iraq",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1011,
+          "order": 8,
+          "official_name": "Jordan",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1012,
+          "order": 9,
+          "official_name": "Korea DPR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1013,
+          "order": 10,
+          "official_name": "Kuwait",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1015,
+          "order": 11,
+          "official_name": "Lebanon",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1022,
+          "order": 12,
+          "official_name": "Oman",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1026,
+          "order": 13,
+          "official_name": "Qatar",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1031,
+          "order": 14,
+          "official_name": "Thailand",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1032,
+          "order": 15,
+          "official_name": "United Arab Emirates",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1141,
+          "order": 16,
+          "official_name": "New Zealand",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        },
+        {
+          "team_id": 1184,
+          "order": 17,
+          "official_name": "Uzbekistan",
+          "catalog_integration": "existing",
+          "team_bin_policy": "preserve_existing"
+        }
+      ]
+    }
+  ],
+  "content_id": "2359b3504983293f"
+}

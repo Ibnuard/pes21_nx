@@ -112,26 +112,39 @@ static void rectangle(unsigned char *triangles, float left, float top,
   for (int vertex=0; vertex<6; ++vertex)
     memcpy(triangles+(vertex/3)*96+(vertex%3)*32,xy[vertex],8);
 }
+static void reset_rect(unsigned char *triangles) {
+  memset(triangles,0,192);
+  rectangle(triangles,100,27,180,32); // 5px-tall native strip
+}
 int main(void) {
   unsigned char item[128]={0}, triangles[192]={0};
   void *pointer=triangles; int32_t count=2;
   memcpy(item+0x50,&pointer,sizeof(pointer));
   memcpy(item+0x58,&count,sizeof(count));
-  rectangle(triangles,100,27,180,28);
+  reset_rect(triangles);
   unsigned char original[192]; memcpy(original,triangles,sizeof(original));
   float bounds[4];
   assert(pause_stamina_canvas_bounds(item,bounds));
-  assert(bounds[0]==100 && bounds[1]==27 && bounds[2]==180 && bounds[3]==28);
+  assert(bounds[0]==100 && bounds[1]==27 && bounds[2]==180 && bounds[3]==32);
+  // Unrelated caller: draw untouched, no geometry rewrite.
   pause_stamina_canvas_draw_item(0,item);
   assert(draw_calls==1);
+  assert(memcmp(original,triangles,sizeof(original))==0);
   pause_stamina_canvas_backing_return=1;
   pause_stamina_canvas_fill_return=2;
+  // Backing pass: suppressed, geometry never touched.
   test_caller=1;
   pause_stamina_canvas_draw_item(0,item);
   assert(draw_calls==1);
+  assert(memcmp(original,triangles,sizeof(original))==0);
+  // Production fill pass: original geometry and color remain untouched.
   test_caller=2;
   pause_stamina_canvas_draw_item(0,item);
   assert(draw_calls==2);
+  assert(pause_stamina_canvas_bounds(item,bounds));
+  assert(bounds[0]==100 && bounds[2]==180); // width unchanged
+  assert(bounds[1]==27);                    // top anchor preserved
+  assert(bounds[3]==32);
   assert(memcmp(original,triangles,sizeof(original))==0);
   count=65; memcpy(item+0x58,&count,4);
   assert(!pause_stamina_canvas_bounds(item,bounds));
@@ -141,7 +154,8 @@ int main(void) {
         build_and_run(self.cc, code)
         wrapper = function(hooks, "pause_stamina_canvas_draw_item")
         self.assertIn('if (backing)\n      return;', wrapper)
-        self.assertNotIn('pause_stamina_expand_canvas_fill', hooks)
+        self.assertNotIn('PES_STAMINA_FILL_HEIGHT_SCALE', hooks)
+
 
     def test_buffer_matches_engine_request_even_with_720p_config(self):
         shim = (ROOT / "source/libc_shim.c").read_text()

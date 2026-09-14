@@ -1185,9 +1185,7 @@ static void pause_stamina_canvas_draw_item(void *canvas, void *item) {
                   bounds[0], bounds[1], bounds[2], bounds[3]);
     }
 #endif
-    // This is the black pass inside IsStaminaGauge, not the separate 2/3
-    // models already suppressed above. Test occlusion without modifying the
-    // fill, matrix, depth state, texture or any shared model vertex data.
+    // Keep the native extent; production uses the game's own fill geometry.
     if (backing)
       return;
   }
