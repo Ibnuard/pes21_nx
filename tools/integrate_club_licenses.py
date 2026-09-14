@@ -58,10 +58,13 @@ def main():
     overrides, payloads, provenance = [], [], []
     for row in names:
         team_id = int(row['team_id'])
+        source_team_id = int(row.get('source_team_id', team_id))
+        if source_team_id <= 0:
+            raise ValueError(f'Invalid Football Life source team ID: {source_team_id}')
         value = member = chosen = None
         for source in reversed(sources):
             for suffix in ('r_ll', 'r_l', 'r', 'r_b'):
-                candidate = f'common/render/symbol/flag/e_{team_id:06d}_{suffix}.png'
+                candidate = f'common/render/symbol/flag/e_{source_team_id:06d}_{suffix}.png'
                 data = read_cpk_member(source, candidate)
                 if data is not None:
                     value, member, chosen = data, candidate, source['path']
@@ -75,7 +78,8 @@ def main():
         target = output/'crests'/f'{team_id}.png'
         payloads.append((target, value))
         overrides.append(dict(row, badge_source=target.relative_to(ROOT).as_posix()))
-        provenance.append(dict(team_id=team_id, archive=str(chosen), member=member,
+        provenance.append(dict(team_id=team_id, source_team_id=source_team_id,
+                               archive=str(chosen), member=member,
                                sha256=hashlib.sha256(value).hexdigest()))
     catalog, applied, pending = apply_identities(load_catalog(args.catalog), overrides)
     output.mkdir(parents=True, exist_ok=True)

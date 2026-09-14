@@ -33,6 +33,14 @@ class SerieAManifestTests(unittest.TestCase):
         self.assertTrue(all(row['name_source']=='football_life_license' for row in serie_a))
         self.assertTrue(all('serie-a-club-license-integration/crests/' in row['badge_source'] for row in serie_a))
 
+    def test_native_crest_builder_updates_new_real_variants(self):
+        source = (ROOT/'tools/build_eng_spa_mobile_kits.py').read_text()
+        self.assertIn(
+            "set(inventories['dt240']) | set(payloads['dt240'])",
+            source,
+        )
+        self.assertIn("template = payloads['dt240'].get(name)", source)
+
 
 @unittest.skipUnless((PACK/'validation-report.json').is_file(), 'local Serie A package unavailable')
 class SerieAPackageTests(unittest.TestCase):

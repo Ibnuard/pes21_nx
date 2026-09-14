@@ -95,13 +95,16 @@ typedef struct {
 #define PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE 1403275264ULL
 #define PATCH_OBB_NATIONAL_ALL_KITS_V2_SIZE 1410308096ULL
 #define PATCH_OBB_PLAYER_IDENTITY_RECOVERY_V5_SIZE 1409579008ULL
+#define PATCH_OBB_LICENSE_PORTRAIT_FIX_V1_SIZE 1409914880ULL
+#define PATCH_OBB_EF10_NATIVE_NAMES_PROBE_V1_SIZE 1409912832ULL
+#define PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE 1410254848ULL
 
 static const RuntimeFile required_runtime_files[] = {
   { AVS_SO_NAME, 491032 },
   { AFP_SO_NAME, 1401216 },
   { UE4_SO_NAME, 157571792 },
   { "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak", 459211124 },
-  { PATCH_OBB_PATH, PATCH_OBB_PLAYER_IDENTITY_RECOVERY_V5_SIZE },
+  { PATCH_OBB_PATH, PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE },
   { "Download/dt530_mobile_bra_all.cpk", 173204 },
   { "Download/dt530_mobile_can_all.cpk", 165480 },
   { "Download/dt530_mobile_eng_all.cpk", 198701 },
@@ -187,7 +190,10 @@ static void check_data(void) {
           actual_size == PATCH_OBB_ENG_SPA_ALL_KITS_V3_SIZE ||
           actual_size == PATCH_OBB_SERIE_A_ALL_KITS_V2_SIZE ||
           actual_size == PATCH_OBB_NATIONAL_ALL_KITS_V2_SIZE ||
-          actual_size == PATCH_OBB_PLAYER_IDENTITY_RECOVERY_V5_SIZE));
+          actual_size == PATCH_OBB_PLAYER_IDENTITY_RECOVERY_V5_SIZE ||
+          actual_size == PATCH_OBB_LICENSE_PORTRAIT_FIX_V1_SIZE ||
+          actual_size == PATCH_OBB_EF10_NATIVE_NAMES_PROBE_V1_SIZE ||
+          actual_size == PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE));
     if (stat_rc == 0 && S_ISREG(st.st_mode) && size_matches)
       continue;
 
@@ -206,7 +212,7 @@ static void check_data(void) {
     fatal_error("Loose runtime data is incomplete.\nFirst bad file:\n%s\n"
                 "Actual bytes: %lld (-1 = missing)\n"
                 "Expected/current bytes: %zu\n"
-                "Build: ENG-SPA size-fix v1\n"
+                "Build: Inter Miami FL2026 v1\n"
                 "Missing/corrupt files: %zu",
                 first_bad, first_bad_actual, first_bad_expected, bad_count);
 

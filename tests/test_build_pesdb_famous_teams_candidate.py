@@ -199,6 +199,18 @@ class AuthoritativeOverallRuntimeTests(unittest.TestCase):
             self.hooks,
         )
 
+    def test_custom_gameplan_never_sync_reads_a_missing_portrait(self) -> None:
+        signature = "static int prematch_gameplan_load_portrait("
+        start = self.hooks.rindex(signature)
+        end = self.hooks.index("\n}\n", start) + 2
+        loader = self.hooks[start:end]
+        exists = loader.index("if (exhibition_sys_file_exists)")
+        sync_read = loader.index("exhibition_sys_file_sync_read(file)")
+        self.assertLess(exists, sync_read)
+        self.assertIn("if (!exists)", loader)
+        self.assertIn("using blank fallback", loader)
+        self.assertNotIn("portrait_id == 320983u", loader)
+
     def test_selector_prefers_generated_team_ratings(self) -> None:
         signature = "static void main_menu_2p_team_selector_refresh_ratings(void)"
         start = self.hooks.index(signature, self.hooks.index(signature) + 1)

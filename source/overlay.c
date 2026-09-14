@@ -5791,9 +5791,9 @@ static void overlay_render(void) {
     char label[192];
     snprintf(label, sizeof(label),
 #if PES_EXPERIMENT_INTER_MIAMI
-             "NATIVE 2P SETPLAY V8.17.17 IM27 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V8.17.17 IM27 VTOUCH:OFF H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
 #else
-             "NATIVE 2P SETPLAY V8.17.17 H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
+             "NATIVE 2P SETPLAY V8.17.17 VTOUCH:OFF H:%X P:%X O:%X R:%X U:%X B:%X PR:%X "
 #endif
              "RAW2:%04X AX2:%d,%d K2:%06X LP2:%u G:%X/%u/%u PN:%u/%u%s",
              native_debug.connected_mask & 3u,

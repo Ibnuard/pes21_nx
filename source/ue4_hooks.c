@@ -5818,18 +5818,27 @@ static int prematch_gameplan_load_portrait(uint32_t side, uint32_t index,
       !exhibition_sys_file_get_body || !exhibition_sys_file_get_size ||
       !exhibition_sys_file_release)
     return 0;
-  // Some EF10 roster IDs have no packaged portrait.  Do not call the
-  // synchronous asset reader for these entries: on Switch/Ryujinx a missing
-  // AAsset can leave sync_read waiting forever and freeze the whole hub.
-  if (portrait_id == 320983u) {
-    debugPrintf("native 2P Game Plan: portrait missing id=%u; using blank fallback\n",
-                portrait_id);
-    return 0;
-  }
-
   char path[96];
   uint32_t file_id = portrait_id;
   snprintf(path, sizeof(path), "common/player/%u.png", file_id);
+  // Never issue a synchronous read for a missing AAsset. On Switch/Ryujinx
+  // that request can wait forever and prevent the custom Game Plan opening.
+  // Resolve the variation fallback up front when the existence API is
+  // available; otherwise retain the legacy read-and-validate path below.
+  if (exhibition_sys_file_exists) {
+    int exists = exhibition_sys_file_exists(path);
+    if (!exists && (portrait_id & 0x0ff00000u)) {
+      file_id = portrait_id & 0x0003ffffu;
+      snprintf(path, sizeof(path), "common/player/%u.png", file_id);
+      exists = exhibition_sys_file_exists(path);
+    }
+    if (!exists) {
+      debugPrintf(
+          "native 2P Game Plan: portrait missing id=%u; using blank fallback\n",
+          portrait_id);
+      return 0;
+    }
+  }
   void *file = exhibition_sys_file_create(path, 0xc01);
   const void *body = NULL;
   size_t size = 0;
@@ -5842,7 +5851,7 @@ static int prematch_gameplan_load_portrait(uint32_t side, uint32_t index,
   int valid = body && size >= sizeof(png_signature) &&
               size <= PREMATCH_GAMEPLAN_PORTRAIT_MAX_BYTES &&
               memcmp(body, png_signature, sizeof(png_signature)) == 0;
-  if (!valid && (portrait_id & 0x0ff00000u)) {
+  if (!valid && file_id == portrait_id && (portrait_id & 0x0ff00000u)) {
     if (file)
       exhibition_sys_file_release(file);
     file_id = portrait_id & 0x0003ffffu;
@@ -14046,26 +14055,34 @@ uintptr_t ue4_tickrate_clamp(void *engine) {
 
 // Visibility is part of the mobile control state: forcing these MovieClips
 // hidden also prevents their ButtonObjects from accepting the synthetic touch
-// stream. Keep every clip visible and interactive, but tint the six persistent
-// pieces once after construction to a nearly transparent alpha.
+// stream. Keep every clip logically visible and interactive, but make all six
+// pieces fully transparent during native single-player Exhibition. This is an
+// intentional hardware probe: movement and the four actions must continue
+// through Cobra/native pad with no visible virtual-controller assistance.
 void pes_virtual_pad_update_info(void *virtual_pad) {
   static void *tinted_clips[6];
+  static uint8_t hidden_states[6];
   static const uint32_t clip_offsets[6] = {72, 80, 88, 96, 104, 112};
 
   pes_virtual_pad_update_original(virtual_pad);
   if (!virtual_pad || !virtual_pad_set_color)
     return;
+  const int hide_native_single =
+      pes_controller_native_pad_lab_active() &&
+      !pes_controller_native_pad_lab_two_player();
   for (unsigned int index = 0; index < 6; index++) {
     void *clip = NULL;
     memcpy(&clip, (const uint8_t *)virtual_pad + clip_offsets[index],
            sizeof(clip));
-    if (clip && clip != tinted_clips[index]) {
-      // The first two clips are the virtual movement-stick layers.  Keep them
-      // interactive but completely transparent; 2% alpha is still visible on
-      // an OLED panel.  Preserve the established action-button tint.
-      const float alpha = index < 2u ? 0.0f : 0.02f;
+    if (clip && (clip != tinted_clips[index] ||
+                 hidden_states[index] != (uint8_t)hide_native_single)) {
+      // Movement-stick layers remain transparent in every mode. The four
+      // action clips normally retain the established faint tint, but become
+      // completely transparent for the native single-Exhibition probe.
+      const float alpha = hide_native_single || index < 2u ? 0.0f : 0.02f;
       virtual_pad_set_color(clip, 1.0f, 1.0f, 1.0f, alpha);
       tinted_clips[index] = clip;
+      hidden_states[index] = (uint8_t)hide_native_single;
     }
   }
 }

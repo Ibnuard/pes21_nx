@@ -5,7 +5,7 @@ import io
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from build_eng_spa_mobile_kits import mobile_descriptor, safe_reference
+from build_eng_spa_mobile_kits import mobile_descriptor, safe_reference, source_team_id
 from build_barca_real_madrid_mobile_kit_canary import descriptor_texture_names
 from build_barca_real_madrid_mobile_kit_canary import cpk_inventory, decode_wesys_payload
 from build_pesdb_famous_teams_candidate import member_payload
@@ -41,6 +41,14 @@ class KitDescriptorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 safe_reference(bad)
         self.assertEqual(safe_reference('epl_whi_back'), 'epl_whi_back')
+
+    def test_source_team_id_supports_cross_platform_slot_mapping(self):
+        self.assertEqual(source_team_id({'team_id': 2473}), 2473)
+        self.assertEqual(
+            source_team_id({'team_id': 2473, 'source_team_id': 5738}), 5738
+        )
+        with self.assertRaises(ValueError):
+            source_team_id({'team_id': 2473, 'source_team_id': 0})
 
 
 @unittest.skipUnless((FIXTURE/'validation-report.json').is_file(), 'local proprietary candidate not available')

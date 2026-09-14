@@ -873,6 +873,25 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('exhibition_strategy_action', strategy)
         self.assertNotIn('SetDataControl', self.hooks)
 
+    def test_single_exhibition_hides_every_virtual_control_for_native_probe(self):
+        update = re.search(
+            r'void pes_virtual_pad_update_info\(.*?\n\}', self.hooks, re.S
+        ).group(0)
+        self.assertIn('static const uint32_t clip_offsets[6]', update)
+        self.assertIn('pes_controller_native_pad_lab_active()', update)
+        self.assertIn('!pes_controller_native_pad_lab_two_player()', update)
+        self.assertIn(
+            'hide_native_single || index < 2u ? 0.0f : 0.02f', update
+        )
+        poll = self.shim[self.shim.index('void android_input_poll(void)'):]
+        native = poll.index('else if (native_pad_lab_active && gameplay_active)')
+        native_emit = poll.index('emit_native_lab_pad_input(0', native)
+        touch = poll.index('append_virtual_gamepad_touches(')
+        self.assertGreater(native_emit, native)
+        self.assertLess(touch, native)
+        overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('VTOUCH:OFF', overlay)
+
     def test_matchplan_uses_stock_pad_port_ownership_for_both_sides(self):
         self.assertIn('_ZN9matchPlan4Data10SetPadPortE8HomeAwayj', self.hooks)
         helper = re.search(

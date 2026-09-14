@@ -50,6 +50,14 @@ def safe_reference(name):
     return name
 
 
+def source_team_id(team):
+    """Return the Football Life source ID for a mapped Mobile team slot."""
+    value = int(team.get('source_team_id', team['team_id']))
+    if value <= 0:
+        raise ValueError(f'invalid source_team_id: {value}')
+    return value
+
+
 def build(args):
     out = args.output.resolve()
     if out.exists():
@@ -81,16 +89,19 @@ def build(args):
     flags = set()
     for team in teams:
         tid = team['team_id']
+        source_tid = source_team_id(team)
         if tid in preserved:
             report['teams'].append(dict(team, status='preserved_hardware_verified', kits=[]))
             continue
-        row = dict(team, status='converted' if tid in active else 'assets_only_missing_native_slot', kits=[])
+        row = dict(team, source_team_id=source_tid,
+                   status='converted' if tid in active else 'assets_only_missing_native_slot', kits=[])
         if tid not in active:
             report['pending_native_slots'].append(tid)
         for kind, suffix in KINDS:
             prefix = f'u{tid:04d}{suffix}'
             native_name = f'common/etc/uniform/team/{tid}/{tid}_DEF_{kind}_realUni.bin'
-            source_name = f'common/character0/model/character/uniform/team/{tid}/{tid}_DEF_{kind}_realUni.bin'
+            source_name = (f'common/character0/model/character/uniform/team/'
+                           f'{source_tid}/{source_tid}_DEF_{kind}_realUni.bin')
             pc, pc_meta = winning_member(indexes, source_name)
             source_refs = descriptor_texture_names(pc)
             native = (member_payload(bases['dt200'], native_name)
@@ -158,11 +169,22 @@ def build(args):
             with Image.open(crest_path) as source_image:
                 crest = source_image.convert('RGBA')
                 pattern = re.compile(rf'common/render/symbol/flag/e_{tid:06d}_.*\.png$')
-                names = [name for name in inventories['dt240'] if pattern.fullmatch(name)]
+                # Real-kit enablement can add `_r` variants earlier in this
+                # build. Include those pending members as well as members from
+                # the base inventory, otherwise the game selects an `_r`
+                # copy that still contains the old fake crest.
+                names = sorted(
+                    name
+                    for name in set(inventories['dt240']) | set(payloads['dt240'])
+                    if pattern.fullmatch(name)
+                )
                 if not names:
                     raise ValueError(f'{tid}: no native crest members to update')
                 for name in names:
-                    with Image.open(io.BytesIO(member_payload(bases['dt240'], name))) as old:
+                    template = payloads['dt240'].get(name)
+                    if template is None:
+                        template = member_payload(bases['dt240'], name)
+                    with Image.open(io.BytesIO(template)) as old:
                         size = old.size
                     buffer = io.BytesIO()
                     crest.resize(size, Image.Resampling.LANCZOS).save(buffer, format='PNG')

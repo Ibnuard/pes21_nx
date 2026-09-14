@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "teams": [
+    {
+      "team_id": 2473,
+      "source_team_id": 5738,
+      "display_name": "INTER MIAMI CF",
+      "short_code": "MIA"
+    }
+  ]
+}

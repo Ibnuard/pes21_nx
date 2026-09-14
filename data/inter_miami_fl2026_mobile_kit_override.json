@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "scope": "inter_miami_fl2026_to_mobile_slot_2473",
+  "leagues": [
+    {
+      "key": "north_america_clubs",
+      "label": "NORTH AMERICA CLUBS",
+      "teams": [
+        {
+          "team_id": 2473,
+          "source_team_id": 5738,
+          "order": 1,
+          "official_name": "INTER MIAMI CF",
+          "short_code": "MIA",
+          "catalog_integration": "mapped_external_team",
+          "team_bin_policy": "patch_existing"
+        }
+      ]
+    }
+  ]
+}
