@@ -226,6 +226,7 @@ static const ExhibitionPesdbPlayerOwner exhibition_pesdb_player_owners[] = {
     {55544u, 333u},
     {55545u, 138u},
     {57133u, 17873u},
+    {57304u, 18961u},
     {57447u, 120u},
     {58523u, 177u},
     {58653u, 120u},
@@ -1560,7 +1561,6 @@ static const ExhibitionPesdbPlayerOwner exhibition_pesdb_player_owners[] = {
     {540383u, 17873u},
     {540387u, 20557u},
     {540388u, 18961u},
-    {540390u, 18961u},
     {540394u, 20560u},
     {540402u, 20557u},
     {540507u, 20557u},
@@ -2184,6 +2184,7 @@ static const ExhibitionPesdbPlayerRating exhibition_pesdb_player_ratings[] = {
     {57183u, 75u, 0u},
     {57240u, 78u, 5u},
     {57250u, 77u, 0u},
+    {57304u, 82u, 9u},
     {57344u, 76u, 2u},
     {57353u, 82u, 3u},
     {57393u, 76u, 9u},
@@ -4716,7 +4717,6 @@ static const ExhibitionPesdbPlayerRating exhibition_pesdb_player_ratings[] = {
     {540383u, 76u, 9u},
     {540387u, 78u, 4u},
     {540388u, 82u, 4u},
-    {540390u, 82u, 9u},
     {540394u, 68u, 0u},
     {540402u, 74u, 0u},
     {540507u, 77u, 8u},
@@ -5252,7 +5252,7 @@ static const uint8_t exhibition_pesdb_team_17873_shirts[] = {
 };
 
 static const uint32_t exhibition_pesdb_team_18961_players[] = {
-    129510u, 45290u, 540675u, 540681u, 540880u, 540388u, 540760u, 540533u, 540729u, 126336u, 4522u, 540390u, 540689u, 540662u, 540636u, 540824u, 540690u, 540688u, 540670u, 540717u, 540780u, 540697u, 540752u, 540978u, 540862u, 540663u, 540943u, 540918u, 540937u, 540860u, 540979u, 540993u, 540885u, 540883u,
+    129510u, 45290u, 540675u, 540681u, 540880u, 540388u, 540760u, 540533u, 540729u, 126336u, 4522u, 57304u, 540689u, 540662u, 540636u, 540824u, 540690u, 540688u, 540670u, 540717u, 540780u, 540697u, 540752u, 540978u, 540862u, 540663u, 540943u, 540918u, 540937u, 540860u, 540979u, 540993u, 540885u, 540883u,
 };
 static const uint8_t exhibition_pesdb_team_18961_shirts[] = {
     24, 26, 3, 2, 83, 11, 19, 21, 20, 79, 7, 10, 5, 29, 14, 12, 23, 1, 17, 30, 4, 16, 96, 8, 70, 36, 18, 40, 88, 60, 56, 58, 54, 61,
