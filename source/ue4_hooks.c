@@ -110,6 +110,7 @@ static uintptr_t match_result_half_update_resume;
 static uintptr_t match_tutorial_guide_update_resume;
 static uintptr_t match_flow_check_skip_fix_demo_resume;
 static uintptr_t exhibition_match_setup_data_resume;
+uintptr_t inplay_ball_position_broadcast_resume;
 static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
 uintptr_t pes_main_menu_graphics_d1_resume;
@@ -298,6 +299,9 @@ static void (*match_result_control_wait)(void *window, int waiting);
 static uint32_t match_result_extra_time_started;
 static void (*match_result_update_original)(void *window);
 static void **match_listener_instance;
+static uint32_t (*match_ball_position_broadcast_original)(
+    void *camera, const float *blend, const uint32_t *home_away,
+    float *target_position, float *zoom, uint32_t active);
 static const float *(*match_ball_info_get_trans)(const void *ball_info);
 static uint32_t (*match_goal_demo_get_goal_side)(const void *registry);
 static uint32_t (*match_goal_demo_is_cpu_goal)(void *goal_demo,
@@ -1102,6 +1106,7 @@ static void (*pause_tmpdb_support_set_cursor_target)(void *settings,
                                                      uint32_t value);
 static void (*pause_registry_game_speed_set)(void *settings, uint8_t value);
 static uint32_t (*pause_registry_game_speed_get_fps)(const void *settings);
+static void (*pause_basic_status_set_pes_module_thread_fps)(float value);
 static float (*pause_basic_status_get_pes_module_thread_fps)(void);
 static void (*pause_registry_system_set_no_replay)(void *settings,
                                                    uint32_t value);
@@ -12653,6 +12658,56 @@ void pes_controller_set_piece_selector_input(uint32_t action) {
   __atomic_store_n(&match_kicker_selector_focus, focus, __ATOMIC_RELEASE);
 }
 
+static uint32_t match_broadcast_clamp_target(float *target_position,
+                                             const float *ball_position) {
+  if (!target_position || !ball_position ||
+      !isfinite(target_position[0]) || !isfinite(target_position[1]) ||
+      !isfinite(ball_position[0]) || !isfinite(ball_position[1]))
+    return 0u;
+
+  const float lag_x = target_position[0] - ball_position[0];
+  const float lag_y = target_position[1] - ball_position[1];
+  const float lag_squared = lag_x * lag_x + lag_y * lag_y;
+  const float max_lag = 8.0f;
+  if (lag_squared <= max_lag * max_lag)
+    return 0u;
+
+  // Preserve the native target direction/composition while guaranteeing that
+  // it cannot race all the way back to midfield during a keeper catch, save or
+  // pre-kick animation. The native camera owns the remaining interpolation.
+  const float scale = max_lag / sqrtf(lag_squared);
+  target_position[0] = ball_position[0] + lag_x * scale;
+  target_position[1] = ball_position[1] + lag_y * scale;
+  return 1u;
+}
+
+// This native calculator has a single caller, ShotBroadcastBallActive, so the
+// correction is limited to the Stadium/Live-Broadcast family. It is not the
+// former global camera/velocity override: stock composition runs first and we
+// only clamp a target that would place the live ball outside a safe dead-zone.
+uint32_t pes_inplay_ball_position_broadcast(
+    void *camera, const float *blend, const uint32_t *home_away,
+    float *target_position, float *zoom, uint32_t active) {
+  const uint32_t result = match_ball_position_broadcast_original
+                              ? match_ball_position_broadcast_original(
+                                    camera, blend, home_away, target_position,
+                                    zoom, active)
+                              : 0u;
+  if (!camera || !target_position || !match_ball_info_get_trans)
+    return result;
+
+  // The last bool is a native calculation-mode parameter, not an "enabled"
+  // flag: ShotBroadcastBallActive passes false in normal gameplay. Gating on
+  // it made the previous experiment skip exactly the broken camera path.
+  void *ball_info = NULL;
+  memcpy(&ball_info, (const unsigned char *)camera + 0x198,
+         sizeof(ball_info));
+  const float *ball_position =
+      ball_info ? match_ball_info_get_trans(ball_info) : NULL;
+  match_broadcast_clamp_target(target_position, ball_position);
+  return result;
+}
+
 int pes_controller_custom_pause_active(void) {
   return !pes_controller_pause_transition() && __atomic_load_n(&match_pause_custom_active,
                          __ATOMIC_ACQUIRE) != 0;
@@ -12866,16 +12921,24 @@ static void pause_settings_set_game_speed(uint32_t action) {
     // SystemSettings embeds GameSpeedSettings at +0x14. Passing the parent
     // object wrote its first byte and left gameplay speed unchanged.
     pause_registry_game_speed_set(registry_speed, value);
+
+  uint32_t target_fps = 0;
+  if (registry_speed && pause_registry_game_speed_get_fps)
+    target_fps = pause_registry_game_speed_get_fps(registry_speed);
   void *listener = match_listener_instance ? *match_listener_instance : NULL;
   if (listener && pause_match_listener_change_game_speed)
     pause_match_listener_change_game_speed(listener);
 
+  // MatchListener's stock path can return before committing Status when the
+  // mobile offline match has no network/high-speed-mode owner. Status is the
+  // value the simulation loop actually consumes, so finish that native update
+  // directly using GameSpeedSettings' own FPS conversion.
+  if (target_fps && pause_basic_status_set_pes_module_thread_fps)
+    pause_basic_status_set_pes_module_thread_fps((float)target_fps);
+
   // Publish all layers after the listener refresh. The on-screen line is a
   // hardware-test probe: TMP and REG prove the value arrived, TARGET is the
   // native GameSpeedSettings conversion, and LIVE is Status' active match FPS.
-  uint32_t target_fps = 0;
-  if (registry_speed && pause_registry_game_speed_get_fps)
-    target_fps = pause_registry_game_speed_get_fps(registry_speed);
   uint32_t runtime_fps_milli = 0;
   if (pause_basic_status_get_pes_module_thread_fps) {
     const float runtime_fps = pause_basic_status_get_pes_module_thread_fps();
@@ -12894,6 +12957,27 @@ static void pause_settings_set_game_speed(uint32_t action) {
                    runtime_fps_milli, __ATOMIC_RELEASE);
   __atomic_add_fetch(&pause_game_speed_debug_apply_count, 1,
                      __ATOMIC_ACQ_REL);
+}
+
+static void pause_settings_enforce_game_speed(void) {
+  if (!__atomic_load_n(&pause_game_speed_debug_apply_count,
+                       __ATOMIC_ACQUIRE))
+    return;
+  const uint32_t target_fps = __atomic_load_n(
+      &pause_game_speed_debug_target_fps, __ATOMIC_ACQUIRE);
+  if (!target_fps || !pause_basic_status_set_pes_module_thread_fps)
+    return;
+
+  // Resuming from pause rebuilds parts of MatchListener and can restore the
+  // mobile default (27 FPS) after the settings screen already committed. The
+  // existing UE tick-rate hook repairs only a real mismatch, so +1/+2 remain
+  // active throughout this match without adding a second per-frame hook.
+  float runtime_fps = 0.0f;
+  if (pause_basic_status_get_pes_module_thread_fps)
+    runtime_fps = pause_basic_status_get_pes_module_thread_fps();
+  if (!isfinite(runtime_fps) ||
+      fabsf(runtime_fps - (float)target_fps) > 0.01f)
+    pause_basic_status_set_pes_module_thread_fps((float)target_fps);
 }
 
 static void pause_settings_toggle_next_target(void) {
@@ -14200,6 +14284,9 @@ extern void pes_match_result_full_hook(void);
 extern void pes_match_result_half_hook(void);
 extern void pes_match_result_half_update_hook(void);
 extern void pes_exhibition_match_setup_data_hook(void);
+extern uint32_t pes_inplay_ball_position_broadcast_original(
+    void *camera, const float *blend, const uint32_t *home_away,
+    float *target_position, float *zoom, uint32_t active);
 extern void pes_main_menu_graphics_d1_hook(void);
 extern void pes_main_menu_graphics_d0_hook(void);
 extern void pes_mobile_screen_tap_entry_hook(void);
@@ -14224,6 +14311,7 @@ extern void pes_virtual_pad_update_original(void *virtual_pad);
 
 uintptr_t ue4_tickrate_clamp(void *engine) {
   (void)engine;
+  pause_settings_enforce_game_speed();
   return ue4_tickrate_resume;
 }
 
@@ -15892,13 +15980,36 @@ void install_ue4_hooks(so_module *module) {
               (void *)penalty_goalkeeper_move_main_runtime,
               (void *)penalty_goalkeeper_move_main_slot);
 
-  // Set-piece charge prediction still reads the native BallInfo transform.
-  // Stadium/Live Broadcast ball targeting itself is deliberately left fully
-  // native: the former global target override harmed frame pacing and also
-  // affected camera families outside the intended scope.
+  // Set-piece charge prediction and the Broadcast target guard both read the
+  // live native BallInfo transform.
   match_ball_info_get_trans =
       (void *)so_find_addr_rx(module,
           "_ZNK5match8registry8BallInfo8GetTransEv");
+
+  // GetBallPositionBroadcast has exactly one native caller
+  // (ShotBroadcastBallActive). Keep its full stock calculation and clamp only
+  // the final planar target if it escaped too far from BallInfo. This avoids
+  // reviving the former global, time/velocity-based camera override.
+  const char *ball_position_broadcast_symbol =
+      "_ZN5match6camera6plugin12InplayCamera24GetBallPositionBroadcastERKfRK8HomeAwayPN4math7Vector3ERfb";
+  const uintptr_t ball_position_broadcast =
+      so_find_addr(module, ball_position_broadcast_symbol);
+  const uintptr_t ball_position_broadcast_runtime =
+      so_find_addr_rx(module, ball_position_broadcast_symbol);
+  static const uint32_t expected_ball_position_broadcast_entry[4] = {
+      0xd10703ff, 0x6d123bef, 0x6d1333ed, 0x6d142beb,
+  };
+  if (memcmp((void *)ball_position_broadcast,
+             expected_ball_position_broadcast_entry,
+             sizeof(expected_ball_position_broadcast_entry)) != 0)
+    fatal_error("Unexpected Broadcast ball-position entry at %p",
+                (void *)ball_position_broadcast);
+  inplay_ball_position_broadcast_resume =
+      ball_position_broadcast_runtime + 0x10;
+  match_ball_position_broadcast_original =
+      pes_inplay_ball_position_broadcast_original;
+  hook_arm64(ball_position_broadcast,
+             (uintptr_t)&pes_inplay_ball_position_broadcast);
 
   // Replay owns input from ModeInit until ModeEnd. Hooking its virtual
   // lifecycle is safer than replacing CheckSkip's entry and remains exact
@@ -16276,6 +16387,9 @@ void install_ue4_hooks(so_module *module) {
       "_ZN5match8registry17GameSpeedSettings12SetGameSpeedEh");
   pause_registry_game_speed_get_fps = (void *)so_find_addr_rx(module,
       "_ZNK5match8registry17GameSpeedSettings10GetGameFPSEv");
+  pause_basic_status_set_pes_module_thread_fps =
+      (void *)so_find_addr_rx(module,
+          "_ZN5basic6Status21SetPesModuleThreadFPSEf");
   pause_basic_status_get_pes_module_thread_fps =
       (void *)so_find_addr_rx(module,
           "_ZN5basic6Status21GetPesModuleThreadFPSEv");

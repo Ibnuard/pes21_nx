@@ -81,14 +81,20 @@ int main(void) {
         self.assertIn('(unsigned char *)registry_system + 0x14', body)
         self.assertIn('pause_match_listener_change_game_speed(listener)', body)
         self.assertIn('pause_registry_game_speed_get_fps(registry_speed)', body)
+        self.assertIn('pause_basic_status_set_pes_module_thread_fps((float)target_fps)', body)
         self.assertIn('pause_basic_status_get_pes_module_thread_fps()', body)
         self.assertIn('&pause_game_speed_debug_apply_count, 1', body)
+        enforce = function(SOURCE, 'pause_settings_enforce_game_speed')
+        self.assertIn('fabsf(runtime_fps - (float)target_fps) > 0.01f', enforce)
+        tick = function(SOURCE, 'ue4_tickrate_clamp')
+        self.assertIn('pause_settings_enforce_game_speed();', tick)
         root = Path(__file__).resolve().parents[1]
         overlay = (root / 'source/overlay.c').read_text(encoding='utf-8')
         self.assertIn('pes_controller_game_speed_debug(&game_speed_debug)', overlay)
         self.assertIn('GAME SPEED DBG UI:%+d TMP:%u REG:%u TARGET:%uFPS', overlay)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('"_ZNK5match8registry17GameSpeedSettings10GetGameFPSEv"', install)
+        self.assertIn('"_ZN5basic6Status21SetPesModuleThreadFPSEf"', install)
         self.assertIn('"_ZN5basic6Status21GetPesModuleThreadFPSEv"', install)
 
     def test_replay_off_overrides_the_runtime_replay_decision(self):
@@ -135,15 +141,43 @@ int main(void) {
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
         self.assertIn('&pause_camera_saved_valid, 0', setup)
 
-    def test_broadcast_camera_tracking_is_fully_native_again(self):
+    def test_broadcast_camera_clamps_only_an_escaped_native_target(self):
+        compiler = shutil.which("gcc")
+        if not compiler: self.skipTest("gcc unavailable")
+        build_and_run(compiler, r'''
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+''' + function(SOURCE, 'match_broadcast_clamp_target') + r'''
+int main(void) {
+  float ball[3] = {0.0f, 0.0f, 0.0f};
+  float nearby[3] = {3.0f, 4.0f, 7.0f};
+  assert(match_broadcast_clamp_target(nearby, ball) == 0);
+  assert(nearby[0] == 3.0f && nearby[1] == 4.0f && nearby[2] == 7.0f);
+
+  float escaped[3] = {30.0f, 40.0f, 9.0f};
+  assert(match_broadcast_clamp_target(escaped, ball) == 1);
+  assert(fabsf(escaped[0] - 4.8f) < 0.001f);
+  assert(fabsf(escaped[1] - 6.4f) < 0.001f);
+  assert(escaped[2] == 9.0f);
+
+  float invalid[3] = {NAN, 2.0f, 0.0f};
+  assert(match_broadcast_clamp_target(invalid, ball) == 0);
+}
+''')
         root = Path(__file__).resolve().parents[1]
         assembly = (root / 'source/cobra_pad_hook.s').read_text(encoding='utf-8')
-        self.assertNotIn('pes_inplay_ball_position_broadcast', SOURCE)
-        self.assertNotIn('GetBallPositionBroadcast', SOURCE)
-        self.assertNotIn('inplay_ball_position_broadcast_resume', assembly)
-        # BallInfo remains for set-piece charge prediction, which is unrelated
-        # to Stadium/Live Broadcast target selection.
-        self.assertIn('match_ball_info_get_trans', SOURCE)
+        wrapper = function(SOURCE, 'pes_inplay_ball_position_broadcast')
+        self.assertIn('match_ball_position_broadcast_original(', wrapper)
+        self.assertIn('(const unsigned char *)camera + 0x198', wrapper)
+        self.assertIn('match_broadcast_clamp_target(target_position, ball_position)', wrapper)
+        self.assertNotIn('if (!active', wrapper)
+        self.assertNotIn('armGetSystemTick', wrapper)
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('GetBallPositionBroadcastERKfRK8HomeAway', install)
+        self.assertIn('(uintptr_t)&pes_inplay_ball_position_broadcast', install)
+        self.assertIn('pes_inplay_ball_position_broadcast_original:', assembly)
+        self.assertIn('inplay_ball_position_broadcast_resume', assembly)
 
     def test_stamina_mobile_branch_returns_validated_visibility(self):
         # Frozen native tail: the instruction AFTER the patched CBZ clears

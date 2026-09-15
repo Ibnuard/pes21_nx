@@ -73,11 +73,12 @@ fixed merely because a hook or overlay already exists.
 
 ## Stadium camera tracking
 
-- Stadium/Broadcast now preserves the native composition but corrects it to the
-  live `BallInfo` position only when the ball is moving quickly and the stock
-  group target trails by at least 12 field units. This is deliberately
-  conservative and needs tests for keeper throws, rapid backwards switches and
-  normal slow possession.
+- Stadium/Live Broadcast keeps its native composition and interpolation, but
+  its broadcast-only target calculator now clamps the final planar target to an
+  eight-field-unit dead-zone around live `BallInfo`. This prevents the stock
+  group heuristic from returning to midfield while a goalkeeper still owns the
+  ball. The old global clock/velocity override remains removed. Keeper catches,
+  saves, goal kicks and rapid backwards switches still need hardware validation.
 
 ## Native controller route
 
