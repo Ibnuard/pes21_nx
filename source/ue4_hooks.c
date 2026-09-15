@@ -1039,6 +1039,8 @@ static _Alignas(8) uint64_t match_goal_demo_seen_tick;
 static _Alignas(8) uint64_t match_goal_demo_pad_seen_tick;
 static _Alignas(4) uint32_t match_goal_demo_player_goal;
 static _Alignas(4) uint32_t match_goal_demo_owner_known;
+static _Alignas(4) uint32_t match_goal_demo_own_goal;
+static _Alignas(8) uint64_t match_goal_demo_own_goal_tick;
 static _Alignas(4) uint32_t match_goal_demo_helper_consumed;
 static _Alignas(4) uint32_t match_goal_demo_action_request;
 // Generic cinematic detector.  Replay/GoalDemo transition hooks are kept
@@ -1091,17 +1093,25 @@ enum {
   PAUSE_SETTINGS_PAGE_CAMERA = 1,
 };
 static _Alignas(4) uint32_t pause_settings_page = PAUSE_SETTINGS_PAGE_GENERAL;
-static uint32_t pause_settings_radar = 1, pause_settings_stamina = 1;
+static uint32_t pause_settings_radar = 0, pause_settings_stamina = 1;
 static uint32_t pause_settings_chant = 1, pause_settings_commentary = 1;
 static _Alignas(4) uint32_t pause_camera_saved_valid;
 static unsigned char pause_camera_saved_settings[15];
+static _Alignas(4) uint32_t pause_camera_dynamic_wide_custom;
+static _Alignas(4) uint32_t pause_camera_dynamic_wide_initialized;
+static uint32_t pause_camera_saved_dynamic_wide_custom;
 static void (*pause_settings_volume)(uint32_t kind, float volume);
-static uint32_t (*pause_radar_need_disp_original)(void *radar);
 static uint32_t (*pause_radar_update_original)(void *radar);
+static void *pause_radar_initialized_object;
 static void (*match_pause_camera_update_registry)(void *window,
                                                   uint32_t save);
 static void (*pause_match_listener_set_camera_from_tmpdb)(void *listener,
                                                           uint32_t save);
+static void (*pause_set_tmpdb_camera_original)(void *registry_camera,
+                                               const void *tmpdb_camera,
+                                               void *resident_work);
+static void (*match_inplay_camera_update_original)(void *camera,
+                                                   void *parameter);
 static void (*pause_tmpdb_support_set_cursor_target)(void *settings,
                                                      uint32_t value);
 static void (*pause_registry_game_speed_set)(void *settings, uint8_t value);
@@ -2552,7 +2562,21 @@ static void exhibition_publish_prepared_matchplan(void) {
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
   match_result_extra_time_started = 0;
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
+  __atomic_store_n(&pause_settings_radar, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_seen_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_pad_seen_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_owner_known, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_action_request,
+                   PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_camera_saved_valid, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_camera_dynamic_wide_custom, 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_camera_dynamic_wide_initialized, 0,
+                   __ATOMIC_RELEASE);
+  pause_camera_saved_dynamic_wide_custom = 0;
+  pause_radar_initialized_object = NULL;
   __atomic_store_n(&pause_game_speed_debug_apply_count, 0,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
@@ -11052,6 +11076,12 @@ static uint32_t pes_match_replay_mode_end(void *replay,
   if (__atomic_compare_exchange_n(&match_replay_owner, &expected, 0, 0,
                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
     __atomic_store_n(&match_replay_seen_tick, 0, __ATOMIC_RELEASE);
+  // Keep the own-goal classification alive while Replay and the interactive
+  // goal buttons briefly overlap, then retire it at the real replay boundary.
+  // Clearing it in match_replay_publish() raced the button heartbeat and could
+  // incorrectly restore Celebrate for an own goal.
+  __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_own_goal_tick, 0, __ATOMIC_RELEASE);
   return result;
 }
 
@@ -11283,18 +11313,23 @@ static uint32_t pes_match_goal_demo_is_own_goal(void *goal_demo) {
     memcpy(&demo_kind, (const uint8_t *)goal_demo + 8, sizeof(demo_kind));
   const uint32_t own_goal = (uint32_t)(demo_kind - 0x000300d0u) < 3u;
   if (own_goal) {
+    const uint64_t now = armGetSystemTick();
+    __atomic_store_n(&match_goal_demo_own_goal, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_goal_demo_own_goal_tick, now, __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_owner_known, 1, __ATOMIC_RELEASE);
   }
   return own_goal;
 }
 
-// InteractiveGoalDemoInit is the authoritative beginning of a new A/B choice
-// page. Reset the one-shot latch here, rather than from a timeout heartbeat,
-// so a stale GoalDemo unit cannot resurrect the helper during the black
-// transition after replay.
+// InteractiveGoalDemoInit is one valid beginning of a new A/B choice page.
+// Some match paths reuse the GoalDemo object without calling Init again, so
+// the stable pad/button heartbeats also have a bounded session-gap rearm.
 uintptr_t pes_match_goal_demo_init_entry(void *goal_demo) {
   (void)goal_demo;
+  __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_own_goal_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_pad_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_helper_consumed, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_action_request,
                    PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
@@ -11339,15 +11374,33 @@ uintptr_t pes_match_goal_demo_update_entry(void *goal_demo,
   (void)screen_info;
   (void)context;
   if (goal_demo && registry) {
+    const uint64_t now = armGetSystemTick();
+    const uint64_t previous_seen = __atomic_load_n(
+        &match_goal_demo_seen_tick, __ATOMIC_ACQUIRE);
+    if (!previous_seen ||
+        armTicksToNs(now - previous_seen) > 750000000ULL) {
+      // InteractiveGoalDemoInit belongs to the reusable GoalDemo object and is
+      // not guaranteed for every score. Re-arm on the first update of each
+      // actual goal session, while continuous updates keep a consumed helper
+      // hidden for the rest of that same celebration.
+      __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&match_goal_demo_helper_consumed, 0,
+                       __ATOMIC_RELEASE);
+      __atomic_store_n(&match_goal_demo_action_request,
+                       PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
+    }
     uint32_t player_goal = 0;
-    const uint32_t owner_known =
+    uint32_t owner_known =
         match_goal_demo_resolve_owner(goal_demo, registry, &player_goal);
+    if (__atomic_load_n(&match_goal_demo_own_goal, __ATOMIC_ACQUIRE)) {
+      owner_known = 1u;
+      player_goal = 0u;
+    }
     __atomic_store_n(&match_goal_demo_player_goal, player_goal,
                      __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_owner_known, owner_known,
                      __ATOMIC_RELEASE);
-    __atomic_store_n(&match_goal_demo_seen_tick, armGetSystemTick(),
-                     __ATOMIC_RELEASE);
+    __atomic_store_n(&match_goal_demo_seen_tick, now, __ATOMIC_RELEASE);
     const uint32_t cursor =
         __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
     if (cursor != PES_VIRTUAL_CURSOR_GAMEPLAN)
@@ -11365,10 +11418,39 @@ static void match_goal_demo_refresh_owner(void) {
     owner_known =
         match_goal_demo_resolve_owner(NULL, registry, &player_goal);
   }
+  if (__atomic_load_n(&match_goal_demo_own_goal, __ATOMIC_ACQUIRE)) {
+    owner_known = 1u;
+    player_goal = 0u;
+  }
   __atomic_store_n(&match_goal_demo_owner_known, owner_known,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_player_goal, player_goal,
                    __ATOMIC_RELEASE);
+}
+
+static void match_goal_demo_publish_heartbeat(void) {
+  const uint64_t now = armGetSystemTick();
+  const uint64_t previous_seen = __atomic_load_n(
+      &match_goal_demo_pad_seen_tick, __ATOMIC_ACQUIRE);
+  const int new_session =
+      !previous_seen || armTicksToNs(now - previous_seen) > 500000000ULL;
+  if (new_session) {
+    const uint64_t own_goal_tick = __atomic_load_n(
+        &match_goal_demo_own_goal_tick, __ATOMIC_ACQUIRE);
+    if (!own_goal_tick ||
+        armTicksToNs(now - own_goal_tick) > 2000000000ULL) {
+      __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&match_goal_demo_own_goal_tick, 0, __ATOMIC_RELEASE);
+    }
+    __atomic_store_n(&match_goal_demo_helper_consumed, 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&match_goal_demo_action_request,
+                     PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
+    match_goal_demo_refresh_owner();
+  }
+  __atomic_store_n(&match_goal_demo_pad_seen_tick, now, __ATOMIC_RELEASE);
+  if (!__atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE))
+    match_goal_demo_refresh_owner();
 }
 
 // Unlike GoalDemo::UpdateGoalDemo2DInfo, this native pad unit is a small,
@@ -11386,20 +11468,8 @@ static uint32_t pes_match_goal_demo_pad_main(void *unit, const void *input,
                               ? match_goal_demo_pad_main_original(unit, input,
                                                                   kind)
                               : 0;
-  if (unit && input) {
-    const uint64_t now = armGetSystemTick();
-    const uint64_t previous_seen = __atomic_load_n(
-        &match_goal_demo_pad_seen_tick, __ATOMIC_ACQUIRE);
-    __atomic_store_n(&match_goal_demo_pad_seen_tick, now, __ATOMIC_RELEASE);
-    // Resolve ownership from GoalDemo::GetGoalSide through the global native
-    // registry.  The old implementation hard-coded this to player-owned and
-    // therefore exposed Celebration for opponent goals as well.  If the
-    // registry is not ready, keep the page skip-only rather than guessing.
-    if ((!previous_seen ||
-         armTicksToNs(now - previous_seen) > 500000000ULL) &&
-        !__atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE))
-      match_goal_demo_refresh_owner();
-  }
+  if (unit)
+    match_goal_demo_publish_heartbeat();
   if (trace_call <= 4 || trace_call % 300 == 0)
     debugPrintf("asset-trace-v5: GoalPad exit call=%u result=%u\n", trace_call, result);
   return result;
@@ -11408,6 +11478,12 @@ static uint32_t pes_match_goal_demo_pad_main(void *unit, const void *input,
 static void pes_match_goal_button_update(void *window) {
   if (match_goal_button_update_original)
     match_goal_button_update_original(window);
+  // ButtonGoalPerformance is the authoritative visible A/B window and remains
+  // available on mobile paths where the football pad ThinkUnit supplies a null
+  // input record. Publishing from both hooks makes every goal session visible
+  // without touching the crash-prone GoalDemo::UpdateGoalDemo2DInfo entry.
+  if (window)
+    match_goal_demo_publish_heartbeat();
   if (!window || !pes_controller_native_pad_lab_active() ||
       !match_node_set_alpha || !match_setplay_get_root)
     return;
@@ -11422,9 +11498,12 @@ static void pes_match_goal_button_update(void *window) {
       match_task_manager_get_instance && match_task_manager_push_msg_event) {
     void *manager = match_task_manager_get_instance();
     if (manager) {
+      // PadEventTouchSub maps TouchEventInfo action 0 to ...66 (Skip) and
+      // action 1 to ...67 (Goal Celebration). The old ternary was reversed,
+      // so A queued Celebration and Skip in the same GoalDemo transition.
       const uint32_t event = action == PES_GOAL_DEMO_ACTION_SKIP
-                                 ? 0x01050067u
-                                 : 0x01050066u;
+                                 ? 0x01050066u
+                                 : 0x01050067u;
       match_task_manager_push_msg_event(manager, event, NULL);
       debugPrintf("asset-trace-v5: goal native event action=%u event=%08x\n",
                   action, event);
@@ -12096,26 +12175,28 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
   uint32_t goal_player = 0;
   uint32_t goal_helper_visible = 0;
 
-  if (match_native_replay_active_at(now)) {
+  const uint64_t goal_seen = __atomic_load_n(
+      &match_goal_demo_seen_tick, __ATOMIC_ACQUIRE);
+  const uint64_t goal_pad_seen = __atomic_load_n(
+      &match_goal_demo_pad_seen_tick, __ATOMIC_ACQUIRE);
+  const int goal_active =
+      (goal_seen && armTicksToNs(now - goal_seen) <= 500000000ULL) ||
+      (goal_pad_seen && armTicksToNs(now - goal_pad_seen) <= 500000000ULL);
+  // Replay can be constructed before ButtonGoalPerformance has finished. The
+  // InteractiveGoalDemo pad unit exists only while the A/B page is actionable,
+  // so its heartbeat is more specific and must win during that overlap.
+  if (goal_active) {
+    surface = PES_CONTROLLER_SURFACE_GOAL_DEMO;
+    goal_player =
+        __atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE) &&
+        __atomic_load_n(&match_goal_demo_player_goal, __ATOMIC_ACQUIRE);
+    goal_helper_visible =
+        !__atomic_load_n(&match_goal_demo_helper_consumed,
+                         __ATOMIC_ACQUIRE);
+  } else if (match_native_replay_active_at(now)) {
     surface = PES_CONTROLLER_SURFACE_REPLAY;
   } else {
-    const uint64_t goal_seen = __atomic_load_n(
-        &match_goal_demo_seen_tick, __ATOMIC_ACQUIRE);
-    const uint64_t goal_pad_seen = __atomic_load_n(
-        &match_goal_demo_pad_seen_tick, __ATOMIC_ACQUIRE);
-    const int goal_active =
-        (goal_seen && armTicksToNs(now - goal_seen) <= 500000000ULL) ||
-        (goal_pad_seen &&
-         armTicksToNs(now - goal_pad_seen) <= 500000000ULL);
-    if (goal_active) {
-      surface = PES_CONTROLLER_SURFACE_GOAL_DEMO;
-      goal_player =
-          __atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE) &&
-          __atomic_load_n(&match_goal_demo_player_goal, __ATOMIC_ACQUIRE);
-      goal_helper_visible =
-          !__atomic_load_n(&match_goal_demo_helper_consumed,
-                           __ATOMIC_ACQUIRE);
-    } else if (match_native_demo_active_at(now, NULL)) {
+    if (match_native_demo_active_at(now, NULL)) {
       surface = PES_CONTROLLER_SURFACE_CINEMATIC;
     } else {
       const uint64_t setplay_seen = __atomic_load_n(
@@ -12658,33 +12739,32 @@ void pes_controller_set_piece_selector_input(uint32_t action) {
   __atomic_store_n(&match_kicker_selector_focus, focus, __ATOMIC_RELEASE);
 }
 
-static uint32_t match_broadcast_clamp_target(float *target_position,
-                                             const float *ball_position) {
+static uint32_t match_broadcast_stabilize_target(float *target_position,
+                                                 const float *ball_position) {
   if (!target_position || !ball_position ||
       !isfinite(target_position[0]) || !isfinite(target_position[1]) ||
       !isfinite(ball_position[0]) || !isfinite(ball_position[1]))
     return 0u;
 
-  const float lag_x = target_position[0] - ball_position[0];
-  const float lag_y = target_position[1] - ball_position[1];
-  const float lag_squared = lag_x * lag_x + lag_y * lag_y;
-  const float max_lag = 8.0f;
-  if (lag_squared <= max_lag * max_lag)
+  const float offset_x = ball_position[0] - target_position[0];
+  const float offset_y = ball_position[1] - target_position[1];
+  if (fabsf(offset_x) <= 0.001f && fabsf(offset_y) <= 0.001f)
     return 0u;
 
-  // Preserve the native target direction/composition while guaranteeing that
-  // it cannot race all the way back to midfield during a keeper catch, save or
-  // pre-kick animation. The native camera owns the remaining interpolation.
-  const float scale = max_lag / sqrtf(lag_squared);
-  target_position[0] = ball_position[0] + lag_x * scale;
-  target_position[1] = ball_position[1] + lag_y * scale;
+  // Direct BallInfo targeting made the 2D player labels/cursors expose every
+  // tiny physics-step correction. Keep 20% of the already-smoothed native
+  // composition and pull it 80% toward the ball. This is continuous (unlike
+  // the former hard eight-unit edge), keeps the ball in the central viewport,
+  // and lets native camera/HUD interpolation share a stable target.
+  target_position[0] += offset_x * 0.80f;
+  target_position[1] += offset_y * 0.80f;
   return 1u;
 }
 
 // This native calculator has a single caller, ShotBroadcastBallActive, so the
 // correction is limited to the Stadium/Live-Broadcast family. It is not the
-// former global camera/velocity override: stock composition runs first and we
-// only clamp a target that would place the live ball outside a safe dead-zone.
+// former global camera/velocity override: stock composition runs first, then
+// its planar group target is continuously biased toward live BallInfo.
 uint32_t pes_inplay_ball_position_broadcast(
     void *camera, const float *blend, const uint32_t *home_away,
     float *target_position, float *zoom, uint32_t active) {
@@ -12704,7 +12784,7 @@ uint32_t pes_inplay_ball_position_broadcast(
          sizeof(ball_info));
   const float *ball_position =
       ball_info ? match_ball_info_get_trans(ball_info) : NULL;
-  match_broadcast_clamp_target(target_position, ball_position);
+  match_broadcast_stabilize_target(target_position, ball_position);
   return result;
 }
 
@@ -12772,12 +12852,24 @@ void pes_controller_pause_camera_input(uint32_t action) {
     __atomic_store_n(&match_pause_camera_action, action, __ATOMIC_RELEASE);
 }
 
-static const uint8_t pause_camera_types[] = {0u, 1u, 2u, 5u, 7u, 12u, 13u};
+typedef struct {
+  uint8_t native_type;
+  uint8_t dynamic_wide_custom;
+} PauseCameraPreset;
+
+// DYNAMIC WIDE CUSTOM deliberately keeps native type 5. Only its framing
+// values are overridden, so ball tracking, interpolation and 2D projection all
+// remain in the stable Dynamic-Wide pipeline instead of Broadcast/Stadium.
+static const PauseCameraPreset pause_camera_presets[] = {
+    {0u, 0u}, {1u, 0u}, {2u, 0u}, {5u, 0u},
+    {5u, 1u}, {7u, 0u}, {12u, 0u}, {13u, 0u},
+};
 
 static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
   (void)window;
   const uint32_t count =
-      (uint32_t)(sizeof(pause_camera_types) / sizeof(pause_camera_types[0]));
+      (uint32_t)(sizeof(pause_camera_presets) /
+                 sizeof(pause_camera_presets[0]));
   uint32_t current = 0;
   uint8_t camera_type = 0;
   void *manager = exhibition_tmpdb_manager_get_instance
@@ -12796,8 +12888,12 @@ static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
            (unsigned char *)tmpdb_data + 0xb78 + setting_index * 15,
            sizeof(camera_type));
   }
+  const uint32_t custom_wide =
+      __atomic_load_n(&pause_camera_dynamic_wide_custom, __ATOMIC_ACQUIRE);
   for (uint32_t index = 0; index < count; index++) {
-    if (pause_camera_types[index] == camera_type) {
+    if (pause_camera_presets[index].native_type == camera_type &&
+        pause_camera_presets[index].dynamic_wide_custom ==
+            (camera_type == 5u ? custom_wide : 0u)) {
       current = index;
       break;
     }
@@ -12850,7 +12946,11 @@ static unsigned char *pause_settings_camera_field(uint32_t focus,
   if (!settings || focus < 1u || focus > 3u)
     return NULL;
   uint32_t base = UINT32_MAX;
-  if (type == 4u || (type >= 7u && type <= 11u))
+  if (type == 5u &&
+      __atomic_load_n(&pause_camera_dynamic_wide_custom,
+                      __ATOMIC_ACQUIRE))
+    base = 9u;
+  else if (type == 4u || (type >= 7u && type <= 11u))
     base = 3u;
   else if (type == 6u)
     base = 6u;
@@ -12864,6 +12964,97 @@ static unsigned char *pause_settings_camera_field(uint32_t focus,
   return settings + base + field_delta[focus];
 }
 
+static void pause_set_tmpdb_camera_settings(void *registry_camera,
+                                            const void *tmpdb_camera,
+                                            void *resident_work) {
+  if (pause_set_tmpdb_camera_original)
+    pause_set_tmpdb_camera_original(registry_camera, tmpdb_camera,
+                                    resident_work);
+  if (!registry_camera || !tmpdb_camera ||
+      !__atomic_load_n(&pause_camera_dynamic_wide_custom,
+                       __ATOMIC_ACQUIRE))
+    return;
+
+  const unsigned char *tmpdb = (const unsigned char *)tmpdb_camera;
+  if (tmpdb[0] != 5u)
+    return;
+  const uint8_t distance = tmpdb[9] <= 10u ? tmpdb[9] : 2u;
+  const uint8_t height = tmpdb[10] <= 10u ? tmpdb[10] : 3u;
+  const uint8_t panning = tmpdb[11] <= 10u ? tmpdb[11] : 6u;
+  unsigned char *camera = (unsigned char *)registry_camera;
+
+  // CameraSettings stores active, Normal and BL copies. MatchListener chooses
+  // one of the latter two and copies it back to active after conversion, so
+  // all three must carry the custom composition. Type bytes stay exactly as
+  // selected by the native Dynamic-Wide conversion.
+  static const uint8_t block_offset[3] = {0u, 6u, 11u};
+  for (uint32_t block = 0; block < 3u; ++block) {
+    const uint32_t base = block_offset[block];
+    camera[base + 2u] = distance;
+    camera[base + 3u] = height;
+    camera[base + 4u] = panning;
+  }
+}
+
+// Dynamic Wide's ShotHorizontal path consumes Distance and Height, but ignores
+// CameraSettings::Panning. Apply that last setting to the final native camera
+// parameter instead: rotate the camera position around its native look-at
+// point, preserving its distance, height, tracking and interpolation.
+static uint32_t pause_dynamic_wide_apply_angle(float *parameter,
+                                               float panning) {
+  if (!parameter || !isfinite(panning))
+    return 0u;
+
+  // Registry normally exposes Panning as 0.0 .. 1.0. Accept its raw 0 .. 10
+  // representation as well so this remains safe if a different conversion
+  // path refreshes the plugin between pause and gameplay.
+  float normalized = panning;
+  if (normalized > 1.0f)
+    normalized *= 0.1f;
+  if (normalized < 0.0f)
+    normalized = 0.0f;
+  else if (normalized > 1.0f)
+    normalized = 1.0f;
+  if (normalized <= 0.001f)
+    return 0u;
+
+  const float relative_x = parameter[3] - parameter[0];
+  const float relative_z = parameter[5] - parameter[2];
+  const float radius_squared = relative_x * relative_x +
+                               relative_z * relative_z;
+  if (!isfinite(relative_x) || !isfinite(relative_z) ||
+      !isfinite(radius_squared) || radius_squared <= 0.000001f)
+    return 0u;
+
+  // 0 .. 10 maps to 0 .. 31.5 degrees, matching the conservative yaw range
+  // already proven by the native set-piece camera helper.
+  const float yaw = normalized * 0.55f;
+  const float cosine = cosf(yaw);
+  const float sine = sinf(yaw);
+  parameter[3] = parameter[0] + relative_x * cosine - relative_z * sine;
+  parameter[5] = parameter[2] + relative_x * sine + relative_z * cosine;
+  return isfinite(parameter[3]) && isfinite(parameter[5]);
+}
+
+static void pes_inplay_camera_update(void *camera, void *parameter) {
+  if (match_inplay_camera_update_original)
+    match_inplay_camera_update_original(camera, parameter);
+  if (!camera || !parameter ||
+      !__atomic_load_n(&pause_camera_dynamic_wide_custom,
+                       __ATOMIC_ACQUIRE))
+    return;
+
+  // tmpdb Dynamic Wide maps to InplayCamera CAMERA_ID 5. The custom flag is
+  // the second guard, so no other preset sharing this engine path is altered.
+  uint32_t camera_id = 0;
+  memcpy(&camera_id, (const unsigned char *)camera + 8, sizeof(camera_id));
+  if (camera_id != 5u)
+    return;
+  float panning = 0.0f;
+  memcpy(&panning, (const unsigned char *)camera + 0x14, sizeof(panning));
+  pause_dynamic_wide_apply_angle((float *)parameter, panning);
+}
+
 static void *pause_settings_registry_system(void) {
   void *registry = match_global_registry_get_instance
                        ? match_global_registry_get_instance()
@@ -12875,11 +13066,12 @@ static void *pause_settings_registry_system(void) {
 }
 
 static uint32_t pause_radar_need_disp(void *radar) {
-  if (!__atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE))
-    return 0;
-  return pause_radar_need_disp_original
-             ? pause_radar_need_disp_original(radar)
-             : 1u;
+  (void)radar;
+  // The original mobile preference is OFF and prevented the Radar screen from
+  // entering its first visible lifecycle even though our custom default said
+  // ON. The live update hook owns subsequent toggles, so this creation gate
+  // must follow the custom setting directly rather than consulting stock.
+  return __atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE) ? 1u : 0u;
 }
 
 static uint32_t pause_radar_update(void *radar) {
@@ -12889,9 +13081,19 @@ static uint32_t pause_radar_update(void *radar) {
   void *info = NULL;
   if (radar)
     memcpy(&info, (unsigned char *)radar + 0x38, sizeof(info));
+  const uint32_t enabled =
+      __atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE) ? 1u : 0u;
   if (info)
-    ((unsigned char *)info)[0] =
-        __atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE) ? 1u : 0u;
+    ((unsigned char *)info)[0] = (unsigned char)enabled;
+  if (radar && radar != pause_radar_initialized_object) {
+    pause_radar_initialized_object = radar;
+    // Radar's cached display byte (+0x22) can already say ON even when its
+    // Flash root was created from the stock-mobile OFF value. In that state
+    // UpdateRadarOnOff sees no edge, which explains why OFF -> ON was required
+    // to reveal it. Seed the inverse value once per object so the first stock
+    // Update performs a real Show/Hide transition matching our setting.
+    ((unsigned char *)radar)[0x22] = (unsigned char)(enabled ? 0u : 1u);
+  }
   return pause_radar_update_original ? pause_radar_update_original(radar) : 1u;
 }
 
@@ -13028,6 +13230,8 @@ static void pause_settings_capture_camera(void) {
     return;
   memcpy(pause_camera_saved_settings, settings,
          sizeof(pause_camera_saved_settings));
+  pause_camera_saved_dynamic_wide_custom = __atomic_load_n(
+      &pause_camera_dynamic_wide_custom, __ATOMIC_ACQUIRE);
   __atomic_store_n(&pause_camera_saved_valid, 1, __ATOMIC_RELEASE);
 }
 
@@ -13039,9 +13243,13 @@ static void pause_settings_restore_camera(void *window) {
     return;
   memcpy(settings, pause_camera_saved_settings,
          sizeof(pause_camera_saved_settings));
+  __atomic_store_n(&pause_camera_dynamic_wide_custom,
+                   pause_camera_saved_dynamic_wide_custom,
+                   __ATOMIC_RELEASE);
   pause_settings_apply_camera(window);
-  debugPrintf("input: restored pause camera type=%u\n",
-              (uint32_t)settings[0]);
+  debugPrintf("input: restored pause camera type=%u customWide=%u\n",
+              (uint32_t)settings[0],
+              pause_camera_saved_dynamic_wide_custom);
 }
 
 static void pause_settings_adjust_camera(void *window, uint32_t focus,
@@ -13131,11 +13339,25 @@ static uint32_t pes_match_pause_camera_update(void *window,
                               : (current + 1u) % count;
     unsigned char *settings = pause_settings_tmpdb_camera(NULL);
     if (settings) {
-      settings[0] = pause_camera_types[next];
+      const PauseCameraPreset preset = pause_camera_presets[next];
+      settings[0] = preset.native_type;
+      __atomic_store_n(&pause_camera_dynamic_wide_custom,
+                       preset.dynamic_wide_custom, __ATOMIC_RELEASE);
+      if (preset.dynamic_wide_custom &&
+          !__atomic_exchange_n(&pause_camera_dynamic_wide_initialized, 1,
+                               __ATOMIC_ACQ_REL)) {
+        // Stadium's native fixed composition is Distance 2, Height 3,
+        // Panning 6. Seed the new preset from exactly those values; the spare
+        // custom triplet is otherwise ignored by native Dynamic Wide.
+        settings[9] = 2u;
+        settings[10] = 3u;
+        settings[11] = 6u;
+      }
       pause_settings_capture_camera();
       pause_settings_apply_camera(window);
-      debugPrintf("input: pause camera type %u -> %u\n",
-                  pause_camera_types[current], pause_camera_types[next]);
+      debugPrintf("input: pause camera preset %u -> %u type=%u customWide=%u\n",
+                  current, next, preset.native_type,
+                  preset.dynamic_wide_custom);
     }
   } else if (action == PES_PAUSE_INPUT_BACK &&
              match_pause_camera_footer) {
@@ -13162,7 +13384,11 @@ const char *pes_controller_pause_settings_value(uint32_t index) {
       case 0: return "MEDIUM";
       case 1: return "LONG";
       case 2: return "WIDE";
-      case 5: return "DYNAMIC WIDE";
+      case 5:
+        return __atomic_load_n(&pause_camera_dynamic_wide_custom,
+                               __ATOMIC_ACQUIRE)
+                   ? "DYNAMIC WIDE CUSTOM"
+                   : "DYNAMIC WIDE";
       case 7: return "LIVE BROADCAST";
       case 12: return "STADIUM";
       case 13: return "STADIUM CUSTOM";
@@ -15987,9 +16213,10 @@ void install_ue4_hooks(so_module *module) {
           "_ZNK5match8registry8BallInfo8GetTransEv");
 
   // GetBallPositionBroadcast has exactly one native caller
-  // (ShotBroadcastBallActive). Keep its full stock calculation and clamp only
-  // the final planar target if it escaped too far from BallInfo. This avoids
-  // reviving the former global, time/velocity-based camera override.
+  // (ShotBroadcastBallActive). Keep its full stock calculation, then bias the
+  // planar target toward live BallInfo so the ball remains in the central
+  // viewport without exposing raw physics jitter through the 2D player HUD.
+  // This avoids reviving the former global time/velocity camera override.
   const char *ball_position_broadcast_symbol =
       "_ZN5match6camera6plugin12InplayCamera24GetBallPositionBroadcastERKfRK8HomeAwayPN4math7Vector3ERfb";
   const uintptr_t ball_position_broadcast =
@@ -16010,6 +16237,22 @@ void install_ue4_hooks(so_module *module) {
       pes_inplay_ball_position_broadcast_original;
   hook_arm64(ball_position_broadcast,
              (uintptr_t)&pes_inplay_ball_position_broadcast);
+
+  // Dynamic Wide uses ShotHorizontal, which never consumes the native
+  // Panning/Angle field. Wrap only InplayCamera's virtual Update and gate the
+  // post-composition rotation on CAMERA_ID 5 plus our custom-preset flag.
+  const char *inplay_camera_update_symbol =
+      "_ZN5match6camera6plugin12InplayCamera6UpdateERN4draw15CameraParameterE";
+  const uintptr_t inplay_camera_update_runtime =
+      so_find_addr_rx(module, inplay_camera_update_symbol);
+  uintptr_t *inplay_camera_update_slot = find_vtable_method_slot(
+      module, "_ZTVN5match6camera6plugin12InplayCameraE",
+      inplay_camera_update_runtime, 16);
+  if (!inplay_camera_update_slot)
+    fatal_error("InplayCamera::Update vtable slot not found");
+  match_inplay_camera_update_original =
+      (void *)inplay_camera_update_runtime;
+  *inplay_camera_update_slot = (uintptr_t)&pes_inplay_camera_update;
 
   // Replay owns input from ModeInit until ModeEnd. Hooking its virtual
   // lifecycle is safer than replacing CheckSkip's entry and remains exact
@@ -16399,12 +16642,26 @@ void install_ue4_hooks(so_module *module) {
       "_ZN9game_mode13MatchListener31ChangeGameSpeedForHighSpeedModeEv");
   pause_match_listener_set_camera_from_tmpdb = (void *)so_find_addr_rx(module,
       "_ZN9game_mode13MatchListener22SetCameraInfoFromTmpdbEb");
+  const char *set_tmpdb_camera_symbol =
+      "_ZN9game_mode51SetTmpdbCameraSettingsToMatchRegistryCameraSettingsEPN5match8registry14CameraSettingsERKN5tmpdb14CameraSettingsERNS4_12ResidentWorkE";
+  pause_set_tmpdb_camera_original =
+      (void *)so_find_addr_rx(module, set_tmpdb_camera_symbol);
+  const uintptr_t set_tmpdb_camera_plt =
+      (uintptr_t)module->load_base + 0x38bced0;
+  const uint32_t set_tmpdb_camera_plt_words[] = {
+      0x9002e310, 0xf944e211, 0x91270210, 0xd61f0220};
+  if (memcmp((const void *)set_tmpdb_camera_plt,
+             set_tmpdb_camera_plt_words,
+             sizeof(set_tmpdb_camera_plt_words)))
+    fatal_error("Unexpected camera-settings conversion PLT at %p",
+                (void *)set_tmpdb_camera_plt);
+  hook_arm64(set_tmpdb_camera_plt,
+             (uintptr_t)&pause_set_tmpdb_camera_settings);
   const uintptr_t radar_need_disp_runtime = so_find_addr_rx(module,
       "_ZN7match2D6Screen5Radar8NeedDispEv");
   uintptr_t *radar_need_disp_slot = find_vtable_method_slot(module,
       "_ZTVN7match2D6Screen5RadarE", radar_need_disp_runtime, 26);
   if (radar_need_disp_slot) {
-    pause_radar_need_disp_original = (void *)radar_need_disp_runtime;
     *radar_need_disp_slot = (uintptr_t)&pause_radar_need_disp;
   } else {
     debugPrintf("UE4 hook: Radar::NeedDisp vtable slot not found; "

@@ -1777,9 +1777,6 @@ static void overlay_render(void) {
   PesNativePadLabDebug native_debug = {0};
   if (native_lab)
     pes_controller_native_pad_lab_debug_snapshot(&native_debug);
-  PesGameSpeedDebug game_speed_debug = {0};
-  const int game_speed_debug_active =
-      pes_controller_game_speed_debug(&game_speed_debug);
   int native_setplay_debug =
       !custom_2p_transition && native_lab &&
       native_debug.context != PES_SETPLAY_NONE;
@@ -1846,14 +1843,17 @@ static void overlay_render(void) {
       !result_skin && !result_transition &&
       !setplay_options && !pause_camera_active && !tutorial_play_active &&
       !cinematic_helper_active && penalty_role_p1 == PES_PENALTY_NONE &&
-      penalty_role_p2 == PES_PENALTY_NONE && !game_speed_debug_active)
+      penalty_role_p2 == PES_PENALTY_NONE)
     return;
   if (!gl_init())
     return;
   prepare_uniform_thumbnail_preview(custom_hub_kits_page);
   prepare_gameplan_portraits(custom_gameplan);
+  // A/B helper glyphs share the main-menu button textures. GoalDemo can be the
+  // first custom surface in a session, so include it in the upload gate rather
+  // than binding two generated-but-empty texture names.
   prepare_main_menu_assets(custom_main_menu || custom_popup || pause_skin ||
-                           result_skin);
+                           result_skin || cinematic_helper_active);
   prepare_switch_button_assets(custom_popup || pause_skin || result_skin ||
                                cinematic_helper_active || native_lab ||
                                setplay_options ||
@@ -5935,25 +5935,6 @@ static void overlay_render(void) {
     }
   }
 #endif
-  if (game_speed_debug_active && !custom_popup && !pause_skin && !result_skin &&
-      !result_transition) {
-    char speed_label[144];
-    const int selected = game_speed_debug.tmpdb_value <= 4u
-                             ? (int)game_speed_debug.tmpdb_value - 2
-                             : 99;
-    snprintf(speed_label, sizeof(speed_label),
-             "GAME SPEED DBG UI:%+d TMP:%u REG:%u TARGET:%uFPS "
-             "LIVE:%.1fFPS APPLY:%u",
-             selected, game_speed_debug.tmpdb_value,
-             game_speed_debug.registry_value, game_speed_debug.target_fps,
-             (float)game_speed_debug.runtime_fps_milli / 1000.0f,
-             game_speed_debug.apply_count);
-    const float gh = (float)screen_height / 48.0f;
-    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    quads += emit_line(speed_label, (int)strlen(speed_label), 12.0f,
-                       (float)screen_height * 0.905f, gw, gh,
-                       verts + quads * 24);
-  }
   int prompt_label_quads = 0;
   if (start_prompt) {
     const float gh = (float)screen_height / 22.0f;
@@ -5987,11 +5968,20 @@ static void overlay_render(void) {
         (cinematic_goal_two_player ? 0.075f : 0.825f) * (float)screen_width,
         0.705f * (float)screen_width};
     for (uint32_t group = 0; group < group_count; ++group) {
-      ADD_SWITCH_HELPER("B", helper_x[group],
+      const uint32_t profile = android_controller_profile(group);
+      const char *skip_key =
+          profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+              ? "LEFT"
+              : (profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B");
+      const char *celebrate_key =
+          profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+              ? "DOWN"
+              : (profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "X" : "A");
+      ADD_SWITCH_HELPER(skip_key, helper_x[group],
                         cinematic_goal_actions ? skip_y : generic_y,
                         helper_radius * 2.0f);
       if (cinematic_goal_actions)
-        ADD_SWITCH_HELPER("A", helper_x[group], celebrate_y,
+        ADD_SWITCH_HELPER(celebrate_key, helper_x[group], celebrate_y,
                           helper_radius * 2.0f);
     }
 
@@ -7477,7 +7467,7 @@ static void overlay_render(void) {
     glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
-    glUniform4f(gl.loc_color, 0.02f, 0.36f, 0.62f, 1.0f);
+    glUniform4f(gl.loc_color, 0.95f, 0.97f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, cinematic_helper_text_first_quad * 6,
                  cinematic_helper_text_quads * 6);
     glBindTexture(GL_TEXTURE_2D, gl.tex);

@@ -18,11 +18,13 @@ fixed merely because a hook or overlay already exists.
   `UpdatePostControlWindow` vtable method owns the Game Plan cursor heartbeat,
   so the cursor follows either entry route and expires after the native page
   closes. The previous custom substitution/formation frontend is inactive.
-- Goal celebration is detected before Replay from
-  `GoalDemo::UpdateGoalDemo2DInfo`, with ownership supplied by native
-  `GoalDemo::IsCpuGoal`. Player goals expose A Celebrate/B Skip; CPU goals
-  expose only B Skip. Replay retains its separate any-button skip route. An
-  opponent-goal runtime test remains required.
+- Goal celebration uses the stable `ThinkUnitInteractiveGoalDemo::Main` and
+  `ButtonGoalPerformance` heartbeats; the crash-prone
+  `GoalDemo::UpdateGoalDemo2DInfo` trampoline remains disabled. Ownership comes
+  from native `GoalSide`, with a separate own-goal latch. Player goals expose A
+  Celebrate/B Skip; CPU and own goals expose only B Skip. Replay retains its
+  separate any-button skip route. All ownership cases still need a hardware
+  pass.
 - Extra-time and penalty settings are reapplied at the final native
   `MatchSetupDataTmpdb` conversion and kept resident during gameplay, including
   half/extra-time tmpdb rebuilds. A full ET2 -> penalties test is still required.
@@ -73,12 +75,25 @@ fixed merely because a hook or overlay already exists.
 
 ## Stadium camera tracking
 
-- Stadium/Live Broadcast keeps its native composition and interpolation, but
-  its broadcast-only target calculator now clamps the final planar target to an
-  eight-field-unit dead-zone around live `BallInfo`. This prevents the stock
-  group heuristic from returning to midfield while a goalkeeper still owns the
-  ball. The old global clock/velocity override remains removed. Keeper catches,
-  saves, goal kicks and rapid backwards switches still need hardware validation.
+- Stadium/Live Broadcast keeps its native zoom and interpolation, while its
+  broadcast-only calculator continuously pulls the native planar target 80%
+  toward live `BallInfo`. Retaining 20% of the already-smoothed native target
+  avoids exposing tiny physics-step corrections through player labels/cursors,
+  while still preventing the group heuristic from returning to midfield when a
+  goalkeeper owns the ball. The old global clock/velocity override remains
+  removed. Keeper catches, saves, goal kicks and rapid backwards switches still
+  need hardware validation.
+- `DYNAMIC WIDE CUSTOM` is now available as a separate pause-camera preset. It
+  stays on the native Dynamic-Wide tracking/projection path but starts with the
+  Stadium framing values (Distance 2, Height 3, Angle 6), all three of which
+  remain editable. Dynamic Wide's native horizontal shot ignores its Angle
+  field, so the custom preset applies that value after the native update by
+  rotating the camera position around the native look-at point; native ball
+  tracking and interpolation remain untouched. This is the preferred hardware
+  candidate when the broadcast correction still makes native player names or
+  cursor sprites jitter.
+- Radar now starts `OFF` in each exhibition match, matching the mobile screen's
+  actual initial state. It can still be enabled from General Settings.
 
 ## Native controller route
 

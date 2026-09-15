@@ -14,8 +14,10 @@ class SettingsExitTests(unittest.TestCase):
         body = SOURCE.split("const char *pes_controller_pause_settings_value", 1)[1].split("static void match_pause_go_top_menu", 1)[0]
         self.assertIn("pause_settings_tmpdb_camera(&tmpdb_type)", body)
         self.assertIn("switch (type)", body)
-        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (5, "DYNAMIC WIDE"), (7, "LIVE BROADCAST"), (12, "STADIUM"), (13, "STADIUM CUSTOM")):
+        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (7, "LIVE BROADCAST"), (12, "STADIUM"), (13, "STADIUM CUSTOM")):
             self.assertIn(f'case {enum}: return "{label}";', body)
+        self.assertIn('? "DYNAMIC WIDE CUSTOM"', body)
+        self.assertIn(': "DYNAMIC WIDE"', body)
         self.assertNotIn("PRESET", body)
 
     def test_stamina_toggle_gates_native_active_player_visibility(self):
@@ -49,6 +51,8 @@ int main(void) {
         self.assertIn('focus == 2u ? PAUSE_SETTINGS_PAGE_CAMERA', SOURCE)
         self.assertIn('const uint32_t native_route = focus == 2u ? 1u : focus;', SOURCE)
         camera_field = function(SOURCE, 'pause_settings_camera_field')
+        self.assertIn('type == 5u &&', camera_field)
+        self.assertIn('pause_camera_dynamic_wide_custom', camera_field)
         self.assertIn('type >= 7u && type <= 11u', camera_field)
         self.assertIn('type == 13u', camera_field)
 
@@ -60,6 +64,7 @@ int main(void) {
 #include <stdint.h>
 #include <string.h>
 static uint32_t pause_settings_radar, calls;
+static void *pause_radar_initialized_object;
 static uint32_t native_update(void *radar) { assert(radar); ++calls; return 77; }
 static uint32_t (*pause_radar_update_original)(void *) = native_update;
 ''' + function(SOURCE, "pause_radar_update") + r'''
@@ -67,14 +72,23 @@ int main(void) {
   unsigned char radar[0x40]={0}, info[2]={9,0}; void *p=info;
   memcpy(radar+0x38,&p,sizeof(p));
   pause_settings_radar=0;
-  assert(pause_radar_update(radar)==77 && info[0]==0 && calls==1);
+  assert(pause_radar_update(radar)==77 && info[0]==0 && radar[0x22]==1 && calls==1);
   pause_settings_radar=1;
-  assert(pause_radar_update(radar)==77 && info[0]==1 && calls==2);
+  assert(pause_radar_update(radar)==77 && info[0]==1 && radar[0x22]==1 && calls==2);
+  unsigned char radar2[0x40]={0}; memcpy(radar2+0x38,&p,sizeof(p));
+  assert(pause_radar_update(radar2)==77 && info[0]==1 && radar2[0x22]==0 && calls==3);
 }
 ''')
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('"_ZN7match2D6Screen5Radar6UpdateEv"', install)
         self.assertIn('*radar_update_slot = (uintptr_t)&pause_radar_update;', install)
+
+        need_disp = function(SOURCE, 'pause_radar_need_disp')
+        self.assertIn('pause_settings_radar', need_disp)
+        self.assertNotIn('pause_radar_need_disp_original', need_disp)
+        setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
+        self.assertIn('&pause_settings_radar, 0', setup)
+        self.assertIn('static uint32_t pause_settings_radar = 0', SOURCE)
 
     def test_game_speed_targets_embedded_registry_settings_and_refreshes_match(self):
         body = function(SOURCE, 'pause_settings_set_game_speed')
@@ -90,8 +104,8 @@ int main(void) {
         self.assertIn('pause_settings_enforce_game_speed();', tick)
         root = Path(__file__).resolve().parents[1]
         overlay = (root / 'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('pes_controller_game_speed_debug(&game_speed_debug)', overlay)
-        self.assertIn('GAME SPEED DBG UI:%+d TMP:%u REG:%u TARGET:%uFPS', overlay)
+        self.assertNotIn('pes_controller_game_speed_debug(&game_speed_debug)', overlay)
+        self.assertNotIn('GAME SPEED DBG', overlay)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('"_ZNK5match8registry17GameSpeedSettings10GetGameFPSEv"', install)
         self.assertIn('"_ZN5basic6Status21SetPesModuleThreadFPSEf"', install)
@@ -124,10 +138,13 @@ int main(void) {
         apply = function(SOURCE, 'pause_settings_apply_camera')
         self.assertIn('pause_match_listener_set_camera_from_tmpdb(listener, 1u)', apply)
         self.assertIn('match_pause_camera_update_registry(window, 1u)', apply)
-        self.assertIn('static const uint8_t pause_camera_types[] = '
-                      '{0u, 1u, 2u, 5u, 7u, 12u, 13u};', SOURCE)
+        self.assertIn('static const PauseCameraPreset pause_camera_presets[]', SOURCE)
+        self.assertIn('{5u, 0u},\n    {5u, 1u}', SOURCE)
         update = function(SOURCE, 'pes_match_pause_camera_update')
-        self.assertIn('settings[0] = pause_camera_types[next]', update)
+        self.assertIn('settings[0] = preset.native_type', update)
+        self.assertIn('settings[9] = 2u', update)
+        self.assertIn('settings[10] = 3u', update)
+        self.assertIn('settings[11] = 6u', update)
         self.assertIn('const int opening = window && window != match_pause_camera_window;', update)
         self.assertIn('pause_settings_restore_camera(window)', update)
         self.assertIn('pause_settings_capture_camera()', update)
@@ -140,29 +157,107 @@ int main(void) {
         self.assertIn('pause_settings_apply_camera(window)', restore)
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
         self.assertIn('&pause_camera_saved_valid, 0', setup)
+        self.assertIn('&pause_camera_dynamic_wide_custom, 0', setup)
 
-    def test_broadcast_camera_clamps_only_an_escaped_native_target(self):
+    def test_dynamic_wide_custom_keeps_native_type_and_overrides_only_framing(self):
+        compiler = shutil.which("gcc")
+        if not compiler: self.skipTest("gcc unavailable")
+        build_and_run(compiler, r'''
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+static uint32_t pause_camera_dynamic_wide_custom;
+static void native_convert(void *registry, const void *tmpdb, void *resident) {
+  (void)tmpdb; (void)resident;
+  unsigned char *camera=registry;
+  memset(camera, 0, 32);
+  camera[0]=11; camera[6]=11; camera[11]=11;
+  camera[2]=camera[8]=camera[13]=2;
+  camera[3]=camera[9]=camera[14]=2;
+}
+static void (*pause_set_tmpdb_camera_original)(void *, const void *, void *) = native_convert;
+''' + function(SOURCE, 'pause_set_tmpdb_camera_settings') + r'''
+int main(void) {
+  unsigned char registry[32]={0}, tmpdb[15]={0}; tmpdb[0]=5;
+  tmpdb[9]=4; tmpdb[10]=7; tmpdb[11]=9;
+  pause_camera_dynamic_wide_custom=0;
+  pause_set_tmpdb_camera_settings(registry,tmpdb,(void*)1);
+  assert(registry[0]==11 && registry[2]==2 && registry[3]==2);
+  pause_camera_dynamic_wide_custom=1;
+  pause_set_tmpdb_camera_settings(registry,tmpdb,(void*)1);
+  for (unsigned i=0;i<3;i++) {
+    const unsigned base=(unsigned[]){0,6,11}[i];
+    assert(registry[base]==11);
+    assert(registry[base+2]==4 && registry[base+3]==7 && registry[base+4]==9);
+  }
+}
+''')
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('module->load_base + 0x38bced0', install)
+        self.assertIn('&pause_set_tmpdb_camera_settings', install)
+
+    def test_dynamic_wide_custom_angle_rotates_native_camera_about_look_target(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
-''' + function(SOURCE, 'match_broadcast_clamp_target') + r'''
+''' + function(SOURCE, 'pause_dynamic_wide_apply_angle') + r'''
+int main(void) {
+  float zero[6] = {2.0f, 3.0f, 4.0f, 12.0f, 13.0f, 4.0f};
+  assert(pause_dynamic_wide_apply_angle(zero, 0.0f) == 0);
+  assert(zero[3] == 12.0f && zero[4] == 13.0f && zero[5] == 4.0f);
+
+  float camera[6] = {2.0f, 3.0f, 4.0f, 12.0f, 13.0f, 4.0f};
+  const float before_radius = hypotf(camera[3] - camera[0],
+                                     camera[5] - camera[2]);
+  assert(pause_dynamic_wide_apply_angle(camera, 0.6f) == 1);
+  assert(camera[3] != 12.0f && camera[5] != 4.0f);
+  assert(camera[4] == 13.0f);
+  const float after_radius = hypotf(camera[3] - camera[0],
+                                    camera[5] - camera[2]);
+  assert(fabsf(after_radius - before_radius) < 0.001f);
+
+  float raw[6] = {2.0f, 3.0f, 4.0f, 12.0f, 13.0f, 4.0f};
+  assert(pause_dynamic_wide_apply_angle(raw, 6.0f) == 1);
+  assert(fabsf(raw[3] - camera[3]) < 0.001f);
+  assert(fabsf(raw[5] - camera[5]) < 0.001f);
+}
+''')
+        wrapper = function(SOURCE, 'pes_inplay_camera_update')
+        self.assertIn('match_inplay_camera_update_original(camera, parameter)', wrapper)
+        self.assertIn('pause_camera_dynamic_wide_custom', wrapper)
+        self.assertIn('camera_id != 5u', wrapper)
+        self.assertIn('(const unsigned char *)camera + 0x14', wrapper)
+        self.assertIn('pause_dynamic_wide_apply_angle((float *)parameter, panning)', wrapper)
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('InplayCamera6UpdateERN4draw15CameraParameterE', install)
+        self.assertIn('*inplay_camera_update_slot = (uintptr_t)&pes_inplay_camera_update;', install)
+
+    def test_broadcast_camera_uses_a_continuous_stable_ball_target(self):
+        compiler = shutil.which("gcc")
+        if not compiler: self.skipTest("gcc unavailable")
+        build_and_run(compiler, r'''
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+''' + function(SOURCE, 'match_broadcast_stabilize_target') + r'''
 int main(void) {
   float ball[3] = {0.0f, 0.0f, 0.0f};
   float nearby[3] = {3.0f, 4.0f, 7.0f};
-  assert(match_broadcast_clamp_target(nearby, ball) == 0);
-  assert(nearby[0] == 3.0f && nearby[1] == 4.0f && nearby[2] == 7.0f);
+  assert(match_broadcast_stabilize_target(nearby, ball) == 1);
+  assert(fabsf(nearby[0] - 0.6f) < 0.001f);
+  assert(fabsf(nearby[1] - 0.8f) < 0.001f && nearby[2] == 7.0f);
 
   float escaped[3] = {30.0f, 40.0f, 9.0f};
-  assert(match_broadcast_clamp_target(escaped, ball) == 1);
-  assert(fabsf(escaped[0] - 4.8f) < 0.001f);
-  assert(fabsf(escaped[1] - 6.4f) < 0.001f);
+  assert(match_broadcast_stabilize_target(escaped, ball) == 1);
+  assert(fabsf(escaped[0] - 6.0f) < 0.001f);
+  assert(fabsf(escaped[1] - 8.0f) < 0.001f);
   assert(escaped[2] == 9.0f);
 
   float invalid[3] = {NAN, 2.0f, 0.0f};
-  assert(match_broadcast_clamp_target(invalid, ball) == 0);
+  assert(match_broadcast_stabilize_target(invalid, ball) == 0);
 }
 ''')
         root = Path(__file__).resolve().parents[1]
@@ -170,7 +265,7 @@ int main(void) {
         wrapper = function(SOURCE, 'pes_inplay_ball_position_broadcast')
         self.assertIn('match_ball_position_broadcast_original(', wrapper)
         self.assertIn('(const unsigned char *)camera + 0x198', wrapper)
-        self.assertIn('match_broadcast_clamp_target(target_position, ball_position)', wrapper)
+        self.assertIn('match_broadcast_stabilize_target(target_position, ball_position)', wrapper)
         self.assertNotIn('if (!active', wrapper)
         self.assertNotIn('armGetSystemTick', wrapper)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]

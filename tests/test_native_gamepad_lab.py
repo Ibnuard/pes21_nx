@@ -551,8 +551,36 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertNotIn('FAKE_POINTER_GOAL_DEMO', android)
         self.assertIn('PES_GOAL_DEMO_ACTION_SKIP', goal_input)
         self.assertIn('PES_GOAL_DEMO_ACTION_CELEBRATE', goal_input)
-        self.assertIn('0x01050067u', hooks)
-        self.assertIn('0x01050066u', hooks)
+        self.assertIn('? 0x01050066u', hooks)
+        self.assertIn(': 0x01050067u', hooks)
+        self.assertIn('&match_goal_demo_own_goal, 1', hooks)
+        heartbeat = hooks.split(
+            'static void match_goal_demo_publish_heartbeat', 1)[1].split(
+                'static uint32_t pes_match_goal_demo_pad_main', 1)[0]
+        self.assertIn('armTicksToNs(now - previous_seen) > 500000000ULL', heartbeat)
+        self.assertIn('&match_goal_demo_helper_consumed, 0', heartbeat)
+        self.assertIn('match_goal_demo_refresh_owner()', heartbeat)
+        goal_pad = hooks.split(
+            'static uint32_t pes_match_goal_demo_pad_main', 1)[1].split(
+                'static void pes_match_goal_button_update', 1)[0]
+        goal_button = hooks.split(
+            'static void pes_match_goal_button_update', 1)[1].split(
+                'static void match_pause_dispatch_pending', 1)[0]
+        self.assertIn('match_goal_demo_publish_heartbeat()', goal_pad)
+        self.assertIn('match_goal_demo_publish_heartbeat()', goal_button)
+        snapshot = hooks.split(
+            'void pes_controller_surface_snapshot', 1)[1].split(
+                'void pes_controller_surface_read', 1)[0]
+        self.assertLess(snapshot.index('if (goal_active)'),
+                        snapshot.index('match_native_replay_active_at(now)'))
+        install = hooks.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('*goal_demo_pad_main_slot = (uintptr_t)&pes_match_goal_demo_pad_main;', install)
+        self.assertIn('(void)goal_demo_update;', install)
+        self.assertNotIn('hook_arm64(goal_demo_update', install)
+        self.assertIn('result_skin || cinematic_helper_active', overlay)
+        self.assertIn('PES_CONTROLLER_PROFILE_SINGLE_LEFT', overlay)
+        self.assertIn('PES_CONTROLLER_PROFILE_SINGLE_RIGHT', overlay)
+        self.assertIn('glUniform4f(gl.loc_color, 0.95f, 0.97f, 1.0f, 1.0f)', overlay)
         self.assertIn('P1  SKIP', overlay)
         self.assertIn('P2  SKIP', overlay)
         self.assertIn('P1  CELEBRATE', overlay)
