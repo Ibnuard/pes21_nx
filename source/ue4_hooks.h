@@ -549,6 +549,7 @@ const char *pes_controller_custom_info_popup_title(void);
 uint32_t pes_controller_custom_info_popup_line_count(void);
 const char *pes_controller_custom_info_popup_line(uint32_t index);
 int pes_controller_start_prompt(float *normalized_x, float *normalized_y);
+int pes_controller_startup_transition_active(void);
 int pes_controller_menu_scroll_request(void);
 void pes_controller_menu_tap(float normalized_x, float normalized_y);
 int pes_controller_menu_physical_tap(float normalized_x,

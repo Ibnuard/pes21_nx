@@ -45,6 +45,52 @@ def normalized_portrait(source: Path) -> Image.Image:
     return canvas
 
 
+def recolor_two_line_brand(brand: Image.Image) -> Image.Image:
+    """Apply the approved FootballNX26 colors without redrawing the logo."""
+    width, height = brand.size
+    alpha = brand.getchannel("A")
+    opaque = bytes(1 if value >= 96 else 0 for value in alpha.getdata())
+    seed = (int(width * 0.45), int(height * 0.75))
+    seed_index = seed[1] * width + seed[0]
+    if not opaque[seed_index]:
+        raise ValueError("FootballNX26 X-mask seed is outside the logo")
+
+    component = bytearray(width * height)
+    component[seed_index] = 1
+    pending = [seed_index]
+    while pending:
+        index = pending.pop()
+        x = index % width
+        for neighbor in (
+            index - width if index >= width else -1,
+            index + width if index + width < len(component) else -1,
+            index - 1 if x else -1,
+            index + 1 if x + 1 < width else -1,
+        ):
+            if neighbor >= 0 and opaque[neighbor] and not component[neighbor]:
+                component[neighbor] = 1
+                pending.append(neighbor)
+
+    x_mask = Image.frombytes(
+        "L", (width, height), bytes(255 if value else 0 for value in component)
+    ).filter(ImageFilter.MaxFilter(3))
+    source_pixels = list(brand.getdata())
+    x_pixels = x_mask.getdata()
+    output = []
+    for (red, green, blue, pixel_alpha), in_x in zip(source_pixels, x_pixels):
+        is_accent = (
+            pixel_alpha > 0 and red > 150 and green > 100 and blue < 180
+        )
+        if is_accent:
+            output.append((255, 38, 112, pixel_alpha))
+        elif in_x and pixel_alpha > 0:
+            output.append((239, 255, 0, pixel_alpha))
+        else:
+            output.append((red, green, blue, pixel_alpha))
+    brand.putdata(output)
+    return brand
+
+
 def main() -> None:
     ART.mkdir(parents=True, exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
@@ -67,12 +113,28 @@ def main() -> None:
     save_payload(icons, "icons-runtime.png", "main_menu_icons.bin")
 
     brand = Image.open(ART / "brand-logo-source.png").convert("RGBA")
+    # The approved two-line export has a baked gray transparency grid.
+    # It contains only white lettering and a yellow accent. Convert that
+    # export to a sprite mask, retaining those two colors and dropping gray.
+    if brand.getchannel("A").getextrema() == (255, 255):
+        brand = brand.crop((110, 255, 1424, 756))
+        pixels = []
+        for red, green, blue, _ in brand.getdata():
+            yellow = red > 185 and green > 130 and blue < 120
+            alpha = 255 if yellow else max(0, min(255, (min(red, green, blue) - 210) * 255 // 35))
+            pixels.append((red, green, blue, alpha) if yellow else (255, 255, 255, alpha))
+        brand.putdata(pixels)
+        mask = brand.getchannel("A").filter(ImageFilter.MedianFilter(3))
+        mask = mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+        brand.putalpha(mask)
     brand_box = brand.getchannel("A").point(
         lambda alpha: 255 if alpha >= 8 else 0
     ).getbbox()
     if not brand_box:
         raise ValueError("main-menu brand logo has no visible pixels")
     brand = brand.crop(brand_box)
+    brand.thumbnail((1120, 480), Image.Resampling.LANCZOS)
+    brand = recolor_two_line_brand(brand)
     save_payload(brand, "brand-logo-runtime.png", "main_menu_brand.bin")
 
     portraits = (

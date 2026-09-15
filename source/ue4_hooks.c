@@ -1008,6 +1008,7 @@ static uint64_t main_menu_video_focus_started_ms;
 static uint64_t main_menu_video_focus_repeat_ms;
 static _Alignas(8) uint64_t main_menu_video_opened_ms;
 static _Alignas(4) uint32_t startup_prompt_active;
+static _Alignas(4) uint32_t startup_transition_active;
 static void *exhibition_search_window;
 static uint32_t exhibition_search_focus_index;
 static uint32_t exhibition_search_focus_direction;
@@ -4248,6 +4249,8 @@ uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
       "MyClub/Match/Training/MenuMatchTeamSelect";
   static const char post_match_target[] = "MyClub/Match/PostMatchMenu";
   static const char intro_target[] = "Intro/MenuIntroKonamiLogo";
+  static const char pretitle_target[] = "Intro/MenuIntroPreTitle";
+  static const char title_target[] = "Intro/MenuIntroTitle";
   static const char tutorial_replacement[] = "MyClub/TutorialMatch";
   unsigned char *object = flow_name_ptr;
   char *data = NULL;
@@ -4271,6 +4274,25 @@ uintptr_t pes_exhibition_redirect_flow(void *flow_name_ptr) {
     exhibition_flow_log_count++;
     debugPrintf("exhibition: FactoryMobile flow=%.*s length=%u\n",
                 (int)length, data, (unsigned int)length);
+  }
+
+  if (data && length == sizeof(intro_target) - 1 &&
+      memcmp(data, intro_target, sizeof(intro_target) - 1) == 0 &&
+      !__atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE)) {
+    // The corporate screen is replaced in dt210 itself. Leave that native
+    // flow visible, then cover only its hand-off into the title loader.
+    __atomic_store_n(&startup_transition_active, 0, __ATOMIC_RELEASE);
+  } else if (data &&
+             ((length == sizeof(pretitle_target) - 1 &&
+               memcmp(data, pretitle_target,
+                      sizeof(pretitle_target) - 1) == 0) ||
+              (length == sizeof(title_target) - 1 &&
+               memcmp(data, title_target,
+                      sizeof(title_target) - 1) == 0)) &&
+             !__atomic_load_n(&exhibition_session_active,
+                              __ATOMIC_ACQUIRE)) {
+    __atomic_store_n(&startup_transition_active, 1, __ATOMIC_RELEASE);
+    debugPrintf("UE4 menu: startup title transition covered\n");
   }
 
   const char *matched_target = NULL;
@@ -5101,6 +5123,7 @@ void pes_controller_menu_back_pressed(void) {
 }
 
 void pes_controller_title_ready(void *window) {
+  __atomic_store_n(&startup_transition_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&startup_prompt_active, 1, __ATOMIC_RELEASE);
 
   // The Android title layout exposes its graphics/settings shortcut as the
@@ -5129,6 +5152,14 @@ int pes_controller_start_prompt(float *normalized_x, float *normalized_y) {
   if (normalized_y)
     *normalized_y = 0.704f;
   return 1;
+}
+
+int pes_controller_startup_transition_active(void) {
+  if (__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE)) {
+    __atomic_store_n(&startup_transition_active, 0, __ATOMIC_RELEASE);
+    return 0;
+  }
+  return __atomic_load_n(&startup_transition_active, __ATOMIC_ACQUIRE) != 0;
 }
 
 int pes_controller_selector_rect(float *x, float *y, float *width,
@@ -7934,6 +7965,7 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
     // The first A is the start-screen confirmation. Clear this one-shot
     // state after the synthetic touch is delivered so later A presses can
     // activate tiles and settings.
+    __atomic_store_n(&startup_transition_active, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&startup_prompt_active, 0, __ATOMIC_RELEASE);
     debugPrintf("input: startup prompt accepted via controller A\n");
     return;
@@ -8033,6 +8065,7 @@ int pes_controller_menu_physical_tap(float normalized_x,
   if (pes_controller_start_prompt(NULL, NULL)) {
     // A physical tap on the launch prompt follows the same one-shot path as
     // controller A. The game's original touch stream still receives the tap.
+    __atomic_store_n(&startup_transition_active, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&startup_prompt_active, 0, __ATOMIC_RELEASE);
     debugPrintf("input: startup prompt accepted via physical tap at %.3f,%.3f\n",
                 normalized_x, normalized_y);

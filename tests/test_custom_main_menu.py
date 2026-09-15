@@ -50,6 +50,29 @@ class CustomMainMenuTests(unittest.TestCase):
         self.assertIn("1.0f, 0.91f, 0.02f, focus_amount", overlay)
         self.assertIn("main_menu_row_focus_amount", overlay)
 
+    def test_cpk_splash_handoff_and_title_page_are_custom_full_frames(self):
+        overlay = (ROOT / "source/overlay.c").read_text(encoding="utf-8")
+        hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
+        self.assertIn("pes_controller_startup_transition_active()", overlay)
+        self.assertIn("startup_transition_background_quad", overlay)
+        self.assertIn("gl.bind_sampler(0, 0)", overlay)
+        self.assertIn("update_title_portrait_cycle", overlay)
+        self.assertIn('"PRESS"', overlay)
+        self.assertIn('"TO START"', overlay)
+        self.assertIn('"ANDROSWITCH PROJECT 2026"', overlay)
+        self.assertIn("startup_transition_active", hooks)
+        self.assertIn('"Intro/MenuIntroKonamiLogo"', hooks)
+        self.assertIn('"Intro/MenuIntroPreTitle"', hooks)
+        # Image quads must stay out of the monochrome font batch; otherwise
+        # the font atlas is stretched across the title as vertical stripes.
+        self.assertLess(
+            overlay.index("const int generic_text_end_quad = quads;"),
+            overlay.index("if (startup_transition) {"),
+        )
+        self.assertGreaterEqual(
+            hooks.count("&startup_transition_active, 1, __ATOMIC_RELEASE"), 3
+        )
+
     def test_embedded_png_payloads_exist_and_icons_have_alpha(self):
         names = (
             "main_menu_background.bin",
@@ -69,6 +92,22 @@ class CustomMainMenuTests(unittest.TestCase):
         icons = Image.open(ROOT / "data" / "main_menu_icons.bin")
         self.assertEqual(icons.mode, "RGBA")
         self.assertEqual(icons.getchannel("A").getextrema(), (0, 255))
+
+        brand = Image.open(ROOT / "data" / "main_menu_brand.bin")
+        self.assertEqual(brand.mode, "RGBA")
+        self.assertEqual(brand.getchannel("A").getextrema(), (0, 255))
+        self.assertLessEqual(brand.width, 1120)
+        self.assertLessEqual(brand.height, 480)
+        self.assertGreater(brand.width / brand.height, 2.5)
+        self.assertLess(brand.width / brand.height, 2.8)
+        self.assertEqual(brand.getpixel((504, 318))[:3], (239, 255, 0))
+        self.assertEqual(brand.getpixel((420, 340))[:3], (255, 38, 112))
+        self.assertEqual(brand.getpixel((100, 100))[:3], (255, 255, 255))
+
+        with Image.open(
+            ROOT / "art" / "main_menu" / "androswitch-boot-splash-v3.png"
+        ) as authored_splash:
+            self.assertEqual(authored_splash.size, (1920, 1080))
 
     def test_two_player_general_settings_omits_com_level(self):
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")

@@ -1535,6 +1535,45 @@ static float main_menu_row_focus_amount(uint32_t row, float transition) {
   return 0.0f;
 }
 
+static struct {
+  int initialized;
+  u64 started_tick;
+} title_portrait_cycle;
+
+static float update_title_portrait_cycle(int active, uint32_t *previous,
+                                         uint32_t *current) {
+  if (!active) {
+    memset(&title_portrait_cycle, 0, sizeof(title_portrait_cycle));
+    if (previous) *previous = 0;
+    if (current) *current = 0;
+    return 1.0f;
+  }
+
+  const u64 now = armGetSystemTick();
+  if (!title_portrait_cycle.initialized) {
+    title_portrait_cycle.initialized = 1;
+    title_portrait_cycle.started_tick = now;
+  }
+
+  const uint64_t elapsed_ns = armTicksToNs(
+      now - title_portrait_cycle.started_tick);
+  const uint64_t hold_ns = 10000000000ULL;
+  const uint64_t fade_ns = 450000000ULL;
+  const uint64_t slot = elapsed_ns / hold_ns;
+  const uint32_t next = (uint32_t)(slot % 4ULL);
+  const uint32_t prior = slot ? (next + 3u) % 4u : next;
+  if (previous) *previous = prior;
+  if (current) *current = next;
+
+  if (!slot)
+    return 1.0f;
+  const uint64_t phase_ns = elapsed_ns % hold_ns;
+  if (phase_ns >= fade_ns)
+    return 1.0f;
+  float progress = (float)phase_ns / (float)fade_ns;
+  return progress * progress * (3.0f - 2.0f * progress);
+}
+
 #if defined(DEBUG_LOG) && DEBUG_LOG
 static const char *native_lab_event_name(uint32_t event) {
   switch (event) {
@@ -1759,14 +1798,19 @@ static void overlay_render(void) {
     memset(team_selector_confirm_started_tick, 0,
            sizeof(team_selector_confirm_started_tick));
   }
-  float prompt_x = 0.0f;
-  float prompt_y = 0.0f;
+  const int startup_transition =
+      !custom_2p_transition && pes_controller_startup_transition_active();
   const int start_prompt =
-      !custom_2p_transition && pes_controller_start_prompt(&prompt_x,
-                                                           &prompt_y);
+      !startup_transition && !custom_2p_transition &&
+      pes_controller_start_prompt(NULL, NULL);
+  uint32_t title_portrait_previous = 0;
+  uint32_t title_portrait_current = 0;
+  const float title_portrait_mix = update_title_portrait_cycle(
+      start_prompt, &title_portrait_previous, &title_portrait_current);
   const int custom_main_menu =
       main_menu_host && !start_prompt && !custom_2p_team_selector &&
       !custom_2p_prematch_hub_raw && !custom_2p_transition &&
+      !startup_transition &&
       !custom_gameplan && !pause_skin && !result_skin && !result_transition &&
       !pause_camera_active && !tutorial_play_active;
   const uint32_t custom_main_menu_row =
@@ -1839,7 +1883,9 @@ static void overlay_render(void) {
   }
 
   if ((!config.show_fps || !fps.text[0]) && !selector && !custom_main_menu &&
-      !start_prompt && !custom_popup && !gameplan_cursor && !native_lab &&
+      !startup_transition && !start_prompt && !custom_popup &&
+      !gameplan_cursor &&
+      !native_lab &&
       !result_skin && !result_transition &&
       !setplay_options && !pause_camera_active && !tutorial_play_active &&
       !cinematic_helper_active && penalty_role_p1 == PES_PENALTY_NONE &&
@@ -1852,7 +1898,8 @@ static void overlay_render(void) {
   // A/B helper glyphs share the main-menu button textures. GoalDemo can be the
   // first custom surface in a session, so include it in the upload gate rather
   // than binding two generated-but-empty texture names.
-  prepare_main_menu_assets(custom_main_menu || custom_popup || pause_skin ||
+  prepare_main_menu_assets(start_prompt ||
+                           custom_main_menu || custom_popup || pause_skin ||
                            result_skin || cinematic_helper_active);
   prepare_switch_button_assets(custom_popup || pause_skin || result_skin ||
                                cinematic_helper_active || native_lab ||
@@ -1956,6 +2003,17 @@ static void overlay_render(void) {
   RoundedRectStyle result_card_style = {0};
   int result_cover_background = 0;
   int result_cover_spinner = 0, result_cover_spinner_count = 0;
+  int startup_transition_background_quad = 0;
+  int startup_transition_spinner_first_quad = 0;
+  int startup_transition_spinner_quads = 0;
+  int startup_transition_text_first_quad = 0;
+  int startup_transition_text_quads = 0;
+  int title_background_quad = 0;
+  int title_portrait_quad = 0;
+  int title_brand_quad = 0;
+  int title_button_a_quad = 0;
+  int title_prompt_text_first_quad = 0, title_prompt_text_quads = 0;
+  int title_footer_first_quad = 0, title_footer_quads = 0;
   int main_menu_background_quad = 0;
   int main_menu_portrait_quad = 0;
   int main_menu_card_quads[4] = {0};
@@ -5935,22 +5993,6 @@ static void overlay_render(void) {
     }
   }
 #endif
-  int prompt_label_quads = 0;
-  if (start_prompt) {
-    const float gh = (float)screen_height / 22.0f;
-    const char *prompt_label = "PRESS A TO START";
-    const int prompt_len = (int)strlen(prompt_label);
-    const float label_gh = (float)screen_height / 38.0f;
-    const float label_gw =
-        label_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    const float label_x = prompt_x * (float)screen_width -
-                          (float)prompt_len * label_gw * 0.5f;
-    // Leave a clear gap below the native pulse instead of touching its rim.
-    const float label_y = prompt_y * (float)screen_height + gh * 1.55f;
-    prompt_label_quads = emit_line(prompt_label, prompt_len, label_x, label_y,
-                                   label_gw, label_gh, verts + quads * 24);
-    quads += prompt_label_quads;
-  }
   if (config.show_fps && fps.text[0]) {
     const float gh = (float)screen_height / 30.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
@@ -5958,6 +6000,104 @@ static void overlay_render(void) {
                        gw, gh, verts + quads * 24);
   }
   const int generic_text_end_quad = quads;
+  if (startup_transition) {
+    startup_transition_background_quad = quads;
+    quads += emit_image_rect(0, 0, screen_width, screen_height,
+                             verts + quads * 24);
+    const float center_x = 0.956f * (float)screen_width;
+    const float center_y = 0.905f * (float)screen_height;
+    const float radius = 0.017f * (float)screen_height;
+    const float thickness = 0.004f * (float)screen_height;
+    const u64 frequency = armGetSystemTickFreq();
+    const float phase = frequency
+                            ? (float)(armGetSystemTick() % frequency) /
+                                  (float)frequency * 6.2831853f
+                            : 0.0f;
+    startup_transition_spinner_first_quad = quads;
+    for (uint32_t segment = 0; segment < 8; segment++) {
+      const float a0 = phase + (float)segment * 0.43f;
+      const float a1 = a0 + 0.25f;
+      startup_transition_spinner_quads += emit_segment(
+          center_x + cosf(a0) * radius,
+          center_y + sinf(a0) * radius,
+          center_x + cosf(a1) * radius,
+          center_y + sinf(a1) * radius, thickness,
+          verts + quads * 24);
+      quads++;
+    }
+    const char *loading = "LOADING";
+    const float loading_h = (float)screen_height / 42.0f;
+    const float loading_w = measure_efootball_line(
+        loading, 7, loading_h, EFOOTBALL_FONT_BOLD);
+    startup_transition_text_first_quad = quads;
+    startup_transition_text_quads = emit_efootball_line(
+        loading, 7, 0.932f * (float)screen_width - loading_w,
+        center_y - loading_h * 0.5f, loading_h,
+        EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += startup_transition_text_quads;
+  }
+  if (start_prompt) {
+    title_background_quad = quads;
+    quads += emit_image_rect(0, 0, screen_width, screen_height,
+                             verts + quads * 24);
+
+    // Reuse the tile menu's proven HD portrait size on the title page's
+    // intentionally quiet left side.
+    const float portrait_w = 0.425f * (float)screen_width;
+    const float portrait_h = 1.010f * (float)screen_height;
+    title_portrait_quad = quads;
+    quads += emit_image_rect(0.030f * (float)screen_width,
+        0.035f * (float)screen_height, portrait_w, portrait_h,
+        verts + quads * 24);
+
+    const float brand_w = 0.350f * (float)screen_width;
+    const float brand_h = brand_w * (496.0f / 1310.0f);
+    title_brand_quad = quads;
+    quads += emit_image_rect(0.715f * (float)screen_width - brand_w * 0.5f,
+                             0.510f * (float)screen_height - brand_h * 0.5f,
+                             brand_w, brand_h, verts + quads * 24);
+
+    const float prompt_h = (float)screen_height / 36.0f;
+    const float prompt_icon = 0.045f * (float)screen_height;
+    const float prompt_gap = 0.011f * (float)screen_width;
+    const float press_w = measure_efootball_line(
+        "PRESS", 5, prompt_h, EFOOTBALL_FONT_BOLD);
+    const float start_w = measure_efootball_line(
+        "TO START", 8, prompt_h, EFOOTBALL_FONT_BOLD);
+    const float prompt_w = press_w + prompt_gap + prompt_icon +
+                           prompt_gap + start_w;
+    const float prompt_x = 0.715f * (float)screen_width - prompt_w * 0.5f;
+    const float prompt_center_y = 0.810f * (float)screen_height;
+    title_button_a_quad = quads;
+    quads += emit_image_rect(prompt_x + press_w + prompt_gap,
+                             prompt_center_y - prompt_icon * 0.5f,
+                             prompt_icon, prompt_icon,
+                             verts + quads * 24);
+    title_prompt_text_first_quad = quads;
+    title_prompt_text_quads += emit_efootball_line(
+        "PRESS", 5, prompt_x, prompt_center_y - prompt_h * 0.5f,
+        prompt_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += title_prompt_text_quads;
+    const int to_start_quads = emit_efootball_line(
+        "TO START", 8,
+        prompt_x + press_w + prompt_gap + prompt_icon + prompt_gap,
+        prompt_center_y - prompt_h * 0.5f, prompt_h,
+        EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += to_start_quads;
+    title_prompt_text_quads += to_start_quads;
+
+    const char *footer = "ANDROSWITCH PROJECT 2026";
+    const int footer_len = (int)strlen(footer);
+    const float footer_h = (float)screen_height / 51.0f;
+    const float footer_w = measure_efootball_line(
+        footer, footer_len, footer_h, EFOOTBALL_FONT_BOLD);
+    title_footer_first_quad = quads;
+    title_footer_quads = emit_efootball_line(
+        footer, footer_len, 0.715f * (float)screen_width - footer_w * 0.5f,
+        0.947f * (float)screen_height, footer_h,
+        EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += title_footer_quads;
+  }
   if (cinematic_helper_active) {
     const float helper_radius = 0.022f * (float)screen_height;
     const float skip_y = 0.865f * (float)screen_height;
@@ -6622,13 +6762,14 @@ static void overlay_render(void) {
     quads += emit_image_rect(0, 0, screen_width, screen_height,
                              verts + quads * 24);
     main_menu_portrait_quad = quads;
-    quads += emit_image_rect(0.525f * screen_width, -0.030f * screen_height,
-                             0.455f * screen_width, 1.080f * screen_height,
+    quads += emit_image_rect(0.540f * screen_width, 0.035f * screen_height,
+                             0.425f * screen_width, 1.010f * screen_height,
                              verts + quads * 24);
 
     main_menu_brand_quad = quads;
     quads += emit_image_rect(0.055f * screen_width, 0.052f * screen_height,
-                             0.270f * screen_width, 0.153f * screen_height,
+                             0.245f * screen_width,
+                             0.245f * screen_width * (496.0f / 1310.0f),
                              verts + quads * 24);
 
     const float card_x = 0.055f * screen_width;
@@ -6680,7 +6821,8 @@ static void overlay_render(void) {
   if (!quads)
     return;
 
-  GLint prev_fb, prev_prog, prev_active, prev_tex0, prev_array_buf, prev_viewport[4];
+  GLint prev_fb, prev_prog, prev_active, prev_tex0, prev_sampler = 0;
+  GLint prev_array_buf, prev_viewport[4];
   GLint bsrc_rgb, bdst_rgb, bsrc_a, bdst_a, beq_rgb, beq_a;
   GLboolean color_mask[4];
   const GLboolean prev_blend = glIsEnabled(GL_BLEND);
@@ -6702,6 +6844,14 @@ static void overlay_render(void) {
   glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
   glActiveTexture(GL_TEXTURE0);
   glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex0);
+  // UE4 frequently leaves a sampler object bound to unit zero. A sampler
+  // overrides the filtering/wrap state configured on our textures and caused
+  // the full-page PNGs to appear as repeated vertical strips. Own unit zero
+  // for the complete overlay pass and restore it at the frame boundary.
+  if (gl.bind_sampler) {
+    glGetIntegerv(GL_SAMPLER_BINDING, &prev_sampler);
+    gl.bind_sampler(0, 0);
+  }
   GLint prev_va_pos = 0, prev_va_uv = 0;
   glGetVertexAttribiv(gl.loc_pos, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prev_va_pos);
   glGetVertexAttribiv(gl.loc_uv, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prev_va_uv);
@@ -6757,6 +6907,44 @@ static void overlay_render(void) {
   glUniform1f(gl.loc_round_feather, 1.15f);
   glUniform1f(gl.loc_cursor, 0.0f);
   glUniform1f(gl.loc_cursor_border, 0.0f);
+  if (start_prompt) {
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.main_menu_background_tex);
+    glDrawArrays(GL_TRIANGLES, title_background_quad * 6, 6);
+
+    if (title_portrait_mix < 1.0f &&
+        title_portrait_previous != title_portrait_current) {
+      glBindTexture(GL_TEXTURE_2D,
+                    gl.main_menu_portrait_tex[title_portrait_previous]);
+      glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f,
+                  1.0f - title_portrait_mix);
+      glDrawArrays(GL_TRIANGLES, title_portrait_quad * 6, 6);
+    }
+    glBindTexture(GL_TEXTURE_2D,
+                  gl.main_menu_portrait_tex[title_portrait_current]);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, title_portrait_mix);
+    glDrawArrays(GL_TRIANGLES, title_portrait_quad * 6, 6);
+
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.main_menu_brand_tex);
+    glDrawArrays(GL_TRIANGLES, title_brand_quad * 6, 6);
+    glBindTexture(GL_TEXTURE_2D, gl.main_menu_button_a_tex);
+    glDrawArrays(GL_TRIANGLES, title_button_a_quad * 6, 6);
+
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.98f);
+    glDrawArrays(GL_TRIANGLES, title_prompt_text_first_quad * 6,
+                 title_prompt_text_quads * 6);
+    glUniform4f(gl.loc_color, 0.74f, 0.84f, 1.0f, 0.86f);
+    glDrawArrays(GL_TRIANGLES, title_footer_first_quad * 6,
+                 title_footer_quads * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+  }
   if (custom_main_menu) {
     use_rounded_rect(NULL);
     glUniform1f(gl.loc_solid, 0.0f);
@@ -7783,6 +7971,29 @@ static void overlay_render(void) {
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
 
+  if (startup_transition) {
+    // This cover is deliberately last: no native title/loading geometry may
+    // bleed through between PreTitle and the custom title PostInit callback.
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+    glDrawArrays(GL_TRIANGLES, startup_transition_background_quad * 6, 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.94f);
+    glDrawArrays(GL_TRIANGLES, startup_transition_spinner_first_quad * 6,
+                 startup_transition_spinner_quads * 6);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glDrawArrays(GL_TRIANGLES, startup_transition_text_first_quad * 6,
+                 startup_transition_text_quads * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+  }
+
 #undef ADD_SWITCH_HELPER
 
   // restore the two attrib arrays to whatever the engine had (it uses the same
@@ -7799,6 +8010,8 @@ static void overlay_render(void) {
   if (prev_stencil) glEnable(GL_STENCIL_TEST);
   if (prev_scissor) glEnable(GL_SCISSOR_TEST);
   if (prev_cull) glEnable(GL_CULL_FACE);
+  if (gl.bind_sampler)
+    gl.bind_sampler(0, (GLuint)prev_sampler);
   glBindTexture(GL_TEXTURE_2D, prev_tex0);
   glActiveTexture(prev_active);
   glUseProgram(prev_prog);
