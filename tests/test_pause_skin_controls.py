@@ -50,7 +50,14 @@ class PauseSkinTests(unittest.TestCase):
         self.assertIn('pause_top_menu_transition_tick', pause)
         simplify = function(hooks, 'pes_main_menu_simplify')
         self.assertIn('&pause_top_menu_transition_tick, 0', simplify)
-        self.assertIn('focus == 2u', pause)
+        self.assertIn('focus == 3u', pause)
+
+    def test_pause_root_has_separate_general_and_camera_cards(self):
+        overlay = (ROOT / 'source/overlay.c').read_text()
+        self.assertIn('"GAME PLAN", "GENERAL SETTINGS", "CAMERA SETTINGS", "TOP MENU"', overlay)
+        self.assertIn('int pause_skin_cards[4]', overlay)
+        hooks = (ROOT / 'source/ue4_hooks.c').read_text()
+        self.assertIn('% 4u', function(hooks, 'pes_controller_pause_skin_focus'))
 
     def test_live_editor_uses_native_reservations_and_not_bootstrap(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()

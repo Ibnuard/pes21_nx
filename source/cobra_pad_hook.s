@@ -87,24 +87,6 @@ pes_match_cursor_info_from_tmpdb_hook:
     .size pes_match_cursor_info_from_tmpdb_hook, .-pes_match_cursor_info_from_tmpdb_hook
 
     .align 2
-    .global pes_inplay_ball_position_broadcast_original
-    .type pes_inplay_ball_position_broadcast_original, %function
-
-// Callable trampoline for the hooked Broadcast target calculator. Recreate
-// its displaced prologue and let the original epilogue return to the C
-// wrapper, which can then correct only the fast-ball lag case.
-pes_inplay_ball_position_broadcast_original:
-    sub sp, sp, #0x1c0
-    stp d15, d14, [sp, #288]
-    stp d13, d12, [sp, #304]
-    stp d11, d10, [sp, #320]
-    adrp x17, inplay_ball_position_broadcast_resume
-    ldr x17, [x17, #:lo12:inplay_ball_position_broadcast_resume]
-    br x17
-
-    .size pes_inplay_ball_position_broadcast_original, .-pes_inplay_ball_position_broadcast_original
-
-    .align 2
     .global pes_match_replay_check_skip_hook
     .type pes_match_replay_check_skip_hook, %function
 

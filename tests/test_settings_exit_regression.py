@@ -10,14 +10,15 @@ SOURCE = (Path(__file__).resolve().parents[1] / "source/ue4_hooks.c").read_text(
 
 
 class SettingsExitTests(unittest.TestCase):
-    def test_camera_names_follow_native_type_not_page(self):
+    def test_camera_names_follow_tmpdb_type_and_include_custom(self):
         body = SOURCE.split("const char *pes_controller_pause_settings_value", 1)[1].split("static void match_pause_go_top_menu", 1)[0]
-        self.assertIn("switch (types[current])", body)
-        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (5, "DYNAMIC WIDE"), (7, "LIVE BROADCAST"), (12, "STADIUM")):
+        self.assertIn("pause_settings_tmpdb_camera(&tmpdb_type)", body)
+        self.assertIn("switch (type)", body)
+        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (5, "DYNAMIC WIDE"), (7, "LIVE BROADCAST"), (12, "STADIUM"), (13, "STADIUM CUSTOM")):
             self.assertIn(f'case {enum}: return "{label}";', body)
         self.assertNotIn("PRESET", body)
 
-    def test_stamina_preserves_native_validity_but_overrides_mobile_hide(self):
+    def test_stamina_toggle_gates_native_active_player_visibility(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
@@ -34,11 +35,115 @@ int main(void) {
     for (uint32_t i = 0; i < 4; ++i) {
       pause_settings_stamina = 0; calls = 0;
       assert(pause_stamina_disp((void *)123, i) == 0 && calls == 0);
-      pause_settings_stamina = 1;
+      pause_settings_stamina = 1; calls = 0;
       assert(pause_stamina_disp((void *)123, i) == valid && calls == 1);
     }
 }
 ''')
+
+    def test_pause_settings_are_split_into_general_and_camera_pages(self):
+        self.assertIn('return index < 7u ? general[index] : "";', SOURCE)
+        self.assertIn('"RADAR", "SHOW STAMINA", "GAME SPEED", "NEXT TARGET INDICATOR"', SOURCE)
+        self.assertIn('"SHOW REPLAY", "CHANT SFX", "COMMENTARY"', SOURCE)
+        self.assertIn('"CAMERA TYPE", "CAMERA HEIGHT", "CAMERA DISTANCE", "CAMERA ANGLE"', SOURCE)
+        self.assertIn('focus == 2u ? PAUSE_SETTINGS_PAGE_CAMERA', SOURCE)
+        self.assertIn('const uint32_t native_route = focus == 2u ? 1u : focus;', SOURCE)
+        camera_field = function(SOURCE, 'pause_settings_camera_field')
+        self.assertIn('type >= 7u && type <= 11u', camera_field)
+        self.assertIn('type == 13u', camera_field)
+
+    def test_radar_toggle_overrides_the_per_frame_info_byte(self):
+        compiler = shutil.which("gcc")
+        if not compiler: self.skipTest("gcc unavailable")
+        build_and_run(compiler, r'''
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+static uint32_t pause_settings_radar, calls;
+static uint32_t native_update(void *radar) { assert(radar); ++calls; return 77; }
+static uint32_t (*pause_radar_update_original)(void *) = native_update;
+''' + function(SOURCE, "pause_radar_update") + r'''
+int main(void) {
+  unsigned char radar[0x40]={0}, info[2]={9,0}; void *p=info;
+  memcpy(radar+0x38,&p,sizeof(p));
+  pause_settings_radar=0;
+  assert(pause_radar_update(radar)==77 && info[0]==0 && calls==1);
+  pause_settings_radar=1;
+  assert(pause_radar_update(radar)==77 && info[0]==1 && calls==2);
+}
+''')
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('"_ZN7match2D6Screen5Radar6UpdateEv"', install)
+        self.assertIn('*radar_update_slot = (uintptr_t)&pause_radar_update;', install)
+
+    def test_game_speed_targets_embedded_registry_settings_and_refreshes_match(self):
+        body = function(SOURCE, 'pause_settings_set_game_speed')
+        self.assertIn('(unsigned char *)registry_system + 0x14', body)
+        self.assertIn('pause_match_listener_change_game_speed(listener)', body)
+        self.assertIn('pause_registry_game_speed_get_fps(registry_speed)', body)
+        self.assertIn('pause_basic_status_get_pes_module_thread_fps()', body)
+        self.assertIn('&pause_game_speed_debug_apply_count, 1', body)
+        root = Path(__file__).resolve().parents[1]
+        overlay = (root / 'source/overlay.c').read_text(encoding='utf-8')
+        self.assertIn('pes_controller_game_speed_debug(&game_speed_debug)', overlay)
+        self.assertIn('GAME SPEED DBG UI:%+d TMP:%u REG:%u TARGET:%uFPS', overlay)
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('"_ZNK5match8registry17GameSpeedSettings10GetGameFPSEv"', install)
+        self.assertIn('"_ZN5basic6Status21GetPesModuleThreadFPSEv"', install)
+
+    def test_replay_off_overrides_the_runtime_replay_decision(self):
+        compiler = shutil.which("gcc")
+        if not compiler: self.skipTest("gcc unavailable")
+        build_and_run(compiler, r'''
+#include <assert.h>
+#include <stdint.h>
+static uint32_t pause_settings_show_replay, native_value, calls;
+static uint32_t native_get(void *settings) { assert(settings==(void*)9); ++calls; return native_value; }
+static uint32_t (*pause_registry_system_is_no_replay_original)(void *) = native_get;
+''' + function(SOURCE, "pause_registry_system_is_no_replay") + r'''
+int main(void) {
+  pause_settings_show_replay=0; native_value=0;
+  assert(pause_registry_system_is_no_replay((void*)9)==1 && calls==0);
+  pause_settings_show_replay=1; native_value=0;
+  assert(pause_registry_system_is_no_replay((void*)9)==0 && calls==1);
+  native_value=1;
+  assert(pause_registry_system_is_no_replay((void*)9)==1 && calls==2);
+}
+''')
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('module->load_base + 0x380e790', install)
+        self.assertIn('&pause_registry_system_is_no_replay', install)
+
+    def test_camera_changes_sync_camera_registry_and_live_match_env(self):
+        apply = function(SOURCE, 'pause_settings_apply_camera')
+        self.assertIn('pause_match_listener_set_camera_from_tmpdb(listener, 1u)', apply)
+        self.assertIn('match_pause_camera_update_registry(window, 1u)', apply)
+        self.assertIn('static const uint8_t pause_camera_types[] = '
+                      '{0u, 1u, 2u, 5u, 7u, 12u, 13u};', SOURCE)
+        update = function(SOURCE, 'pes_match_pause_camera_update')
+        self.assertIn('settings[0] = pause_camera_types[next]', update)
+        self.assertIn('const int opening = window && window != match_pause_camera_window;', update)
+        self.assertIn('pause_settings_restore_camera(window)', update)
+        self.assertIn('pause_settings_capture_camera()', update)
+        self.assertIn('pause_settings_apply_camera(window)', update)
+        capture = function(SOURCE, 'pause_settings_capture_camera')
+        restore = function(SOURCE, 'pause_settings_restore_camera')
+        self.assertIn('sizeof(pause_camera_saved_settings)', capture)
+        self.assertIn('&pause_camera_saved_valid, 1', capture)
+        self.assertIn('memcpy(settings, pause_camera_saved_settings', restore)
+        self.assertIn('pause_settings_apply_camera(window)', restore)
+        setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
+        self.assertIn('&pause_camera_saved_valid, 0', setup)
+
+    def test_broadcast_camera_tracking_is_fully_native_again(self):
+        root = Path(__file__).resolve().parents[1]
+        assembly = (root / 'source/cobra_pad_hook.s').read_text(encoding='utf-8')
+        self.assertNotIn('pes_inplay_ball_position_broadcast', SOURCE)
+        self.assertNotIn('GetBallPositionBroadcast', SOURCE)
+        self.assertNotIn('inplay_ball_position_broadcast_resume', assembly)
+        # BallInfo remains for set-piece charge prediction, which is unrelated
+        # to Stadium/Live Broadcast target selection.
+        self.assertIn('match_ball_info_get_trans', SOURCE)
 
     def test_stamina_mobile_branch_returns_validated_visibility(self):
         # Frozen native tail: the instruction AFTER the patched CBZ clears

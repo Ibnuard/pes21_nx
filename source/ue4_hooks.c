@@ -110,7 +110,6 @@ static uintptr_t match_result_half_update_resume;
 static uintptr_t match_tutorial_guide_update_resume;
 static uintptr_t match_flow_check_skip_fix_demo_resume;
 static uintptr_t exhibition_match_setup_data_resume;
-uintptr_t inplay_ball_position_broadcast_resume;
 static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
 uintptr_t pes_main_menu_graphics_d1_resume;
@@ -286,8 +285,6 @@ static void (*match_squad_data_set_piece_taker)(void *squad_data,
 static void (*match_squad_data_set_attacker)(void *squad_data,
                                               uint32_t slot,
                                               uint32_t member_id);
-static void (*match_pause_camera_swipe)(void *window, uint32_t old_page,
-                                         uint32_t new_page);
 static void (*match_pause_camera_footer)(void *window, uint32_t footer_key);
 static uint32_t (*match_pause_camera_update_original)(void *window,
                                                        uint32_t pad_status);
@@ -301,9 +298,6 @@ static void (*match_result_control_wait)(void *window, int waiting);
 static uint32_t match_result_extra_time_started;
 static void (*match_result_update_original)(void *window);
 static void **match_listener_instance;
-static uint32_t (*match_ball_position_broadcast_original)(
-    void *camera, const float *blend, const uint32_t *home_away,
-    float *target_position, float *zoom, uint32_t active);
 static const float *(*match_ball_info_get_trans)(const void *ball_info);
 static uint32_t (*match_goal_demo_get_goal_side)(const void *registry);
 static uint32_t (*match_goal_demo_is_cpu_goal)(void *goal_demo,
@@ -1088,138 +1082,105 @@ static _Alignas(8) uint64_t match_pause_camera_seen_tick;
 static _Alignas(4) uint32_t match_pause_camera_action;
 static void *match_pause_camera_window;
 static uint32_t pause_settings_focus;
-static uint32_t pause_settings_stamina = 1, pause_settings_chant = 1, pause_settings_commentary = 1;
+enum {
+  PAUSE_SETTINGS_PAGE_GENERAL = 0,
+  PAUSE_SETTINGS_PAGE_CAMERA = 1,
+};
+static _Alignas(4) uint32_t pause_settings_page = PAUSE_SETTINGS_PAGE_GENERAL;
+static uint32_t pause_settings_radar = 1, pause_settings_stamina = 1;
+static uint32_t pause_settings_chant = 1, pause_settings_commentary = 1;
+static _Alignas(4) uint32_t pause_camera_saved_valid;
+static unsigned char pause_camera_saved_settings[15];
 static void (*pause_settings_volume)(uint32_t kind, float volume);
+static uint32_t (*pause_radar_need_disp_original)(void *radar);
+static uint32_t (*pause_radar_update_original)(void *radar);
+static void (*match_pause_camera_update_registry)(void *window,
+                                                  uint32_t save);
+static void (*pause_match_listener_set_camera_from_tmpdb)(void *listener,
+                                                          uint32_t save);
+static void (*pause_tmpdb_support_set_cursor_target)(void *settings,
+                                                     uint32_t value);
+static void (*pause_registry_game_speed_set)(void *settings, uint8_t value);
+static uint32_t (*pause_registry_game_speed_get_fps)(const void *settings);
+static float (*pause_basic_status_get_pes_module_thread_fps)(void);
+static void (*pause_registry_system_set_no_replay)(void *settings,
+                                                   uint32_t value);
+static uint32_t (*pause_registry_system_is_no_replay_original)(void *settings);
+static void (*pause_match_listener_change_game_speed)(void *listener);
+static _Alignas(4) uint32_t pause_settings_show_replay = 1;
+static _Alignas(4) uint32_t pause_game_speed_debug_tmpdb = 2;
+static _Alignas(4) uint32_t pause_game_speed_debug_registry = 2;
+static _Alignas(4) uint32_t pause_game_speed_debug_target_fps;
+static _Alignas(4) uint32_t pause_game_speed_debug_runtime_fps_milli;
+static _Alignas(4) uint32_t pause_game_speed_debug_apply_count;
 static uint32_t (*pause_stamina_disp_original)(void *model, uint32_t index);
 static uint32_t pause_stamina_disp(void *model, uint32_t index) {
   return __atomic_load_n(&pause_settings_stamina, __ATOMIC_ACQUIRE)
-      ? pause_stamina_disp_original(model, index) : 0;
+             ? pause_stamina_disp_original(model, index)
+             : 0u;
 }
-// ModelStaminaGauge owns four Model2DData instances. GetColor/ExecOther in the
-// shipped binary establish the pairing unambiguously: indices 0/1 are the
-// coloured, stamina-powered fills and indices 2/3 are the constant black
-// backing plates. Keep the native transform and fill renderer completely
-// untouched; only suppress Draw for the two backing-model pointers. This is
-// also deliberately free of a swap-time replacement, avoiding the one-frame
-// phase difference that made the former custom bar shake above moving players.
-static void (*pause_stamina_draw_original)(void *data, void *command);
-static void *(*pause_stamina_get_model_original)(void *model,
-                                                  uint32_t index);
-static _Alignas(8) uintptr_t pause_stamina_model_by_index[4];
-static void (*pause_stamina_canvas_draw_item_original)(void *canvas,
-                                                        void *item);
-static uintptr_t pause_stamina_canvas_fill_return;
-static uintptr_t pause_stamina_canvas_backing_return;
-#if defined(DEBUG_LOG) && DEBUG_LOG
-static _Alignas(4) uint32_t pause_stamina_plate_hidden_mask;
-static _Alignas(4) uint32_t pause_stamina_fill_expand_samples;
-#endif
 
 uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
                                      uint32_t capacity) {
   (void)bars;
   (void)capacity;
-  // Retained as a compatibility ABI for older build products. Native stamina
-  // is now the only visible implementation.
-  return 0;
+  // Compatibility ABI for older overlay callers. Stamina is rendered entirely
+  // by the native ModelStaminaGauge again.
+  return 0u;
 }
 
-static void *pause_stamina_get_model(void *model, uint32_t index) {
-  void *data = pause_stamina_get_model_original(model, index);
-  if (index < 4u)
-    __atomic_store_n(&pause_stamina_model_by_index[index],
-                     (uintptr_t)data, __ATOMIC_RELEASE);
-  return data;
-}
-
-// Inspect the final native triangles without changing their geometry. A thin
-// visible line does not prove the submitted fill is thin: the stamina renderer
-// also submits an internal black pass, separate from ModelStaminaGauge 2/3.
-static int pause_stamina_canvas_bounds(void *item, float bounds[4]) {
-  if (!item)
+int pes_controller_game_speed_debug(PesGameSpeedDebug *snapshot) {
+  if (!snapshot)
     return 0;
-  void *triangles = NULL;
-  int32_t count = 0;
-  memcpy(&triangles, (char *)item + 0x50, sizeof(triangles));
-  memcpy(&count, (char *)item + 0x58, sizeof(count));
-  if (!triangles || count <= 0 || count > 64)
+  const uint32_t apply_count = __atomic_load_n(
+      &pause_game_speed_debug_apply_count, __ATOMIC_ACQUIRE);
+  if (!apply_count)
     return 0;
-
-  float min_x = 1.0e30f, max_x = -1.0e30f;
-  float min_y = 1.0e30f, max_y = -1.0e30f;
-  for (int32_t triangle = 0; triangle < count; ++triangle) {
-    for (uint32_t vertex = 0; vertex < 3; ++vertex) {
-      const char *address = (const char *)triangles +
-                            triangle * 96 + vertex * 32;
-      float x = 0.0f, y = 0.0f;
-      memcpy(&x, address, sizeof(x));
-      memcpy(&y, address + 4, sizeof(y));
-      if (!isfinite(x) || !isfinite(y) || fabsf(x) > 8192.0f ||
-          fabsf(y) > 8192.0f)
-        return 0;
-      if (x < min_x) min_x = x;
-      if (x > max_x) max_x = x;
-      if (y < min_y) min_y = y;
-      if (y > max_y) max_y = y;
-    }
+  snapshot->tmpdb_value = __atomic_load_n(
+      &pause_game_speed_debug_tmpdb, __ATOMIC_ACQUIRE);
+  snapshot->registry_value = __atomic_load_n(
+      &pause_game_speed_debug_registry, __ATOMIC_ACQUIRE);
+  snapshot->target_fps = __atomic_load_n(
+      &pause_game_speed_debug_target_fps, __ATOMIC_ACQUIRE);
+  uint32_t runtime_fps_milli = __atomic_load_n(
+      &pause_game_speed_debug_runtime_fps_milli, __ATOMIC_ACQUIRE);
+  // Status owns the value consumed by the match loop. Refresh only while this
+  // opt-in debug line is visible so LIVE remains live rather than a snapshot
+  // from the exact frame in which the pause action was applied.
+  if (pause_basic_status_get_pes_module_thread_fps) {
+    const float runtime_fps = pause_basic_status_get_pes_module_thread_fps();
+    if (runtime_fps > 0.0f && runtime_fps < 1000.0f)
+      runtime_fps_milli = (uint32_t)(runtime_fps * 1000.0f + 0.5f);
   }
-
-  bounds[0] = min_x;
-  bounds[1] = min_y;
-  bounds[2] = max_x;
-  bounds[3] = max_y;
+  snapshot->runtime_fps_milli = runtime_fps_milli;
+  snapshot->apply_count = apply_count;
   return 1;
 }
 
-static void pause_stamina_canvas_draw_item(void *canvas, void *item) {
-  const uintptr_t caller = (uintptr_t)__builtin_return_address(0);
-  const int backing = caller == pause_stamina_canvas_backing_return;
-  if (backing || caller == pause_stamina_canvas_fill_return) {
-#if defined(DEBUG_LOG) && DEBUG_LOG
-    if (__atomic_fetch_add(&pause_stamina_fill_expand_samples, 1u,
-                           __ATOMIC_RELAXED) < 32u) {
-      float bounds[4] = {0};
-      const int valid = pause_stamina_canvas_bounds(item, bounds);
-      debugPrintf("STAMINA canvas %s valid=%d bounds=%.2f,%.2f..%.2f,%.2f\n",
-                  backing ? "backing suppressed" : "fill native", valid,
-                  bounds[0], bounds[1], bounds[2], bounds[3]);
-    }
-#endif
-    // Keep the native extent; production uses the game's own fill geometry.
-    if (backing)
-      return;
-  }
-  pause_stamina_canvas_draw_item_original(canvas, item);
-}
-
-static void pause_stamina_draw(void *data, void *command) {
-  if (!data) {
-    pause_stamina_draw_original(data, command);
-    return;
-  }
-  for (uint32_t index = 2; index < 4; ++index) {
-    if ((uintptr_t)data != __atomic_load_n(&pause_stamina_model_by_index[index],
-                                           __ATOMIC_ACQUIRE))
-      continue;
-#if defined(DEBUG_LOG) && DEBUG_LOG
-    const uint32_t bit = 1u << index;
-    const uint32_t previous = __atomic_fetch_or(
-        &pause_stamina_plate_hidden_mask, bit, __ATOMIC_RELAXED);
-    if (!(previous & bit)) {
-      debugPrintf("STAMINA native backing hidden index=%u data=%p; "
-                  "fill indices 0/1 remain native\n", index, data);
-    }
-#endif
-    // Do not mutate the model or shared render state. Merely omit this one
-    // backing draw, then let the native fill at indices 0/1 render normally.
-    return;
-  }
-  pause_stamina_draw_original(data, command);
-}
 uint32_t pes_controller_pause_settings_focus(void) { return pause_settings_focus; }
+uint32_t pes_controller_pause_settings_count(void) {
+  return __atomic_load_n(&pause_settings_page, __ATOMIC_ACQUIRE) ==
+                 PAUSE_SETTINGS_PAGE_CAMERA
+             ? 4u
+             : 7u;
+}
+const char *pes_controller_pause_settings_title(void) {
+  return __atomic_load_n(&pause_settings_page, __ATOMIC_ACQUIRE) ==
+                 PAUSE_SETTINGS_PAGE_CAMERA
+             ? "CAMERA SETTINGS"
+             : "GENERAL SETTINGS";
+}
 const char *pes_controller_pause_settings_label(uint32_t index) {
-  static const char *const labels[] = {"CAMERA", "SHOW STAMINA", "CHANT SFX", "COMMENTARY"};
-  return index < 4 ? labels[index] : "";
+  static const char *const general[] = {
+      "RADAR", "SHOW STAMINA", "GAME SPEED", "NEXT TARGET INDICATOR",
+      "SHOW REPLAY", "CHANT SFX", "COMMENTARY"};
+  static const char *const camera[] = {
+      "CAMERA TYPE", "CAMERA HEIGHT", "CAMERA DISTANCE", "CAMERA ANGLE"};
+  const uint32_t page = __atomic_load_n(&pause_settings_page,
+                                         __ATOMIC_ACQUIRE);
+  if (page == PAUSE_SETTINGS_PAGE_CAMERA)
+    return index < 4u ? camera[index] : "";
+  return index < 7u ? general[index] : "";
 }
 static _Alignas(4) uint32_t match_gameplan_pause_route;
 static _Alignas(4) uint32_t match_result_input_action;
@@ -1299,10 +1260,6 @@ static _Alignas(4) uint32_t match_kicker_selector_open;
 static _Alignas(4) uint32_t match_kicker_selector_pending_action;
 static _Alignas(4) uint32_t match_kicker_selector_owner_pad = UINT32_MAX;
 static _Alignas(8) uintptr_t match_kicker_selector_button_owner;
-static _Alignas(8) uint64_t match_camera_ball_seen_tick;
-static float match_camera_previous_ball[3];
-static uint32_t match_camera_previous_ball_valid;
-
 static int match_native_demo_active_at(uint64_t now, uintptr_t *owner_out);
 
 enum {
@@ -2590,6 +2547,9 @@ static void exhibition_publish_prepared_matchplan(void) {
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
   match_result_extra_time_started = 0;
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
+  __atomic_store_n(&pause_camera_saved_valid, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_game_speed_debug_apply_count, 0,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&pause_resume_transition_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&live_gameplan_returning_to_pause, 0, __ATOMIC_RELEASE);
@@ -7838,10 +7798,10 @@ const char *pes_controller_custom_info_popup_line(uint32_t index) {
       return index == 3 ? "A APPLY   B BACK" : "";
     }
     static const char *const normal[] = {
-        "  RESUME MATCH", "  GAME PLAN", "  CAMERA MODE",
+        "  GAME PLAN", "  GENERAL SETTINGS", "  CAMERA SETTINGS",
         "  BACK TO HOME"};
     static const char *const focused[] = {
-        "> RESUME MATCH", "> GAME PLAN", "> CAMERA MODE",
+        "> GAME PLAN", "> GENERAL SETTINGS", "> CAMERA SETTINGS",
         "> BACK TO HOME"};
     if (index < 4) {
       const uint32_t focus = __atomic_load_n(&match_pause_custom_focus,
@@ -12693,82 +12653,6 @@ void pes_controller_set_piece_selector_input(uint32_t action) {
   __atomic_store_n(&match_kicker_selector_focus, focus, __ATOMIC_RELEASE);
 }
 
-// Stadium/Broadcast normally widens its target to include nearby players.
-// During a fast keeper throw or a backwards switch that heuristic can retain
-// the old group for several frames and leave the ball outside the viewport.
-// Keep the stock calculation, but while the ball is travelling quickly force
-// its target back to the live BallInfo position when the group target trails
-// by a large distance. Slow possession and ordinary camera composition remain
-// untouched.
-uint32_t pes_inplay_ball_position_broadcast(
-    void *camera, const float *blend, const uint32_t *home_away,
-    float *target_position, float *zoom, uint32_t active) {
-  const uint32_t result = match_ball_position_broadcast_original
-                              ? match_ball_position_broadcast_original(
-                                    camera, blend, home_away, target_position,
-                                    zoom, active)
-                              : 0;
-  if (!active || !camera || !target_position || !match_ball_info_get_trans)
-    return result;
-
-  const uint64_t now = armGetSystemTick();
-  const uint64_t sampled_tick = __atomic_load_n(
-      &match_camera_ball_seen_tick, __ATOMIC_ACQUIRE);
-  // Some camera paths evaluate the same target more than once inside one
-  // rendered frame. Sampling BallInfo again only adds game-thread work and can
-  // perturb the velocity estimate. One sample per ~8 ms preserves both 60 and
-  // 30 fps behaviour while eliminating those duplicate sub-frame calls.
-  if (sampled_tick &&
-      armTicksToNs(now - sampled_tick) < 8000000ULL)
-    return result;
-
-  void *ball_info = NULL;
-  memcpy(&ball_info, (const unsigned char *)camera + 408,
-         sizeof(ball_info));
-  const float *ball = ball_info ? match_ball_info_get_trans(ball_info) : NULL;
-  if (!ball || !isfinite(ball[0]) || !isfinite(ball[1]) ||
-      !isfinite(ball[2]))
-    return result;
-
-  const uint64_t previous_tick = __atomic_exchange_n(
-      &match_camera_ball_seen_tick, now, __ATOMIC_ACQ_REL);
-  float travel_squared = 0.0f;
-  if (match_camera_previous_ball_valid && previous_tick) {
-    const float dx = ball[0] - match_camera_previous_ball[0];
-    const float dy = ball[1] - match_camera_previous_ball[1];
-    const float dz = ball[2] - match_camera_previous_ball[2];
-    const uint64_t elapsed_ns = armTicksToNs(now - previous_tick);
-    if (elapsed_ns > 0 && elapsed_ns < 250000000ULL) {
-      const float frame_scale = 16666667.0f / (float)elapsed_ns;
-      travel_squared = (dx * dx + dy * dy + dz * dz) *
-                       frame_scale * frame_scale;
-    }
-  }
-  memcpy(match_camera_previous_ball, ball,
-         sizeof(match_camera_previous_ball));
-  match_camera_previous_ball_valid = 1;
-
-  const float lag_x = target_position[0] - ball[0];
-  const float lag_y = target_position[1] - ball[1];
-  const float planar_lag_squared = lag_x * lag_x + lag_y * lag_y;
-  if (travel_squared >= 0.22f * 0.22f &&
-      planar_lag_squared >= 12.0f * 12.0f) {
-    // A hard assignment made the whole pitch appear to drop frames even while
-    // the renderer reported a stable 60 fps. Preserve the fast-ball recovery,
-    // but blend progressively: modest lag gets a gentle correction while an
-    // escaped keeper throw converges much more aggressively.
-    float correction = 0.20f;
-    if (planar_lag_squared >= 24.0f * 24.0f)
-      correction = 0.40f;
-    if (planar_lag_squared >= 40.0f * 40.0f)
-      correction = 0.65f;
-    target_position[0] += (ball[0] - target_position[0]) * correction;
-    target_position[1] += (ball[1] - target_position[1]) * correction;
-    target_position[2] += (ball[2] - target_position[2]) * correction;
-  }
-  return result;
-}
-
 int pes_controller_custom_pause_active(void) {
   return !pes_controller_pause_transition() && __atomic_load_n(&match_pause_custom_active,
                          __ATOMIC_ACQUIRE) != 0;
@@ -12813,7 +12697,7 @@ uint32_t pes_controller_pause_transition(void) {
 }
 
 uint32_t pes_controller_pause_skin_focus(void) {
-  return __atomic_load_n(&match_pause_custom_focus, __ATOMIC_ACQUIRE) % 3u;
+  return __atomic_load_n(&match_pause_custom_focus, __ATOMIC_ACQUIRE) % 4u;
 }
 
 void pes_controller_custom_pause_input(uint32_t action) {
@@ -12833,18 +12717,13 @@ void pes_controller_pause_camera_input(uint32_t action) {
     __atomic_store_n(&match_pause_camera_action, action, __ATOMIC_RELEASE);
 }
 
-static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
-  uint32_t count = 0;
-  uint32_t current = 0;
-  int32_t *begin = NULL;
-  int32_t *end = NULL;
-  if (window) {
-    memcpy(&begin, (unsigned char *)window + 536, sizeof(begin));
-    memcpy(&end, (unsigned char *)window + 544, sizeof(end));
-  }
-  if (begin && end && end >= begin && (uintptr_t)(end - begin) <= 16)
-    count = (uint32_t)(end - begin);
+static const uint8_t pause_camera_types[] = {0u, 1u, 2u, 5u, 7u, 12u, 13u};
 
+static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
+  (void)window;
+  const uint32_t count =
+      (uint32_t)(sizeof(pause_camera_types) / sizeof(pause_camera_types[0]));
+  uint32_t current = 0;
   uint8_t camera_type = 0;
   void *manager = exhibition_tmpdb_manager_get_instance
                       ? exhibition_tmpdb_manager_get_instance()
@@ -12863,7 +12742,7 @@ static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
            sizeof(camera_type));
   }
   for (uint32_t index = 0; index < count; index++) {
-    if ((uint32_t)begin[index] == camera_type) {
+    if (pause_camera_types[index] == camera_type) {
       current = index;
       break;
     }
@@ -12873,14 +12752,242 @@ static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
   return current;
 }
 
+static unsigned char *pause_settings_resident_work(void) {
+  void *manager = exhibition_tmpdb_manager_get_instance
+                      ? exhibition_tmpdb_manager_get_instance()
+                      : NULL;
+  void *resident = NULL;
+  if (manager)
+    memcpy(&resident, (unsigned char *)manager + 72, sizeof(resident));
+  return resident;
+}
+
+static unsigned char *pause_settings_tmpdb_system(void) {
+  unsigned char *resident = pause_settings_resident_work();
+  return resident ? resident + 0xb44 : NULL;
+}
+
+static unsigned char *pause_settings_tmpdb_camera(uint8_t *type_out) {
+  unsigned char *resident = pause_settings_resident_work();
+  if (!resident)
+    return NULL;
+  uint32_t mode = 0;
+  memcpy(&mode, resident + 0x18338, sizeof(mode));
+  if (mode > 6u)
+    mode = 0;
+  unsigned char *settings = resident + 0xb78 + mode * 15u;
+  if (type_out)
+    *type_out = settings[0];
+  return settings;
+}
+
+// The conversion table in
+// SetTmpdbCameraSettingsToMatchRegistryCameraSettings shows which camera
+// families consume editable distance/height/panning bytes. Other types use
+// fixed engine defaults, so the custom page mirrors console behavior by
+// presenting N/A and ignoring changes for them.
+static unsigned char *pause_settings_camera_field(uint32_t focus,
+                                                   uint8_t *type_out) {
+  uint8_t type = 0;
+  unsigned char *settings = pause_settings_tmpdb_camera(&type);
+  if (type_out)
+    *type_out = type;
+  if (!settings || focus < 1u || focus > 3u)
+    return NULL;
+  uint32_t base = UINT32_MAX;
+  if (type == 4u || (type >= 7u && type <= 11u))
+    base = 3u;
+  else if (type == 6u)
+    base = 6u;
+  else if (type == 13u)
+    base = 9u;
+  if (base == UINT32_MAX)
+    return NULL;
+  // Page order is Height, Distance, Angle; tmpdb stores Distance, Height,
+  // Panning (the native name for camera angle).
+  static const uint8_t field_delta[4] = {0u, 1u, 0u, 2u};
+  return settings + base + field_delta[focus];
+}
+
+static void *pause_settings_registry_system(void) {
+  void *registry = match_global_registry_get_instance
+                       ? match_global_registry_get_instance()
+                       : NULL;
+  void *system = NULL;
+  if (registry)
+    memcpy(&system, (unsigned char *)registry + 0x7c0, sizeof(system));
+  return system;
+}
+
+static uint32_t pause_radar_need_disp(void *radar) {
+  if (!__atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE))
+    return 0;
+  return pause_radar_need_disp_original
+             ? pause_radar_need_disp_original(radar)
+             : 1u;
+}
+
+static uint32_t pause_radar_update(void *radar) {
+  // Manager::UpdateRadarInfo refreshes Utility::Info every frame, so changing
+  // NeedDisp only affected object creation. Override the live display byte
+  // immediately before Radar::Update consumes it in UpdateRadarOnOff.
+  void *info = NULL;
+  if (radar)
+    memcpy(&info, (unsigned char *)radar + 0x38, sizeof(info));
+  if (info)
+    ((unsigned char *)info)[0] =
+        __atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE) ? 1u : 0u;
+  return pause_radar_update_original ? pause_radar_update_original(radar) : 1u;
+}
+
+static uint32_t pause_registry_system_is_no_replay(void *settings) {
+  if (!__atomic_load_n(&pause_settings_show_replay, __ATOMIC_ACQUIRE))
+    return 1u;
+  return pause_registry_system_is_no_replay_original
+             ? pause_registry_system_is_no_replay_original(settings)
+             : 0u;
+}
+
+static void pause_settings_set_game_speed(uint32_t action) {
+  unsigned char *system = pause_settings_tmpdb_system();
+  uint8_t value = system ? system[0x14] : 2u;
+  if (value > 4u)
+    value = 2u;
+  if (action == PES_PAUSE_INPUT_LEFT)
+    value = value ? value - 1u : 4u;
+  else
+    value = (uint8_t)((value + 1u) % 5u);
+  if (system)
+    system[0x14] = value;
+  void *registry_system = pause_settings_registry_system();
+  unsigned char *registry_speed =
+      registry_system ? (unsigned char *)registry_system + 0x14 : NULL;
+  if (registry_speed && pause_registry_game_speed_set)
+    // SystemSettings embeds GameSpeedSettings at +0x14. Passing the parent
+    // object wrote its first byte and left gameplay speed unchanged.
+    pause_registry_game_speed_set(registry_speed, value);
+  void *listener = match_listener_instance ? *match_listener_instance : NULL;
+  if (listener && pause_match_listener_change_game_speed)
+    pause_match_listener_change_game_speed(listener);
+
+  // Publish all layers after the listener refresh. The on-screen line is a
+  // hardware-test probe: TMP and REG prove the value arrived, TARGET is the
+  // native GameSpeedSettings conversion, and LIVE is Status' active match FPS.
+  uint32_t target_fps = 0;
+  if (registry_speed && pause_registry_game_speed_get_fps)
+    target_fps = pause_registry_game_speed_get_fps(registry_speed);
+  uint32_t runtime_fps_milli = 0;
+  if (pause_basic_status_get_pes_module_thread_fps) {
+    const float runtime_fps = pause_basic_status_get_pes_module_thread_fps();
+    if (runtime_fps > 0.0f && runtime_fps < 1000.0f)
+      runtime_fps_milli = (uint32_t)(runtime_fps * 1000.0f + 0.5f);
+  }
+  __atomic_store_n(&pause_game_speed_debug_tmpdb,
+                   system ? (uint32_t)system[0x14] : UINT32_MAX,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_game_speed_debug_registry,
+                   registry_speed ? (uint32_t)registry_speed[0] : UINT32_MAX,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_game_speed_debug_target_fps, target_fps,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_game_speed_debug_runtime_fps_milli,
+                   runtime_fps_milli, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&pause_game_speed_debug_apply_count, 1,
+                     __ATOMIC_ACQ_REL);
+}
+
+static void pause_settings_toggle_next_target(void) {
+  unsigned char *resident = pause_settings_resident_work();
+  if (!resident)
+    return;
+  const uint32_t next = resident[0x44 + 3] == 0u ? 1u : 0u;
+  // ModelCursorNextTarget indexes SupportSettings by PlayerNo, not pad. Apply
+  // the preference to every possible on-pitch player so active-cursor changes
+  // cannot revert it during the same match.
+  for (uint32_t player = 0; player < 24u; ++player) {
+    void *settings = resident + player * 90u + 0x44;
+    if (pause_tmpdb_support_set_cursor_target)
+      pause_tmpdb_support_set_cursor_target(settings, next);
+    else
+      ((unsigned char *)settings)[3] = (unsigned char)next;
+  }
+}
+
+static void pause_settings_toggle_replay(void) {
+  unsigned char *system = pause_settings_tmpdb_system();
+  const uint32_t show_replay =
+      !__atomic_load_n(&pause_settings_show_replay, __ATOMIC_ACQUIRE);
+  const uint32_t no_replay = show_replay ? 0u : 1u;
+  __atomic_store_n(&pause_settings_show_replay, show_replay,
+                   __ATOMIC_RELEASE);
+  if (system)
+    system[0x0c] = (unsigned char)no_replay;
+  void *registry_system = pause_settings_registry_system();
+  if (registry_system && pause_registry_system_set_no_replay)
+    pause_registry_system_set_no_replay(registry_system, no_replay);
+}
+
+static void pause_settings_apply_camera(void *window) {
+  // UpdateRegistry changes MatchEnv for the active view. The match listener
+  // additionally commits tmpdb into CameraSettings, which is the source used
+  // when gameplay resumes and when the camera object refreshes.
+  void *listener = match_listener_instance ? *match_listener_instance : NULL;
+  if (listener && pause_match_listener_set_camera_from_tmpdb)
+    pause_match_listener_set_camera_from_tmpdb(listener, 1u);
+  if (match_pause_camera_update_registry)
+    match_pause_camera_update_registry(window, 1u);
+}
+
+static void pause_settings_capture_camera(void) {
+  unsigned char *settings = pause_settings_tmpdb_camera(NULL);
+  if (!settings)
+    return;
+  memcpy(pause_camera_saved_settings, settings,
+         sizeof(pause_camera_saved_settings));
+  __atomic_store_n(&pause_camera_saved_valid, 1, __ATOMIC_RELEASE);
+}
+
+static void pause_settings_restore_camera(void *window) {
+  if (!__atomic_load_n(&pause_camera_saved_valid, __ATOMIC_ACQUIRE))
+    return;
+  unsigned char *settings = pause_settings_tmpdb_camera(NULL);
+  if (!settings)
+    return;
+  memcpy(settings, pause_camera_saved_settings,
+         sizeof(pause_camera_saved_settings));
+  pause_settings_apply_camera(window);
+  debugPrintf("input: restored pause camera type=%u\n",
+              (uint32_t)settings[0]);
+}
+
+static void pause_settings_adjust_camera(void *window, uint32_t focus,
+                                         uint32_t action) {
+  unsigned char *field = pause_settings_camera_field(focus, NULL);
+  if (!field)
+    return;
+  uint8_t value = *field;
+  if (value > 10u)
+    value = 5u;
+  if (action == PES_PAUSE_INPUT_LEFT)
+    value = value ? value - 1u : 10u;
+  else
+    value = (uint8_t)((value + 1u) % 11u);
+  *field = value;
+  pause_settings_capture_camera();
+  pause_settings_apply_camera(window);
+}
+
 static uint32_t pes_match_pause_camera_update(void *window,
                                                uint32_t pad_status) {
+  const int opening = window && window != match_pause_camera_window;
   const uint32_t result = match_pause_camera_update_original
                               ? match_pause_camera_update_original(
                                     window, pad_status)
                               : 0;
   if (!window)
     return result;
+  if (opening)
+    pause_settings_restore_camera(window);
   match_pause_camera_window = window;
   if (match_setplay_get_root && match_node_set_alpha) {
     void *root = match_setplay_get_root(window);
@@ -12890,38 +12997,61 @@ static uint32_t pes_match_pause_camera_update(void *window,
                    __ATOMIC_RELEASE);
   const uint32_t action = __atomic_exchange_n(
       &match_pause_camera_action, 0, __ATOMIC_ACQ_REL);
+  const uint32_t page = __atomic_load_n(&pause_settings_page,
+                                         __ATOMIC_ACQUIRE);
+  const uint32_t item_count = page == PAUSE_SETTINGS_PAGE_CAMERA ? 4u : 7u;
   if (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_DOWN) {
-    pause_settings_focus = (pause_settings_focus + (action == PES_PAUSE_INPUT_UP ? 3u : 1u)) % 4u;
+    pause_settings_focus =
+        (pause_settings_focus +
+         (action == PES_PAUSE_INPUT_UP ? item_count - 1u : 1u)) %
+        item_count;
   } else if (action == PES_PAUSE_INPUT_LEFT ||
       action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DECIDE) {
+    if (page == PAUSE_SETTINGS_PAGE_GENERAL) {
+      if (pause_settings_focus == 0u) {
+        const uint32_t enabled =
+            !__atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&pause_settings_radar, enabled, __ATOMIC_RELEASE);
+      } else if (pause_settings_focus == 1u) {
+        const uint32_t enabled =
+            !__atomic_load_n(&pause_settings_stamina, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&pause_settings_stamina, enabled, __ATOMIC_RELEASE);
+      } else if (pause_settings_focus == 2u) {
+        pause_settings_set_game_speed(action);
+      } else if (pause_settings_focus == 3u) {
+        pause_settings_toggle_next_target();
+      } else if (pause_settings_focus == 4u) {
+        pause_settings_toggle_replay();
+      } else {
+        uint32_t *value = pause_settings_focus == 5u
+                              ? &pause_settings_chant
+                              : &pause_settings_commentary;
+        const uint32_t enabled =
+            !__atomic_load_n(value, __ATOMIC_ACQUIRE);
+        __atomic_store_n(value, enabled, __ATOMIC_RELEASE);
+        // Native categories: 2=Commentary, 3=Crowd (chants and cheers).
+        if (pause_settings_volume)
+          pause_settings_volume(pause_settings_focus == 5u ? 3u : 2u,
+                                enabled ? 1.0f : 0.0f);
+      }
+      return result;
+    }
     if (pause_settings_focus) {
-      uint32_t *value = pause_settings_focus == 1 ? &pause_settings_stamina :
-          pause_settings_focus == 2 ? &pause_settings_chant : &pause_settings_commentary;
-      const uint32_t enabled = !__atomic_load_n(value, __ATOMIC_ACQUIRE);
-      __atomic_store_n(value, enabled, __ATOMIC_RELEASE);
-      // Native categories: 2=Commentary, 3=Crowd (chants and cheers).
-      if (pause_settings_focus > 1 && pause_settings_volume)
-        pause_settings_volume(pause_settings_focus == 2 ? 3u : 2u, enabled ? 1.0f : 0.0f);
+      pause_settings_adjust_camera(window, pause_settings_focus, action);
       return result;
     }
     uint32_t count = 0;
     uint32_t current = match_pause_camera_page(window, &count);
-    // Some builds expose the camera vector only after the first registry
-    // refresh. The native screen still has six camera pages, so retain a safe
-    // fallback index instead of dropping the first D-pad press.
-    if (!count)
-      count = 6;
-    if (current >= count)
-      current = 0;
-    if (count && match_pause_camera_swipe) {
-      // The page indicator follows the D-pad direction: Left selects the
-      // previous camera and Right selects the next camera.
-      const uint32_t next = action == PES_PAUSE_INPUT_LEFT
-                                ? (current ? current - 1 : count - 1)
-                                : (current + 1) % count;
-      match_pause_camera_swipe(window, current, next);
-      debugPrintf("input: pause camera swipe %u -> %u (count=%u)\n",
-                  current, next, count);
+    const uint32_t next = action == PES_PAUSE_INPUT_LEFT
+                              ? (current ? current - 1u : count - 1u)
+                              : (current + 1u) % count;
+    unsigned char *settings = pause_settings_tmpdb_camera(NULL);
+    if (settings) {
+      settings[0] = pause_camera_types[next];
+      pause_settings_capture_camera();
+      pause_settings_apply_camera(window);
+      debugPrintf("input: pause camera type %u -> %u\n",
+                  pause_camera_types[current], pause_camera_types[next]);
     }
   } else if (action == PES_PAUSE_INPUT_BACK &&
              match_pause_camera_footer) {
@@ -12937,27 +13067,63 @@ static uint32_t pes_match_pause_camera_update(void *window,
 }
 
 const char *pes_controller_pause_settings_value(uint32_t index) {
-  if (index == 0) {
-    uint32_t count = 0;
-    uint32_t current = match_pause_camera_page(match_pause_camera_window, &count);
-    int32_t *types = NULL;
-    if (match_pause_camera_window)
-      memcpy(&types, (unsigned char *)match_pause_camera_window + 536, sizeof(types));
-    // Native InitSwf indexes cameraType_* by enum, not by page number.
-    if (types && current < count) {
-      switch (types[current]) {
+  const uint32_t page = __atomic_load_n(&pause_settings_page,
+                                         __ATOMIC_ACQUIRE);
+  if (page == PAUSE_SETTINGS_PAGE_CAMERA && index == 0u) {
+    uint8_t tmpdb_type = 0;
+    const uint32_t type = pause_settings_tmpdb_camera(&tmpdb_type)
+                              ? (uint32_t)tmpdb_type
+                              : UINT32_MAX;
+    switch (type) {
       case 0: return "MEDIUM";
       case 1: return "LONG";
       case 2: return "WIDE";
       case 5: return "DYNAMIC WIDE";
       case 7: return "LIVE BROADCAST";
       case 12: return "STADIUM";
-      }
+      case 13: return "STADIUM CUSTOM";
     }
     return "CAMERA";
   }
-  const uint32_t enabled = index == 1 ? pause_settings_stamina : index == 2 ? pause_settings_chant : pause_settings_commentary;
-  return enabled ? "ON" : "OFF";
+  if (page == PAUSE_SETTINGS_PAGE_CAMERA) {
+    static char camera_values[3][4];
+    unsigned char *field = pause_settings_camera_field(index, NULL);
+    if (!field || index > 3u)
+      return "N/A";
+    snprintf(camera_values[index - 1u], sizeof(camera_values[0]), "%u",
+             (uint32_t)*field);
+    return camera_values[index - 1u];
+  }
+  if (index == 0u)
+    return __atomic_load_n(&pause_settings_radar, __ATOMIC_ACQUIRE) ? "ON"
+                                                                    : "OFF";
+  if (index == 1u)
+    return __atomic_load_n(&pause_settings_stamina, __ATOMIC_ACQUIRE) ? "ON"
+                                                                      : "OFF";
+  unsigned char *system = pause_settings_tmpdb_system();
+  if (index == 2u) {
+    static const char *const speeds[] = {"-2", "-1", "0", "+1", "+2"};
+    const uint32_t speed = system && system[0x14] <= 4u
+                               ? system[0x14]
+                               : 2u;
+    return speeds[speed];
+  }
+  if (index == 3u) {
+    unsigned char *resident = pause_settings_resident_work();
+    return !resident || resident[0x44 + 3] == 0u ? "ON" : "OFF";
+  }
+  if (index == 4u)
+    return __atomic_load_n(&pause_settings_show_replay, __ATOMIC_ACQUIRE)
+               ? "ON"
+               : "OFF";
+  if (index == 5u)
+    return __atomic_load_n(&pause_settings_chant, __ATOMIC_ACQUIRE) ? "ON"
+                                                                    : "OFF";
+  if (index == 6u)
+    return __atomic_load_n(&pause_settings_commentary, __ATOMIC_ACQUIRE)
+               ? "ON"
+               : "OFF";
+  return "";
 }
 
 static void match_pause_go_top_menu(void *window) {
@@ -13591,9 +13757,9 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
         return match_pause_update_resume;
       }
       if (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_UP)
-        focus = focus ? focus - 1u : 2u;
+        focus = focus ? focus - 1u : 3u;
       else if (action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DOWN)
-        focus = (focus + 1u) % 3u;
+        focus = (focus + 1u) % 4u;
       __atomic_store_n(&match_pause_custom_focus, focus, __ATOMIC_RELEASE);
       if (action == PES_PAUSE_INPUT_BACK && match_pause_pad_event_back) {
         __atomic_store_n(&pause_resume_transition_tick, armGetSystemTick(), __ATOMIC_RELEASE);
@@ -13602,7 +13768,7 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
         match_pause_pad_event_back(window);
         return match_pause_update_resume;
       }
-      if (action == PES_PAUSE_INPUT_DECIDE && focus == 2u) {
+      if (action == PES_PAUSE_INPUT_DECIDE && focus == 3u) {
         __atomic_store_n(&match_pause_top_menu_confirm, 1,
                          __ATOMIC_RELEASE);
         // Default to Cancel, matching the console's safe confirmation flow.
@@ -13617,10 +13783,19 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
           __atomic_store_n(&live_gameplan_returning_to_pause, 0, __ATOMIC_RELEASE);
           live_gameplan_open_requested = 1;
           __atomic_store_n(&pause_editor_transition_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+        } else {
+          __atomic_store_n(&pause_settings_page,
+                           focus == 2u ? PAUSE_SETTINGS_PAGE_CAMERA
+                                       : PAUSE_SETTINGS_PAGE_GENERAL,
+                           __ATOMIC_RELEASE);
+          pause_settings_focus = 0;
         }
         // Verified native handler consumes only TouchEventInfo index at +8.
-        // It performs the original choice dispatch and control-wait handshake.
-        const uint32_t event[4] = {0, 0, focus, 0};
+        // MatchPause has one native settings route. Both custom settings cards
+        // host their page in that safe child and select content through
+        // pause_settings_page.
+        const uint32_t native_route = focus == 2u ? 1u : focus;
+        const uint32_t event[4] = {0, 0, native_route, 0};
         match_pause_choice_touch(window, event);
         return match_pause_update_resume;
       }
@@ -13671,6 +13846,8 @@ static void pes_match_pause_destroyed(void *window) {
   __atomic_store_n(&match_pause_top_menu_confirm_focus, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&match_pause_custom_page, MATCH_PAUSE_PAGE_ROOT,
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&match_pause_camera_seen_tick, 0, __ATOMIC_RELEASE);
+  match_pause_camera_window = NULL;
   // Preserve ownership across Pause -> MyClubSquadEdit. The native Pause
   // object is destroyed before the Game Plan child receives its first update;
   // the next +/- request replaces this value when a new pause flow starts.
@@ -14023,9 +14200,6 @@ extern void pes_match_result_full_hook(void);
 extern void pes_match_result_half_hook(void);
 extern void pes_match_result_half_update_hook(void);
 extern void pes_exhibition_match_setup_data_hook(void);
-extern uint32_t pes_inplay_ball_position_broadcast_original(
-    void *camera, const float *blend, const uint32_t *home_away,
-    float *target_position, float *zoom, uint32_t active);
 extern void pes_main_menu_graphics_d1_hook(void);
 extern void pes_main_menu_graphics_d0_hook(void);
 extern void pes_mobile_screen_tap_entry_hook(void);
@@ -15718,29 +15892,13 @@ void install_ue4_hooks(so_module *module) {
               (void *)penalty_goalkeeper_move_main_runtime,
               (void *)penalty_goalkeeper_move_main_slot);
 
-  const char *ball_position_broadcast_symbol =
-      "_ZN5match6camera6plugin12InplayCamera24GetBallPositionBroadcastERKfRK8HomeAwayPN4math7Vector3ERfb";
-  const uintptr_t ball_position_broadcast =
-      so_find_addr(module, ball_position_broadcast_symbol);
-  const uintptr_t ball_position_broadcast_runtime =
-      so_find_addr_rx(module, ball_position_broadcast_symbol);
-  static const uint32_t expected_ball_position_broadcast_entry[4] = {
-      0xd10703ff, 0x6d123bef, 0x6d1333ed, 0x6d142beb,
-  };
-  if (memcmp((void *)ball_position_broadcast,
-             expected_ball_position_broadcast_entry,
-             sizeof(expected_ball_position_broadcast_entry)) != 0)
-    fatal_error("Unexpected Broadcast ball-position entry at %p",
-                (void *)ball_position_broadcast);
-  inplay_ball_position_broadcast_resume =
-      ball_position_broadcast_runtime + 0x10;
-  match_ball_position_broadcast_original =
-      pes_inplay_ball_position_broadcast_original;
+  // Set-piece charge prediction still reads the native BallInfo transform.
+  // Stadium/Live Broadcast ball targeting itself is deliberately left fully
+  // native: the former global target override harmed frame pacing and also
+  // affected camera families outside the intended scope.
   match_ball_info_get_trans =
       (void *)so_find_addr_rx(module,
           "_ZNK5match8registry8BallInfo8GetTransEv");
-  hook_arm64(ball_position_broadcast,
-             (uintptr_t)&pes_inplay_ball_position_broadcast);
 
   // Replay owns input from ModeInit until ModeEnd. Hooking its virtual
   // lifecycle is safer than replacing CheckSkip's entry and remains exact
@@ -16112,13 +16270,62 @@ void install_ue4_hooks(so_module *module) {
 
   pause_settings_volume = (void *)so_find_addr_rx(module,
       "_ZN5sound3sys9Interface19SetGameOptionVolumeENS1_13E_OPTVOL_TYPEEf");
+  pause_tmpdb_support_set_cursor_target = (void *)so_find_addr_rx(module,
+      "_ZN5tmpdb15SupportSettings21SetCursorChangeTargetENS0_18SupportSettingTypeE");
+  pause_registry_game_speed_set = (void *)so_find_addr_rx(module,
+      "_ZN5match8registry17GameSpeedSettings12SetGameSpeedEh");
+  pause_registry_game_speed_get_fps = (void *)so_find_addr_rx(module,
+      "_ZNK5match8registry17GameSpeedSettings10GetGameFPSEv");
+  pause_basic_status_get_pes_module_thread_fps =
+      (void *)so_find_addr_rx(module,
+          "_ZN5basic6Status21GetPesModuleThreadFPSEv");
+  pause_registry_system_set_no_replay = (void *)so_find_addr_rx(module,
+      "_ZN5match8registry14SystemSettings11SetNoReplayEb");
+  pause_match_listener_change_game_speed = (void *)so_find_addr_rx(module,
+      "_ZN9game_mode13MatchListener31ChangeGameSpeedForHighSpeedModeEv");
+  pause_match_listener_set_camera_from_tmpdb = (void *)so_find_addr_rx(module,
+      "_ZN9game_mode13MatchListener22SetCameraInfoFromTmpdbEb");
+  const uintptr_t radar_need_disp_runtime = so_find_addr_rx(module,
+      "_ZN7match2D6Screen5Radar8NeedDispEv");
+  uintptr_t *radar_need_disp_slot = find_vtable_method_slot(module,
+      "_ZTVN7match2D6Screen5RadarE", radar_need_disp_runtime, 26);
+  if (radar_need_disp_slot) {
+    pause_radar_need_disp_original = (void *)radar_need_disp_runtime;
+    *radar_need_disp_slot = (uintptr_t)&pause_radar_need_disp;
+  } else {
+    debugPrintf("UE4 hook: Radar::NeedDisp vtable slot not found; "
+                "radar toggle remains enabled\n");
+  }
+  const uintptr_t radar_update_runtime = so_find_addr_rx(module,
+      "_ZN7match2D6Screen5Radar6UpdateEv");
+  uintptr_t *radar_update_slot = find_vtable_method_slot(module,
+      "_ZTVN7match2D6Screen5RadarE", radar_update_runtime, 26);
+  if (radar_update_slot) {
+    pause_radar_update_original = (void *)radar_update_runtime;
+    *radar_update_slot = (uintptr_t)&pause_radar_update;
+  } else {
+    debugPrintf("UE4 hook: Radar::Update vtable slot not found; "
+                "live radar toggle remains unavailable\n");
+  }
+  const uintptr_t no_replay_plt =
+      (uintptr_t)module->load_base + 0x380e790;
+  const uint32_t no_replay_plt_words[] = {
+      0xf002e5b0, 0xf9431211, 0x91188210, 0xd61f0220};
+  pause_registry_system_is_no_replay_original = (void *)so_find_addr_rx(
+      module, "_ZNK5match8registry14SystemSettings10IsNoReplayEv");
+  if (memcmp((const void *)no_replay_plt, no_replay_plt_words,
+             sizeof(no_replay_plt_words)))
+    fatal_error("Unexpected SystemSettings::IsNoReplay PLT at %p",
+                (void *)no_replay_plt);
+  hook_arm64(no_replay_plt,
+             (uintptr_t)&pause_registry_system_is_no_replay);
   const uintptr_t stamina_disp_runtime = so_find_addr_rx(module,
       "_ZN7match2D6Screen17ModelStaminaGauge7GetDispEj");
   const uintptr_t stamina_disp_code = so_find_addr(module,
       "_ZN7match2D6Screen17ModelStaminaGauge7GetDispEj");
   // Custom exhibition runs through tutorial mode (9). Keep native player,
-  // cursor and match-phase validity checks, but let our ON/OFF switch own
-  // visibility instead of the tutorial ban and the mobile saved hide flag.
+  // cursor and match-phase validity checks, but allow the hidden source model
+  // to publish active-player stamina despite the tutorial/mobile hide flags.
   patch_checked_u32(stamina_disp_code + 0x38, 0x540007c0, 0xd503201f,
                     "Stamina allow tutorial-backed exhibition");
   // +0x130 clears w20. Skip it and return the visibility already validated
@@ -16131,44 +16338,6 @@ void install_ue4_hooks(so_module *module) {
     pause_stamina_disp_original = (void *)stamina_disp_runtime;
     *stamina_disp_slot = (uintptr_t)&pause_stamina_disp;
   }
-  const uintptr_t stamina_get_model_runtime = so_find_addr_rx(module,
-      "_ZN7match2D6Screen17ModelStaminaGauge8GetModelEj");
-  uintptr_t *stamina_get_model_slot = find_vtable_method_slot(module,
-      "_ZTVN7match2D6Screen17ModelStaminaGaugeE",
-      stamina_get_model_runtime, 25);
-  if (!stamina_get_model_slot)
-    fatal_error("ModelStaminaGauge::GetModel vtable slot not found");
-  pause_stamina_get_model_original = (void *)stamina_get_model_runtime;
-  *stamina_get_model_slot = (uintptr_t)&pause_stamina_get_model;
-  const uintptr_t stamina_draw_plt = (uintptr_t)module->load_base + 0x38d62b0;
-  const uint32_t stamina_draw_plt_words[] = {
-      0xf002e290, 0xf941da11, 0x910ec210, 0xd61f0220};
-  pause_stamina_draw_original = (void *)so_find_addr_rx(module,
-      "_ZN5flash11Model2DData4DrawEPN5cobra2rc8render2d7CommandE");
-  if (memcmp((const void *)stamina_draw_plt, stamina_draw_plt_words,
-             sizeof(stamina_draw_plt_words)))
-    fatal_error("Unexpected Model2DData::Draw PLT at %p", (void *)stamina_draw_plt);
-  hook_arm64(stamina_draw_plt, (uintptr_t)&pause_stamina_draw);
-  // Primitive::DrawBuff's second stamina-only item is the coloured fill. Hook
-  // the shared PLT but mutate exclusively that exact return address; all
-  // cursor, name and ordinary UCanvas draws pass through byte-for-byte.
-  const uintptr_t stamina_canvas_draw_item_plt =
-      (uintptr_t)module->load_base + 0x37fffa0;
-  const uint32_t stamina_canvas_draw_item_plt_words[] = {
-      0xf002e5f0, 0xf9411611, 0x9108a210, 0xd61f0220};
-  pause_stamina_canvas_draw_item_original = (void *)so_find_addr_rx(
-      module, "_ZN7UCanvas8DrawItemER11FCanvasItem");
-  pause_stamina_canvas_fill_return =
-      (uintptr_t)module->load_virtbase + 0x3f10144;
-  pause_stamina_canvas_backing_return =
-      (uintptr_t)module->load_virtbase + 0x3f0fc74;
-  if (memcmp((const void *)stamina_canvas_draw_item_plt,
-             stamina_canvas_draw_item_plt_words,
-             sizeof(stamina_canvas_draw_item_plt_words)))
-    fatal_error("Unexpected UCanvas::DrawItem PLT at %p",
-                (void *)stamina_canvas_draw_item_plt);
-  hook_arm64(stamina_canvas_draw_item_plt,
-             (uintptr_t)&pause_stamina_canvas_draw_item);
   const uintptr_t pause_camera_update_runtime = so_find_addr_rx(
       module,
       "_ZN4menu28MatchPauseTouchCameraSetting23UpdatePostControlWindowEN10menusystem6Window10PAD_STATUSE");
@@ -16183,9 +16352,9 @@ void install_ue4_hooks(so_module *module) {
     match_pause_camera_update_original = (void *)pause_camera_update_runtime;
     *pause_camera_update_slot = (uintptr_t)&pes_match_pause_camera_update;
   }
-  match_pause_camera_swipe =
+  match_pause_camera_update_registry =
       (void *)so_find_addr_rx(module,
-          "_ZN4menu28MatchPauseTouchCameraSetting16PadEventSwipeEndEjj");
+          "_ZN4menu28MatchPauseTouchCameraSetting14UpdateRegistryEb");
   match_pause_camera_footer =
       (void *)so_find_addr_rx(module,
           "_ZN4menu28MatchPauseTouchCameraSetting19PadEventFooterTouchEN10menusystem17MOBILE_FOOTER_KEYE");

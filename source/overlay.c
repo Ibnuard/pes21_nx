@@ -1777,13 +1777,16 @@ static void overlay_render(void) {
   PesNativePadLabDebug native_debug = {0};
   if (native_lab)
     pes_controller_native_pad_lab_debug_snapshot(&native_debug);
+  PesGameSpeedDebug game_speed_debug = {0};
+  const int game_speed_debug_active =
+      pes_controller_game_speed_debug(&game_speed_debug);
   int native_setplay_debug =
       !custom_2p_transition && native_lab &&
       native_debug.context != PES_SETPLAY_NONE;
   if (native_setplay_debug) {
     // The semantic snapshot can lag one frame behind ThinkUnitList. During
     // the native lab, the routed native context is authoritative; otherwise
-    // corner/free kick briefly fall back to the exhibition ZR/X/Y legend.
+    // corner/free kick briefly fall back to the exhibition helper legend.
     setplay_context = native_debug.context;
     setplay_options = 0;
   }
@@ -1826,7 +1829,7 @@ static void overlay_render(void) {
   }
   // Penalty is a controller-owned surface, not a set-piece selector.  The
   // stock ButtonSetplay snapshot can still carry its old option bits for a
-  // few frames, which used to repaint the exhibition `ZR SET PIECE TAKER`
+  // few frames, which used to repaint the stale set-piece-taker helper
   // helper over the native P1/P2 penalty legend.  Give the latched penalty
   // roles priority for the complete idle/aim/kick transition.
   const int penalty_session_active =
@@ -1843,7 +1846,7 @@ static void overlay_render(void) {
       !result_skin && !result_transition &&
       !setplay_options && !pause_camera_active && !tutorial_play_active &&
       !cinematic_helper_active && penalty_role_p1 == PES_PENALTY_NONE &&
-      penalty_role_p2 == PES_PENALTY_NONE)
+      penalty_role_p2 == PES_PENALTY_NONE && !game_speed_debug_active)
     return;
   if (!gl_init())
     return;
@@ -1923,7 +1926,7 @@ static void overlay_render(void) {
   int cinematic_helper_text_first_quad = 0;
   int cinematic_helper_text_quads = 0;
   int gameplan_cursor_first_quad = 0;
-  int pause_skin_cards[3] = {0};
+  int pause_skin_cards[4] = {0};
   int pause_skin_text = 0, pause_skin_text_quads = 0;
   int pause_stats_panel = 0, pause_stats_text = 0, pause_stats_quads = 0;
   int pause_helper_text = 0, pause_helper_text_quads = 0;
@@ -4088,21 +4091,28 @@ static void overlay_render(void) {
     // TIME (DAY/NIGHT) has moved to Stadium. A 1P match keeps its COM-level
     // row; the 2P hub exposes only the four settings shared by two humans.
     const uint32_t item_count = pause_settings_popup
-                                    ? 4u
+                                    ? pes_controller_pause_settings_count()
                                     : pes_controller_custom_match_settings_count();
+    const int compact_settings = pause_settings_popup && item_count > 5u;
     const uint32_t focus = pause_settings_popup ? pes_controller_pause_settings_focus() : pes_controller_custom_match_settings_focus();
     const float panel_x = 0.17f * (float)screen_width;
-    const float panel_y = 0.095f * (float)screen_height;
+    const float panel_y = (compact_settings ? 0.045f : 0.095f) *
+                          (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
-    const float panel_h = 0.700f * (float)screen_height;
+    const float panel_h = (compact_settings ? 0.825f : 0.700f) *
+                          (float)screen_height;
     const float panel_radius = 0.025f * (float)screen_height;
-    const float header_h = 0.125f * (float)screen_height;
+    const float header_h = (compact_settings ? 0.095f : 0.125f) *
+                           (float)screen_height;
     const float row_x = panel_x + 0.040f * (float)screen_width;
     const float row_w = panel_w - 0.080f * (float)screen_width;
     const float row_y0 = panel_y + header_h +
-                         0.045f * (float)screen_height;
-    const float row_h = 0.078f * (float)screen_height;
-    const float row_step = 0.105f * (float)screen_height;
+                         (compact_settings ? 0.025f : 0.045f) *
+                             (float)screen_height;
+    const float row_h = (compact_settings ? 0.064f : 0.078f) *
+                        (float)screen_height;
+    const float row_step = (compact_settings ? 0.085f : 0.105f) *
+                          (float)screen_height;
     const float value_w = 0.205f * (float)screen_width;
     const float value_h = 0.058f * (float)screen_height;
     // Keep the focused row symmetric. Move the selector group left so both
@@ -4227,7 +4237,9 @@ static void overlay_render(void) {
       custom_white_text_quads += line_quads;
       quads += line_quads;
     }
-    const char *title = "GENERAL SETTINGS";
+    const char *title = pause_settings_popup
+                            ? pes_controller_pause_settings_title()
+                            : "GENERAL SETTINGS";
     const float title_w = measure_efootball_line(
         title, (int)strlen(title), title_gh, EFOOTBALL_FONT_BOLD);
     line_quads = emit_efootball_line(
@@ -5923,6 +5935,25 @@ static void overlay_render(void) {
     }
   }
 #endif
+  if (game_speed_debug_active && !custom_popup && !pause_skin && !result_skin &&
+      !result_transition) {
+    char speed_label[144];
+    const int selected = game_speed_debug.tmpdb_value <= 4u
+                             ? (int)game_speed_debug.tmpdb_value - 2
+                             : 99;
+    snprintf(speed_label, sizeof(speed_label),
+             "GAME SPEED DBG UI:%+d TMP:%u REG:%u TARGET:%uFPS "
+             "LIVE:%.1fFPS APPLY:%u",
+             selected, game_speed_debug.tmpdb_value,
+             game_speed_debug.registry_value, game_speed_debug.target_fps,
+             (float)game_speed_debug.runtime_fps_milli / 1000.0f,
+             game_speed_debug.apply_count);
+    const float gh = (float)screen_height / 48.0f;
+    const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    quads += emit_line(speed_label, (int)strlen(speed_label), 12.0f,
+                       (float)screen_height * 0.905f, gw, gh,
+                       verts + quads * 24);
+  }
   int prompt_label_quads = 0;
   if (start_prompt) {
     const float gh = (float)screen_height / 22.0f;
@@ -6046,7 +6077,7 @@ static void overlay_render(void) {
     setplay_helper_count = 2;
   } else if (!native_setplay_debug && !native_lab &&
              setplay_context == PES_SETPLAY_CORNER) {
-    setplay_keys[0] = "ZR";
+    setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "X";
     setplay_labels[1] = "SHORT CORNER";
@@ -6055,7 +6086,7 @@ static void overlay_render(void) {
     setplay_helper_count = 3;
   } else if (!native_setplay_debug && !native_lab &&
              setplay_context == PES_SETPLAY_FREE_KICK) {
-    setplay_keys[0] = "ZR";
+    setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "X";
     setplay_labels[1] = "SWITCH VIEW";
@@ -6069,8 +6100,7 @@ static void overlay_render(void) {
     // frames before the semantic set-piece context has settled.
     if ((setplay_options & PES_SETPLAY_OPTION_KICKER) &&
         setplay_helper_count < 3) {
-      setplay_keys[setplay_helper_count] =
-          single_joy_setplay ? "L1+R1" : "ZR";
+      setplay_keys[setplay_helper_count] = setplay_taker_key;
       setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
     }
     if ((setplay_options & PES_SETPLAY_OPTION_TEAM_UP) &&
@@ -6280,11 +6310,12 @@ static void overlay_render(void) {
           screen_height * 0.10f, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
     }
     pause_header_count = quads - pause_header;
-    const float w = 0.305f * screen_width, h = 0.105f * screen_height;
+    const float w = 0.231f * screen_width, h = 0.105f * screen_height;
     pause_skin_style = (RoundedRectStyle){w, h, 0.018f * screen_height};
-    static const char *const labels[] = {"GAME PLAN", "SETTINGS", "TOP MENU"};
-    for (int i = 0; i < 3; ++i) {
-      const float x = (0.025f + i * 0.3225f) * screen_width;
+    static const char *const labels[] = {
+        "GAME PLAN", "GENERAL SETTINGS", "CAMERA SETTINGS", "TOP MENU"};
+    for (int i = 0; i < 4; ++i) {
+      const float x = (0.020f + i * 0.243f) * screen_width;
       const float y = 0.780f * screen_height;
       if (pes_controller_pause_skin_focus() == (uint32_t)i)
         pause_skin_focus = i;
@@ -6299,10 +6330,14 @@ static void overlay_render(void) {
     quads += emit_round_rect_quad(0.18f * screen_width, 0.265f * screen_height,
         0.64f * screen_width, 0.465f * screen_height, verts + quads * 24);
     pause_skin_text = quads;
-    for (int i = 0; i < 3; ++i) {
-      const float x = (0.025f + i * 0.3225f) * screen_width;
+    for (int i = 0; i < 4; ++i) {
+      const float x = (0.020f + i * 0.243f) * screen_width;
       const float y = 0.780f * screen_height;
-      const float gh = screen_height / 29.0f;
+      float gh = screen_height / 31.0f;
+      const float measured = measure_efootball_line(
+          labels[i], (int)strlen(labels[i]), gh, EFOOTBALL_FONT_STENCIL);
+      if (measured > w - 0.020f * screen_width)
+        gh *= (w - 0.020f * screen_width) / measured;
       const int n = emit_efootball_line(labels[i], (int)strlen(labels[i]),
           x + (w - measure_efootball_line(labels[i], (int)strlen(labels[i]), gh,
                   EFOOTBALL_FONT_STENCIL)) * 0.5f, y + (h - gh) * 0.5f, gh,
@@ -7467,7 +7502,7 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_circle, 0.0f);
     glUniform1f(gl.loc_cursor, 0.0f);
     use_rounded_rect(&pause_skin_style);
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
       if (i == pause_skin_focus) glUniform4f(gl.loc_color, 0.12f, 0.75f, 0.93f, 1.0f);
       else glUniform4f(gl.loc_color, 0.93f, 0.95f, 0.99f, 0.98f);
       glDrawArrays(GL_TRIANGLES, pause_skin_cards[i] * 6, 6);

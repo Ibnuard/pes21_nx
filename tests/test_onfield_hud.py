@@ -62,7 +62,7 @@ int main(void) {
 '''
         build_and_run(self.cc, code)
 
-    def test_stamina_uses_native_fill_and_suppresses_only_backing_plate(self):
+    def test_stamina_overlay_snapshot_abi_is_disabled(self):
         hooks = (ROOT / "source/ue4_hooks.c").read_text()
         header = (ROOT / "source/ue4_hooks.h").read_text()
         typedef = header[header.index("typedef struct {\n  float x;"):
@@ -73,88 +73,30 @@ int main(void) {
 #include <stdint.h>
 ''' + typedef + "\n" + function(hooks, "pes_controller_stamina_bars") + r'''
 int main(void) {
-  assert(pes_controller_stamina_bars((void *)1, 4) == 0);
+  PesStaminaBarSnapshot bars[4]={{0}};
+  assert(pes_controller_stamina_bars(bars,4)==0);
+  assert(pes_controller_stamina_bars(0,0)==0);
 }
 '''
         build_and_run(self.cc, code)
-        self.assertIn('pause_stamina_get_model_original', hooks)
-        self.assertIn('for (uint32_t index = 2; index < 4; ++index)', hooks)
-        self.assertIn('STAMINA native backing hidden', hooks)
-        self.assertIn('pause_stamina_canvas_bounds', hooks)
-        self.assertIn('STAMINA canvas %s valid=', hooks)
-        self.assertIn('0x3f10144', hooks)
-        self.assertIn('0x3f0fc74', hooks)
-        self.assertNotIn('pause_stamina_snapshot_sequence', hooks)
-        self.assertNotIn('stamina_plate_first_quad',
-                         (ROOT / "source/overlay.c").read_text())
+        self.assertNotIn('pause_stamina_get_model_original', hooks)
+        self.assertNotIn('pause_stamina_hud_power_milli', hooks)
+        self.assertNotIn('_ZN7UCanvas8DrawItemER11FCanvasItem', hooks)
 
-    def test_native_canvas_suppresses_internal_backing_without_mutating_fill(self):
+    def test_native_stamina_draw_is_not_intercepted(self):
         hooks = (ROOT / "source/ue4_hooks.c").read_text()
-        code = r'''
-#include <assert.h>
-#include <math.h>
-#include <stdint.h>
-#include <string.h>
-static uintptr_t pause_stamina_canvas_backing_return;
-static uintptr_t pause_stamina_canvas_fill_return;
-static uintptr_t test_caller=3;
-#define __builtin_return_address(n) ((void *)test_caller)
-static int draw_calls;
-static void draw(void *canvas, void *item) { ++draw_calls; }
-static void (*pause_stamina_canvas_draw_item_original)(void*,void*)=draw;
-''' + function(hooks, "pause_stamina_canvas_bounds") + "\n" + function(hooks, "pause_stamina_canvas_draw_item") + r'''
-static void rectangle(unsigned char *triangles, float left, float top,
-                      float right, float bottom) {
-  const float xy[6][2] = {
-    {left,top},{right,top},{right,bottom},
-    {left,top},{right,bottom},{left,bottom}
-  };
-  for (int vertex=0; vertex<6; ++vertex)
-    memcpy(triangles+(vertex/3)*96+(vertex%3)*32,xy[vertex],8);
-}
-static void reset_rect(unsigned char *triangles) {
-  memset(triangles,0,192);
-  rectangle(triangles,100,27,180,32); // 5px-tall native strip
-}
-int main(void) {
-  unsigned char item[128]={0}, triangles[192]={0};
-  void *pointer=triangles; int32_t count=2;
-  memcpy(item+0x50,&pointer,sizeof(pointer));
-  memcpy(item+0x58,&count,sizeof(count));
-  reset_rect(triangles);
-  unsigned char original[192]; memcpy(original,triangles,sizeof(original));
-  float bounds[4];
-  assert(pause_stamina_canvas_bounds(item,bounds));
-  assert(bounds[0]==100 && bounds[1]==27 && bounds[2]==180 && bounds[3]==32);
-  // Unrelated caller: draw untouched, no geometry rewrite.
-  pause_stamina_canvas_draw_item(0,item);
-  assert(draw_calls==1);
-  assert(memcmp(original,triangles,sizeof(original))==0);
-  pause_stamina_canvas_backing_return=1;
-  pause_stamina_canvas_fill_return=2;
-  // Backing pass: suppressed, geometry never touched.
-  test_caller=1;
-  pause_stamina_canvas_draw_item(0,item);
-  assert(draw_calls==1);
-  assert(memcmp(original,triangles,sizeof(original))==0);
-  // Production fill pass: original geometry and color remain untouched.
-  test_caller=2;
-  pause_stamina_canvas_draw_item(0,item);
-  assert(draw_calls==2);
-  assert(pause_stamina_canvas_bounds(item,bounds));
-  assert(bounds[0]==100 && bounds[2]==180); // width unchanged
-  assert(bounds[1]==27);                    // top anchor preserved
-  assert(bounds[3]==32);
-  assert(memcmp(original,triangles,sizeof(original))==0);
-  count=65; memcpy(item+0x58,&count,4);
-  assert(!pause_stamina_canvas_bounds(item,bounds));
-  assert(!pause_stamina_canvas_bounds(0,bounds));
-}
-'''
-        build_and_run(self.cc, code)
-        wrapper = function(hooks, "pause_stamina_canvas_draw_item")
-        self.assertIn('if (backing)\n      return;', wrapper)
-        self.assertNotIn('PES_STAMINA_FILL_HEIGHT_SCALE', hooks)
+        install = hooks.split('void install_ue4_hooks', 1)[1]
+        self.assertNotIn('ModelStaminaGauge8GetModel', install)
+        self.assertNotIn('Model2DData4Draw', install)
+        self.assertNotIn('stamina_draw_plt', install)
+        self.assertNotIn('PES_STAMINA_FILL_SCALE_Y', hooks)
+
+    def test_custom_stamina_hud_is_removed(self):
+        overlay = (ROOT / "source/overlay.c").read_text()
+        self.assertNotIn('stamina_outline_first_quad', overlay)
+        self.assertNotIn('stamina_track_first_quad', overlay)
+        self.assertNotIn('stamina_fill_first_quad', overlay)
+        self.assertNotIn('pes_controller_stamina_bars(', overlay)
 
 
     def test_buffer_matches_engine_request_even_with_720p_config(self):
@@ -340,7 +282,7 @@ class OnfieldAssetAndAbiTests(unittest.TestCase):
             words = struct.unpack('<4I', stream.read(16))
             self.assertEqual(words, (0x9002e330, 0xf943f611, 0x911fa210, 0xd61f0220))
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()
-        self.assertIn('hook_arm64(stamina_draw_plt, (uintptr_t)&pause_stamina_draw)', hooks)
+        self.assertNotIn('stamina_draw_plt', hooks)
         self.assertNotIn('pause_stamina_update_original', hooks)
 
 if __name__ == "__main__": unittest.main()

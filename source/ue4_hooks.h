@@ -3,6 +3,8 @@
 
 #include "so_util.h"
 uint32_t pes_controller_pause_settings_focus(void);
+uint32_t pes_controller_pause_settings_count(void);
+const char *pes_controller_pause_settings_title(void);
 const char *pes_controller_pause_settings_label(uint32_t index);
 const char *pes_controller_pause_settings_value(uint32_t index);
 
@@ -73,8 +75,8 @@ typedef struct {
   uint32_t replay_feedback;
 } PesControllerSnapshot;
 
-// A render-thread snapshot of the game's own ModelStaminaGauge transform.
-// The overlay consumes this POD copy without allocating or querying GL state.
+// Compatibility layout retained for older overlay code. The current runtime
+// renders stamina through the native ModelStaminaGauge and publishes no bars.
 #define PES_STAMINA_BAR_CAPACITY 4u
 typedef struct {
   float x;
@@ -84,6 +86,17 @@ typedef struct {
   float power;
   uint32_t rgba;
 } PesStaminaBarSnapshot;
+
+// Captured immediately after the custom pause page applies Game Speed. This
+// lets the overlay distinguish a UI-only value from the registry/runtime FPS
+// actually consumed by the match loop.
+typedef struct {
+  uint32_t tmpdb_value;
+  uint32_t registry_value;
+  uint32_t target_fps;
+  uint32_t runtime_fps_milli;
+  uint32_t apply_count;
+} PesGameSpeedDebug;
 
 #define PES_PAUSE_INPUT_UP 1u
 #define PES_PAUSE_INPUT_DOWN 2u
@@ -96,6 +109,7 @@ typedef struct {
 void install_ue4_hooks(so_module *module);
 uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
                                      uint32_t capacity);
+int pes_controller_game_speed_debug(PesGameSpeedDebug *snapshot);
 void pes_controller_friend_press_update(int held, uint64_t now_ms);
 void ue4_hooks_post_finalize(so_module *module);
 void cobra_pad_set_input(uint32_t buttons, int32_t up, int32_t down,

@@ -558,18 +558,15 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('P1  CELEBRATE', overlay)
         self.assertIn('P2  CELEBRATE', overlay)
 
-    def test_stamina_fallback_does_not_hook_shared_canvas_items(self):
+    def test_stamina_is_fully_native_without_overlay_or_draw_hook(self):
         hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
-        self.assertIn('pause_stamina_canvas_draw_item', hooks)
-        self.assertIn('_ZN7UCanvas8DrawItemER11FCanvasItem', hooks)
-        self.assertIn('pause_stamina_canvas_fill_return', hooks)
-        self.assertIn('0x3f10144', hooks)
-        self.assertIn('pause_stamina_get_model_original', hooks)
-        self.assertIn('for (uint32_t index = 2; index < 4; ++index)', hooks)
-        self.assertIn('STAMINA native backing hidden', hooks)
-        self.assertNotIn('pause_stamina_snapshot_sequence', hooks)
-        self.assertNotIn('stamina_plate_first_quad', overlay)
+        self.assertNotIn('pause_stamina_canvas_draw_item', hooks)
+        self.assertNotIn('_ZN7UCanvas8DrawItemER11FCanvasItem', hooks)
+        self.assertNotIn('pause_stamina_get_model_original', hooks)
+        self.assertNotIn('(const char *)data + 0x6c', hooks)
+        self.assertNotIn('pause_stamina_hud_power_milli', hooks)
+        self.assertNotIn('stamina_outline_first_quad', overlay)
         self.assertNotIn('stamina_fill_first_quad', overlay)
 
     def test_substitute_names_are_left_aligned_and_keep_marquee(self):
@@ -1074,8 +1071,12 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('HidNpadButton_Right | HidNpadButton_Minus', self.shim)
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
         self.assertIn('NATIVE 2P SETPLAY V8.17.17', overlay)
+        self.assertIn('single_joy_setplay ? "L1+R1" : ">"', overlay)
         self.assertIn('setplay_keys[0] = "L";', overlay)
         self.assertIn('setplay_keys[1] = setplay_taker_key;', overlay)
+        self.assertNotRegex(overlay, r'setplay_keys\[[^\]]+\]\s*=\s*"ZR"')
+        assets = (ROOT/'source/switch_button_assets.h').read_text(encoding='utf-8')
+        self.assertIn('X(right, ">")', assets)
         self.assertNotIn('CAMERA LOCK', overlay)
         self.assertNotIn('"TRAJECTORY ON"', overlay)
         self.assertNotIn('"TRAJECTORY OFF"', overlay)
