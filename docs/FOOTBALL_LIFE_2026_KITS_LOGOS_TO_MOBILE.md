@@ -213,6 +213,41 @@ transparency, susunan bagian jersey, nomor, serta font harus masuk akal.
 
 ## 6. Terapkan logo ke dua jalur render
 
+### Preview kit pada custom hub
+
+Texture pertandingan di `dt120` dan preview kit di hub merupakan aset terpisah.
+Hub membaca PNG berikut dari `dt240` berdasarkan `UniformId` native:
+
+```text
+common/render/thumbnail/uniform/uni<UniformId>.png
+```
+
+PNG biasa berukuran 128×128. Varian `_full.png` berukuran 128×512 dan dipakai
+jalur native lain. Mengganti atlas `Uniform16` tidak otomatis memperbarui kedua
+thumbnail ini.
+
+Canary renderer membangun ulang preview home/away Barcelona, Manchester City,
+Manchester United, dan Real Madrid dari atlas Football Life yang sama dengan
+texture runtime:
+
+```powershell
+python tools/build_kit_preview_canary.py
+```
+
+Tool mengonversi FTEX melalui transform `Uniform16` yang sudah diverifikasi,
+memastikan byte atlas hasilnya sama dengan texture yang sedang terpasang di
+`dt120`, lalu memproyeksikannya ke mesh UV jersey project-owned dengan kamera
+dan pencahayaan tetap. Nama member target ditemukan dari inventory `dt240` dan
+diurai sebagai `(physical_team_id << 14) | (regulation << 9) | kind`; nama file
+tidak ditebak hanya dari urutan selector.
+
+Output lokal berada di `local-debug/kit-preview-canary-v5/`. Contact sheet
+memungkinkan seluruh hasil diperiksa sebelum hardware test. Canary v1 hanya
+mengubah delapan thumbnail hub 128×128; `_full.png` dipertahankan sampai renderer
+manekin lengkap divalidasi. Paket dibuat di atas full player migration terbaru,
+sehingga NRO, dummy OBB, database pemain, crest, dan 23 CPK selain `dt240`
+tetap identik.
+
 ### Crest native di OBB
 
 `build_eng_spa_mobile_kits.py --identity-overrides ...` mengganti seluruh member

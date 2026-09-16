@@ -51,22 +51,21 @@ outside the SD runtime for rollback. From `local-debug/loose-cpk-full-v1`, copy:
 
 There must be 24 `.cpk` files and `manifest.txt`. Do not copy the ELF, NACP,
 or provenance JSON. Leave `Download/`, `PesMobile/`, `SaveData/`, libraries,
-and response assets unchanged. If a previous full test created
-`LooseCpk/verified-v2.txt`, delete that generated cache before reinstalling.
+and response assets unchanged. A legacy `LooseCpk/verified-v2.txt` may remain;
+the fast-validation runtime ignores it.
 
 Copy CPKs first and `manifest.txt` last. Never install while the game is open.
 
-## Verification cache
+## Fast boot validation
 
-On the first full boot, the runtime hashes all 24 CPKs (about 1.4 GB) against
-the manifest, then writes `LooseCpk/verified-v2.txt`. The first boot can
-therefore stay on the startup screen longer than normal. Diagnostic logging
-prints each file before and after hashing. Later boots hash only the small
-manifest and dummy OBB, validate all sizes and signatures, and use the cache.
+Runtime boot does not hash the 1.4 GB package. It validates the manifest/build
+ID, dummy OBB size, all 24 required filenames and exact sizes, and the `CPK `
+signature of every archive. Full SHA-256 validation remains mandatory in the
+PC-side extract, update, verify, and packaging tools. Copy CPKs first and the
+manifest last so an interrupted partial update fails the runtime size checks.
 
-Changing the manifest invalidates the cache automatically. The update tool
-also removes the cache before replacing a CPK so an interrupted update fails
-closed instead of accepting mixed data.
+Legacy `LooseCpk/verified-v2.txt` files are ignored and may be left in place;
+new runtime builds do not create or depend on a verification cache.
 
 ## Partial updates
 
@@ -87,13 +86,14 @@ change. Loose CPK packaging does not remove that compatibility contract.
 
 ## Hardware validation
 
-- First boot completes, creates `verified-v2.txt`, and reports full mode.
+- First boot reaches the game without reading all CPK payloads and reports
+  fast-validated full mode.
 - The log records successful loose redirects for every CPK mounted by the
   selected language; no nested bind may use a placeholder.
 - Inter Miami, Al Nassr, Barcelona, kits, crests, portraits, faces,
   commentary, pre-match Game Plan, pause Game Plan, and repeated matches are
   unchanged from the approved canary.
-- A second cold boot is fast and still loads the same content.
+- Repeated cold boots and the first boot after a partial update remain fast.
 - Changing commentary language mounts the corresponding loose dt530 CPK.
 
 The default runtime hardware gate passed. The large OBB is retired from the SD

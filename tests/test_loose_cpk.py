@@ -165,10 +165,6 @@ class RuntimeTests(unittest.TestCase):
 #include "loose_cpk.h"
 #define debugPrintf(...) ((void)0)
 #define fatal_error(...) abort()
-static int hash_file(const char *path, unsigned char digest[32]) {
- FILE *f=fopen(path,"rb"); if(!f) return 0;
- memset(digest,0,32); fseek(f,4,SEEK_SET); digest[0]=fgetc(f); fclose(f); return 1;
-}
 static void *seen_source; static const char *seen_path;
 static int32_t sound_cri_bind_cpk_original(void *b,void *s,const char *p,void *w,int32_t n,uint32_t *id) {
  assert(b==(void*)1 && w==(void*)3 && n==77); seen_source=s; seen_path=p; *id=9; return 0;
@@ -182,7 +178,7 @@ static int32_t sound_cri_bind_cpk_original(void *b,void *s,const char *p,void *w
 int main(int argc,char **argv) {
  char error[256]; int expected=atoi(argv[1]), require_full=atoi(argv[2]);
  assert(!pes_loose_cpk_path("/Expansion/dt200_mobile_all.cpk"));
- int result=pes_loose_cpk_init("81f096d278e1225b",require_full,hash_file,error,sizeof(error));
+ int result=pes_loose_cpk_init("81f096d278e1225b",require_full,error,sizeof(error));
  if(result!=expected) { fprintf(stderr,"result=%d expected=%d %s",result,expected,error); return 1; }
  uint32_t id=0;
  pes_runtime_cri_bind_cpk((void*)1,(void*)2,"/Expansion/dt200_mobile_all.cpk",(void*)3,77,&id);
@@ -225,7 +221,11 @@ int main(int argc,char **argv) {
             manifest.write_text(text+'unexpected\n')
             run(-1)
             manifest.write_text(text)
-            (root/'LooseCpk'/NAMES[0]).write_bytes(b'CPK \1')  # same-size hash mismatch
+            # Fast runtime validation deliberately accepts a same-size payload;
+            # strong SHA verification remains a packaging-time responsibility.
+            (root/'LooseCpk'/NAMES[0]).write_bytes(b'CPK \1')
+            run(1)
+            (root/'LooseCpk'/NAMES[0]).write_bytes(b'BAD \1')
             run(-1)
             (root/'LooseCpk'/NAMES[0]).write_bytes(b'CPK')
             run(-1)
@@ -247,7 +247,7 @@ int main(int argc,char **argv) {
                 text += name+' 5 '+'0'*64+'\n'
             (root/'LooseCpk/manifest.txt').write_text(text)
             run(2)
-            self.assertTrue((root/'LooseCpk/verified-v2.txt').is_file())
+            self.assertFalse((root/'LooseCpk/verified-v2.txt').exists())
             run(2)
             (root/'LooseCpk/manifest.txt').write_text(text.replace(
                 'dt540_mobile_all.cpk 5 ', 'dt540_mobile_all.cpk 6 '))

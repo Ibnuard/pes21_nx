@@ -594,25 +594,6 @@ static int32_t pes_sound_language_string3_english(char *language,
 static int32_t (*sound_cri_bind_cpk_original)(void *, void *, const char *,
                                             void *, int32_t, uint32_t *);
 
-static int pes_loose_cpk_hash(const char *path, unsigned char digest[32]) {
-  debugPrintf("loose-cpk: hashing %s\n", path);
-  FILE *file = fopen(path, "rb");
-  if (!file) return 0;
-  unsigned char *buffer = malloc(65536);
-  if (!buffer) { fclose(file); return 0; }
-  Sha256Context ctx;
-  sha256ContextCreate(&ctx);
-  size_t count;
-  while ((count = fread(buffer, 1, 65536, file)) != 0)
-    sha256ContextUpdate(&ctx, buffer, count);
-  const int ok = !ferror(file);
-  fclose(file);
-  free(buffer);
-  if (ok) sha256ContextGetHash(&ctx, digest);
-  if (ok) debugPrintf("loose-cpk: hash complete %s\n", path);
-  return ok;
-}
-
 static int32_t pes_runtime_cri_bind_cpk(
     void *binder, void *source_binder, const char *path, void *work,
     int32_t work_size, uint32_t *bind_id) {
@@ -17423,12 +17404,11 @@ void install_ue4_hooks(so_module *module) {
 #else
       NULL,
 #endif
-      PES_LOOSE_CPK_FULL,
-      pes_loose_cpk_hash, loose_error, sizeof(loose_error));
+      PES_LOOSE_CPK_FULL, loose_error, sizeof(loose_error));
   if (loose_enabled < 0) fatal_error("%s", loose_error);
   debugPrintf("loose-cpk: mode=%s\n",
-              loose_enabled == 2 ? "verified full loose package (24 CPKs)" :
-              loose_enabled == 1 ? "verified loose canary (dt200/dt241)" :
+              loose_enabled == 2 ? "fast-validated full loose package (24 CPKs)" :
+              loose_enabled == 1 ? "fast-validated loose canary (dt200/dt241)" :
                                    "original OBB");
   sound_cri_bind_cpk_original =
       (void *)so_find_addr_rx(module, "criFsBinder_BindCpk");

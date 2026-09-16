@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "scope": "kit_preview_canary_v1",
+  "leagues": [
+    {
+      "key": "preview_canary",
+      "label": "KIT PREVIEW CANARY",
+      "teams": [
+        {
+          "team_id": 100,
+          "source_team_id": 100,
+          "official_name": "Manchester United",
+          "short_code": "MUN",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 108,
+          "source_team_id": 108,
+          "official_name": "FC Barcelona",
+          "short_code": "BAR",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 109,
+          "source_team_id": 109,
+          "official_name": "Real Madrid CF",
+          "short_code": "RMA",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        },
+        {
+          "team_id": 173,
+          "source_team_id": 173,
+          "official_name": "Manchester City",
+          "short_code": "MCI",
+          "catalog_integration": "existing",
+          "team_bin_policy": "patch_existing"
+        }
+      ]
+    }
+  ]
+}
