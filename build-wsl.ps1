@@ -2,7 +2,9 @@ param(
   [string]$Distro = "Ubuntu",
   [int]$Jobs = 0,
   [string]$OutputDirectory = "",
+  [long]$ExpectedPatchObbSize = 0,
   [switch]$DisablePesdbAuthoritativeOvr,
+  [switch]$PlayerMigrationCanary,
   [switch]$Diagnostics,
   [switch]$PerfTrace
 )
@@ -16,6 +18,8 @@ $oldPerfTrace = $env:PES21_NX_PERF_TRACE
 $oldJobs = $env:PES21_NX_BUILD_JOBS
 $oldOutputRoot = $env:PES21_NX_BUILD_OUTPUT_ROOT
 $oldPesdbAuthoritativeOvr = $env:PES21_NX_PESDB_AUTHORITATIVE_OVR
+$oldPlayerMigrationCanary = $env:PES21_NX_PLAYER_MIGRATION_CANARY
+$oldExpectedPatchObbSize = $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE
 
 try {
   $buildOutputRoot = if ($OutputDirectory) {
@@ -30,10 +34,12 @@ try {
   $env:PES21_NX_BUILD_JOBS = if ($Jobs -gt 0) { "$Jobs" } else { "" }
   $env:PES21_NX_BUILD_OUTPUT_ROOT = $buildOutputRoot
   $env:PES21_NX_PESDB_AUTHORITATIVE_OVR = if ($DisablePesdbAuthoritativeOvr) { "0" } else { "1" }
+  $env:PES21_NX_PLAYER_MIGRATION_CANARY = if ($PlayerMigrationCanary) { "1" } else { "0" }
+  $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE = "$ExpectedPatchObbSize"
   $env:WSLENV = if ($oldWslEnv) {
-    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR"
+    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_EXPECTED_PATCH_OBB_SIZE"
   } else {
-    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR"
+    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_EXPECTED_PATCH_OBB_SIZE"
   }
 
   $buildScript = @'
@@ -67,10 +73,24 @@ export PATH=/opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/usr/bin:/bin
 
 make clean
 jobs="${PES21_NX_BUILD_JOBS:-$(nproc)}"
+link_build_id=$(
+  {
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+    printf '%s\n' \
+      "DIAGNOSTICS=${PES21_NX_DIAGNOSTICS:-0}" \
+      "PERF_TRACE=${PES21_NX_PERF_TRACE:-0}" \
+      "PES_PESDB_AUTHORITATIVE_OVR=${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
+      "PES_PLAYER_MIGRATION_CANARY=${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
+      "PES_EXPECTED_PATCH_OBB_SIZE=${PES21_NX_EXPECTED_PATCH_OBB_SIZE:-0}"
+  } | sha256sum | cut -c1-40
+)
 make -j"$jobs" \
   DIAGNOSTICS="${PES21_NX_DIAGNOSTICS:-0}" \
   PERF_TRACE="${PES21_NX_PERF_TRACE:-0}" \
-  PES_PESDB_AUTHORITATIVE_OVR="${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}"
+  PES_PESDB_AUTHORITATIVE_OVR="${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
+  PES_PLAYER_MIGRATION_CANARY="${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
+  PES_EXPECTED_PATCH_OBB_SIZE="${PES21_NX_EXPECTED_PATCH_OBB_SIZE:-0}" \
+  LINK_BUILD_ID="$link_build_id"
 
 cp pes21_nx.nro "$PES21_NX_BUILD_OUTPUT_ROOT/"
 cp pes21_nx.elf "$PES21_NX_BUILD_OUTPUT_ROOT/"
@@ -143,5 +163,15 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
     Remove-Item Env:PES21_NX_PESDB_AUTHORITATIVE_OVR -ErrorAction SilentlyContinue
   } else {
     $env:PES21_NX_PESDB_AUTHORITATIVE_OVR = $oldPesdbAuthoritativeOvr
+  }
+  if ($null -eq $oldPlayerMigrationCanary) {
+    Remove-Item Env:PES21_NX_PLAYER_MIGRATION_CANARY -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_PLAYER_MIGRATION_CANARY = $oldPlayerMigrationCanary
+  }
+  if ($null -eq $oldExpectedPatchObbSize) {
+    Remove-Item Env:PES21_NX_EXPECTED_PATCH_OBB_SIZE -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE = $oldExpectedPatchObbSize
   }
 }

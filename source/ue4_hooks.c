@@ -30,6 +30,10 @@
 #define PES_PESDB_AUTHORITATIVE_OVR 0
 #endif
 
+#ifndef PES_PLAYER_MIGRATION_CANARY
+#define PES_PLAYER_MIGRATION_CANARY 0
+#endif
+
 typedef struct {
   void *data;
   int32_t num;
@@ -2750,6 +2754,14 @@ typedef struct {
   uint32_t player_count;
 } ExhibitionMasterRoster;
 
+#if PES_PLAYER_MIGRATION_CANARY
+typedef struct {
+  uint32_t player_unique_id;
+  uint8_t overall;
+  uint8_t primary_position;
+} ExhibitionMigrationPlayerRating;
+#endif
+
 #if PES_PESDB_RUNTIME_ROSTERS
 typedef struct {
   uint32_t player_unique_id;
@@ -2819,6 +2831,36 @@ static const uint8_t exhibition_madrid_shirts[] = {
 #if PES_PESDB_RUNTIME_ROSTERS
 #include "exhibition_rosters_pesdb_generated.inc"
 #endif
+#if PES_PLAYER_MIGRATION_CANARY
+#include "exhibition_rosters_migration_canary_generated.inc"
+// Keep the source-lock identifier in the NRO even when release logging is
+// compiled out. The volatile read in the roster route prevents LTO/GC from
+// discarding this diagnostic identity string.
+static const volatile char exhibition_player_migration_build_id[] =
+    PES21_PLAYER_MIGRATION_BUILD_ID;
+
+static const ExhibitionMigrationPlayerRating *
+exhibition_find_migration_player_rating(uint32_t player_unique_id) {
+  uint32_t low = 0;
+  uint32_t high =
+      (uint32_t)(sizeof(exhibition_player_migration_canary_ratings) /
+                 sizeof(exhibition_player_migration_canary_ratings[0]));
+  while (low < high) {
+    const uint32_t middle = low + (high - low) / 2u;
+    if (exhibition_player_migration_canary_ratings[middle].player_unique_id <
+        player_unique_id)
+      low = middle + 1u;
+    else
+      high = middle;
+  }
+  return low < (uint32_t)(sizeof(exhibition_player_migration_canary_ratings) /
+                          sizeof(exhibition_player_migration_canary_ratings[0])) &&
+                 exhibition_player_migration_canary_ratings[low]
+                         .player_unique_id == player_unique_id
+             ? &exhibition_player_migration_canary_ratings[low]
+             : NULL;
+}
+#endif
 
 #if PES_PESDB_RUNTIME_ROSTERS && PES_PESDB_AUTHORITATIVE_OVR
 static const ExhibitionPesdbPlayerRating *
@@ -2872,6 +2914,16 @@ static uint32_t exhibition_player_overall(const void *player,
 
   const uint32_t native_overall =
       exhibition_get_player_overall(player, position, condition);
+#if PES_PLAYER_MIGRATION_CANARY
+  uint64_t migration_player_id = 0u;
+  memcpy(&migration_player_id, (const unsigned char *)player + 44,
+         sizeof(migration_player_id));
+  const ExhibitionMigrationPlayerRating *migration_rating =
+      exhibition_find_migration_player_rating(
+          (uint32_t)(migration_player_id >> 32));
+  if (migration_rating)
+    return migration_rating->overall;
+#endif
 #if PES_PESDB_RUNTIME_ROSTERS && PES_PESDB_AUTHORITATIVE_OVR
   uint64_t player_id = 0u;
   memcpy(&player_id, (const unsigned char *)player + 44, sizeof(player_id));
@@ -3394,6 +3446,24 @@ static uint32_t exhibition_roster_effective_player_count(
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
   const ExhibitionMasterRoster *roster = NULL;
+#if PES_PLAYER_MIGRATION_CANARY
+  // The migration NRO and canary OBB are a matched pair. Only representative
+  // teams are overridden until hardware validates the rewritten native rows.
+  if (exhibition_player_migration_build_id[0] == '\0')
+    return NULL;
+  roster = exhibition_find_sorted_roster(
+      exhibition_player_migration_canary_rosters,
+      (uint32_t)(sizeof(exhibition_player_migration_canary_rosters) /
+                 sizeof(exhibition_player_migration_canary_rosters[0])),
+      team_id);
+  if (roster) {
+    static uint32_t migration_id_logged;
+    if (!__atomic_exchange_n(&migration_id_logged, 1u, __ATOMIC_ACQ_REL))
+      debugPrintf("PES21PLAYERMIGRATION canary build=%s\n",
+                  (const char *)exhibition_player_migration_build_id);
+    return roster;
+  }
+#endif
 #if PES_PESDB_RUNTIME_ROSTERS
   // PESDB Authentic is the release source of current club membership, roster
   // order, and shirt numbers. The generated table points at physical PES21
@@ -3942,6 +4012,8 @@ static uint32_t exhibition_install_master_roster(
   return valid;
 }
 
+static uint32_t (*exhibition_common_get_crypt_key)(void);
+
 static uint32_t exhibition_refresh_squad_side_player_stats(
     unsigned char *squad_edit, void *common_work, uint32_t side) {
   const uint32_t raw_team = __atomic_load_n(
@@ -3957,31 +4029,82 @@ static uint32_t exhibition_refresh_squad_side_player_stats(
     squad_count = 40;
 
   uint32_t updated = 0;
-  uint32_t roster_index = 0;
-  while (updated < squad_count && roster_index < roster->player_count) {
-    const uint32_t unique_id =
-        roster->player_unique_ids[roster_index++];
-    if (!exhibition_roster_player_allowed(roster, unique_id))
+  uint64_t consumed = 0u;
+  for (uint32_t slot = 0; slot < squad_count; ++slot) {
+    void *squad_player =
+        exhibition_squad_data_get_player_by_index(squad_data, &slot);
+    if (!squad_player)
       continue;
+
+    // LoadSquadDataFromMatchPlanData initializes this lookup key from the
+    // selected matchPlan identity BEFORE hydrating the normal/boosted copies.
+    // Those copies may still contain a donor or placeholder, so neither their
+    // PlayerId nor vector order can be used as the source of identity here.
+    // Native tmpdb::PlayerId: storage locator at +0, XOR-protected unique ID
+    // at +4, serial at +8. The match-local locator is NOT a card type or a
+    // stable identity: CommonWork and Match can locate the same player with
+    // different low 16 bits (Match also uses HOME/AWAY sentinel locators).
+    // Preserve the destination key and resolve the master by unique ID only.
+    if (!exhibition_common_get_crypt_key)
+      continue;
+    uint32_t encoded_unique_id = 0;
+    uint16_t match_locator = 0;
+    memcpy(&encoded_unique_id, (const unsigned char *)squad_player + 4, 4);
+    memcpy(&match_locator, squad_player, 2);
+    const uint32_t unique_id =
+        encoded_unique_id ^ exhibition_common_get_crypt_key();
     const uint64_t player_id =
         exhibition_get_player_id_by_unique_id(&unique_id);
+    uint32_t roster_index = UINT32_MAX;
+    for (uint32_t i = 0; i < roster->player_count && i < 64u; ++i) {
+      if (roster->player_unique_ids[i] == unique_id &&
+          exhibition_roster_player_allowed(roster, unique_id)) {
+        roster_index = i;
+        break;
+      }
+    }
+
+    if (!unique_id || (uint32_t)(player_id >> 32) != unique_id ||
+        roster_index == UINT32_MAX || (consumed & (1ULL << roster_index))) {
+      debugPrintf("exhibition: squad identity rejected side=%u slot=%u "
+                  "unique=%u id=0x%llx locator=%u roster=%u\n",
+                  side, slot, unique_id, (unsigned long long)player_id,
+                  match_locator, roster_index);
+      continue;
+    }
+    consumed |= 1ULL << roster_index;
+
     unsigned char *player =
         exhibition_commonwork_update_player(common_work, player_id);
     uint64_t actual_player_id = 0;
     if (player)
       memcpy(&actual_player_id, player + 44, sizeof(actual_player_id));
-    if (!player || actual_player_id != player_id)
+    if (!player || actual_player_id != player_id) {
+      debugPrintf("exhibition: squad master lookup failed side=%u slot=%u "
+                  "unique=%u expected=0x%llx actual=0x%llx\n",
+                  side, slot, unique_id, (unsigned long long)player_id,
+                  (unsigned long long)actual_player_id);
       continue;
-
-    void *squad_player = exhibition_squad_data_get_player_by_index(
-        squad_data, &updated);
-    if (!squad_player)
-      break;
+    }
 
     // SquadPlayer stores its lookup key first, followed by normal and boosted
     // tmpdb::Player copies. Refresh both copies from the authentic master row.
     exhibition_squad_edit_update_player(squad_edit, squad_player, player, 0);
     exhibition_squad_edit_update_player(squad_edit, squad_player, player, 1);
+
+    const void *hydrated =
+        match_squad_data_get_tmpdb_player(squad_data, squad_player);
+    uint64_t hydrated_id = 0;
+    if (hydrated)
+      memcpy(&hydrated_id, (const unsigned char *)hydrated + 44,
+             sizeof(hydrated_id));
+    if (hydrated_id != player_id) {
+      debugPrintf("exhibition: squad identity write mismatch side=%u slot=%u "
+                  "unique=%u locator=%u expected=0x%llx actual=0x%llx\n",
+                  side, slot, unique_id, match_locator,
+                  (unsigned long long)player_id, (unsigned long long)hydrated_id);
+      continue;
+    }
 
 #ifdef DEBUG_LOG
     if (exhibition_get_player_overall && updated < 4) {
@@ -3989,9 +4112,10 @@ static uint32_t exhibition_refresh_squad_side_player_stats(
       const uint32_t overall =
           exhibition_player_overall(player, &natural_position, 2);
       debugPrintf("exhibition: squad stats side=%u slot=%u unique=%u "
-                  "player=0x%llx overall=%u\n",
-                  side, updated, unique_id,
-                  (unsigned long long)player_id, overall);
+                  "player=0x%llx overall=%u locator=%u masterLocator=%u\n",
+                  side, slot, unique_id,
+                  (unsigned long long)player_id, overall,
+                  match_locator, (uint16_t)player_id);
     }
 #endif
     updated++;
@@ -4010,6 +4134,8 @@ static uint32_t exhibition_refresh_squad_player_stats(void) {
       !exhibition_squad_edit_get_squad_data ||
       !exhibition_squad_data_get_player_count ||
       !exhibition_squad_data_get_player_by_index ||
+      !exhibition_common_get_crypt_key ||
+      !match_squad_data_get_tmpdb_player ||
       !exhibition_squad_edit_update_player)
     return 0;
 
@@ -15091,6 +15217,8 @@ void install_ue4_hooks(so_module *module) {
   exhibition_commonwork_update_player =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb10CommonWork12UpdatePlayerEN6common8PlayerIdE");
+  exhibition_common_get_crypt_key = (void *)so_find_addr_rx(
+      module, "_ZN6common11GetCryptKeyEv");
   exhibition_get_player_id_by_unique_id =
       (void *)so_find_addr_rx(module,
           "_ZN5tmpdb4util21GetPlayerIdByUniqueIdERKj");

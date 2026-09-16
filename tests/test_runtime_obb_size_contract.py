@@ -16,7 +16,9 @@ INTER_MIAMI_FL2026_OBB = ROOT/'local-debug/inter-miami-fl2026-kits-native-crests
 
 class RuntimeObbSizeContractTests(unittest.TestCase):
     def test_current_size_is_primary_expectation(self):
-        self.assertIn('{ PATCH_OBB_PATH, PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE }', SOURCE)
+        self.assertIn('{ PATCH_OBB_PATH, PATCH_OBB_CURRENT_SIZE }', SOURCE)
+        self.assertIn('#define PATCH_OBB_CURRENT_SIZE PES_EXPECTED_PATCH_OBB_SIZE', SOURCE)
+        self.assertIn('#define PATCH_BUILD_LABEL "PES21PLAYERMIGRATION canary"', SOURCE)
         size = int(re.search(r'#define PATCH_OBB_NATIONAL_ALL_KITS_V2_SIZE (\d+)ULL', SOURCE)[1])
         self.assertEqual(size, 1410308096)
         recovery_size = int(re.search(r'#define PATCH_OBB_PLAYER_IDENTITY_RECOVERY_V5_SIZE (\d+)ULL', SOURCE)[1])
@@ -56,7 +58,7 @@ class RuntimeObbSizeContractTests(unittest.TestCase):
         self.assertIn('actual_size == PATCH_OBB_NATIVE_LICENSE_KITS_V4_SIZE', SOURCE)
         self.assertIn('S_ISREG(st.st_mode) && size_matches', SOURCE)
         self.assertIn('Actual bytes: %lld', SOURCE)
-        self.assertIn('Build: Inter Miami FL2026 v1', SOURCE)
+        self.assertIn('"Build: " PATCH_BUILD_LABEL', SOURCE)
 
 
 if __name__ == '__main__':

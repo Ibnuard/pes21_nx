@@ -47,6 +47,7 @@ $allowedAssetFiles = @(
   "assets/fonts/efootball/efootballstencil-regular.ttf"
 )
 $allowedLargeFiles = @(
+  "data/pes21_player_registry.json",
   "source/efootball_font_atlas.h",
   "source/team_select_background.h"
 )

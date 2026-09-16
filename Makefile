@@ -53,6 +53,10 @@ INCLUDES	:=	include
 #---------------------------------------------------------------------------------
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 LTOFLAGS := -flto=auto -fuse-linker-plugin
+# build-wsl.ps1 compiles from a fresh randomized /tmp directory. Normalize
+# that directory out of debug data and compiler-generated paths so two clean
+# builds from identical inputs produce the same ELF/NRO bytes.
+REPROFLAGS := -ffile-prefix-map=$(CURDIR)=. -fdebug-prefix-map=$(CURDIR)=.
 DIAGNOSTICS ?= 0
 PERF_TRACE ?= 0
 # Inter Miami original-ID/MLS integration is part of the stable runtime.
@@ -64,8 +68,19 @@ PES_PESDB_RUNTIME_ROSTERS ?= 1
 # Use the authoritative PESDB base OVR for every imported player in custom
 # selector/Game Plan surfaces.  Set to 0 for a quick rollback to native OVR.
 PES_PESDB_AUTHORITATIVE_OVR ?= 1
+# Build only with the matching PES21PLAYERMIGRATION canary OBB. The normal
+# release remains on the established roster/catalog until hardware sign-off.
+PES_PLAYER_MIGRATION_CANARY ?= 0
+PES_EXPECTED_PATCH_OBB_SIZE ?= 0
+LINK_BUILD_ID ?=
 
-CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
+ifeq ($(strip $(LINK_BUILD_ID)),)
+LINK_BUILD_ID_FLAG := -Wl,--build-id=sha1
+else
+LINK_BUILD_ID_FLAG := -Wl,--build-id=0x$(LINK_BUILD_ID)
+endif
+
+CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) $(REPROFLAGS) \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DNDEBUG \
@@ -82,14 +97,16 @@ endif
 CFLAGS	+=	-DPES_EXPERIMENT_INTER_MIAMI=$(PES_EXPERIMENT_INTER_MIAMI)
 CFLAGS	+=	-DPES_PESDB_RUNTIME_ROSTERS=$(PES_PESDB_RUNTIME_ROSTERS)
 CFLAGS	+=	-DPES_PESDB_AUTHORITATIVE_OVR=$(PES_PESDB_AUTHORITATIVE_OVR)
+CFLAGS	+=	-DPES_PLAYER_MIGRATION_CANARY=$(PES_PLAYER_MIGRATION_CANARY)
+CFLAGS	+=	-DPES_EXPECTED_PATCH_OBB_SIZE=$(PES_EXPECTED_PATCH_OBB_SIZE)
 
 CXXFLAGS	:= $(CFLAGS)
 
-ASFLAGS	:=	-g $(ARCH)
+ASFLAGS	:=	-g $(ARCH) $(REPROFLAGS)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,-Map,$(notdir $*.map) \
 			-Wl,--wrap=nouveau_mm_allocate -Wl,--wrap=nouveau_mm_free \
 			-Wl,--wrap=nouveau_mm_free_work \
-			-Wl,--build-id=sha1
+			$(LINK_BUILD_ID_FLAG)
 
 LIBS	:= -lopenal -lSDL2 -lmpg123 \
 			-lEGL -lGLESv2 -lglapi -ldrm_nouveau -lpng -lz -lnx -lm

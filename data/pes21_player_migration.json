@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "source_version": "eF26_v551",
+  "minimum_players": 18,
+  "maximum_players": 40,
+  "canary_team_ids": [38, 50, 56, 108, 109, 5738, 18961],
+  "required_canary_base_ids": [4522, 7511, 57304, 162114],
+  "source_only_fields": [
+    "BoosterId",
+    "MarketValue",
+    "ContractUntil",
+    "LoanUntil"
+  ],
+  "policy": {
+    "materialization": "playable_teams_only",
+    "legacy_teams": "remove_from_selector",
+    "native_id": "stable_hybrid",
+    "missing_portrait": "neutral_placeholder",
+    "save_compatibility": "clean_save_required"
+  }
+}

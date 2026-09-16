@@ -99,12 +99,24 @@ typedef struct {
 #define PATCH_OBB_EF10_NATIVE_NAMES_PROBE_V1_SIZE 1409912832ULL
 #define PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE 1410254848ULL
 
+#if PES_EXPECTED_PATCH_OBB_SIZE > 0
+#define PATCH_OBB_CURRENT_SIZE PES_EXPECTED_PATCH_OBB_SIZE
+#else
+#define PATCH_OBB_CURRENT_SIZE PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE
+#endif
+
+#if PES_PLAYER_MIGRATION_CANARY
+#define PATCH_BUILD_LABEL "PES21PLAYERMIGRATION canary"
+#else
+#define PATCH_BUILD_LABEL "Inter Miami FL2026 v1"
+#endif
+
 static const RuntimeFile required_runtime_files[] = {
   { AVS_SO_NAME, 491032 },
   { AFP_SO_NAME, 1401216 },
   { UE4_SO_NAME, 157571792 },
   { "PesMobile/Content/Paks/PesMobile-Android_ETC1.pak", 459211124 },
-  { PATCH_OBB_PATH, PATCH_OBB_INTER_MIAMI_FL2026_V1_SIZE },
+  { PATCH_OBB_PATH, PATCH_OBB_CURRENT_SIZE },
   { "Download/dt530_mobile_bra_all.cpk", 173204 },
   { "Download/dt530_mobile_can_all.cpk", 165480 },
   { "Download/dt530_mobile_eng_all.cpk", 198701 },
@@ -181,7 +193,8 @@ static void check_data(void) {
     const int size_matches =
         actual_size == required->expected_size ||
         (!strcmp(required->path, PATCH_OBB_PATH) &&
-         (actual_size == PATCH_OBB_ORIGINAL_SIZE ||
+         (actual_size == PATCH_OBB_CURRENT_SIZE ||
+          actual_size == PATCH_OBB_ORIGINAL_SIZE ||
           actual_size == PATCH_OBB_PESDB_CANDIDATE_V4_SIZE ||
           actual_size == PATCH_OBB_PESDB_CANDIDATE_V5_SIZE ||
           actual_size == PATCH_OBB_PESDB_CANDIDATE_V6_KITS_SIZE ||
@@ -212,7 +225,7 @@ static void check_data(void) {
     fatal_error("Loose runtime data is incomplete.\nFirst bad file:\n%s\n"
                 "Actual bytes: %lld (-1 = missing)\n"
                 "Expected/current bytes: %zu\n"
-                "Build: Inter Miami FL2026 v1\n"
+                "Build: " PATCH_BUILD_LABEL "\n"
                 "Missing/corrupt files: %zu",
                 first_bad, first_bad_actual, first_bad_expected, bad_count);
 

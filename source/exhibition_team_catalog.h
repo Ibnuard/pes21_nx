@@ -21,7 +21,15 @@ typedef struct {
   uint32_t badge_slot;
 } ExhibitionTeamCatalogEntry;
 
+#ifndef PES_PLAYER_MIGRATION_CANARY
+#define PES_PLAYER_MIGRATION_CANARY 0
+#endif
+
+#if PES_PLAYER_MIGRATION_CANARY
+#include "exhibition_teams_migration_generated.inc"
+#else
 #include "exhibition_teams_generated.inc"
+#endif
 
 #define EXHIBITION_TEAM_CATEGORY_COUNT                                    \
   ((uint32_t)(sizeof(exhibition_team_categories) /                         \
