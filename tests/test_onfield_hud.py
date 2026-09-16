@@ -89,6 +89,17 @@ int main(void) {
         self.assertNotIn('ModelStaminaGauge8GetModel', install)
         self.assertNotIn('Model2DData4Draw', install)
         self.assertNotIn('stamina_draw_plt', install)
+
+    def test_native_stamina_slots_put_live_fill_after_dark_track(self):
+        hooks = (ROOT / 'source/ue4_hooks.c').read_text(encoding='utf-8')
+        install = hooks.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('stamina_color_code + 0xc0, 0x54000229, 0x54000228',
+                      install)
+        self.assertIn('stamina_exec_code + 0xe8, 0x540001a8, 0x540001a9',
+                      install)
+        self.assertIn('stamina_exec_code + 0xec, 0x8b354a94, 0x8b394a94',
+                      install)
+        self.assertNotIn('_ZN7UCanvas8DrawItemER11FCanvasItem', install)
         self.assertNotIn('PES_STAMINA_FILL_SCALE_Y', hooks)
 
     def test_custom_stamina_hud_is_removed(self):

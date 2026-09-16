@@ -12781,16 +12781,22 @@ static uint32_t match_broadcast_stabilize_target(float *target_position,
 
   const float offset_x = ball_position[0] - target_position[0];
   const float offset_y = ball_position[1] - target_position[1];
-  if (fabsf(offset_x) <= 0.001f && fabsf(offset_y) <= 0.001f)
+  const float distance = hypotf(offset_x, offset_y);
+  const float deadzone = 10.0f;
+  if (!isfinite(distance) || distance <= deadzone)
     return 0u;
 
-  // Direct BallInfo targeting made the 2D player labels/cursors expose every
-  // tiny physics-step correction. Keep 20% of the already-smoothed native
-  // composition and pull it 80% toward the ball. This is continuous (unlike
-  // the former hard eight-unit edge), keeps the ball in the central viewport,
-  // and lets native camera/HUD interpolation share a stable target.
-  target_position[0] += offset_x * 0.80f;
-  target_position[1] += offset_y * 0.80f;
+  // Do not feed sub-threshold ball physics into the camera every frame. Once
+  // the ball leaves the safe area, smoothly ramp a modest correction over
+  // eight native units. Smoothstep removes the old hard-threshold jump while
+  // retaining the stock camera target as the dominant source of motion.
+  float ramp = (distance - deadzone) / 8.0f;
+  if (ramp > 1.0f)
+    ramp = 1.0f;
+  const float smooth = ramp * ramp * (3.0f - 2.0f * ramp);
+  const float gain = 0.35f * smooth;
+  target_position[0] += offset_x * gain;
+  target_position[1] += offset_y * gain;
   return 1u;
 }
 
@@ -16246,10 +16252,10 @@ void install_ue4_hooks(so_module *module) {
           "_ZNK5match8registry8BallInfo8GetTransEv");
 
   // GetBallPositionBroadcast has exactly one native caller
-  // (ShotBroadcastBallActive). Keep its full stock calculation, then bias the
-  // planar target toward live BallInfo so the ball remains in the central
-  // viewport without exposing raw physics jitter through the 2D player HUD.
-  // This avoids reviving the former global time/velocity camera override.
+  // (ShotBroadcastBallActive). Keep its full stock calculation, then apply a
+  // smooth deadzone correction only after the ball escapes its safe area.
+  // This avoids both the former global camera override and per-frame raw-ball
+  // corrections while the stock target is already close enough.
   const char *ball_position_broadcast_symbol =
       "_ZN5match6camera6plugin12InplayCamera24GetBallPositionBroadcastERKfRK8HomeAwayPN4math7Vector3ERfb";
   const uintptr_t ball_position_broadcast =
@@ -16727,6 +16733,10 @@ void install_ue4_hooks(so_module *module) {
       "_ZN7match2D6Screen17ModelStaminaGauge7GetDispEj");
   const uintptr_t stamina_disp_code = so_find_addr(module,
       "_ZN7match2D6Screen17ModelStaminaGauge7GetDispEj");
+  const uintptr_t stamina_color_code = so_find_addr(module,
+      "_ZN7match2D6Screen17ModelStaminaGauge8GetColorEjRhS2_S2_S2_");
+  const uintptr_t stamina_exec_code = so_find_addr(module,
+      "_ZN7match2D6Screen17ModelStaminaGauge9ExecOtherEj");
   // Custom exhibition runs through tutorial mode (9). Keep native player,
   // cursor and match-phase validity checks, but allow the hidden source model
   // to publish active-player stamina despite the tutorial/mobile hide flags.
@@ -16736,6 +16746,17 @@ void install_ue4_hooks(so_module *module) {
   // above (player/cursor/phase), at +0x134. NOP here would hide every gauge.
   patch_checked_u32(stamina_disp_code + 0x12c, 0x34000128, 0x14000002,
                     "Stamina custom visibility setting");
+  // The mobile binary submits the colored fill (slots 0/1) before a full
+  // dark track (slots 2/3). On Switch that later track covers the fill and
+  // leaves only its one-pixel edge visible. Swap the native slot semantics:
+  // 0/1 become full dark tracks, then 2/3 draw the colored live power above
+  // them. Models, bounds, UCanvas rendering and update cadence remain native.
+  patch_checked_u32(stamina_color_code + 0xc0, 0x54000229, 0x54000228,
+                    "Stamina draw colored slots after track");
+  patch_checked_u32(stamina_exec_code + 0xe8, 0x540001a8, 0x540001a9,
+                    "Stamina live power slots after track");
+  patch_checked_u32(stamina_exec_code + 0xec, 0x8b354a94, 0x8b394a94,
+                    "Stamina live power cache index");
   uintptr_t *stamina_disp_slot = find_vtable_method_slot(module,
       "_ZTVN7match2D6Screen17ModelStaminaGaugeE", stamina_disp_runtime, 25);
   if (stamina_disp_slot) {

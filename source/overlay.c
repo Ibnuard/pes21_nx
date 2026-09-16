@@ -334,6 +334,11 @@ static float measure_efootball_line(const char *text, int len, float gh,
                                     uint32_t weight) {
   if (weight >= EFOOTBALL_FONT_WEIGHTS)
     weight = EFOOTBALL_FONT_REGULAR;
+  const int small = gh <= 21.0f;
+  const uint8_t *advances = small ? efootball_font_small_advance[weight]
+                                  : efootball_font_advance[weight];
+  const float source_height = small ? (float)EFOOTBALL_FONT_SMALL_CELL_H
+                                    : (float)EFOOTBALL_FONT_CELL_H;
   float width = 0.0f;
   for (int index = 0; index < len; index++) {
     if (text[index] == ' ') {
@@ -343,8 +348,7 @@ static float measure_efootball_line(const char *text, int len, float gh,
     const int glyph = efootball_font_glyph_index(text[index]);
     if (glyph < 0)
       continue;
-    width += (float)efootball_font_advance[weight][glyph] * gh /
-             (float)EFOOTBALL_FONT_CELL_H;
+    width += (float)advances[glyph] * gh / source_height;
   }
   return width;
 }
@@ -353,8 +357,16 @@ static int emit_efootball_line(const char *text, int len, float x, float y,
                                float gh, uint32_t weight, GLfloat *verts) {
   if (weight >= EFOOTBALL_FONT_WEIGHTS)
     weight = EFOOTBALL_FONT_REGULAR;
-  const float gw = gh * (float)EFOOTBALL_FONT_CELL_W /
-                   (float)EFOOTBALL_FONT_CELL_H;
+  const int small = gh <= 21.0f;
+  const float source_width = small ? (float)EFOOTBALL_FONT_SMALL_CELL_W
+                                   : (float)EFOOTBALL_FONT_CELL_W;
+  const float source_height = small ? (float)EFOOTBALL_FONT_SMALL_CELL_H
+                                    : (float)EFOOTBALL_FONT_CELL_H;
+  const uint8_t *advances = small ? efootball_font_small_advance[weight]
+                                  : efootball_font_advance[weight];
+  const uint32_t atlas_row = weight + (small ? EFOOTBALL_FONT_WEIGHTS : 0u);
+  const float gw = gh * source_width / source_height;
+  const float draw_y = small ? floorf(y + 0.5f) : y;
   float pen_x = x;
   int quads = 0;
   for (int index = 0; index < len; index++) {
@@ -370,26 +382,26 @@ static int emit_efootball_line(const char *text, int len, float x, float y,
         ((float)(glyph * EFOOTBALL_FONT_CELL_W) + 0.5f) /
         (float)EFOOTBALL_FONT_ATLAS_W;
     const float u1 =
-        ((float)((glyph + 1) * EFOOTBALL_FONT_CELL_W) - 0.5f) /
+        ((float)(glyph * EFOOTBALL_FONT_CELL_W) + source_width - 0.5f) /
         (float)EFOOTBALL_FONT_ATLAS_W;
     const float v0 =
-        ((float)(weight * EFOOTBALL_FONT_CELL_H) + 0.5f) /
+        ((float)(atlas_row * EFOOTBALL_FONT_CELL_H) + 0.5f) /
         (float)EFOOTBALL_FONT_ATLAS_H;
     const float v1 =
-        ((float)((weight + 1u) * EFOOTBALL_FONT_CELL_H) - 0.5f) /
+        ((float)(atlas_row * EFOOTBALL_FONT_CELL_H) + source_height - 0.5f) /
         (float)EFOOTBALL_FONT_ATLAS_H;
-    const float px0 = pen_x * 2.0f / (float)screen_width - 1.0f;
-    const float px1 = (pen_x + gw) * 2.0f / (float)screen_width - 1.0f;
-    const float py0 = 1.0f - y * 2.0f / (float)screen_height;
-    const float py1 = 1.0f - (y + gh) * 2.0f / (float)screen_height;
+    const float draw_x = small ? floorf(pen_x + 0.5f) : pen_x;
+    const float px0 = draw_x * 2.0f / (float)screen_width - 1.0f;
+    const float px1 = (draw_x + gw) * 2.0f / (float)screen_width - 1.0f;
+    const float py0 = 1.0f - draw_y * 2.0f / (float)screen_height;
+    const float py1 = 1.0f - (draw_y + gh) * 2.0f / (float)screen_height;
     const GLfloat quad[24] = {
         px0, py0, u0, v0, px1, py0, u1, v0, px0, py1, u0, v1,
         px1, py0, u1, v0, px1, py1, u1, v1, px0, py1, u0, v1,
     };
     memcpy(verts + quads * 24, quad, sizeof(quad));
     quads++;
-    pen_x += (float)efootball_font_advance[weight][glyph] * gh /
-             (float)EFOOTBALL_FONT_CELL_H;
+    pen_x += (float)advances[glyph] * gh / source_height;
   }
   return quads;
 }
@@ -1557,7 +1569,7 @@ static float update_title_portrait_cycle(int active, uint32_t *previous,
 
   const uint64_t elapsed_ns = armTicksToNs(
       now - title_portrait_cycle.started_tick);
-  const uint64_t hold_ns = 10000000000ULL;
+  const uint64_t hold_ns = 5000000000ULL;
   const uint64_t fade_ns = 450000000ULL;
   const uint64_t slot = elapsed_ns / hold_ns;
   const uint32_t next = (uint32_t)(slot % 4ULL);
@@ -6050,11 +6062,13 @@ static void overlay_render(void) {
         0.035f * (float)screen_height, portrait_w, portrait_h,
         verts + quads * 24);
 
+    // Treat the logo, prompt and credit as one vertically centered group on
+    // the otherwise quiet right side of the title page.
     const float brand_w = 0.350f * (float)screen_width;
     const float brand_h = brand_w * (496.0f / 1310.0f);
     title_brand_quad = quads;
     quads += emit_image_rect(0.715f * (float)screen_width - brand_w * 0.5f,
-                             0.510f * (float)screen_height - brand_h * 0.5f,
+                             0.360f * (float)screen_height - brand_h * 0.5f,
                              brand_w, brand_h, verts + quads * 24);
 
     const float prompt_h = (float)screen_height / 36.0f;
@@ -6067,7 +6081,7 @@ static void overlay_render(void) {
     const float prompt_w = press_w + prompt_gap + prompt_icon +
                            prompt_gap + start_w;
     const float prompt_x = 0.715f * (float)screen_width - prompt_w * 0.5f;
-    const float prompt_center_y = 0.810f * (float)screen_height;
+    const float prompt_center_y = 0.620f * (float)screen_height;
     title_button_a_quad = quads;
     quads += emit_image_rect(prompt_x + press_w + prompt_gap,
                              prompt_center_y - prompt_icon * 0.5f,
@@ -6094,7 +6108,7 @@ static void overlay_render(void) {
     title_footer_first_quad = quads;
     title_footer_quads = emit_efootball_line(
         footer, footer_len, 0.715f * (float)screen_width - footer_w * 0.5f,
-        0.947f * (float)screen_height, footer_h,
+        0.770f * (float)screen_height, footer_h,
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += title_footer_quads;
   }
@@ -6920,24 +6934,36 @@ static void overlay_render(void) {
         title_portrait_previous != title_portrait_current) {
       glBindTexture(GL_TEXTURE_2D,
                     gl.main_menu_portrait_tex[title_portrait_previous]);
+      glUniform2f(gl.loc_off, -0.24f * title_portrait_mix, 0.0f);
       glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f,
                   1.0f - title_portrait_mix);
       glDrawArrays(GL_TRIANGLES, title_portrait_quad * 6, 6);
     }
     glBindTexture(GL_TEXTURE_2D,
                   gl.main_menu_portrait_tex[title_portrait_current]);
+    glUniform2f(gl.loc_off, 0.24f * (1.0f - title_portrait_mix), 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, title_portrait_mix);
     glDrawArrays(GL_TRIANGLES, title_portrait_quad * 6, 6);
 
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glBindTexture(GL_TEXTURE_2D, gl.main_menu_brand_tex);
     glDrawArrays(GL_TRIANGLES, title_brand_quad * 6, 6);
+
+    const u64 blink_frequency = armGetSystemTickFreq();
+    const float blink_phase = blink_frequency
+        ? (float)(armGetSystemTick() % blink_frequency) /
+              (float)blink_frequency * 6.2831853f
+        : 0.0f;
+    const float prompt_alpha = 0.58f + 0.42f * (0.5f + 0.5f * sinf(blink_phase));
     glBindTexture(GL_TEXTURE_2D, gl.main_menu_button_a_tex);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, prompt_alpha);
     glDrawArrays(GL_TRIANGLES, title_button_a_quad * 6, 6);
 
     glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_image, 0.0f);
-    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.98f);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f,
+                0.98f * prompt_alpha);
     glDrawArrays(GL_TRIANGLES, title_prompt_text_first_quad * 6,
                  title_prompt_text_quads * 6);
     glUniform4f(gl.loc_color, 0.74f, 0.84f, 1.0f, 0.86f);

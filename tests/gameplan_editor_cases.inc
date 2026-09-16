@@ -233,8 +233,12 @@ static void test_profiles(void) {
   }
 }
 static void assert_glyph_geometry(const GLfloat *v, int count, float height, int clipped) {
-  const float expected_slope = ((EFOOTBALL_FONT_CELL_W - 1.0f) / EFOOTBALL_FONT_ATLAS_W) /
-      (height * EFOOTBALL_FONT_CELL_W / EFOOTBALL_FONT_CELL_H * 2.0f / screen_width);
+  const float source_w = height <= 21.0f ? EFOOTBALL_FONT_SMALL_CELL_W
+                                         : EFOOTBALL_FONT_CELL_W;
+  const float source_h = height <= 21.0f ? EFOOTBALL_FONT_SMALL_CELL_H
+                                         : EFOOTBALL_FONT_CELL_H;
+  const float expected_slope = ((source_w - 1.0f) / EFOOTBALL_FONT_ATLAS_W) /
+      (height * source_w / source_h * 2.0f / screen_width);
   for (int i = 0; i < count; i++) {
     const GLfloat *q = v + i * 24;
     assert(fabsf((q[1] - q[9]) * screen_height / 2.0f - height) < 0.001f);
@@ -253,18 +257,18 @@ static void assert_glyph_geometry(const GLfloat *v, int count, float height, int
 static void test_names(void) {
   const char *name = "Gianluigi Donnarumma";
   GLfloat start[2048], moving[2048];
-  int n = emit_efootball_name_line("Messi", 5, 200, 100, 80, 15, 0, 0, start);
+  int n = emit_efootball_name_line("Messi", 5, 200, 100, 80, 15, 0, 0, 0, start);
   assert(n == 5); assert_glyph_geometry(start, n, 15, 0);
-  n = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 0, 0, start);
+  n = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 0, 0, 0, start);
   assert(n > 3 && n < 18); assert_glyph_geometry(start, n, 15, 0);
   const int dots = efootball_font_glyph_index('.');
   for (int i = n - 3; i < n; i++)
     assert((int)(start[i*24+2] * EFOOTBALL_FONT_ATLAS_W / EFOOTBALL_FONT_CELL_W) == dots);
-  int a = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 1, 1.2, start);
-  int b = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 1, 2.2, moving);
+  int a = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 1, 1.2, 0, start);
+  int b = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 1, 2.2, 0, moving);
   assert(a != b || memcmp(start, moving, a * 24 * sizeof(GLfloat)) != 0);
   for (int ms = 0; ms < 10000; ms += 37) {
-    n = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 1, ms/1000.0, moving);
+    n = emit_efootball_name_line(name, (int)strlen(name), 200, 100, 80, 15, 1, ms/1000.0, 0, moving);
     assert(n > 0); assert_glyph_geometry(moving, n, 15, 1);
   }
   assert(gameplan_name_focus_seconds(0, 1, name) == 0.0);

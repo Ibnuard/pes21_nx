@@ -23,9 +23,10 @@ Icon prompt: Four pristine flat white geometric pictograms on black, uniform 2x2
 Runtime mapping: Exhibition uses Yamal, 2 Player uses Mbappe, Settings uses Messi, and Credits uses Ronaldo. Labels use the existing eFootball stencil atlas. Portraits crossfade when focus changes. Alpha-noise-resistant cropping gives every subject the same vertical occupancy as the Ronaldo anchor, followed by one shared color/sharpness grade.
 
 The title page reuses the same background and four portraits. It cycles the
-large left portrait every 10 seconds with a 450 ms crossfade, places the
-FootballNX26 wordmark in the center of the right-hand area above the Switch A
-sprite plus `PRESS` / `TO START` above the `ANDROSWITCH PROJECT 2026` footer.
+large left portrait every 5 seconds with a 450 ms slide/fade: the old portrait
+exits left while the next enters from the right. The FootballNX26 wordmark,
+blinking Switch A prompt and `ANDROSWITCH PROJECT 2026` credit form one
+vertically centered group in the right-hand area.
 
 Both pages give portraits top padding. The tile menu uses a smaller logo.
 `tools/build_startup_blue_backdrop.py` changes the native corporate fade

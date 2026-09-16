@@ -235,7 +235,7 @@ int main(void) {
         self.assertIn('InplayCamera6UpdateERN4draw15CameraParameterE', install)
         self.assertIn('*inplay_camera_update_slot = (uintptr_t)&pes_inplay_camera_update;', install)
 
-    def test_broadcast_camera_uses_a_continuous_stable_ball_target(self):
+    def test_broadcast_camera_uses_a_smooth_deadzone_ball_target(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
@@ -246,14 +246,18 @@ int main(void) {
 int main(void) {
   float ball[3] = {0.0f, 0.0f, 0.0f};
   float nearby[3] = {3.0f, 4.0f, 7.0f};
-  assert(match_broadcast_stabilize_target(nearby, ball) == 1);
-  assert(fabsf(nearby[0] - 0.6f) < 0.001f);
-  assert(fabsf(nearby[1] - 0.8f) < 0.001f && nearby[2] == 7.0f);
+  assert(match_broadcast_stabilize_target(nearby, ball) == 0);
+  assert(nearby[0] == 3.0f && nearby[1] == 4.0f && nearby[2] == 7.0f);
+
+  float ramped[3] = {12.0f, 0.0f, 8.0f};
+  assert(match_broadcast_stabilize_target(ramped, ball) == 1);
+  assert(fabsf(ramped[0] - 11.34375f) < 0.001f);
+  assert(ramped[1] == 0.0f && ramped[2] == 8.0f);
 
   float escaped[3] = {30.0f, 40.0f, 9.0f};
   assert(match_broadcast_stabilize_target(escaped, ball) == 1);
-  assert(fabsf(escaped[0] - 6.0f) < 0.001f);
-  assert(fabsf(escaped[1] - 8.0f) < 0.001f);
+  assert(fabsf(escaped[0] - 19.5f) < 0.001f);
+  assert(fabsf(escaped[1] - 26.0f) < 0.001f);
   assert(escaped[2] == 9.0f);
 
   float invalid[3] = {NAN, 2.0f, 0.0f};

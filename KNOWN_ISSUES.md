@@ -75,14 +75,15 @@ fixed merely because a hook or overlay already exists.
 
 ## Stadium camera tracking
 
-- Stadium/Live Broadcast keeps its native zoom and interpolation, while its
-  broadcast-only calculator continuously pulls the native planar target 80%
-  toward live `BallInfo`. Retaining 20% of the already-smoothed native target
-  avoids exposing tiny physics-step corrections through player labels/cursors,
-  while still preventing the group heuristic from returning to midfield when a
-  goalkeeper owns the ball. The old global clock/velocity override remains
-  removed. Keeper catches, saves, goal kicks and rapid backwards switches still
-  need hardware validation.
+- Stadium/Live Broadcast keeps its native zoom and interpolation. Its
+  broadcast-only calculator now leaves the native planar target untouched
+  inside a ten-unit safe area, then smoothly ramps a maximum 35% correction
+  toward live `BallInfo` over the following eight units. This prevents tiny
+  ball-physics changes from moving the camera every frame and removes the old
+  threshold discontinuity. The failed shared `gcViewTraceBroadcast` patch and
+  the old global clock/velocity override remain removed. Keeper catches, saves,
+  goal kicks, rapid backwards switches and cursor/name pacing still require a
+  hardware pass.
 - `DYNAMIC WIDE CUSTOM` is now available as a separate pause-camera preset. It
   stays on the native Dynamic-Wide tracking/projection path but starts with the
   Stadium framing values (Distance 2, Height 3, Angle 6), all three of which
