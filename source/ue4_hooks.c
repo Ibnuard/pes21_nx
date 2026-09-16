@@ -176,6 +176,8 @@ static uint32_t (*exhibition_parameter_common_get_user_id)(void *common);
 static uint32_t (*exhibition_get_match_my_side)(void);
 static void *(*exhibition_commonwork_update_team)(void *common_work,
                                                    const uint32_t *team_id);
+static void *(*exhibition_commonwork_update_coach)(void *common_work,
+                                                 const uint64_t *coach_id);
 static void *(*exhibition_commonwork_update_player)(void *common_work,
                                                      uint64_t player_id);
 static uint64_t (*exhibition_get_player_id_by_unique_id)(
@@ -3993,6 +3995,7 @@ static uint32_t exhibition_install_master_roster(
     const ExhibitionMasterRoster *roster) {
   if (!common_work || !team_id || !roster ||
       !exhibition_commonwork_update_team ||
+      !exhibition_commonwork_update_coach ||
       !exhibition_commonwork_update_player ||
       !exhibition_get_player_id_by_unique_id)
     return 0;
@@ -4012,7 +4015,17 @@ static uint32_t exhibition_install_master_roster(
   }
 
   uint64_t *member_ids = (uint64_t *)(team + 272);
-  uint8_t *appointment_order = team + 0x218;
+  // SetExhibitionTeam resolves Team::coach_id (+0x250) with this exact mask.
+  // GetAppointmentOrder reads Coach+0x218, NOT Team+0x218 (member IDs 33..37).
+  uint64_t coach_id;
+  memcpy(&coach_id, team + 0x250, sizeof(coach_id));
+  coach_id &= UINT64_C(0xffffffff0000ffff);
+  unsigned char *coach = exhibition_commonwork_update_coach(common_work, &coach_id);
+  if (!coach) {
+    debugPrintf("exhibition: missing coach for lineup team=%u\n", *team_id);
+    return 0;
+  }
+  uint8_t *appointment_order = coach + 0x218;
   uint16_t *shirt_numbers = (uint16_t *)(team + 604);
   memset(member_ids, 0, 40 * sizeof(*member_ids));
   memset(appointment_order, 0xff, 40);
@@ -15253,6 +15266,9 @@ void install_ue4_hooks(so_module *module) {
   exhibition_commonwork_update_team =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb10CommonWork10UpdateTeamEN6common6TeamIdE");
+  exhibition_commonwork_update_coach =
+      (void *)so_find_addr_rx(module,
+          "_ZNK5tmpdb10CommonWork11UpdateCoachEN6common7CoachIdE");
   exhibition_commonwork_update_player =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb10CommonWork12UpdatePlayerEN6common8PlayerIdE");

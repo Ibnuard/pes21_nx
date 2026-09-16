@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import struct
 
 from prepare_runtime import read_cpk_packet
@@ -303,6 +304,51 @@ def extract_full(obb: Path, root: Path, build: str) -> dict:
     return result
 
 
+def clone_full(source_root: Path, root: Path, build: str) -> dict:
+    """Clone a verified V2 package without duplicating unchanged payloads.
+
+    Hard links make a new migration candidate cheap on disk.  Subsequent
+    ``update`` calls publish replacements with ``os.replace``, so the source
+    checkpoint remains byte-identical.  Copying is the safe fallback when the
+    two roots are on different volumes or the filesystem rejects hard links.
+    """
+    if not re.fullmatch('[0-9a-f]{16}', build):
+        raise ValueError('Build ID must contain 16 lowercase hexadecimal characters')
+    source = verify(source_root)
+    if source['version'] != 2:
+        raise ValueError('Only a full V2 loose CPK package can be cloned')
+    target = root / 'LooseCpk'
+    dummy = root / PATCH_OBB
+    if target.exists() or dummy.exists():
+        raise ValueError(f'Refusing to overwrite existing full package: {root}')
+    target.mkdir(parents=True)
+
+    def link_or_copy(source_path: Path, destination: Path) -> str:
+        try:
+            os.link(source_path, destination)
+            return 'hardlink'
+        except OSError:
+            shutil.copy2(source_path, destination)
+            return 'copy'
+
+    modes = []
+    for row in source['files']:
+        modes.append(link_or_copy(
+            source_root / 'LooseCpk' / row['name'], target / row['name']))
+    modes.append(link_or_copy(source_root / PATCH_OBB, dummy))
+    manifest = dict(
+        version=2,
+        build_id=build,
+        parent_obb_bytes=source['parent_obb_bytes'],
+        parent_obb_sha256=source['parent_obb_sha256'],
+        files=[dict(row) for row in source['files']],
+    )
+    write_manifest(root, manifest)
+    result = verify(root)
+    result['clone_mode'] = 'hardlink' if set(modes) == {'hardlink'} else 'mixed_or_copy'
+    return result
+
+
 def update(root: Path, member: str, source: Path) -> dict:
     result = verify(root)
     names = tuple(row['name'] for row in result['files'])
@@ -340,6 +386,10 @@ def main() -> None:
         p.add_argument('--obb', type=Path, required=True)
         p.add_argument('--output', type=Path, required=True)
         p.add_argument('--build-id', required=True)
+    p = sub.add_parser('clone-full')
+    p.add_argument('--source', type=Path, required=True)
+    p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--build-id', required=True)
     p = sub.add_parser('verify')
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--obb', type=Path)
@@ -352,6 +402,8 @@ def main() -> None:
         result = extract(args.obb, args.output, args.build_id)
     elif args.command == 'extract-full':
         result = extract_full(args.obb, args.output, args.build_id)
+    elif args.command == 'clone-full':
+        result = clone_full(args.source, args.output, args.build_id)
     elif args.command == 'verify':
         result = verify(args.root, args.obb)
     else:

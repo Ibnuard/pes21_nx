@@ -15,6 +15,9 @@
     "materialization": "playable_teams_only",
     "legacy_teams": "remove_from_selector",
     "native_id": "stable_hybrid",
+    "identity_card": "canonical_base_card",
+    "gameplay_card": "highest_overall_variant",
+    "portrait_card": "identity_card",
     "missing_portrait": "neutral_placeholder",
     "save_compatibility": "clean_save_required"
   }

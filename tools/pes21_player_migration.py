@@ -57,7 +57,16 @@ from convert_efootball10_players import (
 from import_efootball10_portraits import normalize_portrait
 from pesdb import decode_wesys
 from generate_exhibition_team_catalog import render_team_include
-from generate_pesdb_runtime_rosters import choose_balanced_xi, load_tactic_roles
+from generate_pesdb_runtime_rosters import (
+    choose_adaptive_formation,
+    _choose_balanced_xi_with_score,
+    load_tactic_roles,
+)
+from prepare_loose_cpk import (
+    clone_full as clone_full_loose_package,
+    update as update_loose_package,
+    verify as verify_loose_package,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +156,41 @@ SOURCE_TO_PES21_STATS = {
     "tight_possession": "TightPossession",
 }
 
+EF_POSITION_FIELDS = tuple(PES21_POSITION_BITS)
+EF_ABILITY_FIELDS = tuple(SOURCE_TO_PES21_STATS.values()) + (
+    "DefensiveEngagement",
+)
+EF_PLAYER_SKILL_FIELDS = (
+    "SoleControl", "GKLowPunt", "GKHighPunt", "Captaincy",
+    "GKPenaltySaver", "PenaltySpecialist", "SlidingTackle", "RisingShot",
+    "Gamesmanship", "Heading", "FlipFlap", "LongRangeShooting",
+    "TrackBack", "DippingShot", "Rabona", "KnuckleShot", "NoLookPass",
+    "WeightedPass", "OneTouchPass", "FirstTimeShot", "AerialSuperiority",
+    "PinpointCrossing", "ChopTurn", "FightingSpirit", "ManMarking",
+    "Interception", "MarseilleTurn", "Sombrero", "SuperSub",
+    "ChipShotControl", "HeelTrick", "LowLoftedPass", "ThroughPassing",
+    "OutsideCurler", "GKLongThrow", "LongRangeCurler", "ScissorsFeint",
+    "LongThrow", "DoubleTouch", "AcrobaticFinishing", "ScotchMove",
+    "Blocker", "CutBehindAndTurn", "AcrobaticClearance", "Fortress",
+    "PhenomenalFinishing", "MomentumDribbling", "GameChangingPass",
+    "EdgedCrossing", "VisionaryPass", "BlitzCurler", "PhenomenalPass",
+    "BulletHeader", "AerialFort", "AccelerationBurst", "LongReachTackle",
+    "GKDirectingDefence", "LowScreamer", "Willpower", "GKSpiritRoar",
+    "MagneticFeet", "AttackTrigger",
+)
+EF_COM_STYLE_FIELDS = (
+    "Trickster", "MazingRun", "SpeedingBullet", "IncisiveRun",
+    "LongBallExpert", "EarlyCrosser", "LongRanger",
+)
+EF_GAMEPLAY_PROFILE_FIELDS = (
+    "Overall", "WeakFootUsage",
+    "WeakFootAccuracy", "Form", "InjuryResistance", "Reputation",
+    "PlayingAttitude",
+    *EF_ABILITY_FIELDS,
+    *EF_PLAYER_SKILL_FIELDS,
+    *EF_COM_STYLE_FIELDS,
+)
+
 VERIFIED_CANARY_FIELDS = [
     "english_name",
     "registered_position",
@@ -157,6 +201,7 @@ VERIFIED_CANARY_FIELDS = [
     "25_gameplay_abilities",
     "ef26_authoritative_overall",
     "position_balanced_starting_xi",
+    "base_identity_highest_overall_gameplay_split",
 ]
 
 
@@ -378,6 +423,45 @@ def choose_canonical(
     return ranked[0], {"method": "national_assignment", "aliases": []}
 
 
+def choose_stats_variant(base_id: int, view: SourceView) -> dict[str, Any]:
+    """Choose the strongest deterministic gameplay card for one BaseId.
+
+    Identity never comes from this selection. A direct/default card only wins
+    a tie; a genuinely higher Overall variant always wins.
+    """
+    variants = view.variants_by_base.get(base_id, [])
+    if not variants:
+        raise RuntimeError(f"BaseId {base_id} has no gameplay variants")
+    return max(
+        variants,
+        key=lambda row: (
+            int(row.get("Overall", 0)),
+            int(row["Id"]) == base_id,
+            int(row.get("CardType", 0)) == 0,
+            -int(row["Id"]),
+        ),
+    )
+
+
+def merge_identity_with_stats(
+    identity: dict[str, Any], stats: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep canonical identity/role data and overlay strongest-card stats.
+
+    Registered position, familiarity, and playing style describe the real
+    player's base role.  Promotional cards may deliberately reinvent those
+    fields (for example CB/Build Up Frenkie de Jong), so they must not move a
+    player away from the base-card role used by the formation solver.
+    """
+    if int(identity["BaseId"]) != int(stats["BaseId"]):
+        raise ValueError("identity and stat cards have different BaseIds")
+    merged = dict(identity)
+    for field in EF_GAMEPLAY_PROFILE_FIELDS:
+        if field in stats:
+            merged[field] = stats[field]
+    return merged
+
+
 def build_active_snapshot(
     source: dict[str, Any], catalog: dict[str, Any], config: dict[str, Any]
 ) -> dict[str, Any]:
@@ -424,15 +508,25 @@ def build_active_snapshot(
         canonical, resolution = choose_canonical(
             base_id, assigned_by_base[base_id], view
         )
+        stats = choose_stats_variant(base_id, view)
+        merged = merge_identity_with_stats(canonical, stats)
+        resolution = dict(resolution)
+        resolution["stats"] = {
+            "method": "highest_overall_variant",
+            "source_card_id": int(stats["Id"]),
+            "overall": int(stats.get("Overall", 0)),
+            "card_type": int(stats.get("CardType", 0)),
+        }
         canonical_by_base[base_id] = canonical
         players.append(
             {
                 "base_id": base_id,
                 "source_card_id": int(canonical["Id"]),
+                "stats_source_card_id": int(stats["Id"]),
                 "name": str(canonical["Name"]),
                 "fingerprint": identity_fingerprint(canonical),
                 "resolution": resolution,
-                "data": canonical,
+                "data": merged,
             }
         )
 
@@ -456,17 +550,20 @@ def build_active_snapshot(
                 int(row["Id"]),
             ),
         )[0]
+        stats = choose_stats_variant(base_id, view)
         index_rows.append(
             {
                 "base_id": base_id,
                 "source_card_id": int(chosen["Id"]),
+                "stats_source_card_id": int(stats["Id"]),
+                "stats_overall": int(stats.get("Overall", 0)),
                 "fingerprint": identity_fingerprint(chosen),
                 "active": base_id in canonical_by_base,
             }
         )
 
     core = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_version": str(source["version"]),
         "policy": config["policy"],
         "counts": {
@@ -810,6 +907,7 @@ def build_registry(
                 "master_uid": f"ef:{base_id}",
                 "ef_base_id": base_id,
                 "source_card_id": int(player["source_card_id"]),
+                "stats_source_card_id": int(player["stats_source_card_id"]),
                 "canonical_name": str(player["name"]),
                 "normalized_name": normalize_name(str(player["name"])),
                 "native_player_id": native_id,
@@ -968,6 +1066,7 @@ def build_registry(
         "migration_build_id": snapshot["migration_build_id"],
         "policy": "stable_hybrid",
         "name_policy": "ef26_canonical",
+        "stats_policy": "highest_overall_variant",
         "counts": {
             "physical_rows": len(rows),
             "active_players": len(active_players),
@@ -1191,13 +1290,14 @@ def order_canary_rosters(
     canary_teams: list[dict[str, Any]],
     players: dict[int, dict[str, Any]],
     table_dir: Path,
+    tactics_hints: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Put a best, position-compatible XI first for every canary team.
 
     EF assignment PositionId is not a dependable current starting-XI signal
     (Messi is assignment 21 at Inter Miami in eF26 v5.5.1).  PES21 treats the
-    first eleven assignment/order entries as starters, so retain the native
-    formation roles and solve the XI against authoritative EF26 OVR instead.
+    first eleven assignment/order entries as starters. Use a locked API shape
+    when supplied, otherwise the native template, and solve position fit first.
     """
     physical_map = {
         int(team["ef_team_id"]): int(team["physical_team_id"])
@@ -1218,19 +1318,54 @@ def order_canary_rosters(
                 int(row["base_id"]),
                 int(players[int(row["base_id"])]["data"].get("Overall", 40)),
                 int(players[int(row["base_id"])]["data"].get("Position", 12)),
+                tuple(
+                    int(players[int(row["base_id"])]["data"].get(name, 0))
+                    for name in (
+                        "GK", "CB", "LB", "RB", "DMF", "CMF", "LMF",
+                        "RMF", "AMF", "LWF", "RWF", "SS", "CF",
+                    )
+                ),
             )
             for row in roster
         ]
-        roles = roles_by_physical[int(team["physical_team_id"])]
-        starting, bench = choose_balanced_xi(candidates, roles)
+        native_roles = roles_by_physical[int(team["physical_team_id"])]
+        hint = (tactics_hints or {}).get("teams", {}).get(str(team["ef_team_id"]))
+        slots = hint["strategies"][0]["slots"] if hint else None
+        template_roles = [int(s["role"]) for s in slots] if slots else native_roles
+        roles, starting, bench, formation_score = choose_adaptive_formation(
+            candidates, template_roles
+        )
+        if slots:
+            starting, bench, formation_score = _choose_balanced_xi_with_score(
+                candidates, roles, [int(s["preferred_base_id"]) for s in slots]
+            )
+            # Both native strategies receive the same role/order contract.
+            # Promotion to a winger must also move its depth into attack.
+            team_copy["formation_coordinates"] = [
+                [max(int(s["depth"]), 39) if role in (9, 10) else int(s["depth"]),
+                 int(s["width"])]
+                for s, role in zip(slots, roles)
+            ]
+            team_copy["tactics_hint_sha256"] = hint["sha256"]
         order = starting + bench
         team_copy["roster"] = [roster[index] for index in order]
+        team_copy["native_formation_roles"] = native_roles
+        team_copy["formation_roles"] = roles
         ordered_teams.append(team_copy)
         reports.append(
             {
                 "ef_team_id": int(team["ef_team_id"]),
                 "physical_team_id": int(team["physical_team_id"]),
+                "native_formation_roles": native_roles,
                 "formation_roles": roles,
+                "formation_adapted": roles != native_roles,
+                "formation_score": list(formation_score),
+                "formation_coordinates": team_copy.get("formation_coordinates"),
+                "tactics_hint_sha256": team_copy.get("tactics_hint_sha256"),
+                "missing_preferred_base_ids": [
+                    int(s["preferred_base_id"]) for s in (slots or [])
+                    if int(s["preferred_base_id"]) not in {c[0] for c in candidates}
+                ],
                 "starting_base_ids": [candidates[index][0] for index in starting],
                 "starting_names": [
                     str(players[candidates[index][0]]["data"]["Name"])
@@ -1245,6 +1380,84 @@ def order_canary_rosters(
 
 def encode_fixed_rows(rows: Iterable[bytes]) -> bytes:
     return encode_pes21_wesys(b"".join(rows))
+
+
+def patch_canary_formation_roles(
+    canary_teams: list[dict[str, Any]],
+    table_dir: Path,
+    destination: Path,
+) -> dict[str, Any]:
+    """Write roles and pitch coordinates to all selected native tactics/phases."""
+    tactics_raw = table_raw(table_dir / "Tactics.bin")
+    formation = bytearray(table_raw(table_dir / "TacticsFormation.bin"))
+    if len(tactics_raw) % 12 or len(formation) % 12:
+        raise RuntimeError("native tactics tables contain partial rows")
+    tactic_by_team: dict[int, list[int]] = {}
+    for offset in range(0, len(tactics_raw), 12):
+        tactic_id, physical_id, _flags = struct.unpack_from("<III", tactics_raw, offset)
+        tactic_by_team.setdefault(physical_id, []).append(tactic_id)
+
+    roles_by_tactic: dict[int, list[int]] = {}
+    coords_by_tactic: dict[int, list[list[int]]] = {}
+    adapted_teams = 0
+    for team in canary_teams:
+        physical_id = int(team["physical_team_id"])
+        tactic_ids = tactic_by_team.get(physical_id)
+        if not tactic_ids:
+            raise RuntimeError(f"team {physical_id} has no native tactic row")
+        roles = [int(value) for value in team["formation_roles"]]
+        if len(roles) != 11:
+            raise RuntimeError(f"team {physical_id} has an invalid adaptive formation")
+        for tactic_id in tactic_ids:
+            previous = roles_by_tactic.setdefault(tactic_id, roles)
+            if previous != roles:
+                raise RuntimeError(f"shared tactic {tactic_id} has conflicting roles")
+            if "formation_coordinates" in team:
+                coords_by_tactic[tactic_id] = team["formation_coordinates"]
+        adapted_teams += roles != [
+            int(value) for value in team["native_formation_roles"]
+        ]
+
+    slot_by_phase: collections.Counter[tuple[int, int]] = collections.Counter()
+    changed_rows = 0
+    for offset in range(0, len(formation), 12):
+        tactic_id, role, packed = struct.unpack_from("<III", formation, offset)
+        roles = roles_by_tactic.get(tactic_id)
+        if roles is None:
+            continue
+        phase = (packed >> 20) & 0x3
+        key = (tactic_id, phase)
+        slot = (packed >> 16) & 0xf
+        slot_by_phase[key] += 1
+        if slot >= 11:
+            continue
+        if role != roles[slot]:
+            struct.pack_into("<I", formation, offset + 4, roles[slot])
+            changed_rows += 1
+        coords = coords_by_tactic.get(tactic_id)
+        if coords:
+            depth, width = coords[slot]
+        else:
+            depth, width = packed & 0xff, (packed >> 8) & 0xff
+            if roles[slot] in (9, 10) and role in (6, 7):
+                depth = max(depth, 39)
+        if not (0 <= depth <= 48 and 0 <= width <= 105):
+            raise RuntimeError("formation coordinates outside native pitch")
+        struct.pack_into("<I", formation, offset + 8,
+                         (packed & 0xffff0000) | (width << 8) | depth)
+    for tactic_id in roles_by_tactic:
+        if slot_by_phase[(tactic_id, 0)] != 11:
+            raise RuntimeError(
+                f"tactic {tactic_id} does not contain 11 default formation rows"
+            )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(encode_pes21_wesys(bytes(formation)))
+    return {
+        "teams": len(canary_teams),
+        "adapted_teams": adapted_teams,
+        "changed_rows": changed_rows,
+        "sha256": sha256_file(destination),
+    }
 
 
 def patch_canary_tables(
@@ -1384,6 +1597,7 @@ def patch_canary_tables(
         INSTALL_MEMBER: output / "InstallVersionPlayer.bin",
         DELETE_MEMBER: output / "PlayerDeleteList.bin",
         ASSIGNMENT_MEMBER: output / "PlayerAssignment.bin",
+        TACTICS_FORMATION_MEMBER: output / "TacticsFormation.bin",
     }
     files[PLAYER_MEMBER].write_bytes(encode_fixed_rows(patched_players))
     files[INSTALL_MEMBER].write_bytes(
@@ -1394,6 +1608,11 @@ def patch_canary_tables(
     )
     files[ASSIGNMENT_MEMBER].write_bytes(
         encode_fixed_rows(struct.pack("<IIII", *row) for row in assignment_rows)
+    )
+    formation_report = patch_canary_formation_roles(
+        canary_teams,
+        table_dir,
+        files[TACTICS_FORMATION_MEMBER],
     )
     report = {
         "player_rows": len(result_ids),
@@ -1406,6 +1625,7 @@ def patch_canary_tables(
         "delete_rows": len(delete_ids),
         "assignments_inserted": inserted_assignments,
         "assignment_references_valid": True,
+        "adaptive_formations": formation_report,
         "files": {
             member: {"path": str(path), "sha256": sha256_file(path)}
             for member, path in files.items()
@@ -1543,6 +1763,7 @@ def canary_command(args: argparse.Namespace) -> None:
         canary_teams,
         players,
         args.work / "base" / "tables",
+        read_json(args.tactics_hints) if args.tactics_hints else None,
     )
     canary_base_ids = {
         int(roster["base_id"])
@@ -1625,6 +1846,7 @@ def canary_command(args: argparse.Namespace) -> None:
     neutral_portrait(placeholder)
     for base_id in sorted(canary_base_ids):
         source = players[base_id]["data"]
+        identity_card_id = int(players[base_id]["source_card_id"])
         native_id = int(reg[base_id]["native_player_id"])
         raw = portrait_dir / f"{native_id}.raw.png"
         normalized = portrait_dir / f"{native_id}.png"
@@ -1633,7 +1855,7 @@ def canary_command(args: argparse.Namespace) -> None:
         cache_valid = (
             normalized.is_file()
             and previous_portrait is not None
-            and int(previous_portrait["source_card_id"]) == int(source["Id"])
+            and int(previous_portrait["source_card_id"]) == identity_card_id
             and int(previous_portrait["native_player_id"]) == native_id
             and previous_portrait.get("sha256") == sha256_file(normalized)
         )
@@ -1641,7 +1863,7 @@ def canary_command(args: argparse.Namespace) -> None:
             status = str(previous_portrait["status"])
         elif not args.no_portraits:
             downloaded = pesdb_module.PesDb.download_portrait(
-                int(source["Id"]), raw, base_id
+                identity_card_id, raw, base_id
             )
         if not cache_valid and downloaded:
             normalize_portrait(raw, normalized)
@@ -1653,7 +1875,7 @@ def canary_command(args: argparse.Namespace) -> None:
         portrait_rows.append(
             {
                 "base_id": base_id,
-                "source_card_id": int(source["Id"]),
+                "source_card_id": identity_card_id,
                 "native_player_id": native_id,
                 "status": status,
                 "sha256": sha256_file(normalized),
@@ -1721,39 +1943,61 @@ def canary_command(args: argparse.Namespace) -> None:
         shutil.copyfile(replaced_dt241, dt241)
 
     canary_obb = output / args.obb.name
-    canary_obb.unlink(missing_ok=True)
-    outer_manifest = output / "outer-replacements.json"
-    write_json(
-        outer_manifest,
-        {DT200_MEMBER: str(dt200), DT241_MEMBER: str(dt241)},
-    )
-    run_checked(
-        [
-            sys.executable,
-            str(ROOT / "tools" / "repack_cpk_members.py"),
-            str(args.obb),
-            str(canary_obb),
-            "--replace-manifest",
-            str(outer_manifest),
-        ]
-    )
-    if not args.skip_nro_build:
+    loose_manifest = None
+    packaging_mode = "monolithic_obb"
+    if args.loose_base_root is not None:
+        packaging_mode = "full_loose_cpk"
+        if not (output / "LooseCpk").exists():
+            clone_full_loose_package(
+                args.loose_base_root,
+                output,
+                str(snapshot["migration_build_id"]),
+            )
+        current = verify_loose_package(output)
+        if current["version"] != 2:
+            raise RuntimeError("migration canary requires a full V2 loose CPK package")
+        if current["build_id"] != snapshot["migration_build_id"]:
+            raise RuntimeError(
+                "existing loose candidate has a different migration build ID"
+            )
+        update_loose_package(output, "dt200_mobile_all.cpk", dt200)
+        update_loose_package(output, "dt241_mobile_all.cpk", dt241)
+        loose_manifest = verify_loose_package(output)
+    else:
+        canary_obb.unlink(missing_ok=True)
+        outer_manifest = output / "outer-replacements.json"
+        write_json(
+            outer_manifest,
+            {DT200_MEMBER: str(dt200), DT241_MEMBER: str(dt241)},
+        )
         run_checked(
             [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(ROOT / "build-wsl.ps1"),
-                "-OutputDirectory",
-                str(output.relative_to(ROOT)),
-                "-ExpectedPatchObbSize",
-                str(canary_obb.stat().st_size),
-                "-DisablePesdbAuthoritativeOvr",
-                "-PlayerMigrationCanary",
+                sys.executable,
+                str(ROOT / "tools" / "repack_cpk_members.py"),
+                str(args.obb),
+                str(canary_obb),
+                "--replace-manifest",
+                str(outer_manifest),
             ]
         )
+    if not args.skip_nro_build:
+        build_command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "build-wsl.ps1"),
+            "-OutputDirectory",
+            str(output.relative_to(ROOT)),
+            "-ExpectedPatchObbSize",
+            str(canary_obb.stat().st_size),
+            "-DisablePesdbAuthoritativeOvr",
+            "-PlayerMigrationCanary",
+        ]
+        if packaging_mode == "full_loose_cpk":
+            build_command.append("-LooseCpkFull")
+        run_checked(build_command)
     canary_nro = output / "pes21_nx.nro"
     if not canary_nro.is_file():
         raise RuntimeError(f"canary NRO was not built: {canary_nro}")
@@ -1762,6 +2006,7 @@ def canary_command(args: argparse.Namespace) -> None:
         "result": "awaiting_hardware_validation",
         "migration_build_id": snapshot["migration_build_id"],
         "canary_content_id": manifest["content_id"],
+        "packaging_mode": packaging_mode,
         "obb": {"path": str(canary_obb), "sha256": sha256_file(canary_obb)},
         "compatible_nro": {
             "path": str(canary_nro),
@@ -1783,11 +2028,30 @@ def canary_command(args: argparse.Namespace) -> None:
             for row in portrait_rows
             if row["status"] == "neutral_placeholder"
         ],
+        "loose_cpk": (
+            {
+                "build_id": loose_manifest["build_id"],
+                "files": len(loose_manifest["files"]),
+                "dt200_sha256": next(
+                    row["sha256"] for row in loose_manifest["files"]
+                    if row["name"] == "dt200_mobile_all.cpk"
+                ),
+                "dt241_sha256": next(
+                    row["sha256"] for row in loose_manifest["files"]
+                    if row["name"] == "dt241_mobile_all.cpk"
+                ),
+            }
+            if loose_manifest is not None else None
+        ),
         "hardware_checks": [
             "startup_branding_and_native_team_assets_match_v4",
             "gameplan_opens_without_crash",
-            "inter_miami_starts_messi_82_and_suarez",
-            "barcelona_starts_lamine_yamal_80",
+            "starting_eleven_matches_lineup_report_by_slot",
+            "messi_winger_depth_matches_native_attacking_coordinates",
+            "available_api_starters_match_exact_slots_yamal_rwf",
+            "attacking_defensive_and_pause_gameplan_preserve_slot_identity",
+            "barcelona_de_jong_uses_ovr90_stats_with_base_identity",
+            "barcelona_lineup_uses_highest_ovr_profiles",
             "match_player_name_matches_selected_gameplan_player",
             "portrait_identity_is_correct",
             "club_national_overlap_is_deduplicated",
@@ -1848,8 +2112,15 @@ def parser() -> argparse.ArgumentParser:
     canary = sub.add_parser("canary")
     canary.add_argument("--output", type=Path, default=ROOT / "local-debug" / "pes21-player-migration-canary")
     canary.add_argument("--package", action="store_true")
+    canary.add_argument("--tactics-hints", type=Path,
+                        help="offline import_team_tactics.py snapshot")
     canary.add_argument("--no-portraits", action="store_true")
     canary.add_argument("--skip-nro-build", action="store_true")
+    canary.add_argument(
+        "--loose-base-root",
+        type=Path,
+        help="clone this verified V2 package and update only dt200/dt241",
+    )
     build = sub.add_parser("build")
     build.add_argument("--hardware-report", type=Path, required=True)
     return result
@@ -1876,6 +2147,8 @@ def main() -> None:
     )
     if hasattr(args, "output"):
         args.output = args.output.resolve()
+    if hasattr(args, "loose_base_root") and args.loose_base_root is not None:
+        args.loose_base_root = args.loose_base_root.resolve()
     if hasattr(args, "hardware_report"):
         args.hardware_report = args.hardware_report.resolve()
     commands = {

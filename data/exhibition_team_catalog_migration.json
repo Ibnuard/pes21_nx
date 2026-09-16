@@ -92,8 +92,8 @@
     ]
   },
   "source_version": "eF26_v551",
-  "migration_build_id": "81f096d278e1225b",
-  "snapshot_content_id": "30e3ea11dcadb204",
+  "migration_build_id": "1852ec648d2ebd75",
+  "snapshot_content_id": "304796954c6ba9bf",
   "categories": [
     {
       "key": "english_league",
@@ -10725,5 +10725,5 @@
     "categories": 33,
     "excluded_teams": 37
   },
-  "content_id": "83d525d451feb075"
+  "content_id": "3486bea49f03e021"
 }

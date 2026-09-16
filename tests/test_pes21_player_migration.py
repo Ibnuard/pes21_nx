@@ -10,7 +10,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 from pes21_player_migration import (
     build_active_snapshot,
     choose_canonical,
+    choose_stats_variant,
     identity_fingerprint,
+    merge_identity_with_stats,
     names_compatible,
     normalize_name,
     patch_verified_player,
@@ -37,6 +39,7 @@ def player(card_id, base_id, name, club_id, *, card_type=0):
         "Height": 180,
         "Foot": True,
         "Position": 12,
+        "Overall": 70,
     }
 
 
@@ -141,6 +144,51 @@ class PlayerMigrationTests(unittest.TestCase):
                 [(first, view.teams_by_id[1]), (second, view.teams_by_id[2])],
                 view,
             )
+
+    def test_base_identity_and_highest_overall_gameplay_are_separate(self):
+        base = player(108_662, 108_662, "Frenkie de Jong", 108)
+        base.update({"Country": 224, "Height": 181, "Position": 5,
+                     "CMF": 2, "DMF": 2, "CB": 2,
+                     "Overall": 75, "BallControl": 85, "PlayingStyle": 20})
+        dream = player(52_788_637_837_430, 108_662, "Frenkie de Jong", 108)
+        dream.update({"Country": 999, "Height": 180, "Position": 1,
+                      "CMF": 0, "DMF": 0, "CB": 3,
+                      "Overall": 90, "BallControl": 91, "PlayingStyle": 15})
+        source = {
+            "version": "eF26_v551",
+            "players": [base, dream],
+            "teams": {},
+            "assigns": [],
+        }
+        view = source_view(source)
+        stats = choose_stats_variant(108_662, view)
+        merged = merge_identity_with_stats(base, stats)
+        self.assertEqual(stats["Id"], dream["Id"])
+        self.assertEqual(merged["Id"], base["Id"])
+        self.assertEqual(merged["Name"], base["Name"])
+        self.assertEqual(merged["Country"], 224)
+        self.assertEqual(merged["Height"], 181)
+        self.assertEqual(merged["Overall"], 90)
+        self.assertEqual(merged["Position"], 5)
+        self.assertEqual(merged["CMF"], 2)
+        self.assertEqual(merged["DMF"], 2)
+        self.assertEqual(merged["CB"], 2)
+        self.assertEqual(merged["BallControl"], 91)
+        self.assertEqual(merged["PlayingStyle"], 20)
+
+    def test_direct_card_wins_only_an_equal_overall_tie(self):
+        direct = player(500, 500, "Tie Player", 1)
+        direct["Overall"] = 85
+        alternate = player(9_000, 500, "Tie Player", 1, card_type=3)
+        alternate["Overall"] = 85
+        stronger = player(10_000, 500, "Tie Player", 1, card_type=3)
+        stronger["Overall"] = 86
+        view = source_view({"version": "test", "players": [direct, alternate],
+                            "teams": {}, "assigns": []})
+        self.assertEqual(choose_stats_variant(500, view)["Id"], 500)
+        view = source_view({"version": "test", "players": [direct, alternate, stronger],
+                            "teams": {}, "assigns": []})
+        self.assertEqual(choose_stats_variant(500, view)["Id"], 10_000)
 
     def test_team_scope_excludes_missing_and_short_rosters(self):
         players = [player(index, index, f"P{index}", 1) for index in range(1, 19)]

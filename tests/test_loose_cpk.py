@@ -9,8 +9,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
-from prepare_loose_cpk import (extract, extract_full, update, verify, NAMES,
-                               FULL_NAMES, PATCH_OBB)
+from prepare_loose_cpk import (clone_full, extract, extract_full, update, verify,
+                               NAMES, FULL_NAMES, PATCH_OBB)
 
 
 def table(rows):
@@ -116,6 +116,34 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(changed, ['LooseCpk/'+FULL_NAMES[-1], 'LooseCpk/manifest.txt'])
             self.assertFalse((out/'LooseCpk/verified-v2.txt').exists())
             self.assertEqual((out/'LooseCpk'/FULL_NAMES[0]).read_bytes(), payloads[FULL_NAMES[0]])
+
+    def test_full_clone_rekeys_manifest_and_update_preserves_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            obb, stable, candidate = root/'source.obb', root/'stable', root/'candidate'
+            payloads = {n: cpk({'asset.bin': n.encode()}) for n in FULL_NAMES}
+            obb.write_bytes(cpk(payloads))
+            extract_full(obb, stable, '81f096d278e1225b')
+            stable_hash = hashlib.sha256(
+                (stable/'LooseCpk'/FULL_NAMES[0]).read_bytes()).hexdigest()
+
+            result = clone_full(stable, candidate, '7134b6147aab5fcf')
+            self.assertEqual(result['build_id'], '7134b6147aab5fcf')
+            self.assertEqual(verify(stable)['build_id'], '81f096d278e1225b')
+            self.assertEqual(
+                (candidate/PATCH_OBB).read_bytes(), (stable/PATCH_OBB).read_bytes())
+
+            replacement = root/'replacement.cpk'
+            replacement.write_bytes(cpk({'asset.bin': b'highest overall stats'}))
+            update(candidate, FULL_NAMES[0], replacement)
+            self.assertEqual(
+                hashlib.sha256((stable/'LooseCpk'/FULL_NAMES[0]).read_bytes()).hexdigest(),
+                stable_hash,
+            )
+            self.assertNotEqual(
+                (candidate/'LooseCpk'/FULL_NAMES[0]).read_bytes(),
+                (stable/'LooseCpk'/FULL_NAMES[0]).read_bytes(),
+            )
 
 
 class RuntimeTests(unittest.TestCase):

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import struct
 from pathlib import Path
@@ -324,15 +325,18 @@ def load_tactic_roles(
         # default attacking/defensive layout used when the page opens.
         if ((packed >> 20) & 0x3) != 0:
             continue
-        roles = roles_by_tactic.setdefault(tactic_id, [])
-        if len(roles) < 11:
-            roles.append(int(role))
+        roles = roles_by_tactic.setdefault(tactic_id, [-1] * 11)
+        slot = (packed >> 16) & 0xf
+        if slot < 11:
+            if roles[slot] != -1:
+                raise ValueError(f"duplicate formation slot {slot} for tactic {tactic_id}")
+            roles[slot] = int(role)
     result: dict[int, list[int]] = {}
     for physical_id in physical_team_map.values():
         result[physical_id] = list(
             roles_by_tactic.get(tactic_by_team.get(physical_id, -1), fallback)
         )
-        if len(result[physical_id]) != 11:
+        if len(result[physical_id]) != 11 or -1 in result[physical_id]:
             result[physical_id] = list(fallback)
     return result, {
         "source": str(tactics_path),
@@ -374,35 +378,99 @@ def role_compatibility(role: int, position: int) -> int:
     return 85 if position in neighbors.get(role, set()) else 0
 
 
-def choose_balanced_xi(
-    players: list[tuple[int, int, int]], roles: list[int]
-) -> tuple[list[int], list[int]]:
-    """Match roster players to native role slots with a bitmask DP."""
+def role_fit_score(
+    role: int, position: int, familiarity: tuple[int, ...] | None = None
+) -> tuple[int, int, int, int] | None:
+    """Return lexicographic position fit before OVR is considered.
+
+    The score dimensions are full familiarity, partial familiarity,
+    neighboring-role compatibility, and primary-position tie-break. A
+    goalkeeper can never be assigned outfield and an outfield player can
+    never keep goal.
+    """
+    if role == 0:
+        return (1, 0, 1, 1) if position == 0 else None
+    if position == 0:
+        return None
+    value = (
+        int(familiarity[role])
+        if familiarity is not None and len(familiarity) == 13
+        else 0
+    )
+    compatibility = role_compatibility(role, position)
+    primary = int(position == role)
+    return (
+        int(primary or value >= 2),
+        int(value == 1),
+        int(compatibility > 0 or value > 0 or primary),
+        primary,
+    )
+
+
+def _choose_balanced_xi_with_score(
+    players: list[tuple[int, int, int] | tuple[int, int, int, tuple[int, ...]]],
+    roles: list[int],
+    preferred_ids: list[int] | None = None,
+) -> tuple[list[int], list[int], tuple[int, int, int, int, int]]:
+    """Fill formation slots by position/familiarity, then break ties by OVR."""
     if len(roles) != 11:
         raise ValueError("native formation must contain exactly 11 role slots")
-    # mask -> (score, [(roster_index, role_index), ...])
-    states: dict[int, tuple[int, tuple[tuple[int, int], ...]]] = {0: (0, ())}
-    for roster_index, (_player_id, overall, position) in enumerate(players):
+    pinned = {}
+    if preferred_ids is not None:
+        if len(preferred_ids) != 11:
+            raise ValueError("preferred XI must contain 11 slots")
+        by_id = {player[0]: index for index, player in enumerate(players)}
+        for slot, preferred in enumerate(preferred_ids):
+            index = by_id.get(preferred)
+            if index is not None and role_fit_score(roles[slot], players[index][2]) is not None:
+                if index in pinned.values():
+                    raise ValueError("preferred XI duplicates a player")
+                pinned[slot] = index
+    # mask -> ((full, partial, compatible, primary, preference+OVR), assignments).
+    # API starters present in the roster are pinned above. For missing slots,
+    # natural roles take precedence over card strength.
+    zero_score = (0, 0, 0, 0, 0)
+    states: dict[
+        int, tuple[tuple[int, int, int, int, int], tuple[tuple[int, int], ...]]
+    ] = {0: (zero_score, ())}
+    for roster_index, player in enumerate(players):
+        _player_id, overall, position = player[:3]
+        familiarity = player[3] if len(player) == 4 else None
         next_states = dict(states)
         for mask, (score, chosen) in states.items():
             for role_index, role in enumerate(roles):
                 bit = 1 << role_index
                 if mask & bit:
                     continue
+                if role_index in pinned and pinned[role_index] != roster_index:
+                    continue
+                if roster_index in pinned.values() and pinned.get(role_index) != roster_index:
+                    continue
+                fit = role_fit_score(role, position, familiarity)
+                if fit is None:
+                    continue
+                next_score = (
+                    score[0] + fit[0],
+                    score[1] + fit[1],
+                    score[2] + fit[2],
+                    score[3] + fit[3],
+                    score[4] + overall + (1000 if preferred_ids and
+                        preferred_ids[role_index] == _player_id else 0),
+                )
                 candidate = (
-                    score + role_compatibility(role, position) + overall,
+                    next_score,
                     chosen + ((roster_index, role_index),),
                 )
                 previous = next_states.get(mask | bit)
-                if previous is None or candidate[0] > previous[0] or (
-                    candidate[0] == previous[0] and candidate[1] < previous[1]
+                if previous is None or next_score > previous[0] or (
+                    next_score == previous[0] and candidate[1] < previous[1]
                 ):
                     next_states[mask | bit] = candidate
         states = next_states
     full = (1 << 11) - 1
     if full not in states:
         raise ValueError("unable to assign a complete position-balanced XI")
-    _score, chosen = states[full]
+    score, chosen = states[full]
     chosen_by_role = [0] * 11
     selected: set[int] = set()
     for roster_index, role_index in chosen:
@@ -410,7 +478,45 @@ def choose_balanced_xi(
         selected.add(roster_index)
     bench = [index for index in range(len(players)) if index not in selected]
     bench.sort(key=lambda index: (-players[index][1], index, players[index][0]))
-    return chosen_by_role, bench
+    return chosen_by_role, bench, score
+
+
+def choose_balanced_xi(
+    players: list[tuple[int, int, int] | tuple[int, int, int, tuple[int, ...]]],
+    roles: list[int],
+) -> tuple[list[int], list[int]]:
+    starting, bench, _score = _choose_balanced_xi_with_score(players, roles)
+    return starting, bench
+
+
+def formation_role_variants(roles: list[int]) -> list[list[int]]:
+    """Suggest wide role upgrades; native writer must update depth as well."""
+    options = []
+    for role in roles:
+        # Preserve the central creator/striker structure. Only wide midfield
+        # slots can be promoted with a matching coordinate update by the
+        # writer; turning AMF into SS can push the real CF out of role.
+        promoted = {6: 9, 7: 10}.get(role)
+        options.append((role,) if promoted is None else (role, promoted))
+    variants = [list(value) for value in itertools.product(*options)]
+    # itertools emits the unchanged/native roles first.  Keep that order so a
+    # score tie never rewrites a formation unnecessarily.
+    return variants
+
+
+def choose_adaptive_formation(
+    players: list[tuple[int, int, int] | tuple[int, int, int, tuple[int, ...]]],
+    native_roles: list[int],
+) -> tuple[list[int], list[int], list[int], tuple[int, int, int, int, int]]:
+    """Choose native or attacking-wide roles from actual roster fit."""
+    best = None
+    for roles in formation_role_variants(native_roles):
+        starting, bench, score = _choose_balanced_xi_with_score(players, roles)
+        candidate = (roles, starting, bench, score)
+        if best is None or score > best[3]:
+            best = candidate
+    assert best is not None
+    return best
 
 
 def symbol_for(team_id: int) -> str:

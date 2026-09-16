@@ -11,10 +11,93 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from convert_efootball10_players import encode_pes21_wesys  # noqa: E402
-from generate_pesdb_runtime_rosters import generate  # noqa: E402
+from generate_pesdb_runtime_rosters import (  # noqa: E402
+    choose_adaptive_formation,
+    choose_balanced_xi,
+    formation_role_variants,
+    generate,
+)
 
 
 class PesdbRuntimeRosterTests(unittest.TestCase):
+    def test_lineup_fills_primary_roles_before_using_ovr(self) -> None:
+        # A promotional 99 OVR CF must not displace the only natural LWF just
+        # because CF is accepted as a neighboring forward position.
+        roles = [0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12]
+        positions = [0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12, 12]
+        overalls = [80, 80, 80, 80, 80, 80, 80, 80, 80, 40, 70, 99]
+        players = [
+            (1000 + index, overalls[index], position)
+            for index, position in enumerate(positions)
+        ]
+        starting, bench = choose_balanced_xi(players, roles)
+        self.assertEqual(players[starting[9]][2], 9)
+        self.assertEqual(players[starting[10]][1], 99)
+        self.assertIn(10, bench)
+
+    def test_lineup_uses_base_familiarity_before_ovr_tie_break(self) -> None:
+        roles = [0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12]
+        natural = tuple(2 if index == 5 else 0 for index in range(13))
+        unfamiliar = tuple(0 for _ in range(13))
+        positions = [0, 1, 1, 3, 2, 4, 8, 10, 9, 12]
+        players = [(2000 + i, 80, p) for i, p in enumerate(positions)]
+        players.extend([
+            (3000, 70, 5, natural),
+            (3001, 99, 12, unfamiliar),
+        ])
+        starting, _bench = choose_balanced_xi(players, roles)
+        self.assertEqual(players[starting[6]][0], 3000)
+
+    def test_primary_role_keeps_messi_on_wing_before_ovr(self) -> None:
+        roles = [0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12]
+        players = [
+            (4000, 80, 0), (4001, 80, 1), (4002, 80, 1),
+            (4003, 80, 3), (4004, 80, 2), (4005, 80, 4),
+            (4006, 80, 5), (4007, 67, 8), (4008, 80, 10),
+            (4009, 80, 9), (4010, 80, 12),
+        ]
+        full_amf = tuple(2 if index in (8, 10) else 0 for index in range(13))
+        players.append((7511, 93, 10, full_amf))
+        starting, bench = choose_balanced_xi(players, roles)
+        self.assertEqual(players[starting[7]][0], 4007)
+        self.assertEqual(players[starting[8]][0], 7511)
+        self.assertIn(8, bench)
+
+    def test_primary_role_bonus_keeps_natural_midfielder(self) -> None:
+        roles = [0, 1, 1, 3, 2, 4, 5, 8, 10, 9, 12]
+        players = [
+            (5000, 80, 0), (5001, 80, 1), (5002, 80, 1),
+            (5003, 80, 3), (5004, 80, 2), (5005, 80, 4),
+            (5006, 80, 8), (5007, 80, 10), (5008, 80, 9),
+            (5009, 80, 12),
+        ]
+        natural_cmf = tuple(2 if index == 5 else 0 for index in range(13))
+        familiar_cmf = tuple(2 if index in (5, 8) else 0 for index in range(13))
+        players.extend([
+            (108662, 90, 5, natural_cmf),
+            (6000, 95, 8, familiar_cmf),
+        ])
+        starting, bench = choose_balanced_xi(players, roles)
+        self.assertEqual(players[starting[6]][0], 108662)
+        self.assertEqual(players[starting[7]][0], 6000)
+        self.assertIn(6, bench)
+
+    def test_adaptive_formation_promotes_wide_roles_for_messi(self) -> None:
+        native = [0, 1, 1, 3, 2, 4, 4, 7, 6, 8, 12]
+        self.assertEqual(len(formation_role_variants(native)), 4)
+        players = [
+            (7000, 80, 0), (7001, 80, 1), (7002, 80, 1),
+            (7003, 80, 3), (7004, 80, 2), (7005, 80, 4),
+            (7006, 80, 4), (7007, 75, 10), (7008, 75, 9),
+            (7009, 75, 8), (7010, 88, 12),
+        ]
+        messi_roles = tuple(2 if index in (8, 10, 11, 12) else 0
+                            for index in range(13))
+        players.append((7511, 93, 10, messi_roles))
+        roles, starting, _bench, _score = choose_adaptive_formation(players, native)
+        self.assertEqual(roles[7:10], [10, 9, 8])
+        self.assertEqual(players[starting[7]][0], 7511)
+
     def build_fixture(self, directory: Path) -> dict[str, Path]:
         player_ids = list(range(1001, 1012))
         positions = [2, 12, 1, 2, 1, 8, 12, 0, 1, 10, 4]
