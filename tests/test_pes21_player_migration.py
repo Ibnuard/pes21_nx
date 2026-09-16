@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from pes21_player_migration import (
+    build_active_appearances,
     build_active_snapshot,
     choose_canonical,
     choose_stats_variant,
@@ -16,6 +17,7 @@ from pes21_player_migration import (
     names_compatible,
     normalize_name,
     patch_verified_player,
+    pes21_playing_style,
     protected_face_ids,
     source_view,
 )
@@ -74,6 +76,18 @@ class PlayerMigrationTests(unittest.TestCase):
                 "InjuryResistance": 2,
                 "Reputation": 7,
                 "PlayingAttitude": 3,
+                "JapaneseName": "サディオ マネ",
+                "ClubShirt": "S. MANÉ",
+                "NationalShirt": "MANÉ",
+                "Country2": 2,
+                "NationalCaps": 99,
+                "PlayingStyle": 22,
+                "MagneticFeet": True,
+                "VisionaryPass": True,
+                "LongReachTackle": True,
+                "Fortress": True,
+                "MazingRun": True,
+                "Celebration1": 72,
             }
         )
         result = patch_verified_player(bytes(312), source, 57_304)
@@ -88,6 +102,43 @@ class PlayerMigrationTests(unittest.TestCase):
         self.assertEqual(read_bits(result, 462, 2) + 1, 3)
         self.assertEqual(read_bits(result, 438, 3) + 1, 5)
         self.assertEqual(pes21_abilities(result)["offensive_awareness"], 77)
+        self.assertEqual(read_bits(result, 155, 5), 13)
+        self.assertEqual(read_bits(result, 500, 1), 1)  # Magnetic Feet fallback
+        self.assertEqual(read_bits(result, 487, 1), 1)  # Visionary Pass fallback
+        self.assertEqual(read_bits(result, 492, 1), 1)  # Long Reach Tackle fallback
+        self.assertEqual(read_bits(result, 517, 1), 1)  # Fortress fallback
+        self.assertEqual(read_bits(result, 531, 1), 1)
+        self.assertEqual(read_bits(result, 242, 8), 72)
+        self.assertEqual(read_bits(result, 233, 9), 1)
+        self.assertEqual(read_bits(result, 224, 9), 2)
+        self.assertEqual(result[23], 99)
+        self.assertEqual(result[129:190].split(b"\0", 1)[0].decode(), "S. MANÉ")
+
+    def test_playing_style_fallback_matches_pesdatabase_converter(self):
+        self.assertEqual(pes21_playing_style(13), 1)
+        self.assertEqual(pes21_playing_style(22), 13)
+        self.assertEqual(pes21_playing_style(20), 20)
+        self.assertEqual(pes21_playing_style(99), 0)
+
+    def test_ef26_appearance_payload_is_rekeyed_without_donor_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "ef-appearance.bin"
+            destination = root / "PlayerAppearance.bin"
+            payload = bytes(range(56))
+            source.write_bytes((123456789).to_bytes(8, "little") + payload)
+            report = build_active_appearances(
+                source,
+                destination,
+                {77: {"source_card_id": 123456789}},
+                {77: {"native_player_id": 9001}},
+                {77},
+            )
+            self.assertEqual(report["active_rows"], 1)
+            self.assertEqual(
+                destination.read_bytes(),
+                (9001).to_bytes(4, "little") + payload,
+            )
 
     def test_locked_face_inventory_is_validated(self):
         with tempfile.TemporaryDirectory() as directory:

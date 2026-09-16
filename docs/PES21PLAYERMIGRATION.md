@@ -97,6 +97,11 @@ python tools/pes21_player_migration.py sync
 python tools/pes21_player_migration.py audit
 python tools/pes21_player_migration.py canary --package `
   --loose-base-root local-debug/loose-cpk-full-v1
+python tools/pes21_player_migration.py build `
+  --hardware-report local-debug/pes21-player-migration-formation-v4/hardware-canary-report.json `
+  --tactics-hints local-inputs/pes21-player-migration/eF26_v551/team-tactics-full.json `
+  --loose-base-root local-debug/loose-cpk-full-v1 `
+  --output local-debug/pes21-player-migration-full-v1
 ```
 
 `sync` copies and hashes `db_eF26_v551.json`, optionally fetches the EF
@@ -170,8 +175,8 @@ are rebuilt for the canary teams, 3D-face owner IDs are protected using a
 locked inventory read directly from the active PES21 PAK, and the matching NRO
 embeds the same `migration_build_id` recorded by the hardware report.
 
-When updating an installed `loose-cpk-full-v1` runtime, close the game and copy
-these files from the canary directory:
+When updating an installed `loose-cpk-full-v1` runtime with another canary,
+close the game and copy these files from the canary directory:
 
 - `pes21_nx.nro`
 - `LooseCpk/dt200_mobile_all.cpk`
@@ -185,11 +190,35 @@ NRO or dt200.
 Use a clean `SaveData` directory for the migration canary. Existing Edit Data
 is intentionally not migrated.
 
-The global `build` stage fails closed until:
+## Full migration build
 
-1. `hardware-canary-report.json` is changed to `result: hardware_pass` after
-   the listed Switch checks are completed; and
-2. the remaining PES21 field/table mapping blocker is removed by verified
-   round-trip tests.
+The formation-v4 hardware canary is signed off. The global `build` stage now
+materializes all 443 playable teams and 12,653 canonical EF26 players while
+preserving the fixed 43,074-row PES21 table. It rebuilds Player,
+InstallVersionPlayer, PlayerAssignment, SpecialPlayerAssignment,
+PlayerAppearance, PlayerWeekly, PlayerDeleteList, Boots, and
+TacticsFormation together. The same locked input is rebuilt twice and every
+modified table must be byte-identical before packaging continues.
+
+The first complete artifact has migration build ID `1852ec648d2ebd75` and is
+written locally under `local-debug/pes21-player-migration-full-v1/`. Install it
+as one atomic set:
+
+- `pes21_nx.nro`
+- `patch.305030001.jp.nyan2021.pesam.obb` (the loose-CPK dummy OBB)
+- the complete `LooseCpk/` directory, including `manifest.txt`
+
+Do not mix any one of those files with the canary package. Start from clean
+SaveData/Edit Data for the first full-migration boot. The generated
+`full-hardware-report.json` is intentionally local and remains
+`awaiting_hardware_validation` until selector, Game Plan, identity assets,
+club/national overlap, and repeated-match checks pass on Switch.
+
+For this build, 5,402 portraits replace existing CPK members, 7,251 are added,
+and 1,222 unavailable source portraits use the neutral silhouette. Missing
+portraits never borrow another player's image. The complete source/tactics
+snapshots and binary artifacts stay in ignored local directories; only the
+stable registry, generator, tests, and generated runtime roster metadata are
+public source.
 
 No PESDB scraper, surrogate player, or portrait alias is part of this flow.
