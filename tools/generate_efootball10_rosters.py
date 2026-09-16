@@ -302,7 +302,7 @@ def main() -> None:
         ),
     )
     parser.add_argument("--output", default="source/exhibition_rosters_ef10.inc")
-    parser.add_argument("--report", default="EFOOTBALL10_PLAYER_UPDATE.md")
+    parser.add_argument("--report", default="docs/EFOOTBALL10_PLAYER_UPDATE.md")
     parser.add_argument(
         "--surrogate-map",
         default="local-debug/efootball10-player-patch/surrogate-map.json",

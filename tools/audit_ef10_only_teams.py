@@ -34,7 +34,7 @@ DEFAULT_PES21_DIR = Path(
 )
 DEFAULT_CONFIG = Path("data/exhibition_team_categories.json")
 DEFAULT_OUTPUT = Path("data/exhibition_ef10_only_teams.json")
-DEFAULT_REPORT = Path("EFOOTBALL10_ONLY_TEAMS.md")
+DEFAULT_REPORT = Path("docs/EFOOTBALL10_ONLY_TEAMS.md")
 
 # These are intentionally only review markers, not automatic inclusion rules.
 # They keep the generated report useful while alias/surrogate policy is being

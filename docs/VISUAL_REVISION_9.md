@@ -104,14 +104,15 @@ python tools/validate_visual_runtime.py --output local-debug/rebuild-v9/native-v
 For v9 itself use the complete preserved `runtime-release/` snapshot and its
 `build-wsl.ps1`, without diagnostic flags. Do not reconstruct v9 from bare
 `git diff`: committed features are omitted. As of 1 September the staging helper
-requires explicit `--baseline` and `--delta-base` arguments for new experiments;
-see [Native Pad Lab V2](local-debug/native-pad-lab-v2-20260901/README.md).
+requires explicit `--baseline` and `--delta-base` arguments for new experiments.
+The former Native Pad Lab V2 local checkpoint was pruned during workspace cleanup.
 Run `tests/run_match_visual_policy.sh` in WSL for the C/UBSan test.
 
 ## Copy / rollback
 
-See [candidate README](local-debug/visual-v9-20260831/README.md). Only NRO and PAK
-are new. Keep the v8 OBB. For isolation, test the NRO with v8 pitch first, then
+The former candidate README was stored in the disposable
+`local-debug/visual-v9-20260831/` checkpoint and was pruned during workspace
+cleanup. Only NRO and PAK were new. Keep the v8 OBB. For isolation, test the NRO with v8 pitch first, then
 the v9 PAK. For rollback restore your previous NRO and the v8 PAK; no SaveData
 needs deletion. The earlier NRO is also available in
 `local-debug/stability-test-20260830/pes21_nx.nro` if that was the installed build.

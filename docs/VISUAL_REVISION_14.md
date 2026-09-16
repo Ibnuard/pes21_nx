@@ -18,9 +18,6 @@ unequal-width experiment.
 
 The accompanying experimental Native Pad Lab NRO was rejected on hardware.
 It reached a one-player match, but Joy-Con input did not control the player and
-the accepted Player Cursor/helper presentation regressed. It remains archived
-under `local-debug/visual-v14-native-pad-lab-20260901/` only for diagnosis and
-must not be distributed as the stable runtime.
-
-See the [stable README](local-debug/visual-v14-stable-20260901/README.md) for
-the exact two files, destinations, hashes, and runtime split.
+the accepted Player Cursor/helper presentation regressed. Its disposable local
+checkpoint was pruned during workspace cleanup and must not be distributed as
+the stable runtime.

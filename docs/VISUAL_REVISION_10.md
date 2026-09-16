@@ -57,6 +57,6 @@ python tools/build_uniform_pitch_patch.py --style clean-v10 --output local-debug
 ```
 
 Use new output directories and locally owned source assets. Omitting `--style`
-retains the historical v9 recipe for reproducibility. A recipe snapshot is in
-the v10 folder. For copy paths and rollback see the
-[v10 README](local-debug/visual-v10-20260831/README.md).
+retains the historical v9 recipe for reproducibility. The former v10 local
+checkpoint and its README were pruned during workspace cleanup; this document
+is now the durable record of that experiment.

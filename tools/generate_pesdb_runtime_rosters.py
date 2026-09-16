@@ -47,7 +47,7 @@ DEFAULT_TACTICS_FORMATION = Path(
     "common/etc/pesdb/TacticsFormation.bin"
 )
 DEFAULT_OUTPUT = Path("source/exhibition_rosters_pesdb_generated.inc")
-DEFAULT_REPORT = Path("PESDB_RUNTIME_ROSTERS.md")
+DEFAULT_REPORT = Path("docs/PESDB_RUNTIME_ROSTERS.md")
 DEFAULT_METADATA_OUTPUT = Path(
     "local-debug/pesdb-runtime-rosters-generated.json"
 )

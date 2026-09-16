@@ -54,7 +54,9 @@ entries and native key mapping. Staged-runtime audit checked retained camera,
 cursor, opacity and helper code; config/render/allocator/data files are unchanged
 from the stable snapshot. V14 pitch hash is unchanged.
 
-See [test instructions](local-debug/native-pad-lab-v2-20260901/README.md).
+The former test instructions were stored in
+`local-debug/native-pad-lab-v2-20260901/README.md`; that disposable binary
+checkpoint was pruned during workspace cleanup.
 See [accepted V1 scope](NATIVE_MAPPING_BASELINE_V1.md).
 
 Stable production combination:

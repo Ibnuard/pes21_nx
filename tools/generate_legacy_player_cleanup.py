@@ -35,7 +35,7 @@ DEFAULT_PES21_DIR = Path(
 DEFAULT_ACTIVE_ROSTERS = Path("source/exhibition_rosters_ef10.inc")
 DEFAULT_CONFIG = Path("data/exhibition_team_categories.json")
 DEFAULT_OUTPUT = Path("data/exhibition_legacy_player_cleanup.json")
-DEFAULT_REPORT = Path("EFOOTBALL10_LEGACY_CLEANUP.md")
+DEFAULT_REPORT = Path("docs/EFOOTBALL10_LEGACY_CLEANUP.md")
 ACTIVE_ROSTER_SYMBOL = "exhibition_ef10_master_rosters"
 
 

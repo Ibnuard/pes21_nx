@@ -10,7 +10,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AUDIT_JSON = ROOT / "data" / "exhibition_ef10_only_teams.json"
-AUDIT_REPORT = ROOT / "EFOOTBALL10_ONLY_TEAMS.md"
+AUDIT_REPORT = ROOT / "docs" / "EFOOTBALL10_ONLY_TEAMS.md"
+AUDIT_FIXTURES = (
+    ROOT / "local-debug/efootball10-audit/tables/common/etc/pesdb/Team.bin",
+    ROOT / "local-debug/efootball10-audit/tables/common/etc/pesdb/Player.bin",
+    ROOT
+    / "local-debug/efootball10-audit/tables/common/etc/pesdb/PlayerAssignment.bin",
+    ROOT
+    / "local-debug/efootball10-audit/tables/common/etc/pesdb/CategoryTeamList.bin",
+    ROOT
+    / "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/pesdb/Team.bin",
+    ROOT
+    / "local-debug/efootball10-audit/compare/old_dt200_mobile_all.cpk/common/etc/pesdb/Player.bin",
+)
 
 
 class Ef10OnlyTeamAuditTests(unittest.TestCase):
@@ -21,6 +33,9 @@ class Ef10OnlyTeamAuditTests(unittest.TestCase):
         cls.by_id = {int(row["ef10_team_id"]): row for row in cls.rows}
 
     def test_generated_outputs_are_current(self) -> None:
+        missing = [path for path in AUDIT_FIXTURES if not path.is_file()]
+        if missing:
+            self.skipTest("local EF10/PES21 audit fixtures are not populated")
         subprocess.run(
             [
                 sys.executable,

@@ -4,7 +4,8 @@
   "status": "stable-user-hardware-confirmed",
   "verification": "User confirmed recovery v6 Barca kit, celebration and pause; then confirmed Madrid v7 stable.",
   "dist": "dist/pes21_nx",
-  "source_artifacts": "local-debug/native-license-v7-madrid-preserve-order",
+  "source_artifacts": null,
+  "historical_source_artifacts": "local-debug/native-license-v7-madrid-preserve-order",
   "files": {
     "pes21_nx.nro": {
       "mode": "production",
@@ -16,6 +17,7 @@
       "sha256": "206720b6c6378dad462d9aa5de2e2e9207992826f70158948175106282b92904"
     }
   },
-  "migration_guide": "KITS_LOGOS_STABLE_MIGRATION.md",
+  "migration_guide": "docs/KITS_LOGOS_STABLE_MIGRATION.md",
+  "artifact_status": "historical source artifact pruned during workspace cleanup",
   "full_ef10_face_transfer_complete": false
 }

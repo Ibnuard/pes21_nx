@@ -1,17 +1,56 @@
 [CmdletBinding()]
 param(
-  [string]$Root = (Split-Path -Parent $PSScriptRoot),
+  [string]$Root,
   [long]$MaxFileBytes = 1MB
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($Root)) {
+  $scriptPath = $MyInvocation.MyCommand.Path
+  if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+    throw "Unable to resolve the script path; pass -Root explicitly."
+  }
+  $Root = Split-Path -Parent (Split-Path -Parent $scriptPath)
+}
 $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\', '/')
 $allowedBinaries = @(
   "data/silent.bin",
   # Generated RGBA atlas linked into the controller overlay by bin2o.
-  "data/badge_atlas.bin"
+  "data/badge_atlas.bin",
+  "data/main_menu_background.bin",
+  "data/main_menu_brand.bin",
+  "data/main_menu_button_a.bin",
+  "data/main_menu_button_b.bin",
+  "data/main_menu_icons.bin",
+  "data/main_menu_portrait_2player.bin",
+  "data/main_menu_portrait_credits.bin",
+  "data/main_menu_portrait_exhibition.bin",
+  "data/main_menu_portrait_settings.bin",
+  "data/switch_button_down.bin",
+  "data/switch_button_l.bin",
+  "data/switch_button_left.bin",
+  "data/switch_button_ls.bin",
+  "data/switch_button_right.bin",
+  "data/switch_button_rs.bin",
+  "data/switch_button_sl.bin",
+  "data/switch_button_sr.bin",
+  "data/switch_button_up.bin",
+  "data/switch_button_x.bin",
+  "data/switch_button_y.bin",
+  "data/switch_button_zl.bin",
+  "data/switch_button_zr.bin"
 )
-$allowedLargeFiles = @()
+$allowedAssetFiles = @(
+  "assets/fonts/efootball/efootballsans-bold.ttf",
+  "assets/fonts/efootball/efootballsans-light.ttf",
+  "assets/fonts/efootball/efootballsans-regular.ttf",
+  "assets/fonts/efootball/efootballstencil-regular.ttf"
+)
+$allowedLargeFiles = @(
+  "source/efootball_font_atlas.h",
+  "source/team_select_background.h"
+)
+$allowedLargePrefixes = @("art/")
 $allowedPlaceholders = @(
   "runtime-template/assets/responses/.donotdelete",
   "runtime-template/download/.donotdelete",
@@ -69,8 +108,14 @@ foreach ($file in $files) {
     continue
   }
 
+  $isAllowedAssetFile = $allowedAssetFiles -contains $relativeLower
+  $isAllowedLargePrefix = @(
+    $allowedLargePrefixes | Where-Object { $relativeLower.StartsWith($_) }
+  ).Count -gt 0
+
   foreach ($part in $parts[0..([Math]::Max(0, $parts.Length - 2))]) {
-    if ($forbiddenDirectories -contains $part -or $part -like ".codex-*") {
+    if ((($forbiddenDirectories -contains $part) -and -not $isAllowedAssetFile) -or
+        $part -like ".codex-*") {
       $failures.Add("forbidden directory: $relative")
       break
     }
@@ -87,7 +132,8 @@ foreach ($file in $files) {
 
   if ($file.Length -gt $MaxFileBytes -and
       $allowedBinaries -notcontains $relativeLower -and
-      $allowedLargeFiles -notcontains $relativeLower) {
+      $allowedLargeFiles -notcontains $relativeLower -and
+      -not $isAllowedLargePrefix) {
     $failures.Add("unexpected large file ($($file.Length) bytes): $relative")
   }
 

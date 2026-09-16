@@ -38,7 +38,7 @@ DEFAULT_EF10_TACTICS_DIR = Path(
 DEFAULT_SYMBOL_ROOT = Path("local-debug/cpk-emblem-check/common/render/symbol")
 DEFAULT_ACTIVE_EF10_ROSTERS = Path("source/exhibition_rosters_ef10.inc")
 DEFAULT_LEGACY_CLEANUP = Path("data/exhibition_legacy_player_cleanup.json")
-DEFAULT_LEGACY_CLEANUP_REPORT = Path("EFOOTBALL10_LEGACY_CLEANUP.md")
+DEFAULT_LEGACY_CLEANUP_REPORT = Path("docs/EFOOTBALL10_LEGACY_CLEANUP.md")
 DEFAULT_PESDB_ROSTERS = Path(
     "local-debug/pesdb-efootball-authentic-rosters-current-54-shirts.json"
 )
@@ -825,7 +825,7 @@ def main() -> None:
         default=Path("source/exhibition_rosters_pes21_generated.inc"),
     )
     parser.add_argument(
-        "--report-output", type=Path, default=Path("EXHIBITION_TEAM_CATALOG.md")
+        "--report-output", type=Path, default=Path("docs/EXHIBITION_TEAM_CATALOG.md")
     )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()

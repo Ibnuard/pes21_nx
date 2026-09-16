@@ -105,6 +105,8 @@ before preparing a clean installation.
 For release history and known limitations, see [CHANGELOG.md](CHANGELOG.md).
 For source builds and porting details, see
 [DEVELOPMENT.md](DEVELOPMENT.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+Subsystem notes, migration reports, and historical audits are indexed in
+[docs/README.md](docs/README.md).
 
 ## Known limitations
 
