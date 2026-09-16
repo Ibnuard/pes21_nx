@@ -34,6 +34,12 @@
 #ifndef PES_PLAYER_MIGRATION_CANARY
 #define PES_PLAYER_MIGRATION_CANARY 0
 #endif
+#ifndef PES_LOOSE_CPK_FULL
+#define PES_LOOSE_CPK_FULL 0
+#endif
+#if PES_LOOSE_CPK_FULL && !PES_PLAYER_MIGRATION_CANARY
+#error "Full loose CPK requires the matching player-migration build ID"
+#endif
 
 typedef struct {
   void *data;
@@ -587,6 +593,7 @@ static int32_t (*sound_cri_bind_cpk_original)(void *, void *, const char *,
                                             void *, int32_t, uint32_t *);
 
 static int pes_loose_cpk_hash(const char *path, unsigned char digest[32]) {
+  debugPrintf("loose-cpk: hashing %s\n", path);
   FILE *file = fopen(path, "rb");
   if (!file) return 0;
   unsigned char *buffer = malloc(65536);
@@ -600,6 +607,7 @@ static int pes_loose_cpk_hash(const char *path, unsigned char digest[32]) {
   fclose(file);
   free(buffer);
   if (ok) sha256ContextGetHash(&ctx, digest);
+  if (ok) debugPrintf("loose-cpk: hash complete %s\n", path);
   return ok;
 }
 
@@ -17399,10 +17407,13 @@ void install_ue4_hooks(so_module *module) {
 #else
       NULL,
 #endif
+      PES_LOOSE_CPK_FULL,
       pes_loose_cpk_hash, loose_error, sizeof(loose_error));
   if (loose_enabled < 0) fatal_error("%s", loose_error);
-  debugPrintf("loose-cpk: mode=%s (dt200/dt241)\n",
-              loose_enabled ? "verified loose canary" : "original OBB");
+  debugPrintf("loose-cpk: mode=%s\n",
+              loose_enabled == 2 ? "verified full loose package (24 CPKs)" :
+              loose_enabled == 1 ? "verified loose canary (dt200/dt241)" :
+                                   "original OBB");
   sound_cri_bind_cpk_original =
       (void *)so_find_addr_rx(module, "criFsBinder_BindCpk");
 #ifndef DEBUG_LOG

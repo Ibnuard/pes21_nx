@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare/verify a two-pack loose CPK canary from a user-owned patch OBB.
+"""Prepare, verify, and update loose CPK runtime packages.
 
-The parent OBB is retained. Updates replace one CPK and publish the manifest
-last; an interrupted copy fails runtime validation instead of falling back.
+V1 is the two-pack hardware canary and retains the original OBB. V2 extracts
+all 24 nested CPKs and emits a tiny valid OBB containing placeholder members.
 """
 from __future__ import annotations
 
@@ -12,11 +12,46 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 
 from prepare_runtime import read_cpk_packet
+from repack_cpk_members import patch_utf_rows
 
-NAMES = ('dt200_mobile_all.cpk', 'dt241_mobile_all.cpk')
-MAGIC = 'PESNX_LOOSE_CPK_V1'
+PATCH_OBB = 'patch.305030001.jp.nyan2021.pesam.obb'
+CANARY_NAMES = ('dt200_mobile_all.cpk', 'dt241_mobile_all.cpk')
+FULL_NAMES = (
+    'dt120_mobile_all.cpk',
+    'dt200_mobile_all.cpk',
+    'dt210_mobile_android.cpk',
+    'dt220_mobile_all.cpk',
+    'dt230_mobile_all.cpk',
+    'dt240_mobile_all.cpk',
+    'dt241_mobile_all.cpk',
+    'dt250_mobile_all.cpk',
+    'dt260_mobile_all.cpk',
+    'dt270_mobile_all.cpk',
+    'dt500_mobile_all.cpk',
+    'dt520_mobile_all.cpk',
+    'dt530_mobile_bra_all.cpk',
+    'dt530_mobile_can_all.cpk',
+    'dt530_mobile_eng_all.cpk',
+    'dt530_mobile_fra_all.cpk',
+    'dt530_mobile_ger_all.cpk',
+    'dt530_mobile_ita_all.cpk',
+    'dt530_mobile_jpn_all.cpk',
+    'dt530_mobile_kor_all.cpk',
+    'dt530_mobile_man_all.cpk',
+    'dt530_mobile_spa_all.cpk',
+    'dt540_mobile_all.cpk',
+    'dt700_mobile_android.cpk',
+)
+NAMES = CANARY_NAMES
+MAGIC_V1 = 'PESNX_LOOSE_CPK_V1'
+MAGIC_V2 = 'PESNX_LOOSE_CPK_V2'
+
+
+def align(value: int, boundary: int) -> int:
+    return (value + boundary - 1) // boundary * boundary
 
 
 def digest(path: Path) -> str:
@@ -24,45 +59,93 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def checked_cpk(path: Path) -> None:
+def member_name(row: dict) -> str:
+    return '/'.join(
+        str(part) for part in (row.get('DirName'), row.get('FileName'))
+        if part not in (None, '', '<NULL>')
+    )
+
+
+def cpk_layout(path: Path) -> tuple[dict, list[dict], int]:
     with path.open('rb') as stream:
-        rows = read_cpk_packet(stream, 0, b'CPK ')
-        if len(rows) != 1:
+        header_rows = read_cpk_packet(stream, 0, b'CPK ')
+        if len(header_rows) != 1:
             raise ValueError(f'Invalid CPK header: {path}')
-        header = rows[0]
+        header = header_rows[0]
         toc = int(header['TocOffset'])
-        base = min(toc, int(header['ContentOffset']))
-        members = read_cpk_packet(stream, toc, b'TOC ')
-        size = path.stat().st_size
-        if not members:
-            raise ValueError(f'Empty CPK: {path}')
-        for row in members:
-            offset, length = base + int(row['FileOffset']), int(row['FileSize'])
-            if offset < 0 or length < 0 or offset + length > size:
-                raise ValueError(f'Out-of-bounds CPK member: {path}')
+        rows = read_cpk_packet(stream, toc, b'TOC ')
+        return header, rows, min(toc, int(header['ContentOffset']))
 
 
-def read_manifest(root: Path) -> tuple[str, int, list[dict]]:
+def checked_cpk(path: Path) -> None:
+    _header, rows, base = cpk_layout(path)
+    size = path.stat().st_size
+    if not rows:
+        raise ValueError(f'Empty CPK: {path}')
+    for row in rows:
+        offset, length = base + int(row['FileOffset']), int(row['FileSize'])
+        if offset < 0 or length < 0 or offset + length > size:
+            raise ValueError(f'Out-of-bounds CPK member: {path}')
+
+
+def source_members(obb: Path, expected: tuple[str, ...]) -> list[tuple[str, int, int]]:
+    _header, rows, base = cpk_layout(obb)
+    layout = tuple(member_name(row).removeprefix('Expansion/') for row in rows)
+    if expected == FULL_NAMES and layout != FULL_NAMES:
+        raise ValueError('Source OBB does not have the approved 24-member layout')
+    result = []
+    size = obb.stat().st_size
+    by_name = {member_name(row).removeprefix('Expansion/'): row for row in rows}
+    for name in expected:
+        row = by_name.get(name)
+        if row is None:
+            raise ValueError(f'Missing source member: {name}')
+        length = int(row['FileSize'])
+        offset = base + int(row['FileOffset'])
+        if (length != int(row['ExtractSize']) or length <= 0 or offset < 0 or
+                offset + length > size):
+            raise ValueError(f'Compressed/invalid source member: {name}')
+        result.append((name, offset, length))
+    return result
+
+
+def read_manifest(root: Path) -> dict:
     lines = (root / 'LooseCpk/manifest.txt').read_text(encoding='ascii').splitlines()
-    if len(lines) != 3:
-        raise ValueError('Manifest must contain header and exactly two CPKs')
-    magic, build, parent_size = lines[0].split()
-    if magic != MAGIC or not re.fullmatch('[0-9a-f]{16}', build):
-        raise ValueError('Invalid manifest version/build ID')
-    rows = []
-    for name, line in zip(NAMES, lines[1:]):
-        actual, size, sha = line.split()
-        if actual != name or int(size) <= 0 or not re.fullmatch('[0-9a-f]{64}', sha):
-            raise ValueError(f'Invalid manifest entry: {line}')
-        rows.append(dict(name=name, size=int(size), sha256=sha))
-    if int(parent_size) <= 0:
+    if not lines:
+        raise ValueError('Empty loose CPK manifest')
+    header = lines[0].split()
+    if len(header) == 3 and header[0] == MAGIC_V1:
+        version, names, parent_sha = 1, CANARY_NAMES, None
+    elif len(header) == 4 and header[0] == MAGIC_V2:
+        version, names, parent_sha = 2, FULL_NAMES, header[3]
+        if not re.fullmatch('[0-9a-f]{64}', parent_sha):
+            raise ValueError('Invalid dummy OBB hash')
+    else:
+        raise ValueError('Invalid loose CPK manifest header')
+    if len(lines) != len(names) + 1 or not re.fullmatch('[0-9a-f]{16}', header[1]):
+        raise ValueError('Invalid manifest version/build ID or entry count')
+    parent_size = int(header[2])
+    if parent_size <= 0:
         raise ValueError('Invalid parent OBB size')
-    return build, int(parent_size), rows
+    rows = []
+    for name, line in zip(names, lines[1:]):
+        fields = line.split()
+        if (len(fields) != 3 or fields[0] != name or int(fields[1]) <= 0 or
+                not re.fullmatch('[0-9a-f]{64}', fields[2])):
+            raise ValueError(f'Invalid manifest entry: {line}')
+        rows.append(dict(name=name, size=int(fields[1]), sha256=fields[2]))
+    return dict(version=version, build_id=header[1], parent_obb_bytes=parent_size,
+                parent_obb_sha256=parent_sha, files=rows)
 
 
-def write_manifest(root: Path, build: str, parent_size: int, rows: list[dict]) -> None:
-    text = f'{MAGIC} {build} {parent_size}\n'
-    text += ''.join(f"{r['name']} {r['size']} {r['sha256']}\n" for r in rows)
+def write_manifest(root: Path, manifest: dict) -> None:
+    magic = MAGIC_V2 if manifest['version'] == 2 else MAGIC_V1
+    text = f"{magic} {manifest['build_id']} {manifest['parent_obb_bytes']}"
+    if manifest['version'] == 2:
+        text += f" {manifest['parent_obb_sha256']}"
+    text += '\n'
+    text += ''.join(f"{r['name']} {r['size']} {r['sha256']}\n"
+                    for r in manifest['files'])
     path = root / 'LooseCpk/manifest.txt'
     temp = path.with_suffix('.part')
     with temp.open('x', encoding='ascii', newline='\n') as stream:
@@ -72,42 +155,97 @@ def write_manifest(root: Path, build: str, parent_size: int, rows: list[dict]) -
     os.replace(temp, path)
 
 
+def checked_dummy_obb(path: Path) -> None:
+    _header, rows, base = cpk_layout(path)
+    layout = tuple(member_name(row).removeprefix('Expansion/') for row in rows)
+    if layout != FULL_NAMES:
+        raise ValueError('Dummy OBB member list/order mismatch')
+    with path.open('rb') as stream:
+        for row in rows:
+            if int(row['FileSize']) != 4 or int(row['ExtractSize']) != 4:
+                raise ValueError('Dummy OBB contains a non-placeholder member')
+            stream.seek(base + int(row['FileOffset']))
+            if stream.read(4) != b'CPK ':
+                raise ValueError('Dummy OBB placeholder signature mismatch')
+
+
+def build_dummy_obb(source_path: Path, output_path: Path) -> None:
+    header, rows, data_base = cpk_layout(source_path)
+    layout = tuple(member_name(row).removeprefix('Expansion/') for row in rows)
+    if layout != FULL_NAMES:
+        raise ValueError('Cannot build dummy from an unexpected OBB layout')
+    toc_offset = int(header['TocOffset'])
+    content_offset = int(header['ContentOffset'])
+    alignment = int(header['Align'])
+    with source_path.open('rb') as source:
+        prefix = bytearray(source.read(content_offset))
+        if len(prefix) != content_offset:
+            raise ValueError('Truncated OBB prefix')
+        cursor = content_offset
+        updates = [{} for _ in rows]
+        payload_offsets = []
+        for row_index, row in sorted(enumerate(rows), key=lambda item: int(item[1]['FileOffset'])):
+            cursor = align(cursor, alignment)
+            updates[row_index] = dict(FileOffset=cursor - data_base, FileSize=4, ExtractSize=4)
+            payload_offsets.append(cursor)
+            cursor += 4
+        final_size = align(cursor, alignment)
+
+        source.seek(toc_offset)
+        toc_packet_header = source.read(16)
+        toc_packet_size = struct.unpack_from('<Q', toc_packet_header, 8)[0]
+        toc_packet = source.read(toc_packet_size)
+        patched_toc = patch_utf_rows(toc_packet, updates)
+        prefix[toc_offset + 16:toc_offset + 16 + toc_packet_size] = patched_toc
+
+        source.seek(0)
+        cpk_packet_header = source.read(16)
+        cpk_packet_size = struct.unpack_from('<Q', cpk_packet_header, 8)[0]
+        cpk_packet = source.read(cpk_packet_size)
+        header_update = dict(ContentSize=final_size - content_offset,
+                             EnabledPackedSize=4 * len(rows),
+                             EnabledDataSize=4 * len(rows), Files=len(rows))
+        patched_header = patch_utf_rows(cpk_packet, [header_update])
+        prefix[16:16 + cpk_packet_size] = patched_header
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open('xb') as output:
+        output.write(prefix)
+        for offset in payload_offsets:
+            if output.tell() < offset:
+                output.write(b'\0' * (offset - output.tell()))
+            if output.tell() != offset:
+                raise RuntimeError('Dummy OBB content offset ordering failure')
+            output.write(b'CPK ')
+        if output.tell() < final_size:
+            output.write(b'\0' * (final_size - output.tell()))
+    checked_dummy_obb(output_path)
+
+
 def verify(root: Path, obb: Path | None = None) -> dict:
-    build, parent_size, rows = read_manifest(root)
-    if obb is not None and obb.stat().st_size != parent_size:
-        raise ValueError('Parent OBB size mismatch')
-    for row in rows:
+    result = read_manifest(root)
+    if result['version'] == 1:
+        if obb is not None and obb.stat().st_size != result['parent_obb_bytes']:
+            raise ValueError('Parent OBB size mismatch')
+    else:
+        dummy = root / PATCH_OBB
+        if (dummy.stat().st_size != result['parent_obb_bytes'] or
+                digest(dummy) != result['parent_obb_sha256']):
+            raise ValueError('Missing/corrupt dummy OBB')
+        checked_dummy_obb(dummy)
+    for row in result['files']:
         path = root / 'LooseCpk' / row['name']
-        if path.is_symlink() or path.stat().st_size != row['size'] or digest(path) != row['sha256']:
+        if (path.is_symlink() or path.stat().st_size != row['size'] or
+                digest(path) != row['sha256']):
             raise ValueError(f"Missing/corrupt loose CPK: {row['name']}")
         checked_cpk(path)
-    return dict(build_id=build, parent_obb_bytes=parent_size, files=rows)
+    return result
 
 
-def extract(obb: Path, root: Path, build: str) -> dict:
-    if not re.fullmatch('[0-9a-f]{16}', build):
-        raise ValueError('Build ID must contain 16 lowercase hexadecimal characters')
-    target = root / 'LooseCpk'
-    if target.exists():
-        raise ValueError(f'Refusing to overwrite existing package: {target}')
+def extract_members(obb: Path, target: Path, names: tuple[str, ...]) -> list[dict]:
+    selected = source_members(obb, names)
+    rows = []
     with obb.open('rb') as stream:
-        header = read_cpk_packet(stream, 0, b'CPK ')[0]
-        toc = int(header['TocOffset'])
-        base = min(toc, int(header['ContentOffset']))
-        entries = read_cpk_packet(stream, toc, b'TOC ')
-        selected = []
-        for name in NAMES:
-            matches = [r for r in entries if r['FileName'] == name]
-            if len(matches) != 1:
-                raise ValueError(f'Expected one source member: {name}')
-            row = matches[0]
-            size = int(row['FileSize'])
-            offset = base + int(row['FileOffset'])
-            if size != int(row['ExtractSize']) or size <= 0 or offset < 0 or offset + size > obb.stat().st_size:
-                raise ValueError(f'Compressed/invalid source member: {name}')
-            selected.append((name, offset, size))
-        target.mkdir(parents=True)
-        rows = []
         for name, offset, size in selected:
             stream.seek(offset)
             destination = target / name
@@ -125,23 +263,60 @@ def extract(obb: Path, root: Path, build: str) -> dict:
             checked_cpk(temp)
             os.replace(temp, destination)
             rows.append(dict(name=name, size=size, sha256=sha.hexdigest()))
-    write_manifest(root, build, obb.stat().st_size, rows)
+    return rows
+
+
+def extract(obb: Path, root: Path, build: str) -> dict:
+    if not re.fullmatch('[0-9a-f]{16}', build):
+        raise ValueError('Build ID must contain 16 lowercase hexadecimal characters')
+    target = root / 'LooseCpk'
+    if target.exists():
+        raise ValueError(f'Refusing to overwrite existing package: {target}')
+    target.mkdir(parents=True)
+    rows = extract_members(obb, target, CANARY_NAMES)
+    manifest = dict(version=1, build_id=build, parent_obb_bytes=obb.stat().st_size,
+                    parent_obb_sha256=None, files=rows)
+    write_manifest(root, manifest)
     result = verify(root, obb)
     result['source_obb_sha256'] = digest(obb)
     (root / 'loose-cpk-source.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     return result
 
 
-def update(root: Path, member: str, source: Path) -> dict:
-    if member not in NAMES:
-        raise ValueError('Only dt200 and dt241 are supported in this canary')
+def extract_full(obb: Path, root: Path, build: str) -> dict:
+    if not re.fullmatch('[0-9a-f]{16}', build):
+        raise ValueError('Build ID must contain 16 lowercase hexadecimal characters')
+    target = root / 'LooseCpk'
+    dummy = root / PATCH_OBB
+    if target.exists() or dummy.exists():
+        raise ValueError(f'Refusing to overwrite existing full package: {root}')
+    target.mkdir(parents=True)
+    rows = extract_members(obb, target, FULL_NAMES)
+    build_dummy_obb(obb, dummy)
+    manifest = dict(version=2, build_id=build, parent_obb_bytes=dummy.stat().st_size,
+                    parent_obb_sha256=digest(dummy), files=rows)
+    write_manifest(root, manifest)
     result = verify(root)
+    result['source_obb_bytes'] = obb.stat().st_size
+    result['source_obb_sha256'] = digest(obb)
+    (root / 'loose-cpk-source.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    return result
+
+
+def update(root: Path, member: str, source: Path) -> dict:
+    result = verify(root)
+    names = tuple(row['name'] for row in result['files'])
+    if member not in names:
+        raise ValueError(f'Unsupported member for this package: {member}')
     checked_cpk(source)
     destination = root / 'LooseCpk' / member
     sha = digest(source)
-    row = next(r for r in result['files'] if r['name'] == member)
+    row = next(row for row in result['files'] if row['name'] == member)
     if row['sha256'] == sha:
         return dict(result, changed=[])
+    cache = root / 'LooseCpk/verified-v2.txt'
+    if result['version'] == 2:
+        cache.unlink(missing_ok=True)
     temp = destination.with_suffix('.part')
     with source.open('rb') as src, temp.open('xb') as out:
         while chunk := src.read(1024 * 1024):
@@ -153,27 +328,30 @@ def update(root: Path, member: str, source: Path) -> dict:
     size = temp.stat().st_size
     os.replace(temp, destination)
     row.update(size=size, sha256=sha)
-    write_manifest(root, result['build_id'], result['parent_obb_bytes'], result['files'])
+    write_manifest(root, result)
     return dict(verify(root), changed=[f'LooseCpk/{member}', 'LooseCpk/manifest.txt'])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
-    p = sub.add_parser('extract')
-    p.add_argument('--obb', type=Path, required=True)
-    p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--build-id', required=True)
+    for command in ('extract', 'extract-full'):
+        p = sub.add_parser(command)
+        p.add_argument('--obb', type=Path, required=True)
+        p.add_argument('--output', type=Path, required=True)
+        p.add_argument('--build-id', required=True)
     p = sub.add_parser('verify')
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--obb', type=Path)
     p = sub.add_parser('update')
     p.add_argument('--root', type=Path, required=True)
-    p.add_argument('--member', choices=NAMES, required=True)
+    p.add_argument('--member', required=True)
     p.add_argument('--file', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'extract':
         result = extract(args.obb, args.output, args.build_id)
+    elif args.command == 'extract-full':
+        result = extract_full(args.obb, args.output, args.build_id)
     elif args.command == 'verify':
         result = verify(args.root, args.obb)
     else:

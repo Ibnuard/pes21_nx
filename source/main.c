@@ -106,7 +106,11 @@ typedef struct {
 #endif
 
 #if PES_PLAYER_MIGRATION_CANARY
+#if PES_LOOSE_CPK_FULL
+#define PATCH_BUILD_LABEL "PES21PLAYERMIGRATION full loose CPK"
+#else
 #define PATCH_BUILD_LABEL "PES21PLAYERMIGRATION canary"
+#endif
 #else
 #define PATCH_BUILD_LABEL "Inter Miami FL2026 v1"
 #endif

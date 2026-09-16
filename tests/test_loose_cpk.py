@@ -9,7 +9,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
-from prepare_loose_cpk import extract, update, verify, NAMES
+from prepare_loose_cpk import (extract, extract_full, update, verify, NAMES,
+                               FULL_NAMES, PATCH_OBB)
 
 
 def table(rows):
@@ -35,18 +36,25 @@ def table(rows):
 
 
 def cpk(members):
-    offset, rows = 1024, []
+    toc_offset, content_offset = 4096, 8192
+    offset, rows = content_offset, []
     for name, payload in members.items():
-        rows.append(dict(FileName=name, FileOffset=offset-256,
+        rows.append(dict(FileName=name, FileOffset=offset-toc_offset,
                          FileSize=len(payload), ExtractSize=len(payload)))
         offset += len(payload)
     def packet(sig, rows):
         data = table(rows)
         return struct.pack('<4s4xQ', sig, len(data)) + data
-    header = packet(b'CPK ', [dict(TocOffset=256, ContentOffset=1024)])
+    header = packet(b'CPK ', [dict(TocOffset=toc_offset, ContentOffset=content_offset,
+                                   ContentSize=offset-content_offset, Align=1,
+                                   EnabledPackedSize=offset-content_offset,
+                                   EnabledDataSize=offset-content_offset,
+                                   Files=len(rows))])
     toc = packet(b'TOC ', rows)
-    assert len(header) <= 256 and len(toc) <= 768
-    return header.ljust(256, b'\0') + toc.ljust(768, b'\0') + b''.join(members.values())
+    assert len(header) <= toc_offset and len(toc) <= content_offset-toc_offset
+    return (header.ljust(toc_offset, b'\0') +
+            toc.ljust(content_offset-toc_offset, b'\0') +
+            b''.join(members.values()))
 
 
 class PackageTests(unittest.TestCase):
@@ -86,6 +94,29 @@ class PackageTests(unittest.TestCase):
                 extract(obb, root/'package', '81f096d278e1225b')
             self.assertFalse((root/'package/LooseCpk/manifest.txt').exists())
 
+    def test_full_extract_emits_tiny_valid_obb_and_all_members(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            obb, out = root/'source.obb', root/'package'
+            payloads = {n: cpk({'asset.bin': n.encode()}) for n in FULL_NAMES}
+            obb.write_bytes(cpk(payloads))
+            result = extract_full(obb, out, '81f096d278e1225b')
+            self.assertEqual(result['version'], 2)
+            self.assertEqual([row['name'] for row in result['files']], list(FULL_NAMES))
+            dummy = out/PATCH_OBB
+            self.assertLess(dummy.stat().st_size, obb.stat().st_size // 2)
+            self.assertEqual(verify(out)['parent_obb_sha256'], hashlib.sha256(dummy.read_bytes()).hexdigest())
+            for name in FULL_NAMES:
+                self.assertEqual((out/'LooseCpk'/name).read_bytes(), payloads[name])
+
+            replacement = root/'replacement.cpk'
+            replacement.write_bytes(cpk({'asset.bin': b'new full payload'}))
+            (out/'LooseCpk/verified-v2.txt').write_text('stale cache\n')
+            changed = update(out, FULL_NAMES[-1], replacement)['changed']
+            self.assertEqual(changed, ['LooseCpk/'+FULL_NAMES[-1], 'LooseCpk/manifest.txt'])
+            self.assertFalse((out/'LooseCpk/verified-v2.txt').exists())
+            self.assertEqual((out/'LooseCpk'/FULL_NAMES[0]).read_bytes(), payloads[FULL_NAMES[0]])
+
 
 class RuntimeTests(unittest.TestCase):
     @classmethod
@@ -121,17 +152,18 @@ static int32_t sound_cri_bind_cpk_original(void *b,void *s,const char *p,void *w
         source += hooks[start:end]
         source += r'''
 int main(int argc,char **argv) {
- char error[256]; int expected=atoi(argv[1]);
+ char error[256]; int expected=atoi(argv[1]), require_full=atoi(argv[2]);
  assert(!pes_loose_cpk_path("/Expansion/dt200_mobile_all.cpk"));
- int result=pes_loose_cpk_init("81f096d278e1225b",hash_file,error,sizeof(error));
+ int result=pes_loose_cpk_init("81f096d278e1225b",require_full,hash_file,error,sizeof(error));
  if(result!=expected) { fprintf(stderr,"result=%d expected=%d %s",result,expected,error); return 1; }
  uint32_t id=0;
  pes_runtime_cri_bind_cpk((void*)1,(void*)2,"/Expansion/dt200_mobile_all.cpk",(void*)3,77,&id);
  assert(id==9);
- if(result==1) { assert(!seen_source); assert(!strcmp(seen_path,"./LooseCpk/dt200_mobile_all.cpk")); }
+ if(result>0) { assert(!seen_source); assert(!strcmp(seen_path,"./LooseCpk/dt200_mobile_all.cpk")); }
  else { assert(seen_source==(void*)2); assert(!strcmp(seen_path,"/Expansion/dt200_mobile_all.cpk")); }
  pes_runtime_cri_bind_cpk((void*)1,(void*)2,"/Expansion/dt240_mobile_all.cpk",(void*)3,77,&id);
- assert(seen_source==(void*)2 && !strcmp(seen_path,"/Expansion/dt240_mobile_all.cpk"));
+ if(result==2) { assert(!seen_source && !strcmp(seen_path,"./LooseCpk/dt240_mobile_all.cpk")); }
+ else { assert(seen_source==(void*)2 && !strcmp(seen_path,"/Expansion/dt240_mobile_all.cpk")); }
  pes_runtime_cri_bind_cpk((void*)1,0,"/Expansion/dt200_mobile_all.cpk",(void*)3,77,&id);
  assert(!seen_source && !strcmp(seen_path,"/Expansion/dt200_mobile_all.cpk"));
  assert(!pes_loose_cpk_path("/Other/dt200_mobile_all.cpk"));
@@ -147,9 +179,10 @@ int main(int argc,char **argv) {
     def test_manifest_validation_and_actual_bind_routing(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            def run(expected):
-                subprocess.run([str(self.exe), str(expected)], cwd=root, check=True, capture_output=True)
-            run(0)  # Legacy package: no manifest means unchanged binding.
+            def run(expected, require_full=0):
+                subprocess.run([str(self.exe), str(expected), str(require_full)], cwd=root,
+                               check=True, capture_output=True)
+            run(0)
             (root/'LooseCpk').mkdir()
             (root/'patch.305030001.jp.nyan2021.pesam.obb').write_bytes(b'OBB')
             manifest = root/'LooseCpk/manifest.txt'
@@ -169,4 +202,25 @@ int main(int argc,char **argv) {
             (root/'LooseCpk'/NAMES[0]).write_bytes(b'CPK')
             run(-1)
             (root/'LooseCpk'/NAMES[0]).unlink()
+            run(-1)
+
+    def test_full_manifest_routes_every_expansion_cpk_and_requires_manifest(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            def run(expected):
+                subprocess.run([str(self.exe), str(expected), '1'], cwd=root,
+                               check=True, capture_output=True)
+            run(-1)
+            (root/'LooseCpk').mkdir()
+            (root/PATCH_OBB).write_bytes(b'CPK \0')
+            text = 'PESNX_LOOSE_CPK_V2 81f096d278e1225b 5 '+'0'*64+'\n'
+            for name in FULL_NAMES:
+                (root/'LooseCpk'/name).write_bytes(b'CPK \0')
+                text += name+' 5 '+'0'*64+'\n'
+            (root/'LooseCpk/manifest.txt').write_text(text)
+            run(2)
+            self.assertTrue((root/'LooseCpk/verified-v2.txt').is_file())
+            run(2)
+            (root/'LooseCpk/manifest.txt').write_text(text.replace(
+                'dt540_mobile_all.cpk 5 ', 'dt540_mobile_all.cpk 6 '))
             run(-1)
