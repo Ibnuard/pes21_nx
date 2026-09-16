@@ -23,6 +23,7 @@ Subsystem notes and historical implementation audits live here.
 
 ## Runtime, controls, and UI
 
+- [Loose CPK canary](LOOSE_CPK_CANARY.md)
 - [Known issues](KNOWN_ISSUES.md)
 - [HUD render audit](HUD_RENDER_AUDIT.md)
 - [Native mapping baseline](NATIVE_MAPPING_BASELINE_V1.md)

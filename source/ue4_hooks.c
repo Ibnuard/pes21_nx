@@ -14,6 +14,7 @@
 #include "so_util.h"
 #include "ue4_hooks.h"
 #include "util.h"
+#include "loose_cpk.h"
 
 #define OBJECT_INITIALIZER_STATE_SLOTS 32
 #define OBJECT_INITIALIZER_MAX_ITEMS (1 << 20)
@@ -582,6 +583,42 @@ static int32_t pes_sound_language_string3_english(char *language,
   return 0;
 }
 
+static int32_t (*sound_cri_bind_cpk_original)(void *, void *, const char *,
+                                            void *, int32_t, uint32_t *);
+
+static int pes_loose_cpk_hash(const char *path, unsigned char digest[32]) {
+  FILE *file = fopen(path, "rb");
+  if (!file) return 0;
+  unsigned char *buffer = malloc(65536);
+  if (!buffer) { fclose(file); return 0; }
+  Sha256Context ctx;
+  sha256ContextCreate(&ctx);
+  size_t count;
+  while ((count = fread(buffer, 1, 65536, file)) != 0)
+    sha256ContextUpdate(&ctx, buffer, count);
+  const int ok = !ferror(file);
+  fclose(file);
+  free(buffer);
+  if (ok) sha256ContextGetHash(&ctx, digest);
+  return ok;
+}
+
+static int32_t pes_runtime_cri_bind_cpk(
+    void *binder, void *source_binder, const char *path, void *work,
+    int32_t work_size, uint32_t *bind_id) {
+  const char *loose = source_binder ? pes_loose_cpk_path(path) : NULL;
+  const int32_t result = sound_cri_bind_cpk_original(
+      binder, loose ? NULL : source_binder, loose ? loose : path,
+      work, work_size, bind_id);
+  if (loose) {
+    debugPrintf("loose-cpk: bind %s -> %s result=%d bind=%u\n",
+                path, loose, result, bind_id ? *bind_id : 0);
+    if (result != 0)
+      fatal_error("Loose CPK mount failed: %s (%d)", loose, result);
+  }
+  return result;
+}
+
 static uint32_t pes_use_commentary_enabled(void) {
   return 1;
 }
@@ -601,12 +638,6 @@ static int32_t (*sound_set_game_option_volume_original)(uint32_t type,
                                                         float volume);
 static int32_t (*sound_set_category_volume_original)(const char *category,
                                                      float volume);
-static int32_t (*sound_cri_bind_cpk_original)(void *binder,
-                                              void *source_binder,
-                                              const char *path,
-                                              void *work,
-                                              int32_t work_size,
-                                              uint32_t *bind_id);
 static float (*sound_get_category_volume)(const char *category);
 static float (*sound_get_category_total_volume)(const char *category);
 static unsigned int sound_play_log_count;
@@ -709,7 +740,7 @@ static int32_t pes_sound_set_category_volume_diagnostic(
 static int32_t pes_sound_cri_bind_cpk_diagnostic(
     void *binder, void *source_binder, const char *path, void *work,
     int32_t work_size, uint32_t *bind_id) {
-  const int32_t result = sound_cri_bind_cpk_original(
+  const int32_t result = pes_runtime_cri_bind_cpk(
       binder, source_binder, path, work, work_size, bind_id);
   debugPrintf("sound: criFsBinder_BindCpk path=%s result=%d bind=%u "
               "binder=%p source=%p work=%p/%d\n",
@@ -17361,6 +17392,29 @@ void install_ue4_hooks(so_module *module) {
                 (void *)sound_language_string3_plt,
                 (void *)use_commentary_plt);
   }
+  char loose_error[256];
+  const int loose_enabled = pes_loose_cpk_init(
+#if PES_PLAYER_MIGRATION_CANARY
+      (const char *)exhibition_player_migration_build_id,
+#else
+      NULL,
+#endif
+      pes_loose_cpk_hash, loose_error, sizeof(loose_error));
+  if (loose_enabled < 0) fatal_error("%s", loose_error);
+  debugPrintf("loose-cpk: mode=%s (dt200/dt241)\n",
+              loose_enabled ? "verified loose canary" : "original OBB");
+  sound_cri_bind_cpk_original =
+      (void *)so_find_addr_rx(module, "criFsBinder_BindCpk");
+#ifndef DEBUG_LOG
+  const uintptr_t loose_bind_plt = (uintptr_t)module->load_base + 0x3860390;
+  static const uint32_t expected_loose_bind_plt[4] = {
+      0xd002e470, 0xf9421211, 0x91108210, 0xd61f0220,
+  };
+  if (memcmp((const void *)loose_bind_plt, expected_loose_bind_plt,
+             sizeof(expected_loose_bind_plt)))
+    fatal_error("Unexpected loose CPK binder PLT entry");
+  hook_arm64(loose_bind_plt, (uintptr_t)&pes_runtime_cri_bind_cpk);
+#endif
 #ifdef DEBUG_LOG
   sound_cinf_play_original =
       (void *)so_find_addr_rx(module,
@@ -17380,8 +17434,6 @@ void install_ue4_hooks(so_module *module) {
   sound_set_category_volume_original =
       (void *)so_find_addr_rx(
           module, "_ZN2KS8CInfBase17SetCategoryVolumeEPKcf");
-  sound_cri_bind_cpk_original =
-      (void *)so_find_addr_rx(module, "criFsBinder_BindCpk");
   sound_get_category_volume =
       (void *)so_find_addr_rx(module,
                               "criAtomExCategory_GetVolumeByName");
