@@ -13031,15 +13031,13 @@ static uint32_t match_broadcast_stabilize_target(float *target_position,
   if (!isfinite(distance) || distance <= deadzone)
     return 0u;
 
-  // Do not feed sub-threshold ball physics into the camera every frame. Once
-  // the ball leaves the safe area, smoothly ramp a modest correction over
-  // eight native units. Smoothstep removes the old hard-threshold jump while
-  // retaining the stock camera target as the dominant source of motion.
-  float ramp = (distance - deadzone) / 8.0f;
-  if (ramp > 1.0f)
-    ramp = 1.0f;
-  const float smooth = ramp * ramp * (3.0f - 2.0f * ramp);
-  const float gain = 0.35f * smooth;
+  // Bound native anticipation/lag rather than retaining a fixed fraction of
+  // arbitrarily large errors. The residual smoothly saturates at 18 units;
+  // its derivative is one at the deadzone, avoiding an abrupt velocity step.
+  // No velocity extrapolation: both forward and backward passes use live XY.
+  const float residual = deadzone + 4.0f *
+      (1.0f - expf(-(distance - deadzone) / 4.0f));
+  const float gain = 1.0f - residual / distance;
   target_position[0] += offset_x * gain;
   target_position[1] += offset_y * gain;
   return 1u;
@@ -14330,6 +14328,9 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
                 trace_calls, window, pad_status);
   (void)pad_status;
   if (window) {
+    // Pause and its settings children can rebuild the native camera without
+    // replacing BallInfo. Require fresh movement again on return to play.
+    match_broadcast_ball_tracking_ready(NULL, NULL);
     match_pause_apply_owner_side();
     // Visual-only replacement. Keep native choice activation, event routing
     // and confirmation dialogs intact. Fail open if this layout is absent.

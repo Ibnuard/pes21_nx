@@ -199,6 +199,8 @@ static struct {
   GLuint scene_texture;
   unsigned int scene_compose_pending;
   unsigned int scene_compose_count;
+  struct { GLuint texture, framebuffer; GLint width, height; } completed_scene[8];
+  unsigned int completed_scene_next;
 } g_mc[MC_SLOTS];
 static __thread int g_mc_tls_slot = -1;
 static __thread void *g_mc_tls_key;
@@ -627,12 +629,30 @@ static void gl_diag_dump_program_once(GLuint program) {
 
 // Identify the first default-framebuffer draw that samples the most recently
 // observed non-black offscreen color attachment.
-static GLComposeExperiment gl_diag_prepare_compose_experiment(void) {
+static GLComposeExperiment gl_diag_prepare_compose_experiment(GLsizei count) {
   GLComposeExperiment experiment = {0};
   const int slot = mc_current_slot();
-  if (slot < 0 || g_mc[slot].framebuffer != 0 ||
-      !g_mc[slot].scene_compose_pending || !g_mc[slot].scene_texture ||
-      g_mc[slot].texture2d[0] != g_mc[slot].scene_texture)
+  if (slot < 0 || g_mc[slot].framebuffer != 0)
+    return experiment;
+
+  // High's final pass binds bloom on unit 0 and the full-size scene on unit 1.
+  // Match a color+depth target completed THIS frame, not a hardcoded GL name.
+  unsigned int source_unit = 0;
+  for (unsigned int i = 0; count == 3 && i < 8; ++i) {
+    if (g_mc[slot].completed_scene[i].texture &&
+        g_mc[slot].completed_scene[i].texture == g_mc[slot].texture2d[1] &&
+        g_mc[slot].completed_scene[i].width == g_mc[slot].viewport[2] &&
+        g_mc[slot].completed_scene[i].height == g_mc[slot].viewport[3]) {
+      source_unit = 1;
+      g_mc[slot].scene_texture = g_mc[slot].completed_scene[i].texture;
+      g_mc[slot].scene_framebuffer = g_mc[slot].completed_scene[i].framebuffer;
+      g_mc[slot].scene_compose_pending = 1;
+      memset(g_mc[slot].completed_scene, 0, sizeof(g_mc[slot].completed_scene));
+      break;
+    }
+  }
+  if (!g_mc[slot].scene_compose_pending || !g_mc[slot].scene_texture ||
+      g_mc[slot].texture2d[source_unit] != g_mc[slot].scene_texture)
     return experiment;
 
   g_mc[slot].scene_compose_pending = 0;
@@ -641,8 +661,8 @@ static GLComposeExperiment gl_diag_prepare_compose_experiment(void) {
   experiment.mode = 3;
   experiment.log_result = experiment.sequence <= 4 ||
                           ((experiment.sequence - 1) % 120) < 4;
-  experiment.texture = g_mc[slot].texture2d[0];
-  experiment.sampler = g_mc[slot].sampler[0];
+  experiment.texture = g_mc[slot].texture2d[source_unit];
+  experiment.sampler = g_mc[slot].sampler[source_unit];
   experiment.source_framebuffer = g_mc[slot].scene_framebuffer;
   memcpy(experiment.viewport, g_mc[slot].viewport,
          sizeof(experiment.viewport));
@@ -787,7 +807,22 @@ static void gl_diag_finish_compose_experiment(
   // Program 6's static fullscreen VBO/EBO is corrupt on this driver. Draw the
   // scene with a gl_VertexID triangle instead; this keeps texture sampling and
   // sRGB conversion while avoiding all vertex/index-buffer dependencies.
+  const int slot = mc_current_slot();
+  typedef void (*BindSampler)(GLuint, GLuint);
+  static BindSampler bind_sampler;
+  if (!bind_sampler) bind_sampler = (BindSampler)eglGetProcAddress("glBindSampler");
+  const int rebind = slot >= 0 && experiment->texture != g_mc[slot].texture2d[0];
+  if (rebind) {
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, experiment->texture);
+    if (bind_sampler) bind_sampler(0, experiment->sampler);
+  }
   const int fallback_drawn = gl_diag_draw_fallback(GL_TRIANGLES, 2);
+  if (rebind) {
+    glBindTexture(GL_TEXTURE_2D, g_mc[slot].texture2d[0]);
+    if (bind_sampler) bind_sampler(0, g_mc[slot].sampler[0]);
+    glActiveTexture(GL_TEXTURE0 + g_mc[slot].active_texture);
+  }
 
   if (experiment->log_result) {
     const GLenum draw_error = glGetError();
@@ -1420,7 +1455,7 @@ static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
   gl_diag_trace_default_draw("arrays", count, 1);
 #endif
   const GLComposeExperiment experiment =
-      gl_diag_prepare_compose_experiment();
+      gl_diag_prepare_compose_experiment(count);
 #ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
 #endif
@@ -1446,7 +1481,7 @@ static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
   gl_diag_trace_default_draw("elements", count, 1);
 #endif
   const GLComposeExperiment experiment =
-      gl_diag_prepare_compose_experiment();
+      gl_diag_prepare_compose_experiment(count);
 #ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
                                     indices);
@@ -1526,8 +1561,14 @@ static unsigned int gl_diag_sample_offscreen(GLuint framebuffer,
   static volatile uint32_t transition_count;
   const uint32_t transition =
       __atomic_add_fetch(&transition_count, 1, __ATOMIC_RELAXED);
-  if (transition > 3 && (transition % 120) != 0)
+  // Sample each target independently. A global modulo can alias the frame's
+  // pass count and repeatedly inspect only the final quarter-size bloom FBO.
+  static __thread uint32_t target_visits[256];
+  const uint32_t visit = ++target_visits[framebuffer % 256];
+  if (visit > 3 && (visit % 120) != 0)
     return 0;
+  const int trace_slot = mc_current_slot();
+  if (trace_slot >= 0) g_mc[trace_slot].trace_default_draws = 12;
 
   GLint viewport[4] = {0};
   GLint color_type = GL_NONE;
@@ -1577,6 +1618,33 @@ static unsigned int gl_diag_sample_offscreen(GLuint framebuffer,
 
 static void glBindFramebuffer_diag(GLenum target, GLuint framebuffer) {
   const int slot = mc_current_slot();
+  if ((target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) &&
+      slot >= 0 && g_mc[slot].framebuffer &&
+      g_mc[slot].framebuffer != framebuffer) {
+    GLint color_type = 0, color = 0, depth = 0;
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &color_type);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &color);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &depth);
+    if (color_type == GL_TEXTURE && color > 0 && depth != GL_NONE) {
+      const unsigned int i = g_mc[slot].completed_scene_next++ % 8;
+      g_mc[slot].completed_scene[i].texture = (GLuint)color;
+      g_mc[slot].completed_scene[i].framebuffer = g_mc[slot].framebuffer;
+      g_mc[slot].completed_scene[i].width = g_mc[slot].viewport[2];
+      g_mc[slot].completed_scene[i].height = g_mc[slot].viewport[3];
+    }
+  }
+#ifdef DEBUG_LOG
+  // High adds intermediate targets; inspecting only the final FBO->window
+  // transition misses the source scene entirely. Read before leaving each
+  // non-default draw target, with per-target bounded sampling above.
+  if ((target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) &&
+      slot >= 0 && g_mc[slot].framebuffer && framebuffer &&
+      g_mc[slot].framebuffer != framebuffer)
+    gl_diag_sample_offscreen(g_mc[slot].framebuffer, NULL);
+#endif
   if ((target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) &&
       slot >= 0 && g_mc[slot].framebuffer != 0 && framebuffer == 0) {
     const GLuint previous_framebuffer = g_mc[slot].framebuffer;
@@ -1718,7 +1786,7 @@ static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
   gl_diag_trace_default_draw("elements-instanced", count, instances);
 #endif
   const GLComposeExperiment experiment =
-      gl_diag_prepare_compose_experiment();
+      gl_diag_prepare_compose_experiment(count);
 #ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
                                     indices);
@@ -1742,7 +1810,7 @@ static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
   gl_diag_trace_default_draw("arrays-instanced", count, instances);
 #endif
   const GLComposeExperiment experiment =
-      gl_diag_prepare_compose_experiment();
+      gl_diag_prepare_compose_experiment(count);
 #ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
 #endif
@@ -1833,7 +1901,10 @@ static void glTexStorage2D_compat(GLenum target, GLsizei levels,
     }
 #endif
   }
+  debugPrintf("graphics-diag: TexStorage begin target=%x levels=%d format=%x actual=%x size=%dx%d\n",
+              target, levels, internal_format, actual_format, width, height);
   gl_tex_storage_2d_real(target, levels, actual_format, width, height);
+  debugPrintf("graphics-diag: TexStorage end\n");
 }
 
 static void glBindSampler_diag(GLuint unit, GLuint sampler) {
@@ -1936,11 +2007,64 @@ static void glCompileShader_diag(GLuint shader) {
 #endif
 }
 
+// GLES requires a fragment stage even for a depth-only program. Retry only
+// the driver's explicit missing-fragment failure with one compiled vertex
+// stage; never replace an existing (possibly alpha-tested) fragment shader.
+static int gl_complete_vertex_only_program(GLuint program, const char *log) {
+  if (!strstr(log, "lacks a fragment shader")) return 0;
+  GLint count = 0;
+  glGetProgramiv(program, GL_ATTACHED_SHADERS, &count);
+  if (count != 1) return 0;
+  GLuint vertex = 0;
+  GLsizei fetched = 0;
+  glGetAttachedShaders(program, 1, &fetched, &vertex);
+  GLint type = 0, compiled = 0;
+  glGetShaderiv(vertex, GL_SHADER_TYPE, &type);
+  glGetShaderiv(vertex, GL_COMPILE_STATUS, &compiled);
+  if (fetched != 1 || type != GL_VERTEX_SHADER || compiled != GL_TRUE)
+    return 0;
+  char prefix[512] = {0};
+  glGetShaderSource(vertex, sizeof(prefix), NULL, prefix);
+  const char *source = "#version 100\nprecision mediump float;\nvoid main() {}\n";
+  if (strstr(prefix, "#version 320 es"))
+    source = "#version 320 es\nprecision mediump float;\nvoid main() {}\n";
+  else if (strstr(prefix, "#version 310 es"))
+    source = "#version 310 es\nprecision mediump float;\nvoid main() {}\n";
+  else if (strstr(prefix, "#version 300 es"))
+    source = "#version 300 es\nprecision mediump float;\nvoid main() {}\n";
+  else if (!strstr(prefix, "#version 100"))
+    return 0; // Unknown language/version: preserve the original failure.
+  GLuint fragment = glCreateShader(GL_FRAGMENT_SHADER);
+  if (!fragment) return 0;
+  glShaderSource(fragment, 1, &source, NULL);
+  glCompileShader(fragment);
+  glGetShaderiv(fragment, GL_COMPILE_STATUS, &compiled);
+  if (compiled != GL_TRUE) {
+    glDeleteShader(fragment);
+    return 0;
+  }
+  glAttachShader(program, fragment);
+  glLinkProgram(program);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  glDetachShader(program, fragment);
+  glDeleteShader(fragment);
+  debugPrintf("graphics-diag: vertex-only completion program=%u vertex=%u linked=%d\n",
+              program, vertex, linked);
+  if (linked != GL_TRUE) glLinkProgram(program); // restore native failure
+  return linked == GL_TRUE;
+}
+
 static void glLinkProgram_diag(GLuint program) {
   glLinkProgram(program);
-#ifdef DEBUG_LOG
   GLint status = GL_FALSE;
   glGetProgramiv(program, GL_LINK_STATUS, &status);
+  if (status != GL_TRUE) {
+    char reason[1024] = {0};
+    glGetProgramInfoLog(program, sizeof(reason), NULL, reason);
+    if (gl_complete_vertex_only_program(program, reason)) status = GL_TRUE;
+  }
+#ifdef DEBUG_LOG
   if (status == GL_TRUE) {
     __atomic_fetch_add(&gl_diag_link_ok, 1, __ATOMIC_RELAXED);
     return;
@@ -1962,6 +2086,12 @@ static void glLinkProgram_diag(GLuint program) {
 // defined in movie_player.c (already referenced by the import table below).
 extern unsigned int eglSwapBuffersHook(void *display, void *surface);
 static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
+  const int completed_slot = mc_current_slot();
+  if (completed_slot >= 0) {
+    memset(g_mc[completed_slot].completed_scene, 0,
+           sizeof(g_mc[completed_slot].completed_scene));
+    g_mc[completed_slot].completed_scene_next = 0;
+  }
 #ifdef PERF_TRACE
   static volatile uint64_t previous_swap_ns;
   const uint64_t swap_begin_ns = perf_trace_now_ns();
@@ -2555,6 +2685,9 @@ static void gl_load_drain(void) {
 static void glTexImage2D_w(GLenum t, GLint l, GLint i, GLsizei w, GLsizei h,
                            GLint b, GLenum f, GLenum y, const void *p) {
   gl_load_drain();
+  if (!p)
+    debugPrintf("graphics-diag: TexImage allocation begin target=%x level=%d format=%x type=%x size=%dx%d\n",
+                t, l, i, y, w, h);
   // Same half-float-linear limitation as glTexStorage2D_compat: an RGBA
   // color render target allocated as half-float can't be LINEAR-sampled, so
   // the mobile tonemap resolves to black. Downgrade to 8-bit unorm, but ONLY
@@ -2572,6 +2705,14 @@ static void glTexImage2D_w(GLenum t, GLint l, GLint i, GLsizei w, GLsizei h,
     }
   }
   glTexImage2D(t, l, i, w, h, b, f, y, p);
+  if (!p) debugPrintf("graphics-diag: TexImage allocation end\n");
+}
+static void glRenderbufferStorage_diag(GLenum target, GLenum format,
+                                       GLsizei width, GLsizei height) {
+  debugPrintf("graphics-diag: Renderbuffer begin target=%x format=%x size=%dx%d\n",
+              target, format, width, height);
+  glRenderbufferStorage(target, format, width, height);
+  debugPrintf("graphics-diag: Renderbuffer end\n");
 }
 static void glCompressedTexImage2D_w(GLenum t, GLint l, GLenum i, GLsizei w,
                                      GLsizei h, GLint b, GLsizei s, const void *d) {
@@ -3389,7 +3530,7 @@ DynLibFunction dynlib_functions[] = {
   { "glLinkProgram", (uintptr_t)&glLinkProgram_diag },
   { "glPolygonOffset", (uintptr_t)&glPolygonOffset },
   { "glReadPixels", (uintptr_t)&glReadPixels },
-  { "glRenderbufferStorage", (uintptr_t)&glRenderbufferStorage },
+  { "glRenderbufferStorage", (uintptr_t)&glRenderbufferStorage_diag },
   { "glScissor", (uintptr_t)&glScissor },
   { "glShaderSource", (uintptr_t)&glShaderSource },
   { "glTexImage2D", (uintptr_t)&glTexImage2D_w },

@@ -19,7 +19,7 @@ from PIL import Image, ImageFilter
 from cooked_texture import Texture
 from afp_texture_patch import read_atlas, replace_atlas
 
-NINE_BAND_PITCH_STYLES = ('clean-v15', 'clean-v16')
+NINE_BAND_PITCH_STYLES = ('clean-v15', 'clean-v16', 'clean-v17')
 
 
 def sha(data):
@@ -60,6 +60,9 @@ def diffuse_grain_source(ef10):
 
 
 def pitch_colors(style):
+    if style == 'clean-v17':
+        # Same midpoint as v16, one third of its green-band separation.
+        return ([48,80,23], [54,88,26])
     if style == 'clean-v16':
         # Keep v15's light band while lifting the dark band closer to it.
         return ([42,72,20], [60,96,29])
@@ -303,8 +306,15 @@ def neutral_specular_payload(texture, index):
 
 def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
     root=args.pes21/'PesMobile/Content/Assets/bg_lighting_AM1/Textures'
-    grain=grain_source(args.ef10)
-    diffuse_grain=diffuse_grain_source(args.ef10)
+    if getattr(args, 'procedural_grain', False):
+        # Explicit reconstruction policy when the old EF10 fixture is gone.
+        # Seeded fine variation; do not pretend it is the original EF10 asset.
+        rng = np.random.default_rng(1701)
+        grain = np.clip(rng.normal(size=(512, 512)), -2.5, 2.5)
+        diffuse_grain = np.tile(grain, (2, 2))
+    else:
+        grain=grain_source(args.ef10)
+        diffuse_grain=diffuse_grain_source(args.ef10)
     result=[]
     style=getattr(args,'pitch_style','baseline')
     names=('pitch_l_bsm_alp','pitch_r_bsm_alp','pitch_lr_bsm_exLow_alp',
@@ -328,7 +338,8 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
             # Retain its alpha and use EF10 high-frequency turf at lower gain.
             base=np.array([47,65,18],dtype=np.float32)
             replacement=np.empty_like(original)
-            replacement[:,:,:3]=np.clip(base+grain[:,:,None]*np.array([2.0,3.8,1.5]),0,255)
+            detail_grain = np.maximum(grain, 0) if style == 'clean-v17' else grain
+            replacement[:,:,:3]=np.clip(base+detail_grain[:,:,None]*np.array([2.0,3.8,1.5]),0,255)
             replacement[:,:,3]=original[:,:,3]
             image=Image.fromarray(replacement)
         else:
@@ -362,9 +373,14 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                              'clean-v13':[2.8,5.6,2.1],
                               'clean-v14':[2.8,5.6,2.1],
                               'clean-v15':[2.8,5.6,2.1],
-                              'clean-v16':[2.8,5.6,2.1]}
+                              'clean-v16':[2.8,5.6,2.1],
+                              'clean-v17':[1.2,2.4,0.9]}
                 gain=np.array(gain_values[style],dtype=np.float32)
-                rgb+=diffuse_grain[:,:,None]*gain
+                # V17 lifts fine blades instead of engraving dark grain.
+                # Small positive-only gain avoids a broad brightness lift.
+                variation = (np.maximum(diffuse_grain, 0)
+                             if style == 'clean-v17' else diffuse_grain)
+                rgb+=variation[:,:,None]*gain
             image=Image.fromarray(np.uint8(np.clip(np.rint(rgb),0,255)),'RGB')
         payloads=[]
         line_counts=[]
@@ -429,7 +445,8 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                                                   'clean-v13':[2.8,5.6,2.1],
                                                   'clean-v14':[2.8,5.6,2.1],
                                                   'clean-v15':[2.8,5.6,2.1],
-                                                  'clean-v16':[2.8,5.6,2.1]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES and not detail and not specular else None,
+                                                  'clean-v16':[2.8,5.6,2.1],
+                                                  'clean-v17':[1.2,2.4,0.9]}[style]) if style in ('clean-v3','clean-v4','clean-v5','clean-v6','clean-v7','clean-v9','clean-v10','clean-v11','clean-v12','clean-v13','clean-v14') + NINE_BAND_PITCH_STYLES and not detail and not specular else None,
                        'right_half_phase_inverted':bool(style=='clean-v3' and name.startswith('pitch_r_')),
                        'stripe_half_band_offset':bool(style=='clean-v4' and not detail and not specular),
                        'native_seam_anchored':bool(style=='clean-v5' and not detail and not specular),

@@ -28,6 +28,36 @@ class CompressionTests(unittest.TestCase):
 
 
 class TextureTests(unittest.TestCase):
+    def test_soft_pitch_recipe_is_repeatable_and_keeps_subtle_bands(self):
+        import numpy as np
+        from PIL import Image
+        from soften_pitch_patch import soften
+        original = Image.new('RGB', (1024, 32), (4, 18, 2))
+        first = np.asarray(soften(original, 'pitch_l_bsm_alp'))
+        np.testing.assert_array_equal(first, np.asarray(soften(original, 'pitch_l_bsm_alp')))
+        # Local obsolete near-black input must not contaminate authored color.
+        self.assertGreater(first[:, :, 1].mean(), 79)
+        self.assertLess(first[:, :, 1].mean(), 91)
+        blend, _ = mowing_blend('pitch_l_bsm_alp', 1024, 'clean-v17')
+        dark, light = map(np.asarray, pitch_colors('clean-v17'))
+        authored = dark + blend * (light - dark)
+        self.assertTrue(np.all(first >= authored))
+        self.assertLess((first - authored).mean(), 2)
+
+    def test_v17_softens_stripes_without_changing_base_or_geometry(self):
+        import numpy as np
+        old = np.asarray(pitch_colors('clean-v16'))
+        new = np.asarray(pitch_colors('clean-v17'))
+        np.testing.assert_array_equal(old.mean(axis=0), new.mean(axis=0))
+        self.assertLessEqual(new[1, 1] - new[0, 1],
+                             (old[1, 1] - old[0, 1]) / 3)
+        for name in ('pitch_l_bsm_alp', 'pitch_r_bsm_alp',
+                     'pitch_lr_bsm_exLow_alp'):
+            old_blend, old_width = mowing_blend(name, 1024, 'clean-v16')
+            new_blend, new_width = mowing_blend(name, 1024, 'clean-v17')
+            np.testing.assert_array_equal(old_blend, new_blend)
+            self.assertEqual(old_width, new_width)
+
     def test_broad_v10_is_near_v8_width_and_aligns_penalty_front(self):
         import numpy as np
         for name in ('pitch_l_bsm_alp', 'pitch_l_bsm_exLow_alp'):

@@ -255,14 +255,19 @@ int main(void) {
 
   float ramped[3] = {16.0f, 0.0f, 8.0f};
   assert(match_broadcast_stabilize_target(ramped, ball) == 1);
-  assert(fabsf(ramped[0] - 15.125f) < 0.001f);
+  assert(ramped[0] > 14.0f && ramped[0] < 16.0f);
   assert(ramped[1] == 0.0f && ramped[2] == 8.0f);
 
   float escaped[3] = {30.0f, 40.0f, 9.0f};
   assert(match_broadcast_stabilize_target(escaped, ball) == 1);
-  assert(fabsf(escaped[0] - 19.5f) < 0.001f);
-  assert(fabsf(escaped[1] - 26.0f) < 0.001f);
+  assert(hypotf(escaped[0], escaped[1]) <= 18.001f);
+  assert(fabsf(escaped[0] / escaped[1] - 0.75f) < 0.001f);
   assert(escaped[2] == 9.0f);
+  for (int direction = -1; direction <= 1; direction += 2) {
+    float pass[3] = {direction * 100.0f, 0.0f, 3.0f};
+    assert(match_broadcast_stabilize_target(pass, ball) == 1);
+    assert(fabsf(pass[0]) <= 18.001f && pass[2] == 3.0f);
+  }
 
   float invalid[3] = {NAN, 2.0f, 0.0f};
   assert(match_broadcast_stabilize_target(invalid, ball) == 0);
@@ -283,6 +288,11 @@ int main(void) {
   assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
   assert(match_broadcast_ball_tracking_ready(&first_ball, moved) == 0);
   assert(match_broadcast_ball_tracking_ready(&first_ball, live) == 1);
+  assert(match_broadcast_ball_tracking_ready(0, 0) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, moved) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, live) == 1);
   assert(match_broadcast_ball_tracking_ready(&second_ball, live) == 0);
 }
 ''')
@@ -295,6 +305,8 @@ int main(void) {
         self.assertIn('match_broadcast_stabilize_target(target_position, ball_position)', wrapper)
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
         self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);', setup)
+        self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);',
+                      function(SOURCE, 'pes_match_pause_update_entry'))
         self.assertNotIn('if (!active', wrapper)
         self.assertNotIn('armGetSystemTick', wrapper)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
