@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "source_manifest": "data/barca_real_madrid_mobile_kit_canary.json",
+  "team_catalog": "data/exhibition_team_catalog_migration.json",
+  "policy": {
+    "source_team_key": "team_id",
+    "target_team_key": "physical_team_id",
+    "required_kits": ["1st", "2nd", "GK1st"],
+    "hub_previews": ["1st", "2nd"],
+    "missing_source_team": "preserve_existing_mobile_team",
+    "partial_source_team": "preserve_existing_mobile_team",
+    "replace_full_preview_members": false
+  },
+  "football_life_league_archive": "Data/dt15_x64.cpk",
+  "league_branding": {
+    "english_league": {"label": "PREMIER LEAGUE", "member": "common/render/symbol/emblemLc/emb_0009_l.png"},
+    "english_second": {"label": "EFL CHAMPIONSHIP", "member": "common/render/symbol/emblemLc/emb_0066_l.png"},
+    "spanish_league": {"label": "LALIGA EA SPORTS", "member": "common/render/symbol/emblemLc/emb_0011_l.png"},
+    "spanish_second": {"label": "LALIGA HYPERMOTION", "member": "common/render/symbol/emblemLc/emb_0067_l.png"},
+    "ligue_1": {"label": "LIGUE 1 MCDONALD'S", "member": "common/render/symbol/emblemLc/emb_0012_w_l.png"},
+    "ligue_2": {"label": "LIGUE 2 BKT", "member": "common/render/symbol/emblemLc/emb_0068_w_l.png"},
+    "serie_a": {"label": "SERIE A ENILIVE", "member": "common/render/symbol/emblemLc/emb_0010_b_l.png"},
+    "serie_b": {"label": "SERIE BKT", "member": "common/render/symbol/emblemLc/emb_0069_l.png"},
+    "eredivisie": {"label": "EREDIVISIE", "member": "common/render/symbol/emblemLc/emb_0013_b_l.png"},
+    "liga_portugal": {"label": "LIGA PORTUGAL BETCLIC", "member": "common/render/symbol/emblemLc/emb_0014_l.png"},
+    "german_teams": {"label": "BUNDESLIGA", "member": "common/render/symbol/emblemLc/emb_0039_b_l.png"},
+    "turkish_league": {"label": "TRENDYOL SUPER LIG", "member": "common/render/symbol/emblemLc/emb_0119_w_l.png"},
+    "scottish_league": {"label": "SCOTTISH PREMIERSHIP", "member": "common/render/symbol/emblemLc/emb_0137_b_l.png"},
+    "danish_league": {"label": "3F SUPERLIGA", "member": "common/render/symbol/emblemLc/emb_0128_w_l.png"},
+    "belgian_league": {"label": "JUPILER PRO LEAGUE", "member": "common/render/symbol/emblemLc/emb_0111_b_l.png"},
+    "brazil_serie_a": {"label": "BRASILEIRAO BETANO", "member": "common/render/symbol/emblemLc/emb_0021_b_l.png"},
+    "brazil_serie_b": {"label": "BRASILEIRAO SERIE B", "member": "common/render/symbol/emblemLc/emb_0090_b_l.png"},
+    "argentina_league": {"label": "LIGA PROFESIONAL", "member": "common/render/symbol/emblemLc/emb_0022_l.png"},
+    "chilean_league": {"label": "LIGA DE PRIMERA", "member": "common/render/symbol/emblemLc/emb_0023_b_l.png"},
+    "colombian_league": {"label": "LIGA BETPLAY", "member": "common/render/symbol/emblemLc/emb_0122_l.png"},
+    "thai_league": {"label": "THAI LEAGUE 1", "member": "common/render/symbol/emblemLc/emb_0049_l.png"}
+  }
+}

@@ -1,0 +1,444 @@
+source_version,migration_build_id,team_id,physical_team_id,display_name,source_name,kind,category_key,category_position,badge_slot,player_count,status
+eF26_v551,1852ec648d2ebd75,1,1,REPUBLIC OF IRELAND,Republic of Ireland,national,national_europe,9,1,26,active
+eF26_v551,1852ec648d2ebd75,2,2,NORTHERN IRELAND,Northern Ireland,national,national_europe,8,2,26,active
+eF26_v551,1852ec648d2ebd75,3,3,SCOTLAND,Scotland,national,national_europe,5,3,26,active
+eF26_v551,1852ec648d2ebd75,4,4,WALES,Wales,national,national_europe,14,4,26,active
+eF26_v551,1852ec648d2ebd75,5,5,ENGLAND,England,national,national_europe,13,5,26,active
+eF26_v551,1852ec648d2ebd75,6,6,PORTUGAL,Portugal,national,national_europe,37,6,26,active
+eF26_v551,1852ec648d2ebd75,7,7,SPAIN,Spain,national,national_europe,35,7,26,active
+eF26_v551,1852ec648d2ebd75,8,8,FRANCE,France,national,national_europe,19,8,26,active
+eF26_v551,1852ec648d2ebd75,9,9,BELGIUM,Belgium,national,national_europe,16,9,26,active
+eF26_v551,1852ec648d2ebd75,10,10,NETHERLANDS,Netherlands,national,national_europe,11,10,26,active
+eF26_v551,1852ec648d2ebd75,11,11,SWITZERLAND,Switzerland,national,national_europe,23,11,26,active
+eF26_v551,1852ec648d2ebd75,12,12,ITALY,Italy,national,national_europe,31,12,26,active
+eF26_v551,1852ec648d2ebd75,13,13,CZECHIA,Czechia,national,national_europe,18,13,26,active
+eF26_v551,1852ec648d2ebd75,14,14,GERMANY,Germany,national,national_europe,10,14,26,active
+eF26_v551,1852ec648d2ebd75,15,15,DENMARK,Denmark,national,national_europe,7,15,26,active
+eF26_v551,1852ec648d2ebd75,16,16,NORWAY,Norway,national,national_europe,2,16,26,active
+eF26_v551,1852ec648d2ebd75,17,17,SWEDEN,Sweden,national,national_europe,3,17,26,active
+eF26_v551,1852ec648d2ebd75,18,18,FINLAND,Finland,national,national_europe,1,18,26,active
+eF26_v551,1852ec648d2ebd75,19,19,POLAND,Poland,national,national_europe,12,19,26,active
+eF26_v551,1852ec648d2ebd75,20,20,SLOVAKIA,Slovakia,national,national_europe,21,20,26,active
+eF26_v551,1852ec648d2ebd75,21,21,AUSTRIA,Austria,national,national_europe,20,21,26,active
+eF26_v551,1852ec648d2ebd75,22,22,HUNGARY,Hungary,national,national_europe,22,22,26,active
+eF26_v551,1852ec648d2ebd75,23,23,SLOVENIA,Slovenia,national,national_europe,24,23,26,active
+eF26_v551,1852ec648d2ebd75,24,24,CROATIA,Croatia,national,national_europe,25,24,26,active
+eF26_v551,1852ec648d2ebd75,26,26,ROMANIA,Romania,national,national_europe,27,25,26,active
+eF26_v551,1852ec648d2ebd75,27,27,BULGARIA,Bulgaria,national,national_europe,28,26,26,active
+eF26_v551,1852ec648d2ebd75,28,28,GREECE,Greece,national,national_europe,38,27,26,active
+eF26_v551,1852ec648d2ebd75,29,29,TURKIYE,Türkiye,national,national_europe,36,28,26,active
+eF26_v551,1852ec648d2ebd75,30,30,UKRAINE,Ukraine,national,national_europe,17,29,26,active
+eF26_v551,1852ec648d2ebd75,31,31,RUSSIA,Russia,national,national_europe,6,30,26,active
+eF26_v551,1852ec648d2ebd75,32,32,MOROCCO,Morocco,national,national_africa,2,31,26,active
+eF26_v551,1852ec648d2ebd75,33,33,TUNISIA,Tunisia,national,national_africa,0,32,26,active
+eF26_v551,1852ec648d2ebd75,34,34,EGYPT,Egypt,national,national_africa,3,33,26,active
+eF26_v551,1852ec648d2ebd75,35,35,NIGERIA,Nigeria,national,national_africa,8,34,26,active
+eF26_v551,1852ec648d2ebd75,36,36,CAMEROON,Cameroon,national,national_africa,11,35,26,active
+eF26_v551,1852ec648d2ebd75,37,37,SOUTH AFRICA,South Africa,national,national_africa,13,36,25,active
+eF26_v551,1852ec648d2ebd75,38,38,SENEGAL,Senegal,national,national_africa,4,37,26,active
+eF26_v551,1852ec648d2ebd75,39,39,UNITED STATES,United States,national,national_north_america,0,38,26,active
+eF26_v551,1852ec648d2ebd75,40,40,MEXICO,Mexico,national,national_north_america,1,39,26,active
+eF26_v551,1852ec648d2ebd75,41,41,JAMAICA,Jamaica,national,national_north_america,2,40,26,active
+eF26_v551,1852ec648d2ebd75,42,42,COSTA RICA,Costa Rica,national,national_north_america,4,41,26,active
+eF26_v551,1852ec648d2ebd75,43,43,HONDURAS,Honduras,national,national_north_america,3,42,26,active
+eF26_v551,1852ec648d2ebd75,44,44,COLOMBIA,Colombia,national,national_south_america,1,43,26,active
+eF26_v551,1852ec648d2ebd75,45,45,BRAZIL,Brazil,national,national_south_america,4,44,26,active
+eF26_v551,1852ec648d2ebd75,46,46,PERU,Peru,national,national_south_america,3,45,26,active
+eF26_v551,1852ec648d2ebd75,47,47,CHILE,Chile,national,national_south_america,7,46,26,active
+eF26_v551,1852ec648d2ebd75,48,48,PARAGUAY,Paraguay,national,national_south_america,6,47,26,active
+eF26_v551,1852ec648d2ebd75,49,49,URUGUAY,Uruguay,national,national_south_america,9,48,26,active
+eF26_v551,1852ec648d2ebd75,50,50,ARGENTINA,Argentina,national,national_south_america,8,49,26,active
+eF26_v551,1852ec648d2ebd75,51,51,ECUADOR,Ecuador,national,national_south_america,2,50,26,active
+eF26_v551,1852ec648d2ebd75,52,52,JAPAN,Japan,national,national_asia_oceania,5,51,26,active
+eF26_v551,1852ec648d2ebd75,53,53,KOREA REPUBLIC,Korea Republic,national,national_asia_oceania,3,52,26,active
+eF26_v551,1852ec648d2ebd75,54,54,CHINA PR,China PR,national,national_asia_oceania,1,53,26,active
+eF26_v551,1852ec648d2ebd75,55,55,IR IRAN,IR Iran,national,national_asia_oceania,4,54,26,active
+eF26_v551,1852ec648d2ebd75,56,56,SAUDI ARABIA,Saudi Arabia,national,national_asia_oceania,11,55,26,active
+eF26_v551,1852ec648d2ebd75,57,57,AUSTRALIA,Australia,national,national_asia_oceania,15,56,26,active
+eF26_v551,1852ec648d2ebd75,100,100,MANCHESTER UNITED,Manchester United,club,english_league,3,58,33,active
+eF26_v551,1852ec648d2ebd75,101,101,ARSENAL FC,Arsenal FC,club,english_league,11,59,35,active
+eF26_v551,1852ec648d2ebd75,102,102,CHELSEA FC,Chelsea B,club,english_league,14,60,37,active
+eF26_v551,1852ec648d2ebd75,103,103,LIVERPOOL FC,Liverpool R,club,english_league,5,61,40,active
+eF26_v551,1852ec648d2ebd75,104,104,LEEDS UNITED,Leeds W,club,english_league,1,62,30,active
+eF26_v551,1852ec648d2ebd75,105,105,WEST HAM UNITED,West Ham RB,club,english_league,12,63,28,active
+eF26_v551,1852ec648d2ebd75,106,106,NEWCASTLE UNITED,Newcastle WB,club,english_league,0,64,32,active
+eF26_v551,1852ec648d2ebd75,107,107,ASTON VILLA FC,Aston RB,club,english_league,9,65,33,active
+eF26_v551,1852ec648d2ebd75,108,108,FC BARCELONA,FC Barcelona,club,spanish_league,7,66,33,active
+eF26_v551,1852ec648d2ebd75,109,109,REAL MADRID CF,Madrid Chamartin B,club,spanish_league,10,67,40,active
+eF26_v551,1852ec648d2ebd75,110,110,VALENCIA CF,Valencia BN,club,spanish_league,15,68,38,active
+eF26_v551,1852ec648d2ebd75,111,111,LA CORUNA AB,La Coruña AB,club,spanish_second,2,69,34,active
+eF26_v551,1852ec648d2ebd75,112,112,AS MONACO,AS Monaco,club,ligue_1,14,70,32,active
+eF26_v551,1852ec648d2ebd75,113,113,OLYMPIQUE DE MARSEILLE,Olympique de Marseille,club,ligue_1,17,71,33,active
+eF26_v551,1852ec648d2ebd75,114,114,PARIS SAINT-GERMAIN,Paris Saint-Germain,club,ligue_1,4,72,31,active
+eF26_v551,1852ec648d2ebd75,116,116,AFC AJAX,AFC Ajax,club,eredivisie,4,74,38,active
+eF26_v551,1852ec648d2ebd75,117,117,FEYENOORD ROTTERDAM,Feyenoord Rotterdam,club,eredivisie,9,75,40,active
+eF26_v551,1852ec648d2ebd75,118,118,PSV EINDHOVEN,PSV Eindhoven,club,eredivisie,10,76,39,active
+eF26_v551,1852ec648d2ebd75,119,119,INTER MILAN,Internazionale Milano,club,serie_a,2,77,33,active
+eF26_v551,1852ec648d2ebd75,120,120,JUVENTUS FC,Piemonte BN,club,serie_a,6,78,39,active
+eF26_v551,1852ec648d2ebd75,121,121,AC MILAN,AC Milan,club,serie_a,3,79,40,active
+eF26_v551,1852ec648d2ebd75,122,122,SS LAZIO,S.S. Lazio,club,serie_a,14,80,30,active
+eF26_v551,1852ec648d2ebd75,123,123,PARMA CALCIO,Parma GB,club,serie_a,8,81,35,active
+eF26_v551,1852ec648d2ebd75,124,124,ACF FIORENTINA,Firenze V,club,serie_a,12,82,32,active
+eF26_v551,1852ec648d2ebd75,125,125,AS ROMA,Roma GR,club,serie_a,15,83,40,active
+eF26_v551,1852ec648d2ebd75,126,175,BORUSSIA DORTMUND,Borussia Dortmund,club,other_europe,7,84,30,active
+eF26_v551,1852ec648d2ebd75,128,128,BAYER 04 LEVERKUSEN,Bayer 04 Leverkusen,club,german_teams,1,86,30,active
+eF26_v551,1852ec648d2ebd75,130,130,GALATASARAY SK,Galatasaray SK,club,turkish_league,2,87,36,active
+eF26_v551,1852ec648d2ebd75,131,131,CELTIC FC,Celtic FC,club,scottish_league,4,88,30,active
+eF26_v551,1852ec648d2ebd75,132,132,RANGERS FC,Rangers FC,club,scottish_league,5,89,34,active
+eF26_v551,1852ec648d2ebd75,136,136,CR VASCO DA GAMA,CR Vasco da Gama,club,brazil_serie_a,7,93,34,active
+eF26_v551,1852ec648d2ebd75,137,137,SE PALMEIRAS,SE Palmeiras,club,brazil_serie_a,12,94,28,active
+eF26_v551,1852ec648d2ebd75,138,138,CA RIVER PLATE,CA River Plate,club,argentina_league,8,95,40,active
+eF26_v551,1852ec648d2ebd75,139,139,CA BOCA JUNIORS,CA Boca Juniors,club,argentina_league,12,96,40,active
+eF26_v551,1852ec648d2ebd75,144,144,CONSADOLE SAPPORO,Consadole Sapporo,club,j2_league,0,97,35,active
+eF26_v551,1852ec648d2ebd75,145,145,VEGALTA SENDAI,Vegalta Sendai,club,j2_league,3,98,34,active
+eF26_v551,1852ec648d2ebd75,146,146,KASHIMA ANTLERS,Kashima Antlers,club,j1_league,1,99,30,active
+eF26_v551,1852ec648d2ebd75,147,147,URAWA REDS,Urawa Reds,club,j1_league,2,100,27,active
+eF26_v551,1852ec648d2ebd75,148,148,JEF UNITED CHIBA,JEF United Chiba,club,j2_league,7,101,33,active
+eF26_v551,1852ec648d2ebd75,149,149,KASHIWA REYSOL,Kashiwa Reysol,club,j1_league,3,102,38,active
+eF26_v551,1852ec648d2ebd75,150,150,FC TOKYO,FC Tokyo,club,j1_league,4,103,28,active
+eF26_v551,1852ec648d2ebd75,151,151,TOKYO VERDY,Tokyo Verdy,club,j1_league,5,104,35,active
+eF26_v551,1852ec648d2ebd75,152,152,YOKOHAMA F. MARINOS,Yokohama F. Marinos,club,j1_league,8,105,32,active
+eF26_v551,1852ec648d2ebd75,153,153,SHIMIZU S-PULSE,Shimizu S-Pulse,club,j1_league,11,106,35,active
+eF26_v551,1852ec648d2ebd75,154,154,JUBILO IWATA,Jubilo Iwata,club,j2_league,8,107,38,active
+eF26_v551,1852ec648d2ebd75,155,155,NAGOYA GRAMPUS,Nagoya Grampus,club,j1_league,12,108,27,active
+eF26_v551,1852ec648d2ebd75,156,156,KYOTO SANGA F.C.,Kyoto Sanga F.C.,club,j1_league,13,109,36,active
+eF26_v551,1852ec648d2ebd75,157,157,GAMBA OSAKA,Gamba Osaka,club,j1_league,14,110,36,active
+eF26_v551,1852ec648d2ebd75,158,158,VISSEL KOBE,Vissel Kobe,club,j1_league,15,111,37,active
+eF26_v551,1852ec648d2ebd75,159,159,SANFRECCE HIROSHIMA,Sanfrecce Hiroshima,club,j1_league,18,112,29,active
+eF26_v551,1852ec648d2ebd75,160,160,MONTEDIO YAMAGATA,Montedio Yamagata,club,j2_league,2,113,32,active
+eF26_v551,1852ec648d2ebd75,161,161,MITO HOLLYHOCK,Mito Hollyhock,club,j2_league,4,114,34,active
+eF26_v551,1852ec648d2ebd75,162,162,RB OMIYA ARDIJA,RB Omiya Ardija,club,j2_league,5,115,36,active
+eF26_v551,1852ec648d2ebd75,163,163,KAWASAKI FRONTALE,Kawasaki Frontale,club,j1_league,7,116,32,active
+eF26_v551,1852ec648d2ebd75,164,164,YOKOHAMA FC,Yokohama FC,club,j1_league,9,117,32,active
+eF26_v551,1852ec648d2ebd75,165,165,SHONAN BELLMARE,Shonan Bellmare,club,j1_league,10,118,36,active
+eF26_v551,1852ec648d2ebd75,166,166,VENTFORET KOFU,Ventforet Kofu,club,j2_league,6,119,33,active
+eF26_v551,1852ec648d2ebd75,167,167,ALBIREX NIIGATA,Albirex Niigata,club,j1_league,0,120,31,active
+eF26_v551,1852ec648d2ebd75,168,168,CEREZO OSAKA,Cerezo Osaka,club,j1_league,17,121,29,active
+eF26_v551,1852ec648d2ebd75,169,169,AVISPA FUKUOKA,Avispa Fukuoka,club,j1_league,19,122,37,active
+eF26_v551,1852ec648d2ebd75,170,170,SAGAN TOSU,Sagan Tosu,club,j2_league,12,123,32,active
+eF26_v551,1852ec648d2ebd75,171,171,OITA TRINITA,Oita Trinita,club,j2_league,13,124,31,active
+eF26_v551,1852ec648d2ebd75,172,172,ATLETICO MADRID,Madrid Rosas RB,club,spanish_league,11,125,37,active
+eF26_v551,1852ec648d2ebd75,173,173,MANCHESTER CITY,Manchester B,club,english_league,4,126,34,active
+eF26_v551,1852ec648d2ebd75,174,174,ANDERLECHT PW,Anderlecht PW,club,belgian_league,8,127,29,active
+eF26_v551,1852ec648d2ebd75,176,176,BLACKBURN BW,Blackburn BW,club,english_second,3,128,39,active
+eF26_v551,1852ec648d2ebd75,177,177,EVERTON FC,Everton B,club,english_league,6,129,29,active
+eF26_v551,1852ec648d2ebd75,178,178,FULHAM FC,Fulham W,club,english_league,15,130,26,active
+eF26_v551,1852ec648d2ebd75,179,179,TOTTENHAM HOTSPUR,Tottenham WB,club,english_league,10,131,36,active
+eF26_v551,1852ec648d2ebd75,180,180,AJ AUXERRE,AJ Auxerre,club,ligue_1,9,132,31,active
+eF26_v551,1852ec648d2ebd75,181,181,OLYMPIQUE LYONNAIS,Olympique Lyonnais,club,ligue_1,13,133,34,active
+eF26_v551,1852ec648d2ebd75,182,182,RC LENS,RC Lens,club,ligue_1,1,134,30,active
+eF26_v551,1852ec648d2ebd75,186,186,BOLOGNA FC,Bologna RB,club,serie_a,10,135,32,active
+eF26_v551,1852ec648d2ebd75,190,190,UDINESE CALCIO,Udine BN,club,serie_a,0,137,38,active
+eF26_v551,1852ec648d2ebd75,191,191,SL BENFICA,SL Benfica,club,liga_portugal,8,138,33,active
+eF26_v551,1852ec648d2ebd75,192,192,FC PORTO,FC Porto,club,liga_portugal,6,139,33,active
+eF26_v551,1852ec648d2ebd75,193,193,SPORTING CP,Sporting CP,club,liga_portugal,9,140,30,active
+eF26_v551,1852ec648d2ebd75,194,194,REAL BETIS,Sevilla Triana VB,club,spanish_league,18,141,34,active
+eF26_v551,1852ec648d2ebd75,195,195,CELTA DE VIGO,Vigo AB,club,spanish_league,5,142,34,active
+eF26_v551,1852ec648d2ebd75,196,196,REAL SOCIEDAD,Vasco Gipuzkoa AB,club,spanish_league,1,143,27,active
+eF26_v551,1852ec648d2ebd75,197,197,FENERBAHCE SK,Fenerbahçe SK,club,turkish_league,3,144,32,active
+eF26_v551,1852ec648d2ebd75,199,199,PES UNITED,PES United,club,world_edit_clubs,0,145,23,active
+eF26_v551,1852ec648d2ebd75,200,200,WE UNITED,WE United,club,world_edit_clubs,1,146,23,active
+eF26_v551,1852ec648d2ebd75,201,201,BIRMINGHAM B,Birmingham B,club,english_second,11,147,29,active
+eF26_v551,1852ec648d2ebd75,203,203,CHARLTON RW,Charlton RW,club,english_second,17,148,33,active
+eF26_v551,1852ec648d2ebd75,204,204,LEICESTER B,Leicester B,club,english_second,8,149,31,active
+eF26_v551,1852ec648d2ebd75,205,205,MIDDLESBROUGH RW,Middlesbrough RW,club,english_second,0,150,31,active
+eF26_v551,1852ec648d2ebd75,207,207,SOUTHAMPTON RW,Southampton RW,club,english_second,19,151,35,active
+eF26_v551,1852ec648d2ebd75,208,208,WOLVERHAMPTON WANDERERS,Wolverhampton YB,club,english_league,8,152,29,active
+eF26_v551,1852ec648d2ebd75,211,211,EN AVANT GUINGAMP,En Avant Guingamp,club,ligue_2,4,154,30,active
+eF26_v551,1852ec648d2ebd75,213,213,LOSC LILLE,LOSC Lille,club,ligue_1,0,155,37,active
+eF26_v551,1852ec648d2ebd75,215,215,MONTPELLIER HERAULT SC,Montpellier Hérault SC,club,ligue_2,10,156,30,active
+eF26_v551,1852ec648d2ebd75,216,216,FC NANTES,FC Nantes,club,ligue_1,12,157,34,active
+eF26_v551,1852ec648d2ebd75,217,217,OGC NICE,OGC Nice,club,ligue_1,15,158,37,active
+eF26_v551,1852ec648d2ebd75,218,218,STADE RENNAIS FC,Stade Rennais FC,club,ligue_1,8,159,31,active
+eF26_v551,1852ec648d2ebd75,221,221,TOULOUSE FC,Toulouse FC,club,ligue_1,16,160,33,active
+eF26_v551,1852ec648d2ebd75,234,234,ATALANTA BC,Atalanta BC,club,serie_a,1,161,28,active
+eF26_v551,1852ec648d2ebd75,235,235,EMPOLI A,Empoli A,club,serie_b,6,162,30,active
+eF26_v551,1852ec648d2ebd75,240,240,LIGURIA B,Liguria B,club,serie_b,3,163,36,active
+eF26_v551,1852ec648d2ebd75,242,242,AZ ALKMAAR,AZ Alkmaar,club,eredivisie,2,164,37,active
+eF26_v551,1852ec648d2ebd75,244,244,FC GRONINGEN,FC Groningen,club,eredivisie,0,165,27,active
+eF26_v551,1852ec648d2ebd75,245,245,SC HEERENVEEN,SC Heerenveen,club,eredivisie,1,166,27,active
+eF26_v551,1852ec648d2ebd75,250,250,FC TWENTE ENSCHEDE,FC Twente Enschede,club,eredivisie,6,167,31,active
+eF26_v551,1852ec648d2ebd75,251,251,FC UTRECHT,FC Utrecht,club,eredivisie,7,168,39,active
+eF26_v551,1852ec648d2ebd75,256,256,PEC ZWOLLE,PEC Zwolle,club,eredivisie,3,171,31,active
+eF26_v551,1852ec648d2ebd75,258,258,ATHLETIC BILBAO,Bilbao BR,club,spanish_league,2,172,38,active
+eF26_v551,1852ec648d2ebd75,259,259,RCD ESPANYOL,Llobregat AB,club,spanish_league,8,173,30,active
+eF26_v551,1852ec648d2ebd75,260,260,MALAGA AB,Málaga AB,club,spanish_second,13,174,32,active
+eF26_v551,1852ec648d2ebd75,261,261,RCD MALLORCA,Mallorca RN,club,spanish_league,14,175,33,active
+eF26_v551,1852ec648d2ebd75,263,263,CA OSASUNA,Pamplona RA,club,spanish_league,4,176,33,active
+eF26_v551,1852ec648d2ebd75,264,264,SANTANDER VB,Santander VB,club,spanish_second,1,177,34,active
+eF26_v551,1852ec648d2ebd75,265,265,SEVILLA FC,Sevilla Nervión BR,club,spanish_league,19,178,34,active
+eF26_v551,1852ec648d2ebd75,266,266,VALLADOLID MB,Valladolid MB,club,spanish_second,7,179,33,active
+eF26_v551,1852ec648d2ebd75,267,267,VILLARREAL CF,Villarreal A,club,spanish_league,13,180,32,active
+eF26_v551,1852ec648d2ebd75,268,268,ZARAGOZA BA,Zaragoza BA,club,spanish_second,6,181,39,active
+eF26_v551,1852ec648d2ebd75,269,269,BRUGGE BZ,Brugge BZ,club,belgian_league,1,182,34,active
+eF26_v551,1852ec648d2ebd75,273,273,BESIKTAS JK,Beşiktaş JK,club,turkish_league,0,183,29,active
+eF26_v551,1852ec648d2ebd75,274,274,CRUZEIRO EC,Cruzeiro EC,club,brazil_serie_a,5,184,32,active
+eF26_v551,1852ec648d2ebd75,320,320,CAGLIARI CALCIO,Cagliari RB,club,serie_a,18,185,32,active
+eF26_v551,1852ec648d2ebd75,323,323,GENOA CFC,Genova RB,club,serie_a,11,186,36,active
+eF26_v551,1852ec648d2ebd75,327,327,SSC NAPOLI,Napoli A,club,serie_a,16,187,40,active
+eF26_v551,1852ec648d2ebd75,328,328,PESCARA BA,Pescara BA,club,serie_b,7,188,24,active
+eF26_v551,1852ec648d2ebd75,333,333,TORINO FC,Torino G,club,serie_a,7,189,35,active
+eF26_v551,1852ec648d2ebd75,336,336,HELLAS VERONA,Verona GB,club,serie_a,4,190,40,active
+eF26_v551,1852ec648d2ebd75,345,345,FORTUNA SITTARD,Fortuna Sittard,club,eredivisie,11,191,32,active
+eF26_v551,1852ec648d2ebd75,349,349,HERACLES ALMELO,Heracles Almelo,club,eredivisie,5,192,32,active
+eF26_v551,1852ec648d2ebd75,351,351,SPARTA ROTTERDAM,Sparta Rotterdam,club,eredivisie,8,193,25,active
+eF26_v551,1852ec648d2ebd75,357,357,ALMERIA RB,Almería RB,club,spanish_second,12,194,30,active
+eF26_v551,1852ec648d2ebd75,361,361,ELCHE CF,Elche BV,club,spanish_league,17,195,34,active
+eF26_v551,1852ec648d2ebd75,362,362,GETAFE CF,Getafe A,club,spanish_league,12,196,36,active
+eF26_v551,1852ec648d2ebd75,363,363,GIJON RB,Gijón RB,club,spanish_second,0,197,38,active
+eF26_v551,1852ec648d2ebd75,364,364,LAS PALMAS AA,Las Palmas AA,club,spanish_second,15,198,33,active
+eF26_v551,1852ec648d2ebd75,366,366,LEVANTE UD,Levante RA,club,spanish_league,16,199,32,active
+eF26_v551,1852ec648d2ebd75,370,370,RAYO VALLECANO,Vallecas BR,club,spanish_league,9,200,32,active
+eF26_v551,1852ec648d2ebd75,377,377,BRIGHTON & HOVE ALBION,Brighton WB,club,english_league,17,201,31,active
+eF26_v551,1852ec648d2ebd75,378,378,BURNLEY FC,Burnley RB,club,english_league,2,202,36,active
+eF26_v551,1852ec648d2ebd75,382,382,CRYSTAL PALACE FC,Crystal Palace RB,club,english_league,16,204,34,active
+eF26_v551,1852ec648d2ebd75,383,383,DERBY WB,Derby WB,club,english_second,7,205,31,active
+eF26_v551,1852ec648d2ebd75,387,387,MILLWALL BW,Millwall BW,club,english_second,16,206,32,active
+eF26_v551,1852ec648d2ebd75,388,388,NORWICH YG,Norwich YG,club,english_second,9,207,40,active
+eF26_v551,1852ec648d2ebd75,389,389,NOTTINGHAM FOREST,Nottingham RW,club,english_league,7,208,34,active
+eF26_v551,1852ec648d2ebd75,394,394,SHEFFIELD BW,Sheffield BW,club,english_second,4,209,40,active
+eF26_v551,1852ec648d2ebd75,395,395,STOKE RW,Stoke RW,club,english_second,6,210,38,active
+eF26_v551,1852ec648d2ebd75,398,398,WATFORD BY,Watford BY,club,english_second,13,211,29,active
+eF26_v551,1852ec648d2ebd75,399,399,WEST BROMWICH WB,West Bromwich WB,club,english_second,10,212,31,active
+eF26_v551,1852ec648d2ebd75,403,403,ANGERS SCO,Angers SCO,club,ligue_1,11,213,31,active
+eF26_v551,1852ec648d2ebd75,407,407,CLERMONT FOOT 63,Clermont Foot 63,club,ligue_2,6,215,25,active
+eF26_v551,1852ec648d2ebd75,413,413,HAVRE AC,Havre AC,club,ligue_1,2,216,34,active
+eF26_v551,1852ec648d2ebd75,414,414,FC LORIENT,FC Lorient,club,ligue_1,10,217,32,active
+eF26_v551,1852ec648d2ebd75,415,415,AS NANCY-LORRAINE,AS Nancy-Lorraine,club,ligue_2,3,218,29,active
+eF26_v551,1852ec648d2ebd75,418,418,AS SAINT-ETIENNE,AS Saint-Étienne,club,ligue_2,7,219,39,active
+eF26_v551,1852ec648d2ebd75,420,420,ESTAC TROYES,ESTAC Troyes,club,ligue_2,5,220,34,active
+eF26_v551,1852ec648d2ebd75,1010,1010,IRAQ,Iraq,national,national_asia_oceania,7,221,26,active
+eF26_v551,1852ec648d2ebd75,1011,1011,JORDAN,Jordan,national,national_asia_oceania,8,222,26,active
+eF26_v551,1852ec648d2ebd75,1012,1012,KOREA DPR,Korea DPR,national,national_asia_oceania,2,223,26,active
+eF26_v551,1852ec648d2ebd75,1013,1013,KUWAIT,Kuwait,national,national_asia_oceania,9,224,26,active
+eF26_v551,1852ec648d2ebd75,1015,1015,LEBANON,Lebanon,national,national_asia_oceania,6,225,26,active
+eF26_v551,1852ec648d2ebd75,1022,1022,OMAN,Oman,national,national_asia_oceania,13,226,26,active
+eF26_v551,1852ec648d2ebd75,1026,1026,QATAR,Qatar,national,national_asia_oceania,10,227,26,active
+eF26_v551,1852ec648d2ebd75,1031,1031,THAILAND,Thailand,national,national_asia_oceania,14,228,26,active
+eF26_v551,1852ec648d2ebd75,1032,1032,UNITED ARAB EMIRATES,United Arab Emirates,national,national_asia_oceania,12,229,26,active
+eF26_v551,1852ec648d2ebd75,1040,1040,ALGERIA,Algeria,national,national_africa,1,230,26,active
+eF26_v551,1852ec648d2ebd75,1044,1044,BURKINA FASO,Burkina Faso,national,national_africa,6,231,26,active
+eF26_v551,1852ec648d2ebd75,1051,1051,COTE D'IVOIRE,Côte d'Ivoire,national,national_africa,9,232,26,active
+eF26_v551,1852ec648d2ebd75,1058,1058,GHANA,Ghana,national,national_africa,10,233,26,active
+eF26_v551,1852ec648d2ebd75,1059,1059,GUINEA,Guinea,national,national_africa,7,234,26,active
+eF26_v551,1852ec648d2ebd75,1067,1067,MALI,Mali,national,national_africa,5,235,26,active
+eF26_v551,1852ec648d2ebd75,1083,1083,ZAMBIA,Zambia,national,national_africa,12,236,26,active
+eF26_v551,1852ec648d2ebd75,1113,1113,PANAMA,Panama,national,national_north_america,5,237,26,active
+eF26_v551,1852ec648d2ebd75,1128,1128,BOLIVIA,Bolivia,national,national_south_america,5,238,26,active
+eF26_v551,1852ec648d2ebd75,1129,1129,VENEZUELA,Venezuela,national,national_south_america,0,239,26,active
+eF26_v551,1852ec648d2ebd75,1141,1141,NEW ZEALAND,New Zealand,national,national_asia_oceania,16,240,26,active
+eF26_v551,1852ec648d2ebd75,1164,1164,ISRAEL,Israel,national,national_europe,41,241,26,active
+eF26_v551,1852ec648d2ebd75,1165,1165,ALBANIA,Albania,national,national_europe,33,242,26,active
+eF26_v551,1852ec648d2ebd75,1168,1168,AZERBAIJAN,Azerbaijan,national,national_europe,34,243,26,active
+eF26_v551,1852ec648d2ebd75,1171,1171,CYPRUS,Cyprus,national,national_europe,40,244,26,active
+eF26_v551,1852ec648d2ebd75,1174,1174,GEORGIA,Georgia,national,national_europe,32,245,26,active
+eF26_v551,1852ec648d2ebd75,1175,1175,ICELAND,Iceland,national,national_europe,0,246,26,active
+eF26_v551,1852ec648d2ebd75,1176,1176,KAZAKHSTAN,Kazakhstan,national,national_europe,15,247,26,active
+eF26_v551,1852ec648d2ebd75,1180,1180,NORTH MACEDONIA,North Macedonia,national,national_europe,30,248,26,active
+eF26_v551,1852ec648d2ebd75,1181,1181,MALTA,Malta,national,national_europe,39,249,26,active
+eF26_v551,1852ec648d2ebd75,1184,1184,UZBEKISTAN,Uzbekistan,national,national_asia_oceania,0,250,26,active
+eF26_v551,1852ec648d2ebd75,1195,1195,GENK BW,Genk BW,club,belgian_league,5,251,32,active
+eF26_v551,1852ec648d2ebd75,1196,1196,GENT BW,Gent BW,club,belgian_league,3,252,36,active
+eF26_v551,1852ec648d2ebd75,1197,1197,LIEGE RW,Liège RW,club,belgian_league,10,253,32,active
+eF26_v551,1852ec648d2ebd75,1200,1200,MECHELEN GR,Mechelen GR,club,belgian_league,4,254,31,active
+eF26_v551,1852ec648d2ebd75,1207,1207,KOBENHAVN HB,København HB,club,danish_league,6,255,32,active
+eF26_v551,1852ec648d2ebd75,1208,1208,NORDSJLLAND RG,Nordsjælland RG,club,danish_league,4,256,34,active
+eF26_v551,1852ec648d2ebd75,1219,1219,ABERDEEN FC,Aberdeen FC,club,scottish_league,0,257,33,active
+eF26_v551,1852ec648d2ebd75,1220,1220,DUNDEE UNITED FC,Dundee United FC,club,scottish_league,1,258,27,active
+eF26_v551,1852ec648d2ebd75,1222,1222,HIBERNIAN FC,Hibernian FC,club,scottish_league,2,259,29,active
+eF26_v551,1852ec648d2ebd75,1230,1230,GENCLERBIRLIGI SK,Gençlerbirliği SK,club,turkish_league,8,260,38,active
+eF26_v551,1852ec648d2ebd75,1236,1236,LA PATERNAL RB,La Paternal RB,club,argentina_league,10,261,29,active
+eF26_v551,1852ec648d2ebd75,1237,1237,AVELLANEDA AB,Avellaneda AB,club,argentina_league,15,262,34,active
+eF26_v551,1852ec648d2ebd75,1238,1238,BUENOS AIRES RB,Buenos Aires RB,club,argentina_league,20,263,40,active
+eF26_v551,1852ec648d2ebd75,1239,1239,LA PLATA AB,La Plata AB,club,argentina_league,21,264,37,active
+eF26_v551,1852ec648d2ebd75,1240,1240,AVELLANEDA R,Avellaneda R,club,argentina_league,16,265,31,active
+eF26_v551,1852ec648d2ebd75,1241,1241,ROSARIO RN,Rosario RN,club,argentina_league,5,266,30,active
+eF26_v551,1852ec648d2ebd75,1242,1242,ROSARIO AA,Rosario AA,club,argentina_league,6,267,40,active
+eF26_v551,1852ec648d2ebd75,1243,1243,ALMAGRO AR,Almagro AR,club,argentina_league,11,268,39,active
+eF26_v551,1852ec648d2ebd75,1244,1244,LINIERS AB,Liniers AB,club,argentina_league,14,269,30,active
+eF26_v551,1852ec648d2ebd75,1245,1245,ATLETICO MINEIRO,Atlético Mineiro,club,brazil_serie_a,6,270,18,active
+eF26_v551,1852ec648d2ebd75,1246,1246,BOTAFOGO FR,Botafogo FR,club,brazil_serie_a,8,271,29,active
+eF26_v551,1852ec648d2ebd75,1247,1247,SC CORINTHIANS PAULISTA,SC Corinthians Paulista,club,brazil_serie_a,13,272,22,active
+eF26_v551,1852ec648d2ebd75,1248,1248,CR FLAMENGO,CR Flamengo,club,brazil_serie_a,9,273,22,active
+eF26_v551,1852ec648d2ebd75,1249,1249,FLUMINENSE FC,Fluminense FC,club,brazil_serie_a,10,274,24,active
+eF26_v551,1852ec648d2ebd75,1250,1250,GREMIO FBPA,Grêmio FBPA,club,brazil_serie_a,17,275,23,active
+eF26_v551,1852ec648d2ebd75,1252,1252,SC INTERNACIONAL,SC Internacional,club,brazil_serie_a,18,277,24,active
+eF26_v551,1852ec648d2ebd75,1254,1254,SANTOS FC,Santos FC,club,brazil_serie_a,15,278,34,active
+eF26_v551,1852ec648d2ebd75,1255,1255,SAO PAULO F.C.,São Paulo F.C.,club,brazil_serie_a,14,279,35,active
+eF26_v551,1852ec648d2ebd75,1256,1256,SANTIAGO B,Santiago B,club,chilean_league,6,280,37,active
+eF26_v551,1852ec648d2ebd75,1257,1257,CALI R,Cali R,club,colombian_league,14,281,33,active
+eF26_v551,1852ec648d2ebd75,1258,1258,BOGOTA AB,Bogotá AB,club,colombian_league,10,282,30,active
+eF26_v551,1852ec648d2ebd75,1264,184,CLUB AMERICA,Club América,club,north_america_clubs,3,283,33,active
+eF26_v551,1852ec648d2ebd75,1270,1270,TOKUSHIMA VORTIS,Tokushima Vortis,club,j2_league,9,284,30,active
+eF26_v551,1852ec648d2ebd75,1327,1327,QUEEN'S PARK BW,Queen'S Park BW,club,english_second,15,286,35,active
+eF26_v551,1852ec648d2ebd75,1329,1329,STADE BRESTOIS 29,Stade Brestois 29,club,ligue_1,7,287,26,active
+eF26_v551,1852ec648d2ebd75,1330,1330,STADE DE REIMS,Stade de Reims,club,ligue_2,2,288,35,active
+eF26_v551,1852ec648d2ebd75,1493,1493,BURIRAM UNITED F.C.,Buriram United F.C.,club,thai_league,2,289,28,active
+eF26_v551,1852ec648d2ebd75,1550,1550,SERBIA,Serbia,national,national_europe,26,290,26,active
+eF26_v551,1852ec648d2ebd75,1551,1551,MONTENEGRO,Montenegro,national,national_europe,29,291,26,active
+eF26_v551,1852ec648d2ebd75,1589,1589,HULL OB,Hull OB,club,english_second,1,292,31,active
+eF26_v551,1852ec648d2ebd75,1600,1600,LA SPEZIA B,La Spezia B,club,serie_b,5,293,28,active
+eF26_v551,1852ec648d2ebd75,1700,188,CD GUADALAJARA,CD Guadalajara,club,north_america_clubs,2,294,28,active
+eF26_v551,1852ec648d2ebd75,1706,1706,BASEL RB,Basel RB,club,swiss_league,0,295,32,active
+eF26_v551,1852ec648d2ebd75,1760,1760,BRISTOL R,Bristol R,club,english_second,18,296,30,active
+eF26_v551,1852ec648d2ebd75,1765,1765,GRANADA RB,Granada RB,club,spanish_second,11,297,35,active
+eF26_v551,1852ec648d2ebd75,1775,198,PUMAS,Pumas,club,north_america_clubs,4,298,26,active
+eF26_v551,1852ec648d2ebd75,1782,219,TIGRES UANL,Tigres UANL,club,north_america_clubs,1,299,24,active
+eF26_v551,1852ec648d2ebd75,1804,1804,VITORIA SC,Vitória SC,club,liga_portugal,2,300,28,active
+eF26_v551,1852ec648d2ebd75,1832,1832,BRONDBY GB,Brøndby GB,club,danish_league,7,303,29,active
+eF26_v551,1852ec648d2ebd75,1881,1881,FAGIANO OKAYAMA,Fagiano Okayama,club,j1_league,16,304,31,active
+eF26_v551,1852ec648d2ebd75,1909,1909,SWANSEA W,Swansea W,club,english_second,14,305,28,active
+eF26_v551,1852ec648d2ebd75,1919,1919,US SASSUOLO,Sassuolo NV,club,serie_a,9,306,40,active
+eF26_v551,1852ec648d2ebd75,1922,1922,PARQUE PATRICIOS R,Parque Patricios R,club,argentina_league,13,308,28,active
+eF26_v551,1852ec648d2ebd75,1927,1927,BANFIELD VB,Banfield VB,club,argentina_league,18,310,29,active
+eF26_v551,1852ec648d2ebd75,1929,1929,LANUS M,Lanús M,club,argentina_league,17,311,40,active
+eF26_v551,1852ec648d2ebd75,1930,1930,ATHLETICO PARANAENSE,Athletico Paranaense,club,brazil_serie_b,9,312,34,active
+eF26_v551,1852ec648d2ebd75,1931,1931,CURITIBA BV,Curitiba BV,club,brazil_serie_b,10,313,29,active
+eF26_v551,1852ec648d2ebd75,1933,1933,GOIAS V,Goiás V,club,brazil_serie_b,3,314,23,active
+eF26_v551,1852ec648d2ebd75,1937,1937,EC VITORIA,EC Vitória,club,brazil_serie_a,3,316,28,active
+eF26_v551,1852ec648d2ebd75,1944,1944,CD NACIONAL,CD Nacional,club,liga_portugal,11,317,28,active
+eF26_v551,1852ec648d2ebd75,1945,1945,TRABZONSPOR,Trabzonspor,club,turkish_league,7,318,31,active
+eF26_v551,1852ec648d2ebd75,1950,1950,BERN GS,Bern GS,club,swiss_league,4,319,30,active
+eF26_v551,1852ec648d2ebd75,1955,1955,SION RW,Sion RW,club,swiss_league,7,320,25,active
+eF26_v551,1852ec648d2ebd75,1957,1957,ZURICH WB,Zürich WB,club,swiss_league,2,321,33,active
+eF26_v551,1852ec648d2ebd75,1958,1958,SERVETTE R,Servette R,club,swiss_league,8,322,33,active
+eF26_v551,1852ec648d2ebd75,1974,1974,SPORTING BRAGA,Sporting Braga,club,liga_portugal,0,323,31,active
+eF26_v551,1852ec648d2ebd75,1979,1979,RIO AVE FC,Rio Ave FC,club,liga_portugal,5,324,26,active
+eF26_v551,1852ec648d2ebd75,1985,1985,KILMARNOCK FC,Kilmarnock FC,club,scottish_league,8,325,27,active
+eF26_v551,1852ec648d2ebd75,1986,1986,MOTHERWELL FC,Motherwell FC,club,scottish_league,7,326,33,active
+eF26_v551,1852ec648d2ebd75,1987,1987,ST. MIRREN FC,St. Mirren FC,club,scottish_league,6,327,28,active
+eF26_v551,1852ec648d2ebd75,1989,1989,ANTALYASPOR,Antalyaspor,club,turkish_league,13,328,36,active
+eF26_v551,1852ec648d2ebd75,1995,1995,RAMS BASAKSEHIR FK,RAMS Başakşehir FK,club,turkish_league,4,329,29,active
+eF26_v551,1852ec648d2ebd75,1996,1996,MONDIHOME KAYSERISPOR,Mondihome Kayserispor,club,turkish_league,9,330,39,active
+eF26_v551,1852ec648d2ebd75,2009,2009,BRUGGE GZ,Brugge GZ,club,belgian_league,2,331,28,active
+eF26_v551,1852ec648d2ebd75,2010,2010,CHARLEROI ZW,Charleroi ZW,club,belgian_league,11,332,29,active
+eF26_v551,1852ec648d2ebd75,2019,2019,WAREGEM GR,Waregem GR,club,belgian_league,6,334,30,active
+eF26_v551,1852ec648d2ebd75,2067,2067,AARHUS HB,Aarhus HB,club,danish_league,2,335,30,active
+eF26_v551,1852ec648d2ebd75,2069,2069,MIDTJYLLAND SR,Midtjylland SR,club,danish_league,3,336,33,active
+eF26_v551,1852ec648d2ebd75,2070,2070,ODENSE HB,Odense HB,club,danish_league,8,337,25,active
+eF26_v551,1852ec648d2ebd75,2071,2071,RANDERS B,Randers B,club,danish_league,0,338,28,active
+eF26_v551,1852ec648d2ebd75,2187,2187,GIRONA FC,Girona R,club,spanish_league,6,339,33,active
+eF26_v551,1852ec648d2ebd75,2188,2188,HUESCA RA,Huesca RA,club,spanish_second,5,340,30,active
+eF26_v551,1852ec648d2ebd75,2191,2191,SANTIAGO BAR,Santiago BAR,club,chilean_league,7,341,40,active
+eF26_v551,1852ec648d2ebd75,2192,2192,SANTIAGO VB,Santiago VB,club,chilean_league,8,342,39,active
+eF26_v551,1852ec648d2ebd75,2193,2193,MEDELLIN V,Medellín V,club,colombian_league,3,343,32,active
+eF26_v551,1852ec648d2ebd75,2195,2195,BOYACA A,Boyacá A,club,colombian_league,7,344,33,active
+eF26_v551,1852ec648d2ebd75,2208,2208,VINA DEL MAR AA,Viña del Mar AA,club,chilean_league,5,345,33,active
+eF26_v551,1852ec648d2ebd75,2209,2209,SANTIAGO A,Santiago A,club,chilean_league,9,346,38,active
+eF26_v551,1852ec648d2ebd75,2210,2210,MEDELLIN RA,Medellín RA,club,colombian_league,4,347,39,active
+eF26_v551,1852ec648d2ebd75,2284,2284,MANIZALES B,Manizales B,club,colombian_league,8,348,26,active
+eF26_v551,1852ec648d2ebd75,2285,2285,BARRANQUILLA RB,Barranquilla RB,club,colombian_league,0,349,34,active
+eF26_v551,1852ec648d2ebd75,2361,2361,TOLIMA RA,Tolima RA,club,colombian_league,13,351,36,active
+eF26_v551,1852ec648d2ebd75,2372,2372,FC MACHIDA ZELVIA,FC Machida Zelvia,club,j1_league,6,353,29,active
+eF26_v551,1852ec648d2ebd75,2373,2373,V-VAREN NAGASAKI,V-Varen Nagasaki,club,j2_league,14,354,32,active
+eF26_v551,1852ec648d2ebd75,2387,2387,GIL VICENTE FC,Gil Vicente FC,club,liga_portugal,1,355,33,active
+eF26_v551,1852ec648d2ebd75,2388,2388,MOREIRENSE FC,Moreirense FC,club,liga_portugal,4,356,24,active
+eF26_v551,1852ec648d2ebd75,2391,2391,CD SANTA CLARA,CD Santa Clara,club,liga_portugal,10,357,40,active
+eF26_v551,1852ec648d2ebd75,2450,2450,MINAS GERAIS VP,Minas Gerais VP,club,brazil_serie_b,6,358,23,active
+eF26_v551,1852ec648d2ebd75,2451,2451,GOIANIA PV,Goiânia PV,club,brazil_serie_b,4,359,23,active
+eF26_v551,1852ec648d2ebd75,2452,2452,FLORIANOPOLIS AB,Florianópolis AB,club,brazil_serie_b,12,360,23,active
+eF26_v551,1852ec648d2ebd75,2453,2453,EC BAHIA,EC Bahia,club,brazil_serie_a,4,361,29,active
+eF26_v551,1852ec648d2ebd75,2454,2454,CEARA SC,Ceará SC,club,brazil_serie_a,0,362,20,active
+eF26_v551,1852ec648d2ebd75,2459,2459,RED BULL BRAGANTINO,Red Bull Bragantino,club,brazil_serie_a,11,363,30,active
+eF26_v551,1852ec648d2ebd75,2465,2465,PONTE PRETA BP,Ponte Preta BP,club,brazil_serie_b,14,364,23,active
+eF26_v551,1852ec648d2ebd75,2468,2468,VILA NOVA VB,Vila Nova VB,club,brazil_serie_b,5,365,23,active
+eF26_v551,1852ec648d2ebd75,2506,2506,MACEIO VB,Maceió VB,club,brazil_serie_b,1,366,23,active
+eF26_v551,1852ec648d2ebd75,2517,2517,STABIA GB,Stabia GB,club,serie_b,9,367,32,active
+eF26_v551,1852ec648d2ebd75,2538,2538,SANTA FE RB,Santa Fe RB,club,argentina_league,3,368,33,active
+eF26_v551,1852ec648d2ebd75,2541,2541,RANCAGUA A,Rancagua A,club,chilean_league,12,369,33,active
+eF26_v551,1852ec648d2ebd75,2544,2544,LA SERENA R,La Serena R,club,chilean_league,2,371,39,active
+eF26_v551,1852ec648d2ebd75,2545,2545,TALCAHUANO AN,Talcahuano AN,club,chilean_league,14,372,39,active
+eF26_v551,1852ec648d2ebd75,2546,2546,LA CALERA R,La Calera R,club,chilean_league,4,373,32,active
+eF26_v551,1852ec648d2ebd75,2548,2548,SANTIAGO RBV,Santiago RBV,club,chilean_league,11,374,40,active
+eF26_v551,1852ec648d2ebd75,2553,2553,EL SALVADOR BN,El Salvador BN,club,chilean_league,1,375,40,active
+eF26_v551,1852ec648d2ebd75,2614,2614,CD TONDELA,CD Tondela,club,liga_portugal,7,376,24,active
+eF26_v551,1852ec648d2ebd75,2616,2616,MIRANDA DE EBRO RN,Miranda de Ebro RN,club,spanish_second,4,377,36,active
+eF26_v551,1852ec648d2ebd75,2625,2625,KASMPASA SK,Kasımpaşa SK,club,turkish_league,5,379,39,active
+eF26_v551,1852ec648d2ebd75,2643,2643,MUANGTHONG UNITED FC,Muangthong United FC,club,thai_league,6,380,33,active
+eF26_v551,1852ec648d2ebd75,2650,2650,CALI VB,Cali VB,club,colombian_league,15,381,29,active
+eF26_v551,1852ec648d2ebd75,2651,2651,PASTO RAA,Pasto RAA,club,colombian_league,16,382,29,active
+eF26_v551,1852ec648d2ebd75,2653,2653,RIONEGRO RA,Rionegro RA,club,colombian_league,6,384,32,active
+eF26_v551,1852ec648d2ebd75,2654,2654,BOGOTA VB,Bogotá VB,club,colombian_league,11,385,32,active
+eF26_v551,1852ec648d2ebd75,2657,2657,SANTA FE DE BOGOTA R,Santa Fe de Bogotá R,club,colombian_league,12,386,40,active
+eF26_v551,1852ec648d2ebd75,2699,2699,CHILLAN R,Chillán R,club,chilean_league,13,387,36,active
+eF26_v551,1852ec648d2ebd75,2707,2707,COQUIMBO AN,Coquimbo AN,club,chilean_league,3,388,35,active
+eF26_v551,1852ec648d2ebd75,2717,2717,MAR DEL PLATA VA,Mar del Plata VA,club,argentina_league,22,389,33,active
+eF26_v551,1852ec648d2ebd75,2719,2719,TUCUMAN AB,Tucumán AB,club,argentina_league,0,390,33,active
+eF26_v551,1852ec648d2ebd75,2722,2722,FLORENCIO VARELA AV,Florencio Varela AV,club,argentina_league,19,391,33,active
+eF26_v551,1852ec648d2ebd75,2730,2730,JUNIN V,Junín V,club,argentina_league,9,392,33,active
+eF26_v551,1852ec648d2ebd75,4071,4071,AFC BOURNEMOUTH,Bournemouth RB,club,english_league,18,393,27,active
+eF26_v551,1852ec648d2ebd75,4101,4101,BLAUBLITZ AKITA,Blaublitz Akita,club,j2_league,1,395,30,active
+eF26_v551,1852ec648d2ebd75,4108,4108,CHAPECO VB,Chapecó VB,club,brazil_serie_b,11,396,28,active
+eF26_v551,1852ec648d2ebd75,4123,4123,FC METZ,FC Metz,club,ligue_1,3,397,25,active
+eF26_v551,1852ec648d2ebd75,4145,4145,DEPORTIVO ALAVES,Álava AB,club,spanish_league,3,398,34,active
+eF26_v551,1852ec648d2ebd75,4146,4146,EIBAR AR,Eibar AR,club,spanish_second,3,399,31,active
+eF26_v551,1852ec648d2ebd75,4175,4175,CHONBURI FC,Chonburi FC,club,thai_league,9,401,33,active
+eF26_v551,1852ec648d2ebd75,4180,4180,BRENTFORD FC,Brentford RW,club,english_league,13,402,31,active
+eF26_v551,1852ec648d2ebd75,4183,4183,COVENTRY B,Coventry B,club,english_second,12,403,28,active
+eF26_v551,1852ec648d2ebd75,4192,4192,PRESTON WB,Preston WB,club,english_second,2,404,32,active
+eF26_v551,1852ec648d2ebd75,4194,4194,SHEFFIELD RB,Sheffield RB,club,english_second,5,405,32,active
+eF26_v551,1852ec648d2ebd75,4200,4200,AMIENS SC,Amiens SC,club,ligue_2,1,406,35,active
+eF26_v551,1852ec648d2ebd75,4206,4206,USL DUNKERQUE,USL Dunkerque,club,ligue_2,0,407,21,active
+eF26_v551,1852ec648d2ebd75,4211,4211,PARIS FC,Paris FC,club,ligue_1,5,408,34,active
+eF26_v551,1852ec648d2ebd75,4213,4213,RC STRASBOURG ALSACE,RC Strasbourg Alsace,club,ligue_1,6,409,35,active
+eF26_v551,1852ec648d2ebd75,4220,4220,US CREMONESE,Cremona GR,club,serie_a,5,410,35,active
+eF26_v551,1852ec648d2ebd75,4225,4225,REGGIO EMILIA G,Reggio Emilia G,club,serie_b,2,411,29,active
+eF26_v551,1852ec648d2ebd75,4229,4229,VENEZIA ANV,Venezia ANV,club,serie_b,1,412,40,active
+eF26_v551,1852ec648d2ebd75,4230,4230,ENTELLA BA,Entella BA,club,serie_b,4,413,37,active
+eF26_v551,1852ec648d2ebd75,4234,4234,FROSINONE GA,Frosinone GA,club,serie_b,8,414,29,active
+eF26_v551,1852ec648d2ebd75,4237,4237,US LECCE,Lecce GR,club,serie_a,17,415,31,active
+eF26_v551,1852ec648d2ebd75,4241,4241,PISA SPORTING CLUB,Pisa Sporting Club,club,serie_a,13,416,40,active
+eF26_v551,1852ec648d2ebd75,4260,4260,REAL OVIEDO,Oviedo A,club,spanish_league,0,418,32,active
+eF26_v551,1852ec648d2ebd75,4272,4272,LEGANES AB,Leganés AB,club,spanish_second,8,419,40,active
+eF26_v551,1852ec648d2ebd75,4302,4302,ALBACETE BN,Albacete BN,club,spanish_second,10,420,36,active
+eF26_v551,1852ec648d2ebd75,4308,4308,CADIZ AA,Cádiz AA,club,spanish_second,14,421,33,active
+eF26_v551,1852ec648d2ebd75,4370,4370,GRENOBLE FOOT 38,Grenoble Foot 38,club,ligue_2,8,425,29,active
+eF26_v551,1852ec648d2ebd75,4372,4372,RODEZ AVEYRON FOOTBALL,Rodez Aveyron Football,club,ligue_2,9,426,25,active
+eF26_v551,1852ec648d2ebd75,4395,4395,CASTELLON NB,Castellón NB,club,spanish_second,9,427,36,active
+eF26_v551,1852ec648d2ebd75,4914,4914,MONZA RB,Monza RB,club,serie_b,0,428,34,active
+eF26_v551,1852ec648d2ebd75,4937,4937,SANKT GALLEN GW,Sankt Gallen GW,club,swiss_league,1,430,32,active
+eF26_v551,1852ec648d2ebd75,4938,4938,THUN RW,Thun RW,club,swiss_league,5,431,30,active
+eF26_v551,1852ec648d2ebd75,4941,4941,BG PATHUM UNITED FC,BG Pathum United FC,club,thai_league,4,432,35,active
+eF26_v551,1852ec648d2ebd75,4962,4962,LUZERN BW,Luzern BW,club,swiss_league,3,433,27,active
+eF26_v551,1852ec648d2ebd75,4964,4964,LAUSANNE BW,Lausanne BW,club,swiss_league,6,434,27,active
+eF26_v551,1852ec648d2ebd75,4965,4965,LUGANO SW,Lugano SW,club,swiss_league,9,435,29,active
+eF26_v551,1852ec648d2ebd75,4995,4995,SANTIAGO DEL ESTERO BN,Santiago del Estero BN,club,argentina_league,1,436,29,active
+eF26_v551,1852ec648d2ebd75,5028,5028,FC FAMALICAO,FC Famalicão,club,liga_portugal,3,437,29,active
+eF26_v551,1852ec648d2ebd75,5046,5046,CORDOBA AB,Córdoba AB,club,argentina_league,2,438,37,active
+eF26_v551,1852ec648d2ebd75,5099,5099,PAU FC,Pau FC,club,ligue_2,11,439,27,active
+eF26_v551,1852ec648d2ebd75,5137,5137,EC JUVENTUDE,EC Juventude,club,brazil_serie_a,16,440,34,active
+eF26_v551,1852ec648d2ebd75,5139,5139,RIBEIRAO PRETO BVP,Ribeirão Preto BVP,club,brazil_serie_b,7,441,23,active
+eF26_v551,1852ec648d2ebd75,5142,5142,CUIABA VA,Cuiabá VA,club,brazil_serie_b,2,442,23,active
+eF26_v551,1852ec648d2ebd75,5143,5143,FORTALEZA EC,Fortaleza EC,club,brazil_serie_a,1,443,24,active
+eF26_v551,1852ec648d2ebd75,5145,5145,PARA A,Pará A,club,brazil_serie_b,0,444,23,active
+eF26_v551,1852ec648d2ebd75,5191,5191,ANTWERP RW,Antwerp RW,club,belgian_league,0,445,36,active
+eF26_v551,1852ec648d2ebd75,5194,5194,SINT-TRUIDEN GB,Sint-Truiden GB,club,belgian_league,9,446,25,active
+eF26_v551,1852ec648d2ebd75,5202,5202,CORENDON ALANYASPOR,Corendon Alanyaspor,club,turkish_league,14,447,31,active
+eF26_v551,1852ec648d2ebd75,5203,5203,GOZTEPE SK,Göztepe SK,club,turkish_league,10,448,29,active
+eF26_v551,1852ec648d2ebd75,5204,5204,KONYASPOR,Konyaspor,club,turkish_league,11,449,37,active
+eF26_v551,1852ec648d2ebd75,5207,5207,VALLEDUPAR ABR,Valledupar ABR,club,colombian_league,2,450,33,active
+eF26_v551,1852ec648d2ebd75,5208,5208,BUCARAMANGA AV,Bucaramanga AV,club,colombian_league,1,451,26,active
+eF26_v551,1852ec648d2ebd75,5217,5217,LEUVEN WZRG,Leuven WZRG,club,belgian_league,7,453,34,active
+eF26_v551,1852ec648d2ebd75,5225,5225,SILKEBORG RH,Silkeborg RH,club,danish_league,1,455,25,active
+eF26_v551,1852ec648d2ebd75,5226,5226,HADERSLEV HB,Haderslev HB,club,danish_league,9,456,28,active
+eF26_v551,1852ec648d2ebd75,5235,5235,VEJLE RH,Vejle RH,club,danish_league,5,457,35,active
+eF26_v551,1852ec648d2ebd75,5319,5319,LIVINGSTON FC,Livingston FC,club,scottish_league,3,458,28,active
+eF26_v551,1852ec648d2ebd75,5354,5354,CAYKUR RIZESPOR,Çaykur Rizespor,club,turkish_league,1,459,30,active
+eF26_v551,1852ec648d2ebd75,5356,5356,GAZIANTEP FK,Gaziantep FK,club,turkish_league,12,460,32,active
+eF26_v551,1852ec648d2ebd75,5370,5370,PEREIRA AR,Pereira AR,club,colombian_league,9,461,33,active
+eF26_v551,1852ec648d2ebd75,5394,5394,TRUE BANGKOK UNITED FC,True Bangkok United FC,club,thai_league,5,463,40,active
+eF26_v551,1852ec648d2ebd75,5395,5395,SINGHA CHIANGRAI UNITED,Singha Chiangrai United,club,thai_league,0,464,28,active
+eF26_v551,1852ec648d2ebd75,5397,5397,NAKHONRATCHASIMA FC,Nakhonratchasima FC,club,thai_league,3,465,31,active
+eF26_v551,1852ec648d2ebd75,5401,5401,PORT FC,Port FC,club,thai_league,7,466,29,active
+eF26_v551,1852ec648d2ebd75,5402,5402,PT PRACHUAP FC,PT Prachuap FC,club,thai_league,11,467,30,active
+eF26_v551,1852ec648d2ebd75,5403,5403,RATCHABURI FC,Ratchaburi FC,club,thai_league,8,468,29,active
+eF26_v551,1852ec648d2ebd75,5404,5404,SUKHOTHAI FC,Sukhothai FC,club,thai_league,1,469,28,active
+eF26_v551,1852ec648d2ebd75,5416,5416,RAYONG FC,Rayong FC,club,thai_league,10,470,30,active
+eF26_v551,1852ec648d2ebd75,5433,5433,PONTA GROSSA PB,Ponta Grossa PB,club,brazil_serie_b,8,471,23,active
+eF26_v551,1852ec648d2ebd75,5454,5454,VICENTE LOPEZ M,Vicente López M,club,argentina_league,7,473,40,active
+eF26_v551,1852ec648d2ebd75,5652,5652,FATIH KARAGUMRUK SK,Fatih Karagümrük SK,club,turkish_league,6,474,35,active
+eF26_v551,1852ec648d2ebd75,5738,2473,INTER MIAMI CF,Miami BP,club,north_america_clubs,0,476,26,active
+eF26_v551,1852ec648d2ebd75,17873,67025,AL HILAL SFC,Al Hilal SFC,club,other_asia_clubs,1,477,40,active
+eF26_v551,1852ec648d2ebd75,18961,68113,AL NASSR FC,Al Nassr FC,club,other_asia_clubs,2,478,34,active
+eF26_v551,1852ec648d2ebd75,20557,69709,AL SADD SC,Al Sadd SC,club,other_asia_clubs,0,479,37,active
+eF26_v551,1852ec648d2ebd75,20560,69712,SHABAB AL AHLI DUBAI FC,Shabab Al Ahli Dubai FC,club,other_asia_clubs,3,480,39,active

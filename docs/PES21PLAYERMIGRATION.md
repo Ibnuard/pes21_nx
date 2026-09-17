@@ -222,3 +222,14 @@ stable registry, generator, tests, and generated runtime roster metadata are
 public source.
 
 No PESDB scraper, surrogate player, or portrait alias is part of this flow.
+
+## Unified master-data catalog
+
+After a migration build, run `tools/pes21_master_data.py sync`, `audit`, and
+`export`. The pipeline joins the locked player snapshot, stable ID registry,
+443-team catalog, roster memberships, formation hints, final starting elevens,
+portrait/face/commentary ownership, and kit migration report into the ignored
+`local-inputs/master-data/pes21_master.db`. Compact identity/team/competition
+registries remain under `data/master/`; complete CSV exports stay under
+`local-debug/master-exports/`. See `docs/MASTER_DATA_CATALOG.md` for the schema,
+counts, provenance, and example queries.

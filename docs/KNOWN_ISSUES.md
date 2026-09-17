@@ -1,7 +1,7 @@
 # PES21 NX open issues and design notes
 
-Last reviewed: 2026-08-23, against the working tree after the controller
-coverage pass following `775c77c`.
+Last reviewed: 2026-09-17, against the helper/camera/menu candidate produced
+after the full mobile kit migration.
 
 This file records confirmed runtime problems and design decisions that still
 need implementation or hardware testing. It is not a claim that an item is
@@ -42,6 +42,12 @@ fixed merely because a hook or overlay already exists.
   contextual action can begin. This specifically contains the stale-pointer
   risk seen when the ball crossed the line for a corner, but the random freeze
   is not considered resolved until a repeated corner stress test passes.
+- ButtonSetplay visibility is now gated by the native `NeedDisp` result rather
+  than a half-second owner grace. This removes the stale goal-kick helper flash
+  after the keeper enters the kick animation. Ordinary long free kicks expose
+  only Set Piece Taker; offside restarts are identified from native `FoulKind`
+  and intentionally expose no helper. Both restart variants need hardware
+  confirmation.
 
 ## Requested simplified match UI
 
@@ -77,12 +83,15 @@ fixed merely because a hook or overlay already exists.
 
 - Stadium/Live Broadcast keeps its native zoom and interpolation. Its
   broadcast-only calculator now leaves the native planar target untouched
-  inside a ten-unit safe area, then smoothly ramps a maximum 35% correction
+  inside a fourteen-unit safe area, then smoothly ramps a maximum 35% correction
   toward live `BallInfo` over the following eight units. This prevents tiny
   ball-physics changes from moving the camera every frame and removes the old
-  threshold discontinuity. The failed shared `gcViewTraceBroadcast` patch and
-  the old global clock/velocity override remain removed. Keeper catches, saves,
-  goal kicks, rapid backwards switches and cursor/name pacing still require a
+  threshold discontinuity. Tracking remains disarmed while the ball is still
+  at the initial kickoff and warms up one native frame after real ball motion,
+  avoiding the uninitialised-target glitch when Stadium is selected before the
+  match starts. The failed shared `gcViewTraceBroadcast` patch and the old
+  global clock/velocity override remain removed. Keeper catches, saves, goal
+  kicks, rapid backwards switches and cursor/name pacing still require a
   hardware pass.
 - `DYNAMIC WIDE CUSTOM` is now available as a separate pause-camera preset. It
   stays on the native Dynamic-Wide tracking/projection path but starts with the

@@ -249,9 +249,13 @@ int main(void) {
   assert(match_broadcast_stabilize_target(nearby, ball) == 0);
   assert(nearby[0] == 3.0f && nearby[1] == 4.0f && nearby[2] == 7.0f);
 
-  float ramped[3] = {12.0f, 0.0f, 8.0f};
+  float wider_safe_area[3] = {12.0f, 0.0f, 8.0f};
+  assert(match_broadcast_stabilize_target(wider_safe_area, ball) == 0);
+  assert(wider_safe_area[0] == 12.0f);
+
+  float ramped[3] = {16.0f, 0.0f, 8.0f};
   assert(match_broadcast_stabilize_target(ramped, ball) == 1);
-  assert(fabsf(ramped[0] - 11.34375f) < 0.001f);
+  assert(fabsf(ramped[0] - 15.125f) < 0.001f);
   assert(ramped[1] == 0.0f && ramped[2] == 8.0f);
 
   float escaped[3] = {30.0f, 40.0f, 9.0f};
@@ -264,12 +268,33 @@ int main(void) {
   assert(match_broadcast_stabilize_target(invalid, ball) == 0);
 }
 ''')
+        build_and_run(compiler, r'''
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+''' + function(SOURCE, 'match_broadcast_ball_tracking_ready') + r'''
+int main(void) {
+  int first_ball = 1;
+  int second_ball = 2;
+  float still[3] = {10.0f, 20.0f, 0.0f};
+  float moved[3] = {10.6f, 20.0f, 0.0f};
+  float live[3] = {10.8f, 20.0f, 0.0f};
+  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, moved) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, live) == 1);
+  assert(match_broadcast_ball_tracking_ready(&second_ball, live) == 0);
+}
+''')
         root = Path(__file__).resolve().parents[1]
         assembly = (root / 'source/cobra_pad_hook.s').read_text(encoding='utf-8')
         wrapper = function(SOURCE, 'pes_inplay_ball_position_broadcast')
         self.assertIn('match_ball_position_broadcast_original(', wrapper)
         self.assertIn('(const unsigned char *)camera + 0x198', wrapper)
+        self.assertIn('match_broadcast_ball_tracking_ready(ball_info, ball_position)', wrapper)
         self.assertIn('match_broadcast_stabilize_target(target_position, ball_position)', wrapper)
+        setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
+        self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);', setup)
         self.assertNotIn('if (!active', wrapper)
         self.assertNotIn('armGetSystemTick', wrapper)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]

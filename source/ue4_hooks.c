@@ -316,6 +316,8 @@ static uint32_t (*match_ball_position_broadcast_original)(
     void *camera, const float *blend, const uint32_t *home_away,
     float *target_position, float *zoom, uint32_t active);
 static const float *(*match_ball_info_get_trans)(const void *ball_info);
+static uint32_t match_broadcast_ball_tracking_ready(
+    const void *ball_info, const float *ball_position);
 static uint32_t (*match_goal_demo_get_goal_side)(const void *registry);
 static uint32_t (*match_goal_demo_is_cpu_goal)(void *goal_demo,
                                                const void *registry);
@@ -1255,6 +1257,8 @@ static _Alignas(8) uint64_t match_result_started_tick;
 static _Alignas(8) uint64_t match_gameplan_seen_tick;
 static _Alignas(8) uint64_t match_kicker_select_seen_tick;
 static _Alignas(4) uint32_t match_native_setplay_context;
+static _Alignas(4) uint32_t match_native_free_kick_offside;
+static _Alignas(8) uint64_t match_native_free_kick_seen_tick;
 // Penalty units for the kicker and goalkeeper are evaluated independently.
 // A single global role lets whichever unit runs last steal the input surface,
 // which made P1's LS behave like a keeper swipe and left P2 with no controls.
@@ -1274,6 +1278,7 @@ static _Alignas(8) uint64_t match_penalty_touch_owner_started_tick;
 static _Alignas(8) uintptr_t match_button_setplay_owner;
 static _Alignas(8) uint64_t match_button_setplay_seen_tick;
 static _Alignas(4) uint32_t match_button_setplay_mask;
+static _Alignas(4) uint32_t match_button_setplay_visible;
 static _Alignas(4) uint32_t match_button_setplay_pending_type;
 static _Alignas(4) uint32_t match_button_setplay_pending_generation;
 static _Alignas(4) uint32_t match_button_setplay_pending_pad;
@@ -2588,6 +2593,7 @@ static void exhibition_publish_prepared_matchplan(void) {
 
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
   match_result_extra_time_started = 0;
+  match_broadcast_ball_tracking_ready(NULL, NULL);
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
   __atomic_store_n(&pause_settings_radar, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_seen_tick, 0, __ATOMIC_RELEASE);
@@ -2597,6 +2603,12 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_action_request,
                    PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_owner, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_seen_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_mask, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_visible, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_native_free_kick_offside, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_native_free_kick_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_camera_saved_valid, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_camera_dynamic_wide_custom, 0,
                    __ATOMIC_RELEASE);
@@ -2751,13 +2763,21 @@ static void exhibition_adjust_match_setting(int direction) {
               value);
 }
 
+static int exhibition_match_settings_cpu_level_visible(void) {
+  // Exhibition and local 2P share the same pre-match hub.  Hub mode alone is
+  // therefore not enough to decide whether a CPU opponent exists: only the
+  // single-controller Exhibition flow owns COM difficulty.
+  return __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE) &&
+         pes_controller_exhibition_single_controller_mode();
+}
+
 static uint32_t exhibition_match_settings_first_index(void) {
-  // In the two-player pre-match hub there is no CPU opponent, so the native
-  // COM-level row is omitted. Keep the backing state indexed as 1..3; the
-  // public overlay API below translates it to three compact visible rows.
-  return __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE)
-             ? 1u
-             : 0u;
+  // Row zero is TIME in the native matchmaking popup and COM LEVEL in the
+  // single-player pre-match hub.  Local 2P has no CPU opponent, so only that
+  // mode skips row zero and exposes the compact 1..3 range.
+  const int hub_mode =
+      __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE) != 0;
+  return hub_mode && !exhibition_match_settings_cpu_level_visible() ? 1u : 0u;
 }
 
 static uint32_t pes_exhibition_is_test_match(void) {
@@ -5548,6 +5568,8 @@ const char *pes_controller_custom_match_settings_label(uint32_t index) {
       "TIME", "MATCH TIME", "OVERTIME", "PENALTIES"};
   const uint32_t native_index =
       index + exhibition_match_settings_first_index();
+  if (native_index == 0 && exhibition_match_settings_cpu_level_visible())
+    return "COM LEVEL";
   return native_index < PES_MATCH_SETTINGS_COUNT ? labels[native_index] : "";
 }
 
@@ -5556,6 +5578,13 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
   static const char *const match_time_labels[] = {
       "5 MIN", "6 MIN", "7 MIN", "8 MIN", "9 MIN", "10 MIN"};
   index += exhibition_match_settings_first_index();
+  if (index == 0 && exhibition_match_settings_cpu_level_visible()) {
+    const uint32_t level = __atomic_load_n(&exhibition_cpu_level_value,
+                                            __ATOMIC_ACQUIRE);
+    return level < EXHIBITION_CPU_LEVEL_COUNT
+               ? exhibition_cpu_level_labels[level]
+               : exhibition_cpu_level_labels[2];
+  }
   if (index == 0)
     return __atomic_load_n(&exhibition_settings_time_zone,
                            __ATOMIC_ACQUIRE)
@@ -5596,10 +5625,11 @@ const char *pes_controller_custom_video_settings_label(uint32_t index) {
 }
 
 const char *pes_controller_custom_video_settings_value(uint32_t index) {
-  if (index == 0)
-    return __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE)
-               ? "STANDARD"
-               : "LOW";
+  if (index == 0) {
+    const uint32_t graphics =
+        __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE);
+    return graphics >= 2u ? "HIGH" : graphics == 1u ? "STANDARD" : "LOW";
+  }
   if (index == 1)
     return __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE)
                ? "30 FPS"
@@ -9239,8 +9269,9 @@ static uint64_t main_menu_focus_now_ms(void) {
 }
 
 static void main_menu_video_apply(uint32_t index, uint32_t value) {
-  value = value ? 1u : 0u;
   if (index == 0) {
+    if (value > 2u)
+      value = 2u;
     if (!main_menu_save_graphics_quality ||
         !main_menu_save_graphics_quality(value)) {
       debugPrintf("UE4 menu: failed to save graphics quality=%u\n", value);
@@ -9257,11 +9288,12 @@ static void main_menu_video_apply(uint32_t index, uint32_t value) {
         ((void (*)(void *, uint32_t))vtable[47])(bridge, value);
     }
     debugPrintf("UE4 menu: custom video Graphics=%s saved\n",
-                value ? "Standard" : "Low");
+                value >= 2u ? "High" : value == 1u ? "Standard" : "Low");
     return;
   }
 
   if (index == 1) {
+    value = value ? 1u : 0u;
     if (!main_menu_save_frame_rate || !main_menu_save_frame_rate(value)) {
       debugPrintf("UE4 menu: failed to save frame rate=%u\n", value);
       return;
@@ -9306,16 +9338,20 @@ static void main_menu_video_adjust(int direction) {
       focus == 0
           ? __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE)
           : __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE);
-  // Left/right select an absolute value, so holding an arrow can never make a
-  // two-value row flicker. Direction 2 is the explicit A/tap toggle action.
+  // Left/right select an absolute value for the two-state FPS row. Graphics
+  // keeps the stock LOW/STANDARD/HIGH order and wraps only for the explicit
+  // A/tap cycle action.
   uint32_t value;
-  if (direction == 2) {
+  if (focus == 0 && direction == 2) {
+    value = (current + 1u) % 3u;
+  } else if (direction == 2) {
     value = current ? 0u : 1u;
   } else if (focus == 1) {
     // FPS enum order is inverted: left=30 (1), right=60 (0).
     value = direction > 0 ? 0u : 1u;
   } else {
-    value = direction > 0 ? 1u : 0u;
+    value = direction > 0 ? (current < 2u ? current + 1u : 2u)
+                          : (current > 0u ? current - 1u : 0u);
   }
   if (value != current)
     main_menu_video_apply(focus, value);
@@ -9325,8 +9361,8 @@ static void main_menu_video_open(void) {
   uint32_t graphics = main_menu_get_graphics_quality
                           ? main_menu_get_graphics_quality()
                           : 1u;
-  if (graphics > 1)
-    graphics = 1;
+  if (graphics > 2u)
+    graphics = 2u;
 
   // The active Status mode mirrors the persisted frame-rate selection. The
   // stock enum is 0 = 60 fps and 1 = 30 fps (2 is the unused 120 fps mode).
@@ -11237,6 +11273,9 @@ static void match_replay_publish(void *replay) {
   __atomic_store_n(&match_button_setplay_owner, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_mask, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_visible, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_native_free_kick_offside, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_native_free_kick_seen_tick, 0, __ATOMIC_RELEASE);
 }
 
 static uint32_t pes_match_replay_mode_init(void *replay,
@@ -11960,6 +11999,7 @@ static void pes_match_button_setplay_touch_sub(void *window,
   __atomic_store_n(&match_button_setplay_owner, (uintptr_t)window,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_mask, mask, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_visible, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_seen_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
   __atomic_store_n(&match_kicker_selector_context, context,
@@ -11990,6 +12030,7 @@ static uint32_t pes_match_button_setplay_need_disp(void *window) {
       __atomic_store_n(&match_button_setplay_owner, 0, __ATOMIC_RELEASE);
       __atomic_store_n(&match_button_setplay_seen_tick, 0, __ATOMIC_RELEASE);
       __atomic_store_n(&match_button_setplay_mask, 0, __ATOMIC_RELEASE);
+      __atomic_store_n(&match_button_setplay_visible, 0, __ATOMIC_RELEASE);
     }
     if (__atomic_load_n(&match_kicker_selector_button_owner,
                         __ATOMIC_ACQUIRE) == (uintptr_t)window)
@@ -12003,6 +12044,7 @@ static uint32_t pes_match_button_setplay_need_disp(void *window) {
   if (owner != (uintptr_t)window)
     __atomic_store_n(&match_button_setplay_owner, (uintptr_t)window,
                      __ATOMIC_RELEASE);
+  __atomic_store_n(&match_button_setplay_visible, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_seen_tick, armGetSystemTick(),
                    __ATOMIC_RELEASE);
   return visible;
@@ -12146,6 +12188,39 @@ static void match_native_setplay_publish(uint32_t context) {
       context)
     __atomic_store_n(&match_native_setplay_context, context,
                      __ATOMIC_RELEASE);
+  if (context != PES_SETPLAY_FREE_KICK) {
+    __atomic_store_n(&match_native_free_kick_offside, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_native_free_kick_seen_tick, 0, __ATOMIC_RELEASE);
+  }
+}
+
+// Flow::InitFreeKickKind reads FoulKind from the live MatchInfo object at
+// GlobalRegistry + 0x4f0. FoulKind 1 is OFFSIDE; using this native state keeps
+// the helper hidden only for indirect offside restarts, without guessing from
+// field position or how long the stoppage has been active.
+static uint32_t match_current_free_kick_is_offside(void) {
+  if (!match_global_registry_get_instance)
+    return 0u;
+  const void *registry = match_global_registry_get_instance();
+  if (!registry)
+    return 0u;
+  const void *match_info = NULL;
+  memcpy(&match_info, (const uint8_t *)registry + 0x4f0,
+         sizeof(match_info));
+  if (!match_info)
+    return 0u;
+  uint32_t foul_kind = 0u;
+  memcpy(&foul_kind, (const uint8_t *)match_info + 0x1548,
+         sizeof(foul_kind));
+  return foul_kind == 1u;
+}
+
+static void match_native_free_kick_publish(void) {
+  match_native_setplay_publish(PES_SETPLAY_FREE_KICK);
+  __atomic_store_n(&match_native_free_kick_offside,
+                   match_current_free_kick_is_offside(), __ATOMIC_RELEASE);
+  __atomic_store_n(&match_native_free_kick_seen_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
 }
 
 static uint32_t match_native_penalty_input_pad(const void *input) {
@@ -12395,7 +12470,9 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
           &match_button_setplay_seen_tick, __ATOMIC_ACQUIRE);
       const uintptr_t setplay_owner = __atomic_load_n(
           &match_button_setplay_owner, __ATOMIC_ACQUIRE);
-      if (setplay_owner && setplay_seen &&
+      const uint32_t setplay_visible = __atomic_load_n(
+          &match_button_setplay_visible, __ATOMIC_ACQUIRE);
+      if (setplay_visible && setplay_owner && setplay_seen &&
           armTicksToNs(now - setplay_seen) <= 500000000ULL) {
         setplay_mask = __atomic_load_n(&match_button_setplay_mask,
                                        __ATOMIC_ACQUIRE);
@@ -12491,7 +12568,7 @@ static uint32_t pes_match_freekick_main(void *unit, const void *input,
                               ? match_freekick_main_original(unit, input, kind)
                               : 0;
   if (unit && input) {
-    match_native_setplay_publish(PES_SETPLAY_FREE_KICK);
+    match_native_free_kick_publish();
   }
   return result;
 }
@@ -12505,7 +12582,7 @@ static uint32_t pes_match_freekick_is_disp(const void *unit) {
                               ? match_freekick_is_disp_original(unit)
                               : 0;
   if (unit && result)
-    match_native_setplay_publish(PES_SETPLAY_FREE_KICK);
+    match_native_free_kick_publish();
   return result;
 }
 
@@ -12775,6 +12852,15 @@ uint32_t pes_controller_setplay_options(void) {
              : 0;
 }
 
+int pes_controller_free_kick_offside(void) {
+  const uint64_t seen = __atomic_load_n(&match_native_free_kick_seen_tick,
+                                         __ATOMIC_ACQUIRE);
+  return seen &&
+         armTicksToNs(armGetSystemTick() - seen) <= 500000000ULL &&
+         __atomic_load_n(&match_native_free_kick_offside,
+                         __ATOMIC_ACQUIRE) != 0;
+}
+
 int pes_controller_set_piece_selector_active(void) {
   const int active =
       __atomic_load_n(&match_kicker_selector_open, __ATOMIC_ACQUIRE) ||
@@ -12941,7 +13027,7 @@ static uint32_t match_broadcast_stabilize_target(float *target_position,
   const float offset_x = ball_position[0] - target_position[0];
   const float offset_y = ball_position[1] - target_position[1];
   const float distance = hypotf(offset_x, offset_y);
-  const float deadzone = 10.0f;
+  const float deadzone = 14.0f;
   if (!isfinite(distance) || distance <= deadzone)
     return 0u;
 
@@ -12957,6 +13043,46 @@ static uint32_t match_broadcast_stabilize_target(float *target_position,
   target_position[0] += offset_x * gain;
   target_position[1] += offset_y * gain;
   return 1u;
+}
+
+// ShotBroadcastBallActive can be constructed while both teams are waiting at
+// the initial kickoff. Biasing its still-uninitialised group target in those
+// frames is what made Stadium selected before kickoff jitter, although the
+// same camera was stable when selected later. Arm tracking only after the live
+// BallInfo has actually moved; changing BallInfo (new match) resets the gate.
+static uint32_t match_broadcast_ball_tracking_ready(
+    const void *ball_info, const float *ball_position) {
+  static uintptr_t owner;
+  static float anchor_x;
+  static float anchor_y;
+  static uint32_t anchor_valid;
+  static uint32_t ready;
+
+  if (!ball_info || !ball_position || !isfinite(ball_position[0]) ||
+      !isfinite(ball_position[1])) {
+    owner = 0;
+    anchor_valid = 0u;
+    ready = 0u;
+    return 0u;
+  }
+  if (owner != (uintptr_t)ball_info || !anchor_valid) {
+    owner = (uintptr_t)ball_info;
+    anchor_x = ball_position[0];
+    anchor_y = ball_position[1];
+    anchor_valid = 1u;
+    ready = 0u;
+    return 0u;
+  }
+  if (ready)
+    return 1u;
+
+  const float moved = hypotf(ball_position[0] - anchor_x,
+                             ball_position[1] - anchor_y);
+  if (isfinite(moved) && moved > 0.5f) {
+    ready = 1u;
+    return 0u; // Warm up one native frame before applying the first bias.
+  }
+  return 0u;
 }
 
 // This native calculator has a single caller, ShotBroadcastBallActive, so the
@@ -12982,7 +13108,8 @@ uint32_t pes_inplay_ball_position_broadcast(
          sizeof(ball_info));
   const float *ball_position =
       ball_info ? match_ball_info_get_trans(ball_info) : NULL;
-  match_broadcast_stabilize_target(target_position, ball_position);
+  if (match_broadcast_ball_tracking_ready(ball_info, ball_position))
+    match_broadcast_stabilize_target(target_position, ball_position);
   return result;
 }
 
@@ -15874,18 +16001,8 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(graphics_d1, (uintptr_t)&pes_main_menu_graphics_d1_hook);
   hook_arm64(graphics_d0, (uintptr_t)&pes_main_menu_graphics_d0_hook);
 
-  const uintptr_t graphics_prepare = so_find_addr(
-      module, "_ZN4menu26MyClubMatchGraphicsSetting11PrepareDataEv");
-  patch_checked_u32(graphics_prepare + 0xd0, 0xeb08013f, 0x1400003d,
-                    "graphics High option removal");
-  const uintptr_t save_graphics = so_find_addr(
-      module, "_ZN3sys8SaveData19SaveGraphicsQualityEj");
-  patch_checked_u32(save_graphics + 0x18, 0x71000a7f, 0x7100067f,
-                    "graphics quality High rejection");
-  patch_checked_u32((uintptr_t)module->load_base + 0x9438cf8, 2, 1,
-                    "saved High graphics clamp");
   debugPrintf("UE4 menu: graphics settings factory=%p d1=%p d0=%p; "
-              "custom save=%p/%p status=%p/%p bridge=%p; High disabled\n",
+              "custom save=%p/%p status=%p/%p bridge=%p; High enabled\n",
               main_menu_graphics_create, (void *)graphics_d1_runtime,
               (void *)graphics_d0_runtime, main_menu_save_graphics_quality,
               main_menu_save_frame_rate, main_menu_set_frame_rate_mode,

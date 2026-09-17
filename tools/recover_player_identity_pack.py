@@ -51,7 +51,7 @@ def parse_rosters(path):
         table[int(tid)]=arrays[array][int(offset):int(offset)+int(count)]
     return arrays,table
 
-def build(out, package=False):
+def build(out, package=False, pesdb_portrait_dir=None):
     out.mkdir(parents=True,exist_ok=True)
     current_cpk=BASE/'dt200-original-order.cpk'
     # dt241 is carried by the base national-kit OBB.  Prepare its index before
@@ -273,9 +273,11 @@ def build(out, package=False):
         if row['canonical']: continue # existing correctly keyed EF10/original portrait
         sid=row['source']; pid=row['target']; baseid=sid%16777216
         raw_image=ROOT/f'local-debug/efootball10-all-teams-portraits/{baseid}.png'
+        if pesdb_portrait_dir is not None and (pesdb_portrait_dir/f'{sid}.png').is_file():
+            raw_image=pesdb_portrait_dir/f'{sid}.png'
         name=snap['players'][str(sid)]['player_name']
         data=blank.getvalue(); status='transparent_missing_verified_portrait'
-        if baseid in ef_names and norm(ef_names[baseid].name)==norm(name) and raw_image.is_file():
+        if raw_image.is_file() and (pesdb_portrait_dir is not None or (baseid in ef_names and norm(ef_names[baseid].name)==norm(name))):
             path=out/'portraits'/f'{pid}.png'; normalize_portrait(raw_image,path)
             data=path.read_bytes(); status='verified_ef10'
         portrait_name=f'common/player/{pid}.png'
@@ -315,4 +317,5 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output',type=Path,default=ROOT/'local-debug/player-identity-recovery-v1')
     p.add_argument('--package',action='store_true')
-    a=p.parse_args(); build(a.output,a.package)
+    p.add_argument('--pesdb-portrait-dir',type=Path,default=None)
+    a=p.parse_args(); build(a.output,a.package,a.pesdb_portrait_dir.resolve() if a.pesdb_portrait_dir else None)

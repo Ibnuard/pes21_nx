@@ -3,6 +3,8 @@ param(
   [int]$Jobs = 0,
   [string]$OutputDirectory = "",
   [long]$ExpectedPatchObbSize = 0,
+  [string]$BadgeAtlas = "",
+  [string]$MigrationTeamInclude = "",
   [switch]$DisablePesdbAuthoritativeOvr,
   [switch]$PlayerMigrationCanary,
   [switch]$LooseCpkFull,
@@ -22,6 +24,17 @@ $oldPesdbAuthoritativeOvr = $env:PES21_NX_PESDB_AUTHORITATIVE_OVR
 $oldPlayerMigrationCanary = $env:PES21_NX_PLAYER_MIGRATION_CANARY
 $oldLooseCpkFull = $env:PES21_NX_LOOSE_CPK_FULL
 $oldExpectedPatchObbSize = $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE
+$oldBadgeAtlas = $env:PES21_NX_BADGE_ATLAS
+$oldMigrationTeamInclude = $env:PES21_NX_MIGRATION_TEAM_INCLUDE
+
+function Resolve-ProjectInput([string]$Value) {
+  $candidate = if ([IO.Path]::IsPathRooted($Value)) {
+    $Value
+  } else {
+    Join-Path $projectRoot $Value
+  }
+  return (Resolve-Path -LiteralPath $candidate).Path
+}
 
 try {
   $buildOutputRoot = if ($OutputDirectory) {
@@ -39,10 +52,16 @@ try {
   $env:PES21_NX_PLAYER_MIGRATION_CANARY = if ($PlayerMigrationCanary) { "1" } else { "0" }
   $env:PES21_NX_LOOSE_CPK_FULL = if ($LooseCpkFull) { "1" } else { "0" }
   $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE = "$ExpectedPatchObbSize"
+  $env:PES21_NX_BADGE_ATLAS = if ($BadgeAtlas) {
+    Resolve-ProjectInput $BadgeAtlas
+  } else { "" }
+  $env:PES21_NX_MIGRATION_TEAM_INCLUDE = if ($MigrationTeamInclude) {
+    Resolve-ProjectInput $MigrationTeamInclude
+  } else { "" }
   $env:WSLENV = if ($oldWslEnv) {
-    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE"
+    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p"
   } else {
-    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE"
+    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p"
   }
 
   $buildScript = @'
@@ -69,6 +88,17 @@ tar -C "$PES21_NX_PROJECT_ROOT" \
   --exclude=pes21_nx.nro --exclude=pes21_nx.elf --exclude=pes21_nx.nacp \
   -cf - . | tar -C "$build_dir" -xf -
 cd "$build_dir"
+
+if [[ -n "${PES21_NX_BADGE_ATLAS:-}" ]]; then
+  cp "$PES21_NX_BADGE_ATLAS" data/badge_atlas.bin
+  badge_header=$(dirname "$PES21_NX_BADGE_ATLAS")/badge_atlas.h
+  if [[ -f "$badge_header" ]]; then
+    cp "$badge_header" source/badge_atlas.h
+  fi
+fi
+if [[ -n "${PES21_NX_MIGRATION_TEAM_INCLUDE:-}" ]]; then
+  cp "$PES21_NX_MIGRATION_TEAM_INCLUDE" source/exhibition_teams_migration_generated.inc
+fi
 
 export DEVKITPRO=/opt/devkitpro
 export DEVKITA64=/opt/devkitpro/devkitA64
@@ -183,5 +213,15 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
     Remove-Item Env:PES21_NX_EXPECTED_PATCH_OBB_SIZE -ErrorAction SilentlyContinue
   } else {
     $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE = $oldExpectedPatchObbSize
+  }
+  if ($null -eq $oldBadgeAtlas) {
+    Remove-Item Env:PES21_NX_BADGE_ATLAS -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_BADGE_ATLAS = $oldBadgeAtlas
+  }
+  if ($null -eq $oldMigrationTeamInclude) {
+    Remove-Item Env:PES21_NX_MIGRATION_TEAM_INCLUDE -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_MIGRATION_TEAM_INCLUDE = $oldMigrationTeamInclude
   }
 }

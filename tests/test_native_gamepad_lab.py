@@ -1123,7 +1123,33 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('setplay_keys[0] = setplay_taker_key;', far_helper)
         self.assertIn('"SET PIECE TAKER"', far_helper)
         self.assertNotIn('"ZR"', far_helper)
+        fallback_free_kick = re.search(
+            r'else if \(!native_setplay_debug && !native_lab &&\s*'
+            r'setplay_context == PES_SETPLAY_FREE_KICK\).*?'
+            r'setplay_helper_count = 1;', overlay, re.S).group(0)
+        self.assertIn('"SET PIECE TAKER"', fallback_free_kick)
+        self.assertNotIn('"SWITCH VIEW"', fallback_free_kick)
+        self.assertIn('pes_controller_free_kick_offside()', overlay)
+        self.assertIn('if (offside_free_kick)', overlay)
         self.assertIn('!native_setplay_debug && !native_lab', overlay)
+
+    def test_offside_and_setplay_visibility_use_native_lifecycle(self):
+        hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
+        header = (ROOT/'source/ue4_hooks.h').read_text(encoding='utf-8')
+        self.assertIn('match_current_free_kick_is_offside', hooks)
+        self.assertIn('(const uint8_t *)match_info + 0x1548', hooks)
+        self.assertIn('return foul_kind == 1u;', hooks)
+        self.assertIn('int pes_controller_free_kick_offside(void)', hooks)
+        self.assertIn('int pes_controller_free_kick_offside(void);', header)
+        snapshot = re.search(
+            r'void pes_controller_surface_snapshot.*?\n\}',
+            hooks, re.S).group(0)
+        self.assertIn('match_button_setplay_visible', snapshot)
+        need_disp = re.search(
+            r'static uint32_t pes_match_button_setplay_need_disp.*?\n\}',
+            hooks, re.S).group(0)
+        self.assertIn('&match_button_setplay_visible, 0', need_disp)
+        self.assertIn('&match_button_setplay_visible, 1', need_disp)
 
     def test_defending_pad_cannot_clear_attacking_setplay_owner(self):
         route = (ROOT/'source/native_pad_lab.inc').read_text(encoding='utf-8')

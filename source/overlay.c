@@ -1751,6 +1751,8 @@ static void overlay_render(void) {
       !pause_skin && pes_controller_match_result_transition() != 0;
   const int custom_info_popup =
       pes_controller_custom_info_popup_active() && !pause_skin && !result_skin;
+  const int custom_main_menu_dark_popup =
+      main_menu_host && (custom_video_settings_popup || custom_info_popup);
   // Match Settings is a modal child of the hub.  Let the existing settings
   // renderer own the foreground while retaining the hub as its visual host.
   const int custom_2p_prematch_hub =
@@ -4947,11 +4949,13 @@ static void overlay_render(void) {
         (float)screen_height / 600.0f, footer_y - cell_y0,
         verts + quads * 24);
     quads++;
-    custom_rule_quads += emit_rect(
-        panel_x + 0.04f * (float)screen_width, footer_y,
-        panel_w - 0.08f * (float)screen_width,
-        (float)screen_height / 600.0f, verts + quads * 24);
-    quads++;
+    if (!custom_video_settings_popup) {
+      custom_rule_quads += emit_rect(
+          panel_x + 0.04f * (float)screen_width, footer_y,
+          panel_w - 0.08f * (float)screen_width,
+          (float)screen_height / 600.0f, verts + quads * 24);
+      quads++;
+    }
     for (uint32_t item = 0; item < visible; item++) {
       const float icon_x = cell_x[item & 1u] + 0.018f * (float)screen_width;
       const float icon_y = cell_y0 + cell_step * (float)(item / 2u) +
@@ -5045,16 +5049,13 @@ static void overlay_render(void) {
     const float panel_h = 0.64f * (float)screen_height;
     const float panel_radius = 0.025f * (float)screen_height;
     const float header_h = 0.12f * (float)screen_height;
-    const float footer_y = 0.65f * (float)screen_height;
-    const float back_button_w = 0.24f * (float)screen_width;
-    const float back_button_h = 0.065f * (float)screen_height;
-    const float back_button_x =
-        (float)screen_width * 0.5f - back_button_w * 0.5f;
-    const float back_button_y = 0.70f * (float)screen_height;
     const float back_key_radius = 0.020f * (float)screen_height;
-    const float back_key_x =
-        back_button_x + 0.030f * (float)screen_width;
-    const float back_key_y = back_button_y + back_button_h * 0.5f;
+    const float back_key_gap = 0.010f * (float)screen_width;
+    const float back_label_w = measure_efootball_line(
+        "BACK", 4, helper_text_gh, EFOOTBALL_FONT_BOLD);
+    const float back_key_x = 0.955f * (float)screen_width - back_label_w -
+                             back_key_gap - back_key_radius;
+    const float back_key_y = 0.9425f * (float)screen_height;
 
     custom_backdrop_quads = emit_rect(
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
@@ -5074,17 +5075,6 @@ static void overlay_render(void) {
         panel_x, panel_y + header_h - panel_radius, panel_w, panel_radius,
         verts + quads * 24);
     quads += custom_header_fill_quads;
-    custom_rule_quads = emit_rect(
-        panel_x + 0.04f * (float)screen_width, footer_y,
-        panel_w - 0.08f * (float)screen_width,
-        (float)screen_height / 600.0f, verts + quads * 24);
-    quads += custom_rule_quads;
-    custom_back_button_style = (RoundedRectStyle){
-        back_button_w, back_button_h, 0.018f * (float)screen_height};
-    custom_back_button_quads = emit_round_rect_quad(
-        back_button_x, back_button_y, back_button_w, back_button_h,
-        verts + quads * 24);
-    quads += custom_back_button_quads;
     custom_back_key_bg_quads = 1;
     ADD_SWITCH_HELPER("B", back_key_x, back_key_y,
                       back_key_radius * 2.0f);
@@ -5130,20 +5120,12 @@ static void overlay_render(void) {
     }
 
     const float button_gh = helper_text_gh;
-    const float button_gw =
-        button_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     custom_white_text_first_quad = quads;
-    custom_white_text_quads = emit_line(
-        "BACK", 4, back_key_x + 0.027f * (float)screen_width,
-        back_button_y + (back_button_h - button_gh) * 0.5f, button_gw,
-        button_gh, verts + quads * 24);
+    custom_white_text_quads = emit_efootball_line(
+        "BACK", 4, back_key_x + back_key_radius + back_key_gap,
+        back_key_y - button_gh * 0.5f, button_gh,
+        EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += custom_white_text_quads;
-    custom_key_text_first_quad = quads;
-    custom_key_text_quads = emit_line(
-        "B", 1, back_key_x - button_gw * 0.5f,
-        back_key_y - button_gh * 0.5f, button_gw, button_gh,
-        verts + quads * 24);
-    quads += custom_key_text_quads;
   } else if (set_piece_selector) {
     // Mirror TouchKickerSelect's compact list, but retain our stable native
     // controller state machine. The viewport follows focus by one row instead
@@ -5554,35 +5536,40 @@ static void overlay_render(void) {
     const uint32_t item_count = custom_video_settings_popup
                                     ? 2u
                                     : pes_controller_custom_match_settings_count();
-    const float panel_x = (custom_video_settings_popup ? 0.20f : 0.17f) *
+    const float panel_x = 0.17f *
                           (float)screen_width;
-    const float panel_y = (custom_video_settings_popup ? 0.16f : 0.08f) *
+    const float panel_y = (custom_video_settings_popup ? 0.095f : 0.08f) *
                           (float)screen_height;
-    const float panel_w = (custom_video_settings_popup ? 0.60f : 0.66f) *
+    const float panel_w = 0.66f *
                           (float)screen_width;
-    const float panel_h = (custom_video_settings_popup ? 0.68f : 0.84f) *
+    const float panel_h = (custom_video_settings_popup ? 0.70f : 0.84f) *
                           (float)screen_height;
     const float panel_radius = 0.025f * (float)screen_height;
-    const float header_h = 0.115f * (float)screen_height;
+    const float header_h = (custom_video_settings_popup ? 0.125f : 0.115f) *
+                           (float)screen_height;
     const float footer_y =
-        (custom_video_settings_popup ? 0.64f : 0.785f) *
+        (custom_video_settings_popup ? 0.0f : 0.785f) *
         (float)screen_height;
     const float row_x = panel_x + 0.030f * (float)screen_width;
     const float row_w = panel_w - 0.060f * (float)screen_width;
     const float row_y0 =
-        (custom_video_settings_popup ? 0.32f : PES_MATCH_SETTINGS_ROW_Y) *
+        (custom_video_settings_popup ? 0.265f : PES_MATCH_SETTINGS_ROW_Y) *
         (float)screen_height;
     const float row_h =
-        (custom_video_settings_popup ? 0.12f : 0.090f) *
+        (custom_video_settings_popup ? 0.078f : 0.090f) *
         (float)screen_height;
     const float row_step =
-        (custom_video_settings_popup ? 0.145f : PES_MATCH_SETTINGS_ROW_STEP) *
+        (custom_video_settings_popup ? 0.105f : PES_MATCH_SETTINGS_ROW_STEP) *
         (float)screen_height;
     const float selector_inset = 0.006f * (float)screen_height;
-    const float value_w = 0.200f * (float)screen_width;
-    const float value_h = 0.065f * (float)screen_height;
+    const float value_w = (custom_video_settings_popup ? 0.205f : 0.200f) *
+                          (float)screen_width;
+    const float value_h = (custom_video_settings_popup ? 0.058f : 0.065f) *
+                          (float)screen_height;
     const float value_x =
-        panel_x + panel_w - 0.035f * (float)screen_width - value_w;
+        panel_x + panel_w -
+        (custom_video_settings_popup ? 0.070f : 0.035f) *
+            (float)screen_width - value_w;
     const uint32_t focus = custom_video_settings_popup
                                ? pes_controller_custom_video_settings_focus()
                                : pes_controller_custom_match_settings_focus();
@@ -5590,25 +5577,45 @@ static void overlay_render(void) {
         (custom_video_settings_popup ? 0.025f : 0.035f) *
         (float)screen_width;
     const float action_button_x = panel_x + button_margin;
-    const float action_button_y =
-        (custom_video_settings_popup ? 0.69f : 0.823f) *
-        (float)screen_height;
-    const float action_button_w =
-        (custom_video_settings_popup ? 0.160f : 0.250f) *
-        (float)screen_width;
+    const float action_button_y = 0.823f * (float)screen_height;
+    const float action_button_w = 0.250f * (float)screen_width;
     const float apply_button_x =
         (float)screen_width * 0.5f - action_button_w * 0.5f;
     const float back_button_x =
         panel_x + panel_w - button_margin - action_button_w;
     const float back_button_w = action_button_w;
     const float button_h = 0.060f * (float)screen_height;
-    const float key_radius = 0.019f * (float)screen_height;
-    const float action_key_x =
-        action_button_x + 0.030f * (float)screen_width;
-    const float apply_key_x =
-        apply_button_x + 0.030f * (float)screen_width;
-    const float back_key_x = back_button_x + 0.030f * (float)screen_width;
-    const float key_y = action_button_y + button_h * 0.5f;
+    const float key_radius = (custom_video_settings_popup ? 0.0225f : 0.019f) *
+                             (float)screen_height;
+    const float key_text_gap = 0.010f * (float)screen_width;
+    const float key_group_gap = 0.030f * (float)screen_width;
+    const float helper_char_w =
+        helper_text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
+    const float change_label_w = 6.0f * helper_char_w;
+    const float apply_label_w = 5.0f * helper_char_w;
+    const float back_label_w = 4.0f * helper_char_w;
+    const float key_size = key_radius * 2.0f;
+    const float video_helper_total = key_size * 3.0f +
+        key_text_gap * 3.0f + change_label_w + apply_label_w + back_label_w +
+        key_group_gap * 2.0f;
+    float video_helper_x = 0.955f * (float)screen_width -
+                           video_helper_total;
+    const float action_key_x = custom_video_settings_popup
+        ? video_helper_x + key_radius
+        : action_button_x + 0.030f * (float)screen_width;
+    video_helper_x += key_size + key_text_gap + change_label_w +
+                      key_group_gap;
+    const float apply_key_x = custom_video_settings_popup
+        ? video_helper_x + key_radius
+        : apply_button_x + 0.030f * (float)screen_width;
+    video_helper_x += key_size + key_text_gap + apply_label_w +
+                      key_group_gap;
+    const float back_key_x = custom_video_settings_popup
+        ? video_helper_x + key_radius
+        : back_button_x + 0.030f * (float)screen_width;
+    const float key_y = custom_video_settings_popup
+        ? 0.9425f * (float)screen_height
+        : action_button_y + button_h * 0.5f;
 
     custom_backdrop_quads = emit_rect(
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
@@ -5681,25 +5688,20 @@ static void overlay_render(void) {
           verts + quads * 24);
       quads++;
     }
-    custom_action_button_style = (RoundedRectStyle){
-        action_button_w, button_h, 0.017f * (float)screen_height};
-    custom_action_button_quads = emit_round_rect_quad(
-        action_button_x, action_button_y, action_button_w, button_h,
-        verts + quads * 24);
-    quads += custom_action_button_quads;
-    if (custom_video_settings_popup) {
-      const int apply_quads = emit_round_rect_quad(
-          apply_button_x, action_button_y, action_button_w, button_h,
+    if (!custom_video_settings_popup) {
+      custom_action_button_style = (RoundedRectStyle){
+          action_button_w, button_h, 0.017f * (float)screen_height};
+      custom_action_button_quads = emit_round_rect_quad(
+          action_button_x, action_button_y, action_button_w, button_h,
           verts + quads * 24);
-      custom_action_button_quads += apply_quads;
-      quads += apply_quads;
+      quads += custom_action_button_quads;
+      custom_back_button_style = (RoundedRectStyle){
+          back_button_w, button_h, 0.017f * (float)screen_height};
+      custom_back_button_quads = emit_round_rect_quad(
+          back_button_x, action_button_y, back_button_w, button_h,
+          verts + quads * 24);
+      quads += custom_back_button_quads;
     }
-    custom_back_button_style = (RoundedRectStyle){
-        back_button_w, button_h, 0.017f * (float)screen_height};
-    custom_back_button_quads = emit_round_rect_quad(
-        back_button_x, action_button_y, back_button_w, button_h,
-        verts + quads * 24);
-    quads += custom_back_button_quads;
     custom_action_key_bg_quads = 1;
     ADD_SWITCH_HELPER("A", action_key_x, key_y, key_radius * 2.0f);
     if (custom_video_settings_popup) {
@@ -5757,24 +5759,34 @@ static void overlay_render(void) {
       quads += line_quads;
     }
     line_quads = emit_line(
-        "CHANGE", 6, action_key_x + 0.026f * (float)screen_width,
-        action_button_y + (button_h - helper_text_gh) * 0.5f,
+        "CHANGE", 6,
+        custom_video_settings_popup
+            ? action_key_x + key_radius + key_text_gap
+            : action_key_x + 0.026f * (float)screen_width,
+        custom_video_settings_popup
+            ? key_y - helper_text_gh * 0.5f
+            : action_button_y + (button_h - helper_text_gh) * 0.5f,
         helper_gw, helper_text_gh,
         verts + quads * 24);
     custom_white_text_quads += line_quads;
     quads += line_quads;
     if (custom_video_settings_popup) {
       line_quads = emit_line(
-          "APPLY", 5, apply_key_x + 0.026f * (float)screen_width,
-          action_button_y + (button_h - helper_text_gh) * 0.5f,
+          "APPLY", 5, apply_key_x + key_radius + key_text_gap,
+          key_y - helper_text_gh * 0.5f,
           helper_gw, helper_text_gh,
           verts + quads * 24);
       custom_white_text_quads += line_quads;
       quads += line_quads;
     }
     line_quads = emit_line(
-        "BACK", 4, back_key_x + 0.026f * (float)screen_width,
-        action_button_y + (button_h - helper_text_gh) * 0.5f,
+        "BACK", 4,
+        custom_video_settings_popup
+            ? back_key_x + key_radius + key_text_gap
+            : back_key_x + 0.026f * (float)screen_width,
+        custom_video_settings_popup
+            ? key_y - helper_text_gh * 0.5f
+            : action_button_y + (button_h - helper_text_gh) * 0.5f,
         helper_gw, helper_text_gh,
         verts + quads * 24);
     custom_white_text_quads += line_quads;
@@ -6171,12 +6183,19 @@ static void overlay_render(void) {
   const char *setplay_camera_key = single_joy_setplay ? "SR+LS" : "RS";
   const char *setplay_camera_label = single_joy_setplay ? "HOLD: CAMERA / AIM" : "CAMERA / AIM";
   unsigned int setplay_helper_count = 0;
+  const int offside_free_kick =
+      setplay_context == PES_SETPLAY_FREE_KICK &&
+      pes_controller_free_kick_offside();
   const int native_far_free_kick =
       native_setplay_debug && setplay_context == PES_SETPLAY_FREE_KICK &&
       (native_debug.stock_mask &
        (PES_NATIVE_LAB_STOCK_FREEKICK_TACTICS |
         PES_NATIVE_LAB_STOCK_FREEKICK_POSITION));
-  if (native_setplay_debug &&
+  if (offside_free_kick) {
+    // Offside restarts deliberately have no helper. The same free-kick page
+    // is reused by the game, but its native FoulKind is authoritative.
+    setplay_helper_count = 0;
+  } else if (native_setplay_debug &&
       setplay_context == PES_SETPLAY_GOAL_KICK) {
     setplay_keys[0] = "L";
     setplay_labels[0] = "POSITION SHIFT";
@@ -6232,9 +6251,7 @@ static void overlay_render(void) {
              setplay_context == PES_SETPLAY_FREE_KICK) {
     setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET PIECE TAKER";
-    setplay_keys[1] = "X";
-    setplay_labels[1] = "SWITCH VIEW";
-    setplay_helper_count = 2;
+    setplay_helper_count = 1;
   } else if (setplay_context == PES_SETPLAY_THROW_IN) {
     setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET THROWER";
@@ -6517,22 +6534,55 @@ static void overlay_render(void) {
     const float helper_h = helper_text_gh;
     const float helper_y = 0.945f * screen_height;
     const float helper_size = 0.042f * screen_height;
-    ADD_SWITCH_HELPER("LEFT", 0.255f * screen_width, helper_y, helper_size);
-    ADD_SWITCH_HELPER(">", 0.290f * screen_width, helper_y, helper_size);
-    ADD_SWITCH_HELPER("A", 0.500f * screen_width, helper_y, helper_size);
-    ADD_SWITCH_HELPER("B", 0.680f * screen_width, helper_y, helper_size);
+    const float helper_icon_gap = 0.006f * screen_width;
+    const float helper_text_gap = 0.010f * screen_width;
+    const float helper_group_gap = 0.030f * screen_width;
+    const float select_w = measure_efootball_line(
+        "SELECT", 6, helper_h, EFOOTBALL_FONT_BOLD);
+    const float confirm_w = measure_efootball_line(
+        "CONFIRM", 7, helper_h, EFOOTBALL_FONT_BOLD);
+    const float resume_w = measure_efootball_line(
+        "RESUME MATCH", 12, helper_h, EFOOTBALL_FONT_BOLD);
+    const float helper_total = helper_size * 4.0f + helper_icon_gap +
+        helper_text_gap * 3.0f + select_w + confirm_w + resume_w +
+        helper_group_gap * 2.0f;
+    float helper_x = 0.955f * screen_width - helper_total;
+    const float select_left_x = helper_x + helper_size * 0.5f;
+    helper_x += helper_size + helper_icon_gap;
+    const float select_right_x = helper_x + helper_size * 0.5f;
+    helper_x += helper_size + helper_text_gap;
+    const float select_label_x = helper_x;
+    helper_x += select_w + helper_group_gap;
+    const float confirm_key_x = helper_x + helper_size * 0.5f;
+    helper_x += helper_size + helper_text_gap;
+    const float confirm_label_x = helper_x;
+    helper_x += confirm_w + helper_group_gap;
+    const float resume_key_x = helper_x + helper_size * 0.5f;
+    helper_x += helper_size + helper_text_gap;
+    const float resume_label_x = helper_x;
+    ADD_SWITCH_HELPER("LEFT", select_left_x,
+                      helper_y, helper_size);
+    ADD_SWITCH_HELPER(">", select_right_x,
+                      helper_y, helper_size);
+    ADD_SWITCH_HELPER("A", confirm_key_x, helper_y, helper_size);
+    ADD_SWITCH_HELPER("B", resume_key_x, helper_y, helper_size);
     pause_helper_text = quads;
-    static const char *const helper_labels[3] = {
-        "SELECT", "CONFIRM", "RESUME MATCH"};
-    static const float helper_x[3] = {0.315f, 0.525f, 0.705f};
-    for (uint32_t i = 0; i < 3; ++i) {
-      const int n = emit_efootball_line(
-          helper_labels[i], (int)strlen(helper_labels[i]),
-          helper_x[i] * screen_width, helper_y - helper_h * 0.5f,
-          helper_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
-      quads += n;
-      pause_helper_text_quads += n;
-    }
+    int helper_n = emit_efootball_line(
+        "SELECT", 6, select_label_x, helper_y - helper_h * 0.5f,
+        helper_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += helper_n;
+    pause_helper_text_quads += helper_n;
+    helper_n = emit_efootball_line(
+        "CONFIRM", 7, confirm_label_x, helper_y - helper_h * 0.5f,
+        helper_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += helper_n;
+    pause_helper_text_quads += helper_n;
+    helper_n = emit_efootball_line(
+        "RESUME MATCH", 12, resume_label_x,
+        helper_y - helper_h * 0.5f,
+        helper_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    quads += helper_n;
+    pause_helper_text_quads += helper_n;
   }
   if (result_skin) {
     // Literally the pause layout: same background, badges, header, score,
@@ -6635,33 +6685,73 @@ static void overlay_render(void) {
     const float helper_h = helper_text_gh;
     const float helper_y = 0.945f * screen_height;
     const float helper_size = 0.042f * screen_height;
-    if (count > 1u) {
-      ADD_SWITCH_HELPER("LEFT", 0.255f * screen_width, helper_y, helper_size);
-      ADD_SWITCH_HELPER(">", 0.290f * screen_width, helper_y, helper_size);
-    }
-    ADD_SWITCH_HELPER("A", (count > 1u ? 0.500f : 0.390f) * screen_width,
-                      helper_y, helper_size);
+    const float helper_icon_gap = 0.006f * screen_width;
+    const float helper_text_gap = 0.010f * screen_width;
+    const float helper_group_gap = 0.030f * screen_width;
+    const float select_w = count > 1u ? measure_efootball_line(
+        "SELECT", 6, helper_h, EFOOTBALL_FONT_BOLD) : 0.0f;
+    const float confirm_w = measure_efootball_line(
+        "CONFIRM", 7, helper_h, EFOOTBALL_FONT_BOLD);
+    const float back_w = has_back ? measure_efootball_line(
+        "TOP TO MENU", 11, helper_h, EFOOTBALL_FONT_BOLD) : 0.0f;
+    const uint32_t helper_group_count = 1u + (count > 1u ? 1u : 0u) +
+                                        (has_back ? 1u : 0u);
+    float helper_total = helper_size + helper_text_gap + confirm_w;
+    if (count > 1u)
+      helper_total += helper_size * 2.0f + helper_icon_gap +
+                      helper_text_gap + select_w;
     if (has_back)
-      ADD_SWITCH_HELPER("B", (count > 1u ? 0.680f : 0.570f) * screen_width,
-                        helper_y, helper_size);
+      helper_total += helper_size + helper_text_gap + back_w;
+    if (helper_group_count > 1u)
+      helper_total += (float)(helper_group_count - 1u) * helper_group_gap;
+    float helper_x = 0.955f * screen_width - helper_total;
+    float select_left_x = 0.0f;
+    float select_right_x = 0.0f;
+    float select_label_x = 0.0f;
+    if (count > 1u) {
+      select_left_x = helper_x + helper_size * 0.5f;
+      helper_x += helper_size + helper_icon_gap;
+      select_right_x = helper_x + helper_size * 0.5f;
+      helper_x += helper_size + helper_text_gap;
+      select_label_x = helper_x;
+      helper_x += select_w + helper_group_gap;
+    }
+    const float confirm_key_x = helper_x + helper_size * 0.5f;
+    helper_x += helper_size + helper_text_gap;
+    const float confirm_label_x = helper_x;
+    helper_x += confirm_w;
+    float back_key_x = 0.0f;
+    float back_label_x = 0.0f;
+    if (has_back) {
+      helper_x += helper_group_gap;
+      back_key_x = helper_x + helper_size * 0.5f;
+      helper_x += helper_size + helper_text_gap;
+      back_label_x = helper_x;
+    }
+    if (count > 1u) {
+      ADD_SWITCH_HELPER("LEFT", select_left_x, helper_y, helper_size);
+      ADD_SWITCH_HELPER(">", select_right_x, helper_y, helper_size);
+    }
+    ADD_SWITCH_HELPER("A", confirm_key_x, helper_y, helper_size);
+    if (has_back)
+      ADD_SWITCH_HELPER("B", back_key_x, helper_y, helper_size);
     result_helper_text = quads;
     if (count > 1u) {
-      int n = emit_efootball_line(
-          "SELECT", 6, 0.315f * screen_width, helper_y - helper_h * 0.5f,
+      int select_n = emit_efootball_line(
+          "SELECT", 6, select_label_x, helper_y - helper_h * 0.5f,
           helper_h, EFOOTBALL_FONT_BOLD, verts + quads * 24);
-      quads += n;
-      result_helper_text_quads += n;
+      quads += select_n;
+      result_helper_text_quads += select_n;
     }
     int n = emit_efootball_line(
-        "CONFIRM", 7, (count > 1u ? 0.525f : 0.415f) * screen_width,
+        "CONFIRM", 7, confirm_label_x,
         helper_y - helper_h * 0.5f, helper_h, EFOOTBALL_FONT_BOLD,
         verts + quads * 24);
     quads += n;
     result_helper_text_quads += n;
     if (has_back) {
       n = emit_efootball_line(
-          "TOP TO MENU", 11,
-          (count > 1u ? 0.705f : 0.595f) * screen_width,
+          "TOP TO MENU", 11, back_label_x,
           helper_y - helper_h * 0.5f, helper_h, EFOOTBALL_FONT_BOLD,
           verts + quads * 24);
       quads += n;
@@ -7432,7 +7522,8 @@ static void overlay_render(void) {
     custom_offset += custom_backdrop_quads;
     if (custom_2p_team_selector)
       glUniform4f(gl.loc_color, 0.20f, 0.015f, 0.025f, 1.0f);
-    else if (custom_hub_settings_popup || custom_hub_choice_page)
+    else if (custom_hub_settings_popup || custom_hub_choice_page ||
+             custom_main_menu_dark_popup)
       glUniform4f(gl.loc_color, 0.06f, 0.09f, 0.17f,
                   custom_hub_choice_page ? 1.0f : 0.92f);
     else if (custom_2p_prematch_hub)
@@ -7447,7 +7538,8 @@ static void overlay_render(void) {
     custom_offset += custom_panel_quads;
     if (custom_2p_team_selector)
       glUniform4f(gl.loc_color, 0.035f, 0.035f, 0.038f, 1.0f);
-    else if (custom_hub_settings_popup || custom_hub_choice_page)
+    else if (custom_hub_settings_popup || custom_hub_choice_page ||
+             custom_main_menu_dark_popup)
       glUniform4f(gl.loc_color, 0.025f, 0.045f, 0.11f,
                   custom_hub_choice_page ? 1.0f : 0.97f);
     else if (custom_2p_prematch_hub)
@@ -7466,6 +7558,8 @@ static void overlay_render(void) {
     custom_offset += custom_header_fill_quads;
     if (custom_2p_team_selector)
       glUniform4f(gl.loc_color, 0.94f, 0.93f, 0.93f, 0.96f);
+    else if (custom_main_menu_dark_popup)
+      glUniform4f(gl.loc_color, 0.08f, 0.30f, 0.50f, 0.82f);
     else if (custom_hub_settings_popup || custom_hub_choice_page)
       glUniform4f(gl.loc_color, 0.93f, 0.96f, 1.0f, 0.78f);
     else if (custom_2p_prematch_hub)
@@ -7514,7 +7608,8 @@ static void overlay_render(void) {
     custom_offset += custom_kit_preview_quads;
     if (custom_2p_team_selector)
       glUniform4f(gl.loc_color, 0.86f, 0.84f, 0.84f, 0.88f);
-    else if (custom_hub_settings_popup || custom_hub_choice_page)
+    else if (custom_hub_settings_popup || custom_hub_choice_page ||
+             custom_main_menu_dark_popup)
       glUniform4f(gl.loc_color, 0.80f, 0.86f, 0.93f, 0.34f);
     else
       glUniform4f(gl.loc_color,
@@ -7576,7 +7671,8 @@ static void overlay_render(void) {
       glUniform1f(gl.loc_solid, 1.0f);
     }
     custom_offset += custom_team_stat_shape_quads;
-    if (custom_hub_settings_popup || custom_hub_choice_page)
+    if (custom_hub_settings_popup || custom_hub_choice_page ||
+        custom_main_menu_dark_popup)
       glUniform4f(gl.loc_color, 0.04f, 0.43f, 0.76f, 0.96f);
     else if (custom_2p_prematch_hub)
       glUniform4f(gl.loc_color, 0.86f, 0.90f, 0.96f, 0.84f);
@@ -7605,7 +7701,8 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_solid, 1.0f);
     if (custom_2p_prematch_hub)
       glUniform4f(gl.loc_color, 0.97f, 0.98f, 1.0f, 0.75f);
-    else if (custom_hub_settings_popup || custom_hub_choice_page)
+    else if (custom_hub_settings_popup || custom_hub_choice_page ||
+             custom_main_menu_dark_popup)
       glUniform4f(gl.loc_color, 0.04f, 0.43f, 0.76f, 0.96f);
     else
       glUniform4f(gl.loc_color, 0.02f, 0.42f, 0.72f, 1.0f);
@@ -7882,7 +7979,10 @@ static void overlay_render(void) {
   if (custom_dark_text_quads) {
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
-    glUniform4f(gl.loc_color, 0.025f, 0.075f, 0.12f, 1.0f);
+    if (custom_main_menu_dark_popup)
+      glUniform4f(gl.loc_color, 0.94f, 0.97f, 1.0f, 1.0f);
+    else
+      glUniform4f(gl.loc_color, 0.025f, 0.075f, 0.12f, 1.0f);
     glDrawArrays(GL_TRIANGLES, custom_dark_text_first_quad * 6,
                  custom_dark_text_quads * 6);
   }

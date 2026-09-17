@@ -5,6 +5,7 @@ Subsystem notes and historical implementation audits live here.
 
 ## Data and roster migration
 
+- [PES21 NX master data catalog](MASTER_DATA_CATALOG.md)
 - [PESDB eFootball identity](PESDB_EFOOTBALL_IDENTITY.md)
 - [PESDB import](PESDB_EFOOTBALL_IMPORT.md)
 - [PESDB apply](PESDB_EFOOTBALL_APPLY.md)

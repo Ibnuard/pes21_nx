@@ -109,7 +109,7 @@ class CustomMainMenuTests(unittest.TestCase):
         ) as authored_splash:
             self.assertEqual(authored_splash.size, (1920, 1080))
 
-    def test_two_player_general_settings_omits_com_level(self):
+    def test_general_settings_com_level_follows_match_mode(self):
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
         overlay = (ROOT / "source/overlay.c").read_text(encoding="utf-8")
         self.assertIn(
@@ -120,7 +120,17 @@ class CustomMainMenuTests(unittest.TestCase):
             "index + exhibition_match_settings_first_index()",
             hooks,
         )
-        self.assertNotIn('"COM LEVEL", "MATCH TIME"', hooks)
+        self.assertIn(
+            "hub_mode && !exhibition_match_settings_cpu_level_visible() ? 1u : 0u",
+            hooks,
+        )
+        self.assertIn(
+            "pes_controller_exhibition_single_controller_mode();",
+            hooks,
+        )
+        self.assertIn('return "COM LEVEL";', hooks)
+        self.assertIn("exhibition_cpu_level_labels[level]", hooks)
+        self.assertIn("exhibition_apply_cpu_level(value, match);", hooks)
         self.assertIn("pes_controller_custom_match_settings_count()", overlay)
 
     def test_player_cursor_is_not_configurable_and_stays_hidden(self):
@@ -132,6 +142,31 @@ class CustomMainMenuTests(unittest.TestCase):
         self.assertNotIn("player_cursor_show", hooks)
         self.assertNotIn("player_cursor_show", config)
         self.assertIn("const int show = 0;", hooks)
+
+    def test_video_settings_restore_high_and_use_dark_popup_skin(self):
+        hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
+        overlay = (ROOT / "source/overlay.c").read_text(encoding="utf-8")
+        self.assertIn('graphics >= 2u ? "HIGH"', hooks)
+        self.assertIn('value = (current + 1u) % 3u;', hooks)
+        self.assertIn('if (graphics > 2u)', hooks)
+        self.assertNotIn('"graphics High option removal"', hooks)
+        self.assertNotIn('"graphics quality High rejection"', hooks)
+        self.assertNotIn('"saved High graphics clamp"', hooks)
+        self.assertIn('const int custom_main_menu_dark_popup', overlay)
+        self.assertIn('custom_video_settings_popup || custom_info_popup', overlay)
+        self.assertIn('if (custom_main_menu_dark_popup)', overlay)
+        self.assertIn('video_helper_total', overlay)
+        self.assertIn('0.955f * (float)screen_width -', overlay)
+        self.assertIn('if (!custom_video_settings_popup)', overlay)
+        self.assertIn('back_key_x + back_key_radius + back_key_gap', overlay)
+
+    def test_pause_and_result_footer_helpers_are_right_packed(self):
+        overlay = (ROOT / "source/overlay.c").read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            overlay.count('0.955f * screen_width - helper_total'), 2
+        )
+        self.assertNotIn('static const float helper_x[3]', overlay)
+        self.assertNotIn('0.680f * screen_width, helper_y, helper_size', overlay)
 
 
 if __name__ == "__main__":

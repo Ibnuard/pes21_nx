@@ -20,16 +20,9 @@ from prepare_runtime import decrypt_utf, read_cpk_packet
 
 
 PACKET_HEADER = struct.Struct("<4s4xQ")
-TOC_ROW_LENGTH = 28
-TOC_ROWS_RELATIVE = 63
-TOC_COLUMNS = 7
-TOC_FIELD_OFFSETS = {
-    "DirName": 0,
-    "FileName": 4,
-    "FileSize": 8,
-    "ExtractSize": 12,
-    "FileOffset": 16,
-    "ID": 24,
+NUMERIC_FORMATS = {
+    0: ">B", 1: ">b", 2: ">H", 3: ">h", 4: ">I",
+    5: ">i", 6: ">Q", 7: ">q", 8: ">f",
 }
 
 
@@ -86,32 +79,81 @@ def string_at(packet: bytes, strings_offset: int, relative: int) -> str:
     return packet[start:end].decode("utf-8")
 
 
+def value_width(value_type: int) -> int:
+    if value_type in NUMERIC_FORMATS:
+        return struct.calcsize(NUMERIC_FORMATS[value_type])
+    if value_type == 10:
+        return 4
+    if value_type == 11:
+        return 8
+    raise ValueError(f"unsupported CRI UTF value type {value_type}")
+
+
+def toc_descriptors(packet: bytes) -> list[dict[str, Any]]:
+    layout = utf_layout(packet)
+    descriptors: list[dict[str, Any]] = []
+    descriptor_offset = 32
+    row_offset = 0
+    for _ in range(layout["columns"]):
+        flag = packet[descriptor_offset]
+        name_relative = struct.unpack_from(">I", packet, descriptor_offset + 1)[0]
+        descriptor_offset += 5
+        storage = flag & 0xF0
+        value_type = flag & 0x0F
+        width = value_width(value_type)
+        field_offset = None
+        constant_offset = None
+        if storage == 0x30:
+            constant_offset = descriptor_offset
+            descriptor_offset += width
+        elif storage == 0x50:
+            field_offset = row_offset
+            row_offset += width
+        elif storage != 0x10:
+            raise ValueError(f"unsupported CRI UTF storage {storage:#x}")
+        descriptors.append({
+            "name": string_at(packet, layout["strings"], name_relative),
+            "storage": storage,
+            "type": value_type,
+            "width": width,
+            "field_offset": field_offset,
+            "constant_offset": constant_offset,
+        })
+    if descriptor_offset != layout["rows"] or row_offset != layout["row_length"]:
+        raise ValueError("unsupported CPK TOC descriptor layout")
+    return descriptors
+
+
+def descriptor_value(packet: bytes, layout: dict[str, int], descriptor: dict[str, Any], row: bytes) -> Any:
+    storage = descriptor["storage"]
+    value_type = descriptor["type"]
+    if storage == 0x10:
+        return 0
+    offset = descriptor["constant_offset"] if storage == 0x30 else descriptor["field_offset"]
+    source = packet if storage == 0x30 else row
+    if value_type == 10:
+        relative = struct.unpack_from(">I", source, offset)[0]
+        return string_at(packet, layout["strings"], relative)
+    if value_type in NUMERIC_FORMATS:
+        return struct.unpack_from(NUMERIC_FORMATS[value_type], source, offset)[0]
+    raise ValueError(f"unsupported TOC field type {value_type}")
+
+
 def parse_toc_rows(packet: bytes) -> list[dict[str, Any]]:
     layout = utf_layout(packet)
-    if (
-        layout["columns"] != TOC_COLUMNS
-        or layout["row_length"] != TOC_ROW_LENGTH
-        or layout["rows"] != TOC_ROWS_RELATIVE + 8
-    ):
-        raise ValueError("unsupported CPK TOC schema")
+    descriptors = toc_descriptors(packet)
+    required = {"DirName", "FileName", "FileSize", "ExtractSize", "FileOffset", "ID"}
+    if not required.issubset({d["name"] for d in descriptors}):
+        raise ValueError("unsupported CPK TOC fields")
     rows: list[dict[str, Any]] = []
     for index in range(layout["row_count"]):
-        offset = layout["rows"] + index * TOC_ROW_LENGTH
-        row = packet[offset : offset + TOC_ROW_LENGTH]
-        if len(row) != TOC_ROW_LENGTH:
+        offset = layout["rows"] + index * layout["row_length"]
+        row = packet[offset : offset + layout["row_length"]]
+        if len(row) != layout["row_length"]:
             raise ValueError("truncated CPK TOC row")
-        dirname_rel, filename_rel = struct.unpack_from(">II", row, 0)
-        rows.append(
-            {
-                "DirName": string_at(packet, layout["strings"], dirname_rel),
-                "FileName": string_at(packet, layout["strings"], filename_rel),
-                "FileSize": struct.unpack_from(">I", row, 8)[0],
-                "ExtractSize": struct.unpack_from(">I", row, 12)[0],
-                "FileOffset": struct.unpack_from(">Q", row, 16)[0],
-                "ID": struct.unpack_from(">I", row, 24)[0],
-                "_raw": row,
-            }
-        )
+        values = {d["name"]: descriptor_value(packet, layout, d, row) for d in descriptors}
+        values["_raw"] = row
+        rows.append(values)
     return rows
 
 
@@ -131,6 +173,8 @@ def build_toc_packet(
     additions: list[dict[str, Any]],
 ) -> bytes:
     layout = utf_layout(original)
+    descriptors = toc_descriptors(original)
+    by_name = {d["name"]: d for d in descriptors}
     strings = bytearray(original[layout["strings"] : layout["data"]])
     offsets: dict[str, int] = {}
     cursor = 0
@@ -148,22 +192,30 @@ def build_toc_packet(
     all_rows = sorted(rows + additions, key=lambda row: member_name(row).lower())
     row_bytes: list[bytes] = []
     for row in all_rows:
-        raw = bytearray(row.get("_raw", bytes(TOC_ROW_LENGTH)))
-        if len(raw) != TOC_ROW_LENGTH:
+        raw = bytearray(row.get("_raw", bytes(layout["row_length"])))
+        if len(raw) != layout["row_length"]:
             raise ValueError("invalid TOC row size")
-        struct.pack_into(
-            ">II",
-            raw,
-            0,
-            _append_string(strings, offsets, str(row["DirName"])),
-            _append_string(strings, offsets, str(row["FileName"])),
-        )
-        struct.pack_into(">IIQ", raw, 8, int(row["FileSize"]), int(row["ExtractSize"]), int(row["FileOffset"]))
-        struct.pack_into(">I", raw, 24, int(row["ID"]))
+        for name in ("DirName", "FileName", "FileSize", "ExtractSize", "FileOffset", "ID"):
+            descriptor = by_name[name]
+            if descriptor["storage"] == 0x30:
+                # dt241 stores its shared common/player directory as a constant.
+                current = descriptor_value(original, layout, descriptor, raw)
+                if row[name] != current:
+                    raise ValueError(f"constant TOC field differs for {name}: {row[name]!r}")
+                continue
+            if descriptor["storage"] != 0x50:
+                raise ValueError(f"TOC field is not writable: {name}")
+            offset = descriptor["field_offset"]
+            if descriptor["type"] == 10:
+                struct.pack_into(">I", raw, offset, _append_string(strings, offsets, str(row[name])))
+            elif descriptor["type"] in NUMERIC_FORMATS:
+                struct.pack_into(NUMERIC_FORMATS[descriptor["type"]], raw, offset, int(row[name]))
+            else:
+                raise ValueError(f"unsupported writable TOC field: {name}")
         row_bytes.append(bytes(raw))
 
     rows_relative = layout["rows"] - 8
-    strings_relative = rows_relative + TOC_ROW_LENGTH * len(row_bytes)
+    strings_relative = rows_relative + layout["row_length"] * len(row_bytes)
     data_relative = strings_relative + len(strings)
     header = bytearray(original[: layout["rows"]])
     struct.pack_into(">I", header, 4, data_relative)
@@ -250,7 +302,7 @@ def rebuild(source_path: Path, output_path: Path, additions: dict[str, Path]) ->
                     "ExtractSize": len(payload),
                     "FileOffset": cursor - data_base,
                     "ID": next_id,
-                    "_raw": bytes(TOC_ROW_LENGTH),
+                    "_raw": bytes(utf_layout(toc_packet)["row_length"]),
                 }
             )
             payloads.append((cursor, payload))

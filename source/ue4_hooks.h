@@ -266,6 +266,7 @@ void pes_controller_replay_feedback_set(uint32_t feedback);
 uint32_t pes_controller_replay_feedback(void);
 uint32_t pes_controller_setplay_context(void);
 uint32_t pes_controller_setplay_options(void);
+int pes_controller_free_kick_offside(void);
 int pes_controller_set_piece_selector_active(void);
 uint32_t pes_controller_set_piece_selector_owner_pad(void);
 uint32_t pes_controller_set_piece_selector_focus(void);

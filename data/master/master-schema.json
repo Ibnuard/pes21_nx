@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "database": "local-inputs/master-data/pes21_master.db",
+  "tables": [
+    {
+      "name": "metadata",
+      "description": "Snapshot versions, content IDs, source paths, and hashes."
+    },
+    {
+      "name": "competitions",
+      "description": "Selector leagues/categories and their licensed labels."
+    },
+    {
+      "name": "teams",
+      "description": "Logical EF team IDs and native PES21 physical slots."
+    },
+    {
+      "name": "excluded_teams",
+      "description": "Teams deliberately excluded from the playable scope."
+    },
+    {
+      "name": "ef_player_catalog",
+      "description": "Every EF26 BaseId in the locked 24,174-player index."
+    },
+    {
+      "name": "players",
+      "description": "Materialized canonical players and stable native identities."
+    },
+    {
+      "name": "player_stats",
+      "description": "Full canonical/highest-OVR EF data, one wide row per player."
+    },
+    {
+      "name": "player_aliases",
+      "description": "Identity aliases retained by the resolver."
+    },
+    {
+      "name": "team_rosters",
+      "description": "Club/national memberships, shirt numbers, and order."
+    },
+    {
+      "name": "formation_slots",
+      "description": "Locked API formation roles and pitch coordinates."
+    },
+    {
+      "name": "starting_lineups",
+      "description": "Final formation-aware selected eleven for each team."
+    },
+    {
+      "name": "player_assets",
+      "description": "Portrait, face, and commentary ownership/status."
+    },
+    {
+      "name": "team_kits",
+      "description": "Per-team migration or preservation state."
+    },
+    {
+      "name": "kit_variants",
+      "description": "Converted home, away, and goalkeeper kit provenance."
+    },
+    {
+      "name": "source_artifacts",
+      "description": "Input files and hashes used to build this database."
+    },
+    {
+      "name": "field_dictionary",
+      "description": "Mapping from EF source field names to SQL columns."
+    }
+  ],
+  "relationships": [
+    "competitions.category_key -> teams.category_key",
+    "players.base_id -> team_rosters.base_id",
+    "players.base_id -> starting_lineups.base_id",
+    "players.base_id -> player_assets.base_id",
+    "teams.team_id -> formation_slots.team_id",
+    "teams.team_id -> team_kits.team_id"
+  ],
+  "local_only_tables": [
+    "ef_player_catalog",
+    "player_stats",
+    "team_rosters",
+    "formation_slots",
+    "starting_lineups",
+    "player_assets",
+    "team_kits",
+    "kit_variants"
+  ]
+}

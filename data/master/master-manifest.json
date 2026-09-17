@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source_version": "eF26_v551",
+  "migration_build_id": "1852ec648d2ebd75",
+  "snapshot_content_id": "304796954c6ba9bf",
+  "registry_content_id": "6e287826b5b92144",
+  "catalog_content_id": "3486bea49f03e021",
+  "local_database": {
+    "path": "local-inputs/master-data/pes21_master.db",
+    "bytes": 14073856,
+    "sha256": "b171a486c58221afd61892aed2926cff7620573fe8cd3d2e8a1adc1f06472dda"
+  },
+  "counts": {
+    "ef_base_ids": 24174,
+    "active_players": 12653,
+    "allocated_players": 12653,
+    "teams": 443,
+    "competitions": 33
+  },
+  "files": {
+    "player-id-registry.csv": {
+      "bytes": 883915,
+      "sha256": "073ea17c98d115846fe2cb6b49c642c0ba500ce21b535f05833464979f04040b"
+    },
+    "team-registry.csv": {
+      "bytes": 43100,
+      "sha256": "ca29a97426d170eed5247bd4fbebb65727d37d151e3443c3038af1f543feb378"
+    },
+    "competition-registry.csv": {
+      "bytes": 2886,
+      "sha256": "2eba219a6a0eb0ccf8deca8751e978416635bfc69fb02aededed4bb392e02191"
+    },
+    "asset-policy.json": {
+      "bytes": 384,
+      "sha256": "f869e7dc81cb14811d85e543486f38146057b4bfed8ad95025e8426e810c4e70"
+    },
+    "master-schema.json": {
+      "bytes": 2519,
+      "sha256": "62c0656ed3b9658046bb357670c6f07e7ab551c4919486eb36d1b837da56850e"
+    }
+  }
+}

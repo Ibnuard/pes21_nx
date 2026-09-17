@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "identity_key": "ef_base_id",
+  "native_storage_key": "native_pes21_id",
+  "portrait": "PESDBTools source card; neutral silhouette when unavailable",
+  "face": "carry only when BaseId and fingerprint match",
+  "commentary": "preserve stable native owner or leave unset",
+  "forbidden": [
+    "surrogate_player",
+    "portrait_alias",
+    "donor_face"
+  ]
+}
