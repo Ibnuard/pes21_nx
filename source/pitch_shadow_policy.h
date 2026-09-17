@@ -27,6 +27,12 @@ static char *pitch_shadow_source(const char *source) {
   const char *key = "MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition.w";
   const char *at = strstr(body, key);
   if (!at || at[strlen(key)] != ';' || strstr(at+strlen(key), key)) return NULL;
+  // Day-only additive grazing highlight, not the base texture or scene tint.
+  // Retain peak green and use the accepted grass's approximate R:G:B ratio.
+  const char *old_tint = "vec3(8.755540e-01,1.000000e+00,0.000000e+00)";
+  const char *new_tint = "vec3(6.000000e-01,1.000000e+00,2.900000e-01)";
+  const char *tint = strstr(body, old_tint);
+  if (!tint || strstr(tint+strlen(old_tint), old_tint)) return NULL;
   // Reduce the native depth comparison slope slightly; preserve all nine
   // PCF taps, geometry, lighting color and cascade logic. This is a depth
   // transition experiment, not a change to the spatial PCF kernel.
@@ -37,6 +43,30 @@ static char *pitch_shadow_source(const char *source) {
   memcpy(result, source, prefix);
   memcpy(result+prefix, extra, strlen(extra));
   memcpy(result+prefix+strlen(extra), source+prefix, n-prefix+1);
-  return result;
+  size_t tint_offset = (size_t)(tint-source);
+  if (tint_offset >= prefix) tint_offset += strlen(extra);
+  // Equal-length tokens preserve every other byte in the shader.
+  memcpy(result+tint_offset, new_tint, strlen(new_tint));
+  // A pitch-local artistic grade after lighting. Preserve luminance and alpha;
+  // fade out on neutral paint instead of grading the entire composed scene.
+  const char *output = "out_Target0.xyzw = v1;";
+  char *end = strstr(result, output);
+  if (!end || strstr(end+strlen(output), output)) { free(result); return NULL; }
+  const char *grade =
+    "\n// NX pitch hue begin\n"
+    "highp vec3 nxGrass = max(v1.xyz, vec3(0.0));\n"
+    "highp float nxMask = smoothstep(0.05, 0.18, (nxGrass.g-max(nxGrass.r,nxGrass.b))/max(nxGrass.g,0.0001));\n"
+    "highp vec3 nxTint = nxGrass*vec3(0.82,1.0,1.12);\n"
+    "nxTint *= dot(nxGrass,vec3(0.2126,0.7152,0.0722))/max(dot(nxTint,vec3(0.2126,0.7152,0.0722)),0.0001);\n"
+    "out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);\n"
+    "// NX pitch hue end\n";
+  size_t offset = (size_t)(end-result)+strlen(output), total = strlen(result);
+  char *graded = (char *)malloc(total+strlen(grade)+1);
+  if (!graded) { free(result); return NULL; }
+  memcpy(graded, result, offset);
+  memcpy(graded+offset, grade, strlen(grade));
+  memcpy(graded+offset+strlen(grade), result+offset, total-offset+1);
+  free(result);
+  return graded;
 }
 #endif

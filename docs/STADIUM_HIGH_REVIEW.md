@@ -1,5 +1,90 @@
 # Stadium / High diagnostic candidate — 2026-09-17
 
+## Accepted High + shadow + pitch checkpoint
+
+User confirmed the v3 material result fits the pitch and requested commit/push
+on 2026-09-17. Tag: `checkpoint-high-shadow-pitch-v19`.
+Accepted combination (keep both together):
+
+- NRO: `local-debug/day-pitch-tint-v2/pes21_nx.nro`
+  SHA-256 `21c99d7db2c33adbfc064dbb3333c784dbc06aa7f3f192d374b759f93842da14`.
+- PAK: `local-debug/day-shadow-material-v3/install/PesMobile-Android_ETC1_P.pak`
+  SHA-256 `d7b294b455c974ef8ad72c959ada4b7878450557a99d27aa6ddb7a1226b2543f`.
+- High 3D rendering, pitch color/pattern/grain and corrected day shadow hue
+  accepted in the tested scenario. Stadium shadows remain enabled; the
+  conditional shadow-removal fallback is no longer needed for this issue.
+- This is not certification of every stadium, complete native postprocessing
+  fidelity, or a release-performance build: diagnostics remain enabled.
+- Reproduce the 27-member pitch with `recreate_custom_pitch.py` at diffuse
+  scale 0.98, then apply `tune_day_pitch_material.py` to produce the 31-member
+  stage. Package as V8A/Zlib. Game payloads stay local and ignored.
+
+Historical candidate notes below record the investigation, not the latest
+acceptance status.
+
+## Day pitch highlight tint candidate
+
+### v3 material experiment — first of two remaining hardware attempts
+
+User reports v2 remains yellow; log confirms `tint=grass-v2` on shader 136.
+Do not interpret compilation as coverage of every visible pitch draw.
+The day instances MI_Pitch_L and MI_Pitch_R both serialize shadowColor as
+RGBA (0.03125, 0.023696, 0, 1): an explicitly yellow additive material color.
+V3 targets this value directly instead of escalating the framebuffer grade.
+`tools/tune_day_pitch_material.py` changes its RGB ratio to 0.60:1:0.29 with
+weighted luminance retained. It patches a unique 16-byte float tuple, verifies
+the result through UAssetGUI decoding, and retains original package headers
+and all other export bytes. Left lightColor is deliberately unchanged.
+
+The complete PAK contains the accepted 27 files unchanged plus four files
+for the two day material instances. Night material files are unchanged.
+Artifact: `local-debug/day-shadow-material-v3/install/PesMobile-Android_ETC1_P.pak`.
+Use current v2 NRO for a single-variable comparison; replace PAK only. No
+new NRO build. Actual runtime material usage and visual improvement require
+hardware confirmation; this is not a claim of a solved tint.
+
+User permits two further visual attempts starting here. If both fail, their
+requested fallback is removal of stadium shadow for day matches. Do not
+silently remove player/contact shadows along with it. The current experiment
+retains all shadows. Rollback PAK is the accepted pitch-day-soft-v1 artifact.
+
+### v2 after hardware feedback
+
+The supplied runtime log contains `tint=grass-v1` for shader 136, proving the
+v1 rewrite was applied; the user still observes yellow/olive turf. The additive
+highlight correction is therefore insufficient, not an established hook miss.
+V2 adds a pitch-local post-lighting RGB grade (0.82, 1, 1.12), normalized to
+preserve weighted linear luminance, with a green-dominance mask fading out
+on neutral paint. Alpha/depth, textures, shadow kernel and night bodies remain
+unchanged. This is an artistic compensation, not a proven correction of the
+underlying lighting uniforms. It may need adjustment after hardware review.
+
+Install only `local-debug/day-pitch-tint-v2/pes21_nx.nro`; keep v18 PAK.
+Log marker: `tint=grass-v2`. Compare day shadow and sunlit areas, white paint,
+then night. Checkpoint v18 remains the rollback; no new commit requested.
+
+After v18 acceptance, inspection found a fixed yellow-green additive grazing
+highlight in the owned day fragment shader. It is added after the shadowed
+direct and ambient lighting terms, so its hue can remain visible in shadow.
+This is a concrete contributor, not proof that all observed olive tint comes
+from this term. Night material variants do not contain that constant.
+
+`pitch_shadow_policy.h` now replaces only this highlight color in the same
+eight fingerprint-allowlisted day variants: RGB (0.875554, 1, 0) becomes
+(0.60, 1, 0.29), approximately the accepted diffuse palette's channel ratio.
+Peak green and highlight strength/mask/view dependence are retained; this is
+an artistic candidate, not a calibrated color-space conversion. The v18
+shadow slope remains 0.85. Base diffuse, grain, stripes, direct/ambient light,
+night shaders and all other material sources are unchanged. Unknown sources
+pass through. Non-allowlisted day permutations are not covered by this test.
+
+Install NRO only: `local-debug/day-pitch-tint-v1/pes21_nx.nro`. Keep the
+accepted v18 PAK. Log `tint=grass-v1 rgb=0.60,1.00,0.29` confirms application.
+Check High day with the same stadium/camera and both shadowed/sunlit turf,
+then night for regression. The change does not address spatial shadow jaggies.
+Host tests: 41 tests and 30 subtests passed. Hardware color acceptance pending.
+Rollback NRO: `local-debug/day-shadow-soft-v1/pes21_nx.nro`.
+
 Checkpoint: user confirmed High renders 3D without the prior crash and accepted
 the reconstructed pitch pattern/grain (2026-09-17). This is not confirmation
 of complete High postprocessing fidelity or all camera scenarios.

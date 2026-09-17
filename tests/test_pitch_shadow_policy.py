@@ -26,6 +26,22 @@ def bodies(path):
 
 
 class PitchShadowTests(unittest.TestCase):
+    def test_grade_luminance_and_neutral_mask(self):
+        weights = (0.2126, 0.7152, 0.0722)
+        def grade(rgb):
+            r, g, b = rgb
+            t = min(1, max(0, ((g-max(r,b))/max(g,0.0001)-0.05)/0.13))
+            mask = t*t*(3-2*t)
+            tinted = [x*s for x,s in zip(rgb, (0.82,1,1.12))]
+            luminance = sum(x*w for x,w in zip(rgb, weights))
+            scale = luminance/max(sum(x*w for x,w in zip(tinted, weights)),0.0001)
+            return tuple(x*(1-mask)+y*scale*mask for x,y in zip(rgb,tinted))
+        for rgb in ((0.30,0.42,0.08), (0.06,0.09,0.02), (0.8,0.8,0.8), (0,0,0)):
+            out = grade(rgb)
+            self.assertAlmostEqual(sum(x*w for x,w in zip(rgb,weights)), sum(x*w for x,w in zip(out,weights)))
+        self.assertEqual(grade((0.8,0.8,0.8)), (0.8,0.8,0.8))
+        self.assertLess(grade((0.30,0.42,0.08))[0]/grade((0.30,0.42,0.08))[1], 0.30/0.42)
+
     def test_native_allowlist_and_night_exclusion(self):
         gcc = shutil.which('gcc')
         if not gcc:
@@ -54,7 +70,15 @@ class PitchShadowTests(unittest.TestCase):
             for body in bodies(native/'M_Pitch_Default.uexp'):
                 result = transform(body)
                 if key+b';' in body:
-                    self.assertEqual(result, body.replace(key+b';', key+b' * 0.85;'))
+                    old_tint = b'vec3(8.755540e-01,1.000000e+00,0.000000e+00)'
+                    new_tint = b'vec3(6.000000e-01,1.000000e+00,2.900000e-01)'
+                    self.assertEqual(len(old_tint), len(new_tint))
+                    self.assertEqual(body.count(old_tint), 1)
+                    self.assertEqual(result.count(b'// NX pitch hue begin'), 1)
+                    self.assertIn(b'out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);', result)
+                    ungraded = re.sub(rb'\n// NX pitch hue begin\n.*?// NX pitch hue end\n', b'', result, flags=re.S)
+                    self.assertEqual(ungraded, body.replace(key+b';', key+b' * 0.85;').replace(old_tint, new_tint))
+                    self.assertIsNone(transform(result))
                     self.assertIsNone(transform(body+b'//unknown variant'))
                     changed += 1
                 else:
