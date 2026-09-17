@@ -6,6 +6,26 @@ of complete High postprocessing fidelity or all camera scenarios.
 
 ## Accepted checkpoint and next visual review
 
+### Pitch color/pattern/grain acceptance (subsequent checkpoint)
+
+User accepted the `pitch-day-soft-v1` pitch color, pattern and grain on
+2026-09-17. Tag: `checkpoint-pitch-color-pattern-grain-v18` (local only).
+This acceptance does not establish that the experimental day shadow slope
+fixes edge aliasing or the olive/yellow tint.
+
+- NRO: `local-debug/day-shadow-soft-v1/pes21_nx.nro`, SHA-256
+  `d6112900431b689e2e6b4d56ca51f62d92d81970904db253497b0210484868c5`.
+- PAK: `local-debug/pitch-day-soft-v1/install/PesMobile-Android_ETC1_P.pak`,
+  SHA-256 `d493a9f09f1dd14fbe1c6bb07348e73504c0dd684278b4742ca65f7e7d19ee82`.
+- Reproduce with `tools/recreate_custom_pitch.py --diffuse-scale 0.98`
+  and the previously documented owned native inputs/encoder/GUI.
+- Next task: investigate pitch-only daylight lighting tint so it blends with
+  the accepted grass. The user's observation that stock grass is yellower is
+  a plausible explanation, not yet verified as the shader-level cause.
+  Preserve the accepted night look, stripe geometry and grain.
+
+### Earlier High-render checkpoint
+
 - NRO SHA-256: `e514b94d01d63e3b40e5d44a65ec9b60caed4e49ef43aecefd1e930566a54d33`
 - PAK SHA-256: `f25e26d1b5e6bb08156485663ba43f33efb6779521d29d4c08a538e2505ee946`
 - Pitch backup: `local-inputs/custom-pitch-v17/PesMobile-Android_ETC1_P.pak`
@@ -127,3 +147,37 @@ Then select High and reproduce entering the field. Copy `debug.log` immediately
 after failure, before another launch (the next boot truncates it). Include the
 system crash report if available. Diagnostic frame rate is not representative
 of release performance. Ultra and 90 FPS are out of scope.
+## Day shadow / pitch tuning candidate (2026-09-17)
+
+After checkpoint `checkpoint-high-render-pitch-v17`, the user's two-match
+day/night log shows successful composition and no reported compositor GL
+errors. Hardware feedback confirms High renders again. Keep that checkpoint
+as the accepted baseline; this candidate still needs visual hardware testing.
+
+The owned day pitch shader already performs nine-tap manual depth PCF.
+Do not force arbitrary depth samplers to linear. A source hook accepts only
+eight audited day-main fingerprints and scales the shadow comparison slope
+by 0.85. It retains the native spatial kernel and lighting colors. Audited
+night/Low-night bodies and unknown sources pass through unchanged. Runtime
+log `pitch-shadow: day slope=0.85` confirms the hook actually matched; absence
+means the candidate's shader effect has not been established. This is not a
+guaranteed spatial aliasing fix. The olive/yellow tint's cause remains
+unisolated, so no global scene color correction is applied.
+
+The complete 27-member pitch is rebuilt with `--diffuse-scale 0.98`:
+source diffuse RGB is reduced 2%, preserving protected native paint blocks,
+stripe geometry, grain recipe, detail and material bindings. ETC1 quantization
+and lighting mean this is not an exact 2% in-game luminance reduction.
+
+Candidate files:
+- `local-debug/day-shadow-soft-v1/pes21_nx.nro`
+- `local-debug/pitch-day-soft-v1/install/PesMobile-Android_ETC1_P.pak`
+
+Replace only the NRO and the patch PAK under `PesMobile/Content/Paks/`.
+Keep OBB, LooseCpk and saves. Accepted pitch backup remains under
+`local-inputs/custom-pitch-v17/`; accepted NRO is in
+`local-debug/high-compositor-v4/`. Test High day shadow edges and hue, then
+night brightness with the same stadium/camera. Diagnostics remain enabled.
+Host verification: 41 focused tests and 30 subtests passed; hardware visual
+acceptance of the shadow change is pending. The subsequent v18 checkpoint
+accepts pitch color/pattern/grain only, as recorded above.

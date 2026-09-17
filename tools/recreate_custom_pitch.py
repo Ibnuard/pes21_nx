@@ -12,14 +12,15 @@ from build_low_pitch_phase_patch import (
 from build_uniform_pitch_patch import validate as validate_geometry
 
 
-def build(native, output, encoder, gui):
+def build(native, output, encoder, gui, diffuse_scale=1.0):
     if output.exists():
         raise ValueError('Use a fresh output directory')
     output.mkdir(parents=True)
     previews = output / 'previews'
     previews.mkdir()
     settings = SimpleNamespace(pes21=native, ef10=None, etc1tool=encoder,
-                               pitch_style='clean-v17', procedural_grain=True)
+                               pitch_style='clean-v17', procedural_grain=True,
+                               diffuse_scale=diffuse_scale)
     textures = pitch(settings, output, previews)
     stage = output / 'pitch-stage'
     assert len(list(stage.rglob('*.*'))) == 19
@@ -51,7 +52,8 @@ def build(native, output, encoder, gui):
         {TEXTURE:NEW_TEXTURE}, output/'rename-texture', gui))
     assert len(list(stage.rglob('*.*'))) == 27
     geometry = validate_geometry(stage, stage, native, 'clean-v17')
-    report = {'files':27, 'recipe':'clean-v17', 'grain':'seeded procedural, not EF10',
+    report = {'files':27, 'recipe':'clean-v17', 'diffuse_scale':diffuse_scale,
+              'grain':'seeded procedural, not EF10',
               'textures':textures, 'shader_audits':audits, 'renames':renames,
               'encoded_geometry': {key: value for key, value in geometry.items()
                                    if 'identical' not in key and key != 'unchanged_files'},
@@ -64,6 +66,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('native', 'output', 'encoder', 'gui'):
         parser.add_argument('--'+name, type=Path, required=True)
+    parser.add_argument('--diffuse-scale', type=float, default=1.0)
     args = parser.parse_args()
-    build(args.native, args.output, args.encoder.resolve(), args.gui.resolve())
+    build(args.native, args.output, args.encoder.resolve(), args.gui.resolve(), args.diffuse_scale)
     print('Recreated and validated 27-member custom pitch stage')

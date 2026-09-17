@@ -57,6 +57,7 @@
 #include "libc_shim.h"
 #include "overlay.h"
 #include "perf_trace.h"
+#include "pitch_shadow_policy.h"
 
 extern uintptr_t __stack_chk_fail;
 extern so_module avs_mod;
@@ -1926,6 +1927,30 @@ static void glSamplerParameteri_diag(GLuint sampler, GLenum pname, GLint param) 
   gl_sampler_parameteri_real(sampler, pname, param);
 }
 
+static void glShaderSource_pitch(GLuint shader, GLsizei count,
+                                  const GLchar *const *strings,
+                                  const GLint *lengths) {
+  // Fail open on segmented or unsupported input; no blanket shader rewrite.
+  char *patched = NULL;
+  if (count == 1 && strings && strings[0]) {
+    const size_t n = lengths && lengths[0] >= 0 ? (size_t)lengths[0] : strlen(strings[0]);
+    if (n && n < 2u*1024u*1024u) {
+      char *copy = (char *)malloc(n+1);
+      if (copy) {
+        memcpy(copy, strings[0], n); copy[n] = 0;
+        if (strlen(copy) == n) patched = pitch_shadow_source(copy);
+        free(copy);
+      }
+    }
+  }
+  if (patched) {
+    const GLchar *source = patched;
+    glShaderSource(shader, 1, &source, NULL);
+    debugPrintf("pitch-shadow: day slope=0.85 shader=%u\n", shader);
+    free(patched);
+  } else glShaderSource(shader, count, strings, lengths);
+}
+
 static __eglMustCastToProperFunctionPointerType
 eglGetProcAddress_diag(const char *name) {
   __eglMustCastToProperFunctionPointerType proc = eglGetProcAddress(name);
@@ -1937,6 +1962,8 @@ eglGetProcAddress_diag(const char *name) {
     debugPrintf("eglGetProcAddress[%u](%s) -> %p\n", request,
                 name ? name : "(null)", (void *)proc);
 #endif
+  if (name && !strcmp(name, "glShaderSource") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glShaderSource_pitch;
   if (name && !strcmp(name, "glBlitFramebuffer") && proc) {
     gl_blit_framebuffer_real = (GLBlitFramebufferProc)proc;
     return (__eglMustCastToProperFunctionPointerType)&glBlitFramebuffer_diag;
@@ -3532,7 +3559,7 @@ DynLibFunction dynlib_functions[] = {
   { "glReadPixels", (uintptr_t)&glReadPixels },
   { "glRenderbufferStorage", (uintptr_t)&glRenderbufferStorage_diag },
   { "glScissor", (uintptr_t)&glScissor },
-  { "glShaderSource", (uintptr_t)&glShaderSource },
+  { "glShaderSource", (uintptr_t)&glShaderSource_pitch },
   { "glTexImage2D", (uintptr_t)&glTexImage2D_w },
   { "glTexParameterf", (uintptr_t)&glTexParameterf },
   { "glTexParameteri", (uintptr_t)&glTexParameteri },

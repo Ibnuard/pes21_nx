@@ -381,6 +381,10 @@ def pitch(args, out, previews, selected_names=None, complement_diffuse=False):
                 variation = (np.maximum(diffuse_grain, 0)
                              if style == 'clean-v17' else diffuse_grain)
                 rgb+=variation[:,:,None]*gain
+            diffuse_scale = getattr(args, 'diffuse_scale', 1.0)
+            if not 0.9 <= diffuse_scale <= 1.0:
+                raise ValueError('diffuse_scale must be between 0.9 and 1.0')
+            rgb *= diffuse_scale
             image=Image.fromarray(np.uint8(np.clip(np.rint(rgb),0,255)),'RGB')
         payloads=[]
         line_counts=[]
