@@ -51,7 +51,8 @@ class PitchShadowTests(unittest.TestCase):
             c.write_text('#include "pitch_shadow_policy.h"\n#include <stdio.h>\n'
                          'int main(void) {char s[131072]; size_t n=fread(s,1,sizeof(s)-1,stdin);'
                          's[n]=0; char *p=pitch_shadow_source(s); if(!p)return 2;'
-                         'fputs(p,stdout); free(p);return 0;}\n')
+                         'char *r=pitch_roof_source(p); if(!r){free(p);return 3;}'
+                         'fputs(r,stdout); free(r); free(p);return 0;}\n')
             exe = Path(tmp)/'policy.exe'
             subprocess.run([gcc, '-I', str(ROOT/'source'), str(c), '-o', str(exe)], check=True)
             def transform(body):
@@ -77,6 +78,11 @@ class PitchShadowTests(unittest.TestCase):
                     self.assertEqual(result.count(b'// NX pitch hue begin'), 1)
                     self.assertIn(b'out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);', result)
                     ungraded = re.sub(rb'\n// NX pitch hue begin\n.*?// NX pitch hue end\n', b'', result, flags=re.S)
+                    self.assertEqual(result.count(b'uniform highp float nxRoofDisabled;'), 1)
+                    self.assertEqual(result.count(b'mix(texture(ps1,in_TEXCOORD0.zw),vec4(1.0),nxRoofDisabled)'), 1)
+                    ungraded = ungraded.replace(b'uniform highp float nxRoofDisabled;\n', b'').replace(
+                        b'mix(texture(ps1,in_TEXCOORD0.zw),vec4(1.0),nxRoofDisabled)',
+                        b'texture(ps1,in_TEXCOORD0.zw)')
                     self.assertEqual(ungraded, body.replace(key+b';', key+b' * 0.85;').replace(old_tint, new_tint))
                     self.assertIsNone(transform(result))
                     self.assertIsNone(transform(body+b'//unknown variant'))

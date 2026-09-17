@@ -15,6 +15,11 @@
 #include "ue4_hooks.h"
 #include "util.h"
 #include "loose_cpk.h"
+#include "stadium_roof_policy.h"
+#include "perf_match.h"
+#ifdef DEBUG_LOG
+#include "stadium_diagnostic_policy.h"
+#endif
 
 #define OBJECT_INITIALIZER_STATE_SLOTS 32
 #define OBJECT_INITIALIZER_MAX_ITEMS (1 << 20)
@@ -80,6 +85,80 @@ _Static_assert(sizeof(TmpdbMatchPlanSettingsValue) == 52,
 static ObjectInitializerArrayState object_initializer_states[
     OBJECT_INITIALIZER_STATE_SLOTS];
 static void *(*ue4_fmemory_malloc)(uint64_t size, uint32_t alignment);
+
+static StadiumRoofProxies stadium_roof_proxies;
+static uintptr_t stadium_roof_proxy_vtable;
+static void *(*stadium_mesh_create_original)(void *component);
+static void (*stadium_mesh_destroy_original)(void *proxy);
+static void (*stadium_mesh_delete_original)(void *proxy);
+static void (*stadium_mesh_path)(const void *object, const void *stop, Ue4Array *out);
+static void (*stadium_string_free)(void *data);
+uintptr_t stadium_shadow_filter_resume;
+extern void pes_stadium_shadow_filter_original(void *packet, const void *bounds,
+                                               uint64_t flags, void *scene_info,
+                                               const void *proxy);
+
+static void *pes_stadium_mesh_create(void *component) {
+  void *proxy = stadium_mesh_create_original(component);
+  if (!proxy) return proxy;
+  stadium_roof_forget(&stadium_roof_proxies, (uintptr_t)proxy);
+  void *mesh = NULL;
+  memcpy(&mesh, (const unsigned char *)component + 0x5b0, sizeof(mesh));
+  Ue4Array path = {0};
+  if (mesh) stadium_mesh_path(mesh, NULL, &path);
+  const uint32_t id = path.num <= path.max
+                          ? stadium_roof_mesh_id(path.data, path.num) : 0;
+  if (path.data) stadium_string_free(path.data);
+  if (id) {
+    const int tracked = stadium_roof_remember(&stadium_roof_proxies, (uintptr_t)proxy);
+    debugPrintf("roof-caster-v4: create mesh=%u proxy=%p tracked=%d day=%u roof=%u\n",
+                id, proxy, tracked, pes_controller_stadium_is_day(),
+                pes_controller_roof_shadow_enabled());
+    (void)tracked;
+  }
+  return proxy;
+}
+
+static void pes_stadium_mesh_destroy(void *proxy) {
+  stadium_roof_forget(&stadium_roof_proxies, (uintptr_t)proxy);
+  stadium_mesh_destroy_original(proxy);
+}
+
+static void pes_stadium_mesh_delete(void *proxy) {
+  stadium_roof_forget(&stadium_roof_proxies, (uintptr_t)proxy);
+  stadium_mesh_delete_original(proxy);
+}
+
+static void pes_stadium_shadow_filter(void *packet, const void *bounds,
+                                      uint64_t flags, void *scene_info,
+                                      const void *proxy) {
+  uintptr_t vtable = 0;
+  if (proxy) memcpy(&vtable, proxy, sizeof(vtable));
+  const uint32_t tracked = vtable == stadium_roof_proxy_vtable &&
+      stadium_roof_contains(&stadium_roof_proxies, (uintptr_t)proxy);
+  const uint32_t disabled = tracked && pes_controller_stadium_is_day() &&
+                           !pes_controller_roof_shadow_enabled();
+#ifdef PERF_TRACE
+  if (tracked) perf_match_roof(disabled);
+#endif
+#ifdef DEBUG_LOG
+  static __thread StadiumDiagnosticGate gate;
+  static __thread uint64_t calls, suppressed;
+  if (tracked) {
+    ++calls;
+    suppressed += disabled;
+    const uint64_t now = armTicksToNs(armGetSystemTick());
+    if (stadium_diagnostic_due(&gate, now, 1, disabled, 2000000000ULL))
+      debugPrintf("roof-caster-v4: filter proxy=%p disabled=%u "
+                  "calls=%llu suppressed=%llu\n", proxy, disabled,
+                  (unsigned long long)calls, (unsigned long long)suppressed);
+  }
+#endif
+  // Filter before insertion into directional whole-scene shadow subjects.
+  // IsShadowCast alone is insufficient: this renderer inlines the flag tests.
+  if (!disabled)
+    pes_stadium_shadow_filter_original(packet, bounds, flags, scene_info, proxy);
+}
 
 static _Alignas(8) uint64_t cobra_pad_input;
 static _Alignas(4) uint32_t cobra_pad_right_input;
@@ -318,6 +397,15 @@ static uint32_t (*match_ball_position_broadcast_original)(
 static const float *(*match_ball_info_get_trans)(const void *ball_info);
 static uint32_t match_broadcast_ball_tracking_ready(
     const void *ball_info, const float *ball_position);
+static uint32_t match_broadcast_anticipation_enabled;
+// Native target calculation and Update run on the same match thread. Never
+// reuse a sample from a previous Update, replay or set-piece camera path.
+static __thread struct {
+  void *camera;
+  float ball[3];
+  uint32_t ready;
+  uint32_t sampled;
+} match_broadcast_frame;
 static uint32_t (*match_goal_demo_get_goal_side)(const void *registry);
 static uint32_t (*match_goal_demo_is_cpu_goal)(void *goal_demo,
                                                const void *registry);
@@ -941,6 +1029,12 @@ static _Alignas(4) uint32_t exhibition_cpu_level_popup_open;
 static _Alignas(4) uint32_t exhibition_settings_popup_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_value = 2;
 static _Alignas(4) uint32_t exhibition_settings_time_zone;
+static _Alignas(4) uint32_t stadium_roof_shadow_enabled = 0;
+#ifdef PERF_TRACE
+static _Alignas(4) uint32_t stadium_perf_match_id;
+static _Alignas(4) uint32_t stadium_perf_camera_type;
+static _Alignas(8) uint64_t stadium_perf_camera_tick;
+#endif
 static _Alignas(4) uint32_t exhibition_settings_match_time = 10;
 static _Alignas(4) uint32_t exhibition_settings_extra_time;
 static _Alignas(4) uint32_t exhibition_settings_penalties;
@@ -1127,7 +1221,6 @@ static uint32_t pause_settings_chant = 1, pause_settings_commentary = 1;
 static _Alignas(4) uint32_t pause_camera_saved_valid;
 static unsigned char pause_camera_saved_settings[15];
 static _Alignas(4) uint32_t pause_camera_dynamic_wide_custom;
-static _Alignas(4) uint32_t pause_camera_dynamic_wide_initialized;
 static uint32_t pause_camera_saved_dynamic_wide_custom;
 static void (*pause_settings_volume)(uint32_t kind, float volume);
 static uint32_t (*pause_radar_update_original)(void *radar);
@@ -1205,7 +1298,8 @@ uint32_t pes_controller_pause_settings_focus(void) { return pause_settings_focus
 uint32_t pes_controller_pause_settings_count(void) {
   return __atomic_load_n(&pause_settings_page, __ATOMIC_ACQUIRE) ==
                  PAUSE_SETTINGS_PAGE_CAMERA
-             ? 4u
+             ? (__atomic_load_n(&pause_camera_dynamic_wide_custom,
+                                 __ATOMIC_ACQUIRE) ? 1u : 4u)
              : 7u;
 }
 const char *pes_controller_pause_settings_title(void) {
@@ -2275,19 +2369,21 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
   }
   if (page == MAIN_MENU_2P_PREMATCH_PAGE_STADIUM) {
     uint32_t row = __atomic_load_n(&main_menu_2p_prematch_hub_page_focus,
-                                   __ATOMIC_ACQUIRE) & 1u;
+                                   __ATOMIC_ACQUIRE);
+    const uint32_t rows = pes_controller_stadium_is_day() ? 3u : 2u;
+    if (row >= rows) row = rows - 1u;
     uint32_t stadium = __atomic_load_n(
         &main_menu_2p_prematch_stadium_index, __ATOMIC_ACQUIRE);
     if (pressed & (1u << 10)) {
-      row = 0;
+      row = row ? row - 1u : rows - 1u;
     } else if (pressed & (1u << 11)) {
-      row = 1;
+      row = (row + 1u) % rows;
     } else if (pressed & ((1u << 12) | (1u << 13) | (1u << 1))) {
       const int direction = (pressed & (1u << 12)) ? -1 : 1;
       if (row == 0) {
         stadium = direction < 0 ? (stadium ? stadium - 1 : 2)
                                 : (stadium + 1) % 3;
-      } else {
+      } else if (row == 1u) {
         const uint32_t value = !__atomic_load_n(
             &exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
         void *match = exhibition_get_tmpdb_match();
@@ -2295,6 +2391,9 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
           exhibition_match_set_time_zone(match, value);
         __atomic_store_n(&exhibition_settings_time_zone, value,
                          __ATOMIC_RELEASE);
+      } else {
+        const uint32_t enabled = !pes_controller_roof_shadow_enabled();
+        __atomic_store_n(&stadium_roof_shadow_enabled, enabled, __ATOMIC_RELEASE);
       }
     } else if (pressed & (1u << 0)) {
       __atomic_store_n(&main_menu_2p_prematch_hub_page,
@@ -2592,6 +2691,14 @@ static void exhibition_publish_prepared_matchplan(void) {
 }
 
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
+#ifdef PERF_TRACE
+  __atomic_fetch_add(&stadium_perf_match_id, 1u, __ATOMIC_RELAXED);
+  __atomic_store_n(&stadium_perf_camera_tick, 0, __ATOMIC_RELEASE);
+#endif
+#ifdef DEBUG_LOG
+  debugPrintf("roof-camera-diag-v3: match-setup day=%u roof=%u\n",
+              pes_controller_stadium_is_day(), pes_controller_roof_shadow_enabled());
+#endif
   match_result_extra_time_started = 0;
   match_broadcast_ball_tracking_ready(NULL, NULL);
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
@@ -2611,8 +2718,6 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   __atomic_store_n(&match_native_free_kick_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_camera_saved_valid, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&pause_camera_dynamic_wide_custom, 0,
-                   __ATOMIC_RELEASE);
-  __atomic_store_n(&pause_camera_dynamic_wide_initialized, 0,
                    __ATOMIC_RELEASE);
   pause_camera_saved_dynamic_wide_custom = 0;
   pause_radar_initialized_object = NULL;
@@ -3849,7 +3954,7 @@ uint32_t pes_controller_2p_prematch_hub_page(void) {
 
 uint32_t pes_controller_2p_prematch_hub_page_focus(void) {
   return __atomic_load_n(&main_menu_2p_prematch_hub_page_focus,
-                         __ATOMIC_ACQUIRE) & 1u;
+                         __ATOMIC_ACQUIRE);
 }
 
 const char *pes_controller_2p_prematch_hub_team_name(uint32_t side) {
@@ -3924,6 +4029,32 @@ uint32_t pes_controller_2p_prematch_hub_stadium_index(void) {
   return __atomic_load_n(&main_menu_2p_prematch_stadium_index,
                          __ATOMIC_ACQUIRE) % 3u;
 }
+
+uint32_t pes_controller_stadium_is_day(void) {
+  return !__atomic_load_n(&exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
+}
+
+uint32_t pes_controller_roof_shadow_enabled(void) {
+  // One session preference feeds BOTH the native caster and material routes.
+  return __atomic_load_n(&stadium_roof_shadow_enabled, __ATOMIC_ACQUIRE);
+}
+
+#ifdef PERF_TRACE
+// Render-thread snapshot: no native UObject calls or renderer readback.
+uint64_t pes_controller_stadium_perf_key(void) {
+  const uint64_t seen = __atomic_load_n(&stadium_perf_camera_tick, __ATOMIC_ACQUIRE);
+  const uint32_t live = seen && armTicksToNs(armGetSystemTick() - seen) < 250000000ULL;
+  const uint32_t paused = pes_controller_pause_skin_active();
+  const uint32_t state = pes_controller_stadium_is_day() |
+      (pes_controller_roof_shadow_enabled() << 1) |
+      ((__atomic_load_n(&stadium_perf_camera_type, __ATOMIC_ACQUIRE) & 31u) << 2) |
+      (__atomic_load_n(&pause_camera_dynamic_wide_custom, __ATOMIC_ACQUIRE) << 7) |
+      (__atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE) << 8) |
+      (__atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE) << 12) |
+      (paused << 13) | (live << 14);
+  return ((uint64_t)__atomic_load_n(&stadium_perf_match_id, __ATOMIC_ACQUIRE) << 32) | state;
+}
+#endif
 
 static void exhibition_select_team(uint32_t side, uint32_t team_id) {
   if (side >= 2 || !exhibition_is_valid_team(team_id))
@@ -13017,29 +13148,27 @@ void pes_controller_set_piece_selector_input(uint32_t action) {
   __atomic_store_n(&match_kicker_selector_focus, focus, __ATOMIC_RELEASE);
 }
 
-static uint32_t match_broadcast_stabilize_target(float *target_position,
+static uint32_t match_broadcast_limit_anticipation(float *target_position,
                                                  const float *ball_position) {
   if (!target_position || !ball_position ||
-      !isfinite(target_position[0]) || !isfinite(target_position[1]) ||
-      !isfinite(ball_position[0]) || !isfinite(ball_position[1]))
+      !isfinite(target_position[0]) || !isfinite(ball_position[0]))
     return 0u;
 
   const float offset_x = ball_position[0] - target_position[0];
-  const float offset_y = ball_position[1] - target_position[1];
-  const float distance = hypotf(offset_x, offset_y);
-  const float deadzone = 14.0f;
+  // Bound only the longitudinal group/attack bias BEFORE native tracing.
+  // Z is native near/far-touchline composition, not an error to zero out.
+  // In particular, never move the camera eye farther into the stands.
+  const float distance = fabsf(offset_x);
+  const float deadzone = 6.0f;
   if (!isfinite(distance) || distance <= deadzone)
     return 0u;
 
-  // Bound native anticipation/lag rather than retaining a fixed fraction of
-  // arbitrarily large errors. The residual smoothly saturates at 18 units;
-  // its derivative is one at the deadzone, avoiding an abrupt velocity step.
-  // No velocity extrapolation: both forward and backward passes use live XY.
+  // Leave normal composition within six units untouched. Gradually limit
+  // excessive group-based bias to ten, instead of locking to the live ball.
+  // The native spring, zoom, field bounds and camera-angle logic run after it.
   const float residual = deadzone + 4.0f *
       (1.0f - expf(-(distance - deadzone) / 4.0f));
-  const float gain = 1.0f - residual / distance;
-  target_position[0] += offset_x * gain;
-  target_position[1] += offset_y * gain;
+  target_position[0] = ball_position[0] - copysignf(residual, offset_x);
   return 1u;
 }
 
@@ -13052,12 +13181,16 @@ static uint32_t match_broadcast_ball_tracking_ready(
     const void *ball_info, const float *ball_position) {
   static uintptr_t owner;
   static float anchor_x;
-  static float anchor_y;
+  static float anchor_z;
   static uint32_t anchor_valid;
   static uint32_t ready;
 
   if (!ball_info || !ball_position || !isfinite(ball_position[0]) ||
-      !isfinite(ball_position[1])) {
+      !isfinite(ball_position[2])) {
+#ifdef DEBUG_LOG
+    if (owner || ready)
+      debugPrintf("camera-diag: tracking-reset owner=%p ready=%u\n", (void *)owner, ready);
+#endif
     owner = 0;
     anchor_valid = 0u;
     ready = 0u;
@@ -13066,7 +13199,7 @@ static uint32_t match_broadcast_ball_tracking_ready(
   if (owner != (uintptr_t)ball_info || !anchor_valid) {
     owner = (uintptr_t)ball_info;
     anchor_x = ball_position[0];
-    anchor_y = ball_position[1];
+    anchor_z = ball_position[2];
     anchor_valid = 1u;
     ready = 0u;
     return 0u;
@@ -13075,7 +13208,7 @@ static uint32_t match_broadcast_ball_tracking_ready(
     return 1u;
 
   const float moved = hypotf(ball_position[0] - anchor_x,
-                             ball_position[1] - anchor_y);
+                             ball_position[2] - anchor_z);
   if (isfinite(moved) && moved > 0.5f) {
     ready = 1u;
     return 0u; // Warm up one native frame before applying the first bias.
@@ -13083,10 +13216,51 @@ static uint32_t match_broadcast_ball_tracking_ready(
   return 0u;
 }
 
-// This native calculator has a single caller, ShotBroadcastBallActive, so the
-// correction is limited to the Stadium/Live-Broadcast family. It is not the
-// former global camera/velocity override: stock composition runs first, then
-// its planar group target is continuously biased toward live BallInfo.
+#ifdef DEBUG_LOG
+static void stadium_diag_camera_target(void *camera, void *ball_info,
+    const float *ball, const float *before, const float *after,
+    const float *zoom, uint32_t ready, uint32_t corrected, uint32_t result,
+    uint32_t active) {
+  static StadiumDiagnosticGate gate;
+  const uint64_t now = armTicksToNs(armGetSystemTick());
+  if (!stadium_diagnostic_due(&gate, now, (uintptr_t)camera,
+                              ready, 500000000ULL)) return;
+  uint32_t id = 0;
+  memcpy(&id, (const unsigned char *)camera + 8, sizeof(id));
+  const float missing[3] = {NAN, NAN, NAN};
+  if (!ball) ball = missing;
+  debugPrintf("camera-diag: target ms=%llu camera=%p id=%u ball-info=%p "
+              "ready=%u corrected=%u result=%u active=%u "
+              "ball=%g,%g,%g native=%g,%g,%g applied=%g,%g,%g zoom=%g "
+              "error-xz=%g/%g\n",
+              (unsigned long long)(now / 1000000u), camera, id, ball_info,
+              ready, corrected, result, active,
+              ball[0], ball[1], ball[2], before[0], before[1], before[2],
+              after[0], after[1], after[2], zoom ? *zoom : NAN,
+              hypotf(before[0]-ball[0], before[2]-ball[2]),
+              hypotf(after[0]-ball[0], after[2]-ball[2]));
+}
+
+static void stadium_diag_camera_final(void *camera, const void *parameter) {
+  if (!camera || !parameter) return;
+  static StadiumDiagnosticGate gate;
+  const uint64_t now = armTicksToNs(armGetSystemTick());
+  uint32_t id = 0;
+  memcpy(&id, (const unsigned char *)camera + 8, sizeof(id));
+  if (!stadium_diagnostic_due(&gate, now, (uintptr_t)camera,
+                              id, 500000000ULL)) return;
+  float p[6];
+  memcpy(p, parameter, sizeof(p));
+  debugPrintf("camera-diag: final ms=%llu camera=%p id=%u "
+              "look=%g,%g,%g eye=%g,%g,%g day=%u roof=%u\n",
+              (unsigned long long)(now / 1000000u), camera, id,
+              p[0], p[1], p[2], p[3], p[4], p[5],
+              pes_controller_stadium_is_day(), pes_controller_roof_shadow_enabled());
+}
+#endif
+
+// Keep native composition and interpolation. Reduce excessive attack-group
+// anticipation at its input; never translate the final camera pose.
 uint32_t pes_inplay_ball_position_broadcast(
     void *camera, const float *blend, const uint32_t *home_away,
     float *target_position, float *zoom, uint32_t active) {
@@ -13106,10 +13280,31 @@ uint32_t pes_inplay_ball_position_broadcast(
          sizeof(ball_info));
   const float *ball_position =
       ball_info ? match_ball_info_get_trans(ball_info) : NULL;
-  if (match_broadcast_ball_tracking_ready(ball_info, ball_position))
-    match_broadcast_stabilize_target(target_position, ball_position);
+#ifdef DEBUG_LOG
+  float native_target[3];
+  memcpy(native_target, target_position, sizeof(native_target));
+#endif
+  const uint32_t ready = match_broadcast_ball_tracking_ready(ball_info, ball_position);
+  uint32_t corrected = 0u;
+  if (match_broadcast_frame.camera == camera && ball_position) {
+    memcpy(match_broadcast_frame.ball, ball_position, sizeof(match_broadcast_frame.ball));
+    match_broadcast_frame.ready = ready;
+    match_broadcast_frame.sampled = 1u;
+    if (ready && __atomic_load_n(&match_broadcast_anticipation_enabled, __ATOMIC_ACQUIRE))
+      corrected = match_broadcast_limit_anticipation(target_position, ball_position);
+  }
+#ifdef DEBUG_LOG
+  stadium_diag_camera_target(camera, ball_info, ball_position, native_target,
+                             target_position, zoom, ready, corrected, result, active);
+#endif
+  (void)corrected;
   return result;
 }
+
+// Do not hook GetFutureMoveVec: the native tracer ALSO uses it as a camera
+// speed limit by BallTouchKind and field region. Zeroing it caused V5's hard
+// stops in midfield and inconsistent motion near goal. Only target POSITION
+// is bounded above; native velocity, acceleration and trace state stay intact.
 
 int pes_controller_custom_pause_active(void) {
   return !pes_controller_pause_transition() && __atomic_load_n(&match_pause_custom_active,
@@ -13180,9 +13375,9 @@ typedef struct {
   uint8_t dynamic_wide_custom;
 } PauseCameraPreset;
 
-// DYNAMIC WIDE CUSTOM deliberately keeps native type 5. Only its framing
-// values are overridden, so ball tracking, interpolation and 2D projection all
-// remain in the stable Dynamic-Wide pipeline instead of Broadcast/Stadium.
+// FOOTBALLNX CAM keeps native type 5 with fixed original Stadium framing.
+// The legacy internal custom flag distinguishes it from ordinary Dynamic Wide;
+// users do not edit a second set of camera values.
 static const PauseCameraPreset pause_camera_presets[] = {
     {0u, 0u}, {1u, 0u}, {2u, 0u}, {5u, 0u},
     {5u, 1u}, {7u, 0u}, {12u, 0u}, {13u, 0u},
@@ -13272,7 +13467,7 @@ static unsigned char *pause_settings_camera_field(uint32_t focus,
   if (type == 5u &&
       __atomic_load_n(&pause_camera_dynamic_wide_custom,
                       __ATOMIC_ACQUIRE))
-    base = 9u;
+    return NULL; // FOOTBALLNX CAM is a fixed preset, not custom sliders.
   else if (type == 4u || (type >= 7u && type <= 11u))
     base = 3u;
   else if (type == 6u)
@@ -13293,6 +13488,26 @@ static void pause_set_tmpdb_camera_settings(void *registry_camera,
   if (pause_set_tmpdb_camera_original)
     pause_set_tmpdb_camera_original(registry_camera, tmpdb_camera,
                                     resident_work);
+  if (registry_camera && tmpdb_camera) {
+    const uint8_t type = *(const uint8_t *)tmpdb_camera;
+#ifdef PERF_TRACE
+    __atomic_store_n(&stadium_perf_camera_type, type, __ATOMIC_RELEASE);
+#endif
+    __atomic_store_n(&match_broadcast_anticipation_enabled, type == 7u || type == 12u,
+                     __ATOMIC_RELEASE);
+    if (type == 7u || type == 12u) {
+      unsigned char *fixed = (unsigned char *)registry_camera;
+      static const uint8_t copies[] = {0u, 6u, 11u};
+      for (unsigned i = 0; i < 3u; ++i)
+        fixed[copies[i] + 3u] = 6u;
+#ifdef DEBUG_LOG
+      debugPrintf("camera-diag: registry tmpdb=%u types=%u,%u,%u "
+                  "heights=%u,%u,%u distances=%u,%u,%u\n",
+                  type, fixed[0], fixed[6], fixed[11], fixed[3], fixed[9], fixed[14],
+                  fixed[2], fixed[8], fixed[13]);
+#endif
+    }
+  }
   if (!registry_camera || !tmpdb_camera ||
       !__atomic_load_n(&pause_camera_dynamic_wide_custom,
                        __ATOMIC_ACQUIRE))
@@ -13301,9 +13516,11 @@ static void pause_set_tmpdb_camera_settings(void *registry_camera,
   const unsigned char *tmpdb = (const unsigned char *)tmpdb_camera;
   if (tmpdb[0] != 5u)
     return;
-  const uint8_t distance = tmpdb[9] <= 10u ? tmpdb[9] : 2u;
-  const uint8_t height = tmpdb[10] <= 10u ? tmpdb[10] : 3u;
-  const uint8_t panning = tmpdb[11] <= 10u ? tmpdb[11] : 6u;
+  // Original Stadium's native fixed triplet, BEFORE our fixed-height-6
+  // adjustment. Do not borrow/mutate Stadium Custom's stored slider bytes.
+  const uint8_t distance = 2u;
+  const uint8_t height = 3u;
+  const uint8_t panning = 6u;
   unsigned char *camera = (unsigned char *)registry_camera;
 
   // CameraSettings stores active, Normal and BL copies. MatchListener chooses
@@ -13360,8 +13577,21 @@ static uint32_t pause_dynamic_wide_apply_angle(float *parameter,
 }
 
 static void pes_inplay_camera_update(void *camera, void *parameter) {
+#ifdef PERF_TRACE
+  if (camera && parameter)
+    __atomic_store_n(&stadium_perf_camera_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+#endif
+  memset(&match_broadcast_frame, 0, sizeof(match_broadcast_frame));
+  match_broadcast_frame.camera = camera;
   if (match_inplay_camera_update_original)
     match_inplay_camera_update_original(camera, parameter);
+  // Native output stays untouched for Stadium/Broadcast. Clear the whole
+  // prediction scope before any unrelated caller can see this frame's ball.
+  memset(&match_broadcast_frame, 0, sizeof(match_broadcast_frame));
+#ifdef DEBUG_LOG
+  // Snapshot final output before the unrelated FOOTBALLNX fixed rotation.
+  stadium_diag_camera_final(camera, parameter);
+#endif
   if (!camera || !parameter ||
       !__atomic_load_n(&pause_camera_dynamic_wide_custom,
                        __ATOMIC_ACQUIRE))
@@ -13373,8 +13603,7 @@ static void pes_inplay_camera_update(void *camera, void *parameter) {
   memcpy(&camera_id, (const unsigned char *)camera + 8, sizeof(camera_id));
   if (camera_id != 5u)
     return;
-  float panning = 0.0f;
-  memcpy(&panning, (const unsigned char *)camera + 0x14, sizeof(panning));
+  const float panning = 0.6f; // Fixed original Stadium angle, never ball-driven.
   pause_dynamic_wide_apply_angle((float *)parameter, panning);
 }
 
@@ -13614,7 +13843,8 @@ static uint32_t pes_match_pause_camera_update(void *window,
       &match_pause_camera_action, 0, __ATOMIC_ACQ_REL);
   const uint32_t page = __atomic_load_n(&pause_settings_page,
                                          __ATOMIC_ACQUIRE);
-  const uint32_t item_count = page == PAUSE_SETTINGS_PAGE_CAMERA ? 4u : 7u;
+  const uint32_t item_count = pes_controller_pause_settings_count();
+  if (pause_settings_focus >= item_count) pause_settings_focus = 0u;
   if (action == PES_PAUSE_INPUT_UP || action == PES_PAUSE_INPUT_DOWN) {
     pause_settings_focus =
         (pause_settings_focus +
@@ -13666,16 +13896,6 @@ static uint32_t pes_match_pause_camera_update(void *window,
       settings[0] = preset.native_type;
       __atomic_store_n(&pause_camera_dynamic_wide_custom,
                        preset.dynamic_wide_custom, __ATOMIC_RELEASE);
-      if (preset.dynamic_wide_custom &&
-          !__atomic_exchange_n(&pause_camera_dynamic_wide_initialized, 1,
-                               __ATOMIC_ACQ_REL)) {
-        // Stadium's native fixed composition is Distance 2, Height 3,
-        // Panning 6. Seed the new preset from exactly those values; the spare
-        // custom triplet is otherwise ignored by native Dynamic Wide.
-        settings[9] = 2u;
-        settings[10] = 3u;
-        settings[11] = 6u;
-      }
       pause_settings_capture_camera();
       pause_settings_apply_camera(window);
       debugPrintf("input: pause camera preset %u -> %u type=%u customWide=%u\n",
@@ -13710,7 +13930,7 @@ const char *pes_controller_pause_settings_value(uint32_t index) {
       case 5:
         return __atomic_load_n(&pause_camera_dynamic_wide_custom,
                                __ATOMIC_ACQUIRE)
-                   ? "DYNAMIC WIDE CUSTOM"
+                   ? "FOOTBALLNX CAM"
                    : "DYNAMIC WIDE";
       case 7: return "LIVE BROADCAST";
       case 12: return "STADIUM";
@@ -15175,6 +15395,50 @@ static void native_pad_lab_enable_exhibition(void) {
 void install_ue4_hooks(so_module *module) {
   install_friend_press_prototype(module);
   install_native_pad_lab(module);
+
+  // Keep roof rendering visible, but exclude only audited roof proxies from
+  // directional shadow gathering when the hub's Day/Roof option says OFF.
+  // Use virtual creation/destruction for lifetime-safe identity registration.
+  const char *mesh_create_symbol = "_ZN20UStaticMeshComponent16CreateSceneProxyEv";
+  const uintptr_t mesh_create_runtime = so_find_addr_rx(module, mesh_create_symbol);
+  const uintptr_t mesh_create_backing = so_find_addr(module, mesh_create_symbol);
+  static const uint32_t mesh_create_words[4] = {
+    0xa9be4ff4, 0xa9017bfd, 0x910043fd, 0xf942d809,
+  };
+  if (memcmp((void *)mesh_create_backing, mesh_create_words, sizeof(mesh_create_words)))
+    fatal_error("Unexpected StaticMesh CreateSceneProxy / mesh offset");
+  const uintptr_t mesh_destroy_runtime = so_find_addr_rx(module, "_ZN21FStaticMeshSceneProxyD1Ev");
+  const uintptr_t mesh_delete_runtime = so_find_addr_rx(module, "_ZN21FStaticMeshSceneProxyD0Ev");
+  uintptr_t *mesh_create_slot = find_vtable_method_slot(
+      module, "_ZTV20UStaticMeshComponent", mesh_create_runtime, 312);
+  uintptr_t *mesh_destroy_slot = find_vtable_method_slot(
+      module, "_ZTV21FStaticMeshSceneProxy", mesh_destroy_runtime, 52);
+  uintptr_t *mesh_delete_slot = find_vtable_method_slot(
+      module, "_ZTV21FStaticMeshSceneProxy", mesh_delete_runtime, 52);
+  if (!mesh_create_slot || !mesh_destroy_slot || !mesh_delete_slot)
+    fatal_error("Stadium roof proxy lifecycle vtable slot not found");
+  stadium_mesh_path = (void *)so_find_addr_rx(module,
+      "_ZNK18UObjectBaseUtility11GetPathNameEPK7UObjectR7FString");
+  stadium_string_free = (void *)so_find_addr_rx(module, "_ZN7FMemory4FreeEPv");
+  stadium_roof_proxy_vtable = so_find_addr_rx(module, "_ZTV21FStaticMeshSceneProxy") + 16;
+  stadium_mesh_create_original = (void *)mesh_create_runtime;
+  stadium_mesh_destroy_original = (void *)mesh_destroy_runtime;
+  stadium_mesh_delete_original = (void *)mesh_delete_runtime;
+  *mesh_create_slot = (uintptr_t)&pes_stadium_mesh_create;
+  *mesh_destroy_slot = (uintptr_t)&pes_stadium_mesh_destroy;
+  *mesh_delete_slot = (uintptr_t)&pes_stadium_mesh_delete;
+
+  const char *shadow_filter_symbol =
+      "_ZN29FGatherShadowPrimitivesPacket25FilterPrimitiveForShadowsERK16FBoxSphereBounds22FPrimitiveFlagsCompactP19FPrimitiveSceneInfoP20FPrimitiveSceneProxy";
+  const uintptr_t shadow_filter = so_find_addr(module, shadow_filter_symbol);
+  static const uint32_t shadow_filter_words[4] = {
+    0xd101c3ff, 0xa9016ffc, 0xa90267fa, 0xa9035ff8,
+  };
+  if (memcmp((void *)shadow_filter, shadow_filter_words, sizeof(shadow_filter_words)))
+    fatal_error("Unexpected stadium shadow filter entry");
+  stadium_shadow_filter_resume = so_find_addr_rx(module, shadow_filter_symbol) + 16;
+  hook_arm64(shadow_filter, (uintptr_t)&pes_stadium_shadow_filter);
+  debugPrintf("roof-caster-v4: installed directional caster filter; roof meshes only\n");
   // The offline bundle already seeds the profile, club, coach, and squad.
   // Retain ModeEntry's command handshake (states 0..2), then send its completed
   // state 5 directly to the normal "proceed" exit. This removes the obsolete
@@ -16533,11 +16797,8 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(module,
           "_ZNK5match8registry8BallInfo8GetTransEv");
 
-  // GetBallPositionBroadcast has exactly one native caller
-  // (ShotBroadcastBallActive). Keep its full stock calculation, then apply a
-  // smooth deadzone correction only after the ball escapes its safe area.
-  // This avoids both the former global camera override and per-frame raw-ball
-  // corrections while the stock target is already close enough.
+  // Reduce excessive horizontal group anticipation before the native spring;
+  // leave near/far framing, zoom and the final camera transform untouched.
   const char *ball_position_broadcast_symbol =
       "_ZN5match6camera6plugin12InplayCamera24GetBallPositionBroadcastERKfRK8HomeAwayPN4math7Vector3ERfb";
   const uintptr_t ball_position_broadcast =
@@ -16558,6 +16819,8 @@ void install_ue4_hooks(so_module *module) {
       pes_inplay_ball_position_broadcast_original;
   hook_arm64(ball_position_broadcast,
              (uintptr_t)&pes_inplay_ball_position_broadcast);
+
+  // Leave GetFutureMoveVec and shared gcViewTraceBroadcast completely native.
 
   // Dynamic Wide uses ShotHorizontal, which never consumes the native
   // Panning/Angle field. Wrap only InplayCamera's virtual Update and gate the

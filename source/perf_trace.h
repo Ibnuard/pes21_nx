@@ -20,6 +20,7 @@ uint64_t perf_trace_now_ns(void);
 void perf_trace_record(enum PerfTraceKind kind, const void *caller,
                        uint64_t requested_ns, uint64_t elapsed_ns, int result);
 void perf_trace_report(void);
+void perf_trace_log_line(const char *line);
 #else
 static inline uint64_t perf_trace_now_ns(void) { return 0; }
 static inline void perf_trace_record(enum PerfTraceKind kind,

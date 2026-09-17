@@ -4364,8 +4364,12 @@ static void overlay_render(void) {
     // Kits and Stadium use the same native-console settings language: one
     // modal card, a dark title band, white focused row, blue value capsule,
     // and arrows that remain completely inside the selected surface.
-    const uint32_t focus =
-        pes_controller_2p_prematch_hub_page_focus() & 1u;
+    const uint32_t row_count = !custom_hub_kits_page &&
+        pes_controller_stadium_is_day() ? 3u : 2u;
+    const uint32_t raw_focus = pes_controller_2p_prematch_hub_page_focus();
+    const uint32_t focus = raw_focus < row_count ? raw_focus : row_count - 1u;
+    static const char *const stadium_labels[] = {
+        "STADIUM", "MATCH TIME", "ENABLE ROOF SHADOW"};
     const float panel_x = 0.17f * (float)screen_width;
     const float panel_y = 0.075f * (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
@@ -4442,11 +4446,13 @@ static void overlay_render(void) {
       }
     }
 
-    custom_rule_quads += emit_rect(
-        row_x, row_y0 + row_step - (row_step - row_h) * 0.5f,
-        row_w, (float)screen_height / 720.0f, verts + quads * 24);
-    quads++;
-    for (uint32_t row = 0; row < 2; row++) {
+    for (uint32_t row = 1; row < row_count; row++) {
+      custom_rule_quads += emit_rect(
+          row_x, row_y0 + row_step * row - (row_step - row_h) * 0.5f,
+          row_w, (float)screen_height / 720.0f, verts + quads * 24);
+      quads++;
+    }
+    for (uint32_t row = 0; row < row_count; row++) {
       const float value_y = row_y0 + row_step * (float)row +
                             (row_h - value_h) * 0.5f;
       custom_value_plate_style =
@@ -4457,7 +4463,7 @@ static void overlay_render(void) {
     }
     const float arrow_w = 0.007f * (float)screen_width;
     const float arrow_h = 0.012f * (float)screen_height;
-    for (uint32_t row = 0; row < 2; row++) {
+    for (uint32_t row = 0; row < row_count; row++) {
       const float center_y = row_y0 + row_step * (float)row + row_h * 0.5f;
       const float left_x = value_x - 0.014f * (float)screen_width;
       custom_arrow_quads += emit_triangle(
@@ -4487,7 +4493,7 @@ static void overlay_render(void) {
     custom_focus_text_first_quad = quads;
     const char *focused_label = custom_hub_kits_page
                                     ? (focus ? "AWAY KIT" : "HOME KIT")
-                                    : (focus ? "MATCH TIME" : "STADIUM");
+                                    : stadium_labels[focus];
     line_quads = emit_efootball_line(
         focused_label, (int)strlen(focused_label),
         row_x + 0.020f * (float)screen_width,
@@ -4516,10 +4522,11 @@ static void overlay_render(void) {
         quads += line_quads;
       }
     }
+    for (uint32_t other_row = 0; other_row < row_count; other_row++) {
+    if (other_row == focus) continue;
     const char *other_label = custom_hub_kits_page
-                                  ? (focus ? "HOME KIT" : "AWAY KIT")
-                                  : (focus ? "STADIUM" : "MATCH TIME");
-    const uint32_t other_row = focus ^ 1u;
+                                  ? (other_row ? "AWAY KIT" : "HOME KIT")
+                                  : stadium_labels[other_row];
     line_quads = emit_efootball_line(
         other_label, (int)strlen(other_label),
         row_x + 0.020f * (float)screen_width,
@@ -4528,6 +4535,7 @@ static void overlay_render(void) {
         label_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
     custom_white_text_quads += line_quads;
     quads += line_quads;
+    }
     const char *title = custom_hub_kits_page ? "KITS" : "STADIUM";
     const float title_w = measure_efootball_line(
         title, (int)strlen(title), title_gh, EFOOTBALL_FONT_BOLD);
@@ -4537,7 +4545,7 @@ static void overlay_render(void) {
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     custom_white_text_quads += line_quads;
     quads += line_quads;
-    for (uint32_t row = 0; row < 2; row++) {
+    for (uint32_t row = 0; row < row_count; row++) {
       char kit_value[24];
       const char *value = NULL;
       if (custom_hub_kits_page) {
@@ -4557,8 +4565,10 @@ static void overlay_render(void) {
             "AUTO", "HOME", "AWAY"};
         value = stadium_options[
             pes_controller_2p_prematch_hub_stadium_index()];
+      } else if (row == 1u) {
+        value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
       } else {
-        value = pes_controller_custom_match_settings_value(0);
+        value = pes_controller_roof_shadow_enabled() ? "ON" : "OFF";
       }
       const float width = measure_efootball_line(
           value, (int)strlen(value), value_gh, EFOOTBALL_FONT_BOLD);

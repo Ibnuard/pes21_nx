@@ -28,6 +28,7 @@ Subsystem notes and historical implementation audits live here.
 - [Full loose CPK runtime](LOOSE_CPK_FULL.md)
 - [Known issues](KNOWN_ISSUES.md)
 - [HUD render audit](HUD_RENDER_AUDIT.md)
+- [Stadium roof toggle, camera and performance](STADIUM_ROOF_CAMERA.md)
 - [Native mapping baseline](NATIVE_MAPPING_BASELINE_V1.md)
 - [Native pad lab result](NATIVE_PAD_LAB_RESULT.md)
 - [Visual stability test](STABILITY_VISUAL_TEST.md)

@@ -142,7 +142,19 @@ static void perf_trace_insert_top(PerfTraceSnapshot *top, unsigned int *count,
   top[at] = *candidate;
 }
 
-static void perf_trace_output(const char *line) {
+static FILE *trace_file;
+static Mutex trace_file_mutex;
+void perf_trace_log_line(const char *line) {
+  // PERF_TRACE-only, including release-style profiling with DEBUG_LOG OFF.
+  // Buffered writes; one flush per five-second report, never per draw/frame.
+  mutexLock(&trace_file_mutex);
+  if (!trace_file) {
+    trace_file = fopen("perf.log", "w");
+    if (trace_file)
+      fputs("PES21 NX stadium-perf v6; wall/draw/swap are CPU-side timings, not GPU timers\n",trace_file);
+  }
+  if (trace_file) fputs(line,trace_file);
+  mutexUnlock(&trace_file_mutex);
   svcOutputDebugString(line, strlen(line));
 }
 
@@ -186,7 +198,7 @@ void perf_trace_report(void) {
            top_count,
            (unsigned long long)__atomic_exchange_n(&trace_dropped, 0,
                                                    __ATOMIC_RELAXED));
-  perf_trace_output(line);
+  perf_trace_log_line(line);
   for (unsigned int i = 0; i < top_count; i++) {
     char address[48];
     perf_trace_address(address, sizeof(address), top[i].caller);
@@ -201,8 +213,11 @@ void perf_trace_report(void) {
                                   (top[i].count ? top[i].count : 1) / 1000ULL),
              (unsigned long long)(top[i].max_ns / 1000ULL),
              (unsigned long long)top[i].errors);
-    perf_trace_output(line);
+    perf_trace_log_line(line);
   }
+  mutexLock(&trace_file_mutex);
+  if (trace_file) fflush(trace_file);
+  mutexUnlock(&trace_file_mutex);
 }
 
 #endif

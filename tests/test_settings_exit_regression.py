@@ -16,7 +16,7 @@ class SettingsExitTests(unittest.TestCase):
         self.assertIn("switch (type)", body)
         for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (7, "LIVE BROADCAST"), (12, "STADIUM"), (13, "STADIUM CUSTOM")):
             self.assertIn(f'case {enum}: return "{label}";', body)
-        self.assertIn('? "DYNAMIC WIDE CUSTOM"', body)
+        self.assertIn('? "FOOTBALLNX CAM"', body)
         self.assertIn(': "DYNAMIC WIDE"', body)
         self.assertNotIn("PRESET", body)
 
@@ -53,6 +53,7 @@ int main(void) {
         camera_field = function(SOURCE, 'pause_settings_camera_field')
         self.assertIn('type == 5u &&', camera_field)
         self.assertIn('pause_camera_dynamic_wide_custom', camera_field)
+        self.assertIn('return NULL; // FOOTBALLNX CAM', camera_field)
         self.assertIn('type >= 7u && type <= 11u', camera_field)
         self.assertIn('type == 13u', camera_field)
 
@@ -142,9 +143,10 @@ int main(void) {
         self.assertIn('{5u, 0u},\n    {5u, 1u}', SOURCE)
         update = function(SOURCE, 'pes_match_pause_camera_update')
         self.assertIn('settings[0] = preset.native_type', update)
-        self.assertIn('settings[9] = 2u', update)
-        self.assertIn('settings[10] = 3u', update)
-        self.assertIn('settings[11] = 6u', update)
+        self.assertNotIn('settings[9] =', update)
+        self.assertNotIn('settings[10] =', update)
+        self.assertNotIn('settings[11] =', update)
+        self.assertIn('pes_controller_pause_settings_count()', update)
         self.assertIn('const int opening = window && window != match_pause_camera_window;', update)
         self.assertIn('pause_settings_restore_camera(window)', update)
         self.assertIn('pause_settings_capture_camera()', update)
@@ -159,7 +161,7 @@ int main(void) {
         self.assertIn('&pause_camera_saved_valid, 0', setup)
         self.assertIn('&pause_camera_dynamic_wide_custom, 0', setup)
 
-    def test_dynamic_wide_custom_keeps_native_type_and_overrides_only_framing(self):
+    def test_footballnx_keeps_native_type_and_uses_fixed_stadium_framing(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
@@ -167,6 +169,7 @@ int main(void) {
 #include <stdint.h>
 #include <string.h>
 static uint32_t pause_camera_dynamic_wide_custom;
+static uint32_t match_broadcast_anticipation_enabled;
 static void native_convert(void *registry, const void *tmpdb, void *resident) {
   (void)tmpdb; (void)resident;
   unsigned char *camera=registry;
@@ -188,7 +191,18 @@ int main(void) {
   for (unsigned i=0;i<3;i++) {
     const unsigned base=(unsigned[]){0,6,11}[i];
     assert(registry[base]==11);
-    assert(registry[base+2]==4 && registry[base+3]==7 && registry[base+4]==9);
+    assert(registry[base+2]==2 && registry[base+3]==3 && registry[base+4]==6);
+  }
+  assert(tmpdb[9]==4 && tmpdb[10]==7 && tmpdb[11]==9); // other custom preset untouched
+  for (unsigned type=0; type<=13; ++type) {
+    tmpdb[0]=type;
+    pause_camera_dynamic_wide_custom=0;
+    pause_set_tmpdb_camera_settings(registry,tmpdb,(void*)1);
+    assert(match_broadcast_anticipation_enabled == (type==7 || type==12));
+    for (unsigned i=0;i<3;i++) {
+      unsigned base=(unsigned[]){0,6,11}[i];
+      assert(registry[base+3]==((type==7 || type==12)?6:2));
+    }
   }
 }
 ''')
@@ -229,7 +243,7 @@ int main(void) {
         self.assertIn('match_inplay_camera_update_original(camera, parameter)', wrapper)
         self.assertIn('pause_camera_dynamic_wide_custom', wrapper)
         self.assertIn('camera_id != 5u', wrapper)
-        self.assertIn('(const unsigned char *)camera + 0x14', wrapper)
+        self.assertIn('const float panning = 0.6f', wrapper)
         self.assertIn('pause_dynamic_wide_apply_angle((float *)parameter, panning)', wrapper)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('InplayCamera6UpdateERN4draw15CameraParameterE', install)
@@ -242,35 +256,37 @@ int main(void) {
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
-''' + function(SOURCE, 'match_broadcast_stabilize_target') + r'''
+''' + function(SOURCE, 'match_broadcast_limit_anticipation') + r'''
 int main(void) {
   float ball[3] = {0.0f, 0.0f, 0.0f};
-  float nearby[3] = {3.0f, 4.0f, 7.0f};
-  assert(match_broadcast_stabilize_target(nearby, ball) == 0);
-  assert(nearby[0] == 3.0f && nearby[1] == 4.0f && nearby[2] == 7.0f);
+  float nearby[3] = {1.0f, 7.0f, 1.0f};
+  assert(match_broadcast_limit_anticipation(nearby, ball) == 0);
+  assert(nearby[0] == 1.0f && nearby[1] == 7.0f && nearby[2] == 1.0f);
 
-  float wider_safe_area[3] = {12.0f, 0.0f, 8.0f};
-  assert(match_broadcast_stabilize_target(wider_safe_area, ball) == 0);
-  assert(wider_safe_area[0] == 12.0f);
+  float wider_safe_area[3] = {12.0f, 8.0f, 0.0f};
+  assert(match_broadcast_limit_anticipation(wider_safe_area, ball) == 1);
+  assert(wider_safe_area[0] > 6.0f && wider_safe_area[0] <= 10.001f);
 
-  float ramped[3] = {16.0f, 0.0f, 8.0f};
-  assert(match_broadcast_stabilize_target(ramped, ball) == 1);
-  assert(ramped[0] > 14.0f && ramped[0] < 16.0f);
-  assert(ramped[1] == 0.0f && ramped[2] == 8.0f);
+  float ramped[3] = {16.0f, 8.0f, 0.0f};
+  assert(match_broadcast_limit_anticipation(ramped, ball) == 1);
+  assert(ramped[0] > 6.0f && ramped[0] <= 10.001f);
+  assert(ramped[1] == 8.0f && ramped[2] == 0.0f);
 
-  float escaped[3] = {30.0f, 40.0f, 9.0f};
-  assert(match_broadcast_stabilize_target(escaped, ball) == 1);
-  assert(hypotf(escaped[0], escaped[1]) <= 18.001f);
-  assert(fabsf(escaped[0] / escaped[1] - 0.75f) < 0.001f);
-  assert(escaped[2] == 9.0f);
+  float escaped[3] = {30.0f, 9.0f, 40.0f};
+  assert(match_broadcast_limit_anticipation(escaped, ball) == 1);
+  assert(fabsf(escaped[0]) <= 10.001f);
+  assert(escaped[1] == 9.0f && escaped[2] == 40.0f);
   for (int direction = -1; direction <= 1; direction += 2) {
-    float pass[3] = {direction * 100.0f, 0.0f, 3.0f};
-    assert(match_broadcast_stabilize_target(pass, ball) == 1);
-    assert(fabsf(pass[0]) <= 18.001f && pass[2] == 3.0f);
+    float pass[3] = {direction * 100.0f, 3.0f, 0.0f};
+    assert(match_broadcast_limit_anticipation(pass, ball) == 1);
+    assert(fabsf(pass[0]) <= 10.001f && pass[1] == 3.0f);
+    float lateral[3] = {0.0f, 6.0f, direction * 40.0f};
+    assert(match_broadcast_limit_anticipation(lateral, ball) == 0);
+    assert(lateral[2] == direction * 40.0f && lateral[1] == 6.0f);
   }
 
   float invalid[3] = {NAN, 2.0f, 0.0f};
-  assert(match_broadcast_stabilize_target(invalid, ball) == 0);
+  assert(match_broadcast_limit_anticipation(invalid, ball) == 0);
 }
 ''')
         build_and_run(compiler, r'''
@@ -294,6 +310,13 @@ int main(void) {
   assert(match_broadcast_ball_tracking_ready(&first_ball, moved) == 0);
   assert(match_broadcast_ball_tracking_ready(&first_ball, live) == 1);
   assert(match_broadcast_ball_tracking_ready(&second_ball, live) == 0);
+  assert(match_broadcast_ball_tracking_ready(0, 0) == 0);
+  float lifted[3] = {10.0f, 22.0f, 0.0f};
+  float lateral[3] = {10.0f, 20.0f, 0.8f};
+  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, lifted) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, lateral) == 0);
+  assert(match_broadcast_ball_tracking_ready(&first_ball, lateral) == 1);
 }
 ''')
         root = Path(__file__).resolve().parents[1]
@@ -302,7 +325,9 @@ int main(void) {
         self.assertIn('match_ball_position_broadcast_original(', wrapper)
         self.assertIn('(const unsigned char *)camera + 0x198', wrapper)
         self.assertIn('match_broadcast_ball_tracking_ready(ball_info, ball_position)', wrapper)
-        self.assertIn('match_broadcast_stabilize_target(target_position, ball_position)', wrapper)
+        self.assertIn('match_broadcast_limit_anticipation(target_position, ball_position)', wrapper)
+        self.assertIn('match_broadcast_frame.camera == camera', wrapper)
+        self.assertIn('match_broadcast_frame.sampled = 1u', wrapper)
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
         self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);', setup)
         self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);',

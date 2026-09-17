@@ -498,6 +498,11 @@ PesUniformPreviewPng *pes_controller_2p_take_uniform_preview_png(
     uint32_t side);
 int pes_controller_2p_native_uniform_preview_active(void);
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void);
+uint32_t pes_controller_stadium_is_day(void);
+uint32_t pes_controller_roof_shadow_enabled(void);
+#ifdef PERF_TRACE
+uint64_t pes_controller_stadium_perf_key(void);
+#endif
 void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
                                                uint32_t buttons,
                                                uint32_t previous_buttons);

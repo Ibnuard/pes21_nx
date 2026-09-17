@@ -105,6 +105,21 @@ pes_inplay_ball_position_broadcast_original:
     .size pes_inplay_ball_position_broadcast_original, .-pes_inplay_ball_position_broadcast_original
 
     .align 2
+    .global pes_stadium_shadow_filter_original
+    .type pes_stadium_shadow_filter_original, %function
+// Audited first four instructions of FilterPrimitiveForShadows. Resume before
+// the remaining callee saves; all five original argument registers survive.
+pes_stadium_shadow_filter_original:
+    sub sp, sp, #0x70
+    stp x28, x27, [sp, #0x10]
+    stp x26, x25, [sp, #0x20]
+    stp x24, x23, [sp, #0x30]
+    adrp x17, stadium_shadow_filter_resume
+    ldr x17, [x17, #:lo12:stadium_shadow_filter_resume]
+    br x17
+    .size pes_stadium_shadow_filter_original, .-pes_stadium_shadow_filter_original
+
+    .align 2
     .global pes_match_replay_check_skip_hook
     .type pes_match_replay_check_skip_hook, %function
 

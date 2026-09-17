@@ -57,7 +57,13 @@
 #include "libc_shim.h"
 #include "overlay.h"
 #include "perf_trace.h"
+#include "perf_match.h"
 #include "pitch_shadow_policy.h"
+#include "ue4_hooks.h"
+#ifdef DEBUG_LOG
+#include "stadium_diagnostic_policy.h"
+static void stadium_diag_forget(GLuint program);
+#endif
 
 extern uintptr_t __stack_chk_fail;
 extern so_module avs_mod;
@@ -354,19 +360,35 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
   }
   glBindTexture(target, tex);
 }
+static __thread struct { GLuint program; GLint location; int valid; } roof_uniforms[128];
 static void glUseProgram_c(GLuint p) {
   const int slot = mc_current_slot();
   if (slot >= 0)
     g_mc[slot].program = p;
-  if (glc_enabled && glc.have_prog && glc.prog == p) return;
+  const int already_bound = glc_enabled && glc.have_prog && glc.prog == p;
   glc.have_prog = 1; glc.prog = p;
-  glUseProgram(p);
+  if (!already_bound) glUseProgram(p);
+  if (p) {
+    const unsigned index = p % 128u;
+    if (!roof_uniforms[index].valid || roof_uniforms[index].program != p) {
+      roof_uniforms[index].program = p;
+      roof_uniforms[index].location = glGetUniformLocation(p, "nxRoofDisabled");
+      roof_uniforms[index].valid = 1;
+    }
+    if (roof_uniforms[index].location >= 0)
+      glUniform1f(roof_uniforms[index].location,
+          pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled() ? 1.0f : 0.0f);
+  }
 }
 static void glDeleteTextures_c(GLsizei n, const GLuint *t) {
   memset(glc.have_tex2d, 0, sizeof(glc.have_tex2d)); // a deleted bound tex must
   glDeleteTextures(n, t);                            // not be skipped when reused
 }
 static void glDeleteProgram_c(GLuint p) {
+#ifdef DEBUG_LOG
+  stadium_diag_forget(p);
+#endif
+  roof_uniforms[p % 128u].valid = 0;
   if (glc.have_prog && glc.prog == p) glc.have_prog = 0;
   glDeleteProgram(p);
 }
@@ -1443,8 +1465,118 @@ static void gl_diag_trace_default_draw(const char *kind, GLsizei count,
   g_mc[slot].trace_default_draws--;
 }
 
+#ifdef DEBUG_LOG
+typedef struct {
+  GLuint program;
+  EGLContext context;
+  unsigned features;
+  int seen;
+  StadiumDiagnosticGate gate;
+} StadiumProgramProbe;
+static __thread StadiumProgramProbe stadium_program_probes[128];
+
+static void stadium_diag_forget(GLuint program) {
+  memset(&stadium_program_probes[program % 128u], 0,
+         sizeof(StadiumProgramProbe));
+}
+
+static unsigned stadium_diag_program(GLuint program) {
+  GLuint shaders[8] = {0};
+  GLsizei count = 0;
+  unsigned features = 0;
+  glGetAttachedShaders(program, 8, &count, shaders);
+  // Bound source dumping per render thread, deduplicated by body fingerprint.
+  // The log is local diagnostic output, never a public source asset.
+  static __thread uint32_t dumped[24];
+  static __thread unsigned dumped_count;
+  static __thread size_t dumped_bytes;
+  for (GLsizei i = 0; i < count; ++i) {
+    GLint type = 0, length = 0;
+    glGetShaderiv(shaders[i], GL_SHADER_TYPE, &type);
+    if (type != GL_FRAGMENT_SHADER) continue;
+    glGetShaderiv(shaders[i], GL_SHADER_SOURCE_LENGTH, &length);
+    if (length <= 1 || length > 512 * 1024) continue;
+    char *source = calloc((size_t)length + 1u, 1u);
+    if (!source) continue;
+    glGetShaderSource(shaders[i], length, NULL, source);
+    unsigned flags = stadium_diagnostic_features(source);
+    features |= flags;
+    if (flags) {
+      const char *body = strstr(source, "void main()");
+      uint32_t hash = stadium_diagnostic_hash(body ? body : source);
+      debugPrintf("roof-diag: program=%u shader=%u body=%08x features=%u bytes=%d\n",
+                  program, shaders[i], hash, flags, length);
+      unsigned j = 0;
+      while (j < dumped_count && dumped[j] != hash) ++j;
+      if (j == dumped_count && dumped_count < 24u &&
+          dumped_bytes + (size_t)length <= 1024u * 1024u) {
+        dumped[dumped_count++] = hash;
+        dumped_bytes += (size_t)length;
+        debugPrintf("roof-diag: source-begin program=%u shader=%u body=%08x\n%s\n"
+                    "roof-diag: source-end program=%u shader=%u\n",
+                    program, shaders[i], hash, source, program, shaders[i]);
+      }
+    }
+    free(source);
+  }
+  return features;
+}
+
+static void stadium_diag_draw(const char *kind, GLsizei count) {
+  const int slot = mc_current_slot();
+  if (slot < 0 || !g_mc[slot].program) return;
+  const GLuint program = g_mc[slot].program;
+  StadiumProgramProbe *probe = &stadium_program_probes[program % 128u];
+  if (!probe->seen || probe->program != program || probe->context != g_mc[slot].ctx) {
+    memset(probe, 0, sizeof(*probe));
+    probe->seen = 1;
+    probe->program = program;
+    probe->context = g_mc[slot].ctx;
+    probe->features = stadium_diag_program(program);
+  }
+  if (!probe->features) return;
+  const unsigned day = pes_controller_stadium_is_day();
+  const unsigned enabled = pes_controller_roof_shadow_enabled();
+  const uint64_t now = armTicksToNs(armGetSystemTick());
+  if (!stadium_diagnostic_due(&probe->gate, now, program,
+                              day * 2u + enabled, 2000000000ULL)) return;
+
+  GLint actual_program = 0, fbo = 0, active = 0;
+  glGetIntegerv(GL_CURRENT_PROGRAM, &actual_program);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+  const GLint location = glGetUniformLocation(program, "nxRoofDisabled");
+  GLfloat value = -1.0f;
+  if (location >= 0) glGetUniformfv(program, location, &value);
+  debugPrintf("roof-diag: draw ms=%llu kind=%s count=%d ctx=%p program=%u/%d "
+              "fbo=%d features=%u day=%u enabled=%u desired=%u loc=%d actual=%g "
+              "blend=%u depth=%u\n",
+              (unsigned long long)(now / 1000000u), kind, count,
+              (void *)g_mc[slot].ctx, program, actual_program, fbo,
+              probe->features, day, enabled, day && !enabled, location, value,
+              glIsEnabled(GL_BLEND), glIsEnabled(GL_DEPTH_TEST));
+  // Query sampler units rather than assuming ps1 is bound on unit 1. Restore
+  // active texture exactly; no texture, sampler, uniform or framebuffer writes.
+  for (unsigned i = 0; i < 8u; ++i) {
+    char name[16];
+    snprintf(name, sizeof(name), "ps%u", i);
+    GLint loc = glGetUniformLocation(program, name), unit = -1, texture = -1;
+    if (loc < 0) continue;
+    glGetUniformiv(program, loc, &unit);
+    if (unit >= 0 && unit < 8) {
+      glActiveTexture(GL_TEXTURE0 + unit);
+      glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    }
+    debugPrintf("roof-diag: sampler program=%u name=%s unit=%d texture2d=%d\n",
+                program, name, unit, texture);
+  }
+  glActiveTexture((GLenum)active);
+}
+#endif
+
 static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
 #ifdef DEBUG_LOG
+  stadium_diag_draw("arrays", count);
   __atomic_fetch_add(&gl_diag_draw_arrays, 1, __ATOMIC_RELAXED);
   const int slot = mc_current_slot();
   const int offscreen = slot >= 0 && g_mc[slot].framebuffer != 0;
@@ -1460,13 +1592,20 @@ static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
 #ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
 #endif
+#ifdef PERF_TRACE
+  const uint64_t draw_begin = perf_trace_now_ns();
+#endif
   glDrawArrays(mode, first, count);
+#ifdef PERF_TRACE
+  perf_match_draw(count > 0 ? (uint64_t)count : 0, perf_trace_now_ns() - draw_begin);
+#endif
   gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
                                 const void *indices) {
 #ifdef DEBUG_LOG
+  stadium_diag_draw("elements", count);
   __atomic_fetch_add(&gl_diag_draw_elements, 1, __ATOMIC_RELAXED);
   const int slot = mc_current_slot();
   const int offscreen = slot >= 0 && g_mc[slot].framebuffer != 0;
@@ -1487,7 +1626,13 @@ static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
   gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
                                     indices);
 #endif
+#ifdef PERF_TRACE
+  const uint64_t draw_begin = perf_trace_now_ns();
+#endif
   glDrawElements(mode, count, type, indices);
+#ifdef PERF_TRACE
+  perf_match_draw(count > 0 ? (uint64_t)count : 0, perf_trace_now_ns() - draw_begin);
+#endif
   gl_diag_finish_compose_experiment(&experiment);
 }
 
@@ -1629,6 +1774,10 @@ static void glBindFramebuffer_diag(GLenum target, GLuint framebuffer) {
         GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &color);
     glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
         GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &depth);
+#ifdef PERF_TRACE
+    perf_match_target(color_type == GL_NONE && depth != GL_NONE,
+                      (unsigned)g_mc[slot].viewport[2], (unsigned)g_mc[slot].viewport[3]);
+#endif
     if (color_type == GL_TEXTURE && color > 0 && depth != GL_NONE) {
       const unsigned int i = g_mc[slot].completed_scene_next++ % 8;
       g_mc[slot].completed_scene[i].texture = (GLuint)color;
@@ -1690,6 +1839,11 @@ static void glBindFramebuffer_diag(GLenum target, GLuint framebuffer) {
     if (sample)
       g_mc[slot].trace_default_draws = 12;
   }
+#ifdef PERF_TRACE
+  if ((target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) && slot >= 0 &&
+      !g_mc[slot].framebuffer && framebuffer)
+    perf_match_target(0,0,0);
+#endif
   glBindFramebuffer(target, framebuffer);
   if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER) {
     if (slot >= 0)
@@ -1772,6 +1926,7 @@ static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
                                          GLenum type, const void *indices,
                                          GLsizei instances) {
 #ifdef DEBUG_LOG
+  stadium_diag_draw("elements-instanced", count);
   const uint64_t total =
       count > 0 && instances > 0 ? (uint64_t)count * instances : 0;
   __atomic_fetch_add(&gl_diag_draw_elements, 1, __ATOMIC_RELAXED);
@@ -1792,13 +1947,21 @@ static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
   gl_diag_dump_compose_vertex_state(&experiment, mode, 0, count, type,
                                     indices);
 #endif
+#ifdef PERF_TRACE
+  const uint64_t draw_begin = perf_trace_now_ns();
+#endif
   gl_draw_elements_instanced_real(mode, count, type, indices, instances);
+#ifdef PERF_TRACE
+  perf_match_draw(count > 0 && instances > 0 ? (uint64_t)count * instances : 0,
+                  perf_trace_now_ns() - draw_begin);
+#endif
   gl_diag_finish_compose_experiment(&experiment);
 }
 
 static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
                                        GLsizei instances) {
 #ifdef DEBUG_LOG
+  stadium_diag_draw("arrays-instanced", count);
   const uint64_t total =
       count > 0 && instances > 0 ? (uint64_t)count * instances : 0;
   __atomic_fetch_add(&gl_diag_draw_arrays, 1, __ATOMIC_RELAXED);
@@ -1815,7 +1978,14 @@ static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
 #ifdef DEBUG_LOG
   gl_diag_dump_compose_vertex_state(&experiment, mode, first, count, 0, NULL);
 #endif
+#ifdef PERF_TRACE
+  const uint64_t draw_begin = perf_trace_now_ns();
+#endif
   gl_draw_arrays_instanced_real(mode, first, count, instances);
+#ifdef PERF_TRACE
+  perf_match_draw(count > 0 && instances > 0 ? (uint64_t)count * instances : 0,
+                  perf_trace_now_ns() - draw_begin);
+#endif
   gl_diag_finish_compose_experiment(&experiment);
 }
 
@@ -1944,13 +2114,17 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
     }
   }
   if (patched) {
+    char *roof = pitch_roof_source(patched);
+    if (roof) { free(patched); patched = roof; }
     const GLchar *source = patched;
     glShaderSource(shader, 1, &source, NULL);
+    debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
     debugPrintf("pitch-shadow: day slope=0.85 tint=grass-v2 grade=0.82,1.00,1.12 luma-preserved shader=%u\n", shader);
     free(patched);
   } else glShaderSource(shader, count, strings, lengths);
 }
 
+static void glLinkProgram_diag(GLuint program);
 static __eglMustCastToProperFunctionPointerType
 eglGetProcAddress_diag(const char *name) {
   __eglMustCastToProperFunctionPointerType proc = eglGetProcAddress(name);
@@ -1964,6 +2138,18 @@ eglGetProcAddress_diag(const char *name) {
 #endif
   if (name && !strcmp(name, "glShaderSource") && proc)
     return (__eglMustCastToProperFunctionPointerType)&glShaderSource_pitch;
+  if (name && !strcmp(name, "glUseProgram") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glUseProgram_c;
+  if (name && !strcmp(name, "glLinkProgram") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glLinkProgram_diag;
+  if (name && !strcmp(name, "glDeleteProgram") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glDeleteProgram_c;
+#ifdef DEBUG_LOG
+  if (name && !strcmp(name, "glDrawArrays") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glDrawArrays_diag;
+  if (name && !strcmp(name, "glDrawElements") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glDrawElements_diag;
+#endif
   if (name && !strcmp(name, "glBlitFramebuffer") && proc) {
     gl_blit_framebuffer_real = (GLBlitFramebufferProc)proc;
     return (__eglMustCastToProperFunctionPointerType)&glBlitFramebuffer_diag;
@@ -2083,6 +2269,10 @@ static int gl_complete_vertex_only_program(GLuint program, const char *log) {
 }
 
 static void glLinkProgram_diag(GLuint program) {
+#ifdef DEBUG_LOG
+  stadium_diag_forget(program);
+#endif
+  roof_uniforms[program % 128u].valid = 0;
   glLinkProgram(program);
   GLint status = GL_FALSE;
   glGetProgramiv(program, GL_LINK_STATUS, &status);
@@ -2094,6 +2284,17 @@ static void glLinkProgram_diag(GLuint program) {
 #ifdef DEBUG_LOG
   if (status == GL_TRUE) {
     __atomic_fetch_add(&gl_diag_link_ok, 1, __ATOMIC_RELAXED);
+    // Capture while shaders are still attached. The engine may detach them
+    // before the first draw; keep the classification for that linked program.
+    const int slot = mc_current_slot();
+    const unsigned features = stadium_diag_program(program);
+    if (slot >= 0) {
+      StadiumProgramProbe *probe = &stadium_program_probes[program % 128u];
+      probe->program = program;
+      probe->context = g_mc[slot].ctx;
+      probe->features = features;
+      probe->seen = 1;
+    }
     return;
   }
 
@@ -2122,6 +2323,7 @@ static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
 #ifdef PERF_TRACE
   static volatile uint64_t previous_swap_ns;
   const uint64_t swap_begin_ns = perf_trace_now_ns();
+  const uint64_t match_perf_key = pes_controller_stadium_perf_key();
   const uint64_t previous =
       __atomic_exchange_n(&previous_swap_ns, swap_begin_ns, __ATOMIC_RELAXED);
   void *const caller = __builtin_return_address(0);
@@ -2214,8 +2416,10 @@ static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
   gl_state_cache_reset();
   const unsigned int result = eglSwapBuffersHook(display, surface);
 #ifdef PERF_TRACE
+  const uint64_t swap_end_ns = perf_trace_now_ns();
+  perf_match_frame(swap_begin_ns, swap_end_ns, match_perf_key);
   perf_trace_record(PERF_TRACE_SWAP, caller, 0,
-                    perf_trace_now_ns() - swap_begin_ns, result ? 0 : 1);
+                    swap_end_ns - swap_begin_ns, result ? 0 : 1);
   perf_trace_report();
 #endif
   return result;

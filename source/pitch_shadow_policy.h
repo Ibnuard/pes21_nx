@@ -69,4 +69,24 @@ static char *pitch_shadow_source(const char *source) {
   free(result);
   return graded;
 }
+// Called only after the day allowlist accepted the original shader.
+static char *pitch_roof_source(const char *source) {
+  const char *main = strstr(source, "void main()");
+  const char *sample = "texture(ps1,in_TEXCOORD0.zw)";
+  const char *at = main ? strstr(main, sample) : NULL;
+  if (!at || strstr(at+strlen(sample), sample)) return NULL;
+  const char *declaration = "uniform highp float nxRoofDisabled;\n";
+  const char *replacement = "mix(texture(ps1,in_TEXCOORD0.zw),vec4(1.0),nxRoofDisabled)";
+  size_t a = (size_t)(main-source), b = (size_t)(at-main);
+  size_t length = strlen(source)+strlen(declaration)+strlen(replacement)-strlen(sample);
+  char *result = (char *)malloc(length+1);
+  if (!result) return NULL;
+  memcpy(result, source, a);
+  memcpy(result+a, declaration, strlen(declaration));
+  size_t pos = a+strlen(declaration);
+  memcpy(result+pos, main, b); pos += b;
+  memcpy(result+pos, replacement, strlen(replacement)); pos += strlen(replacement);
+  strcpy(result+pos, at+strlen(sample));
+  return result;
+}
 #endif
