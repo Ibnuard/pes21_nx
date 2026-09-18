@@ -1,5 +1,18 @@
 # HUD render candidate — 2026-09-16
 
+## Native visibility ownership — 2026-09-19
+
+The fixed bottom nameplates now follow the exact native
+`match2D::Screen::Time::NeedDisp` result. A fresh native scoreboard heartbeat
+is required, so the cards disappear with the scoreboard under the large
+kickoff/match banner instead of relying on a guessed ball-motion delay.
+
+Goal actions similarly require the exact native
+`ButtonGoalPerformance::NeedDisp` result. The broader GoalDemo heartbeat is
+retained only for lifecycle isolation; hidden black hand-offs cannot render or
+accept A/B. The own-goal latch is no longer cleared by a reusable GoalDemo
+page rearm when `IsOwnGoalDemo` has just classified the same goal.
+
 ## Set-play power gauge and authentic shirt numbers — 2026-09-19
 
 - **Shirt number resolution**: 	mpdb::util::GetUniformNo defaults to 10 (#0xa)

@@ -3,6 +3,20 @@
 Last reviewed: 2026-09-18, against the V12 native Stadium-target candidate
 after the full mobile kit migration.
 
+## 2026-09-19 lifecycle and COM ownership correction
+
+- Nameplates use native scoreboard visibility; goal helpers and their A/B input
+  use native `ButtonGoalPerformance::NeedDisp`, closing both black goal/replay
+  hand-offs.
+- A fresh own-goal predicate survives GoalDemo page initialization/rearm and
+  continues to force skip-only presentation.
+- In one-player Exhibition the AWAY cursor remains pad `-1` (CPU-owned). The
+  prior port-zero assignment conflicted with the intentionally HOME-only input
+  router and could leave the selected COM defender waiting without input.
+- PES21 PC faces are Fox Engine FPK/FMDL/FTEX assets, while the mobile target
+  loads Android-cooked UE4 RealFace packages. Direct transplant is not valid;
+  see `PES21_PC_FACE_TRANSFER_AUDIT.md` for the required conversion canary.
+
 This file records confirmed runtime problems and design decisions that still
 need implementation or hardware testing. It is not a claim that an item is
 fixed merely because a hook or overlay already exists.

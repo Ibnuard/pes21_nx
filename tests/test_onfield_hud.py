@@ -185,7 +185,21 @@ int main(void) {
         self.assertIn('static PesStaminaBarSnapshot presented[2]', snapshot)
         self.assertIn('*bar = presented[side]', snapshot)
         self.assertIn('presented[side] = *bar', snapshot)
-        self.assertIn('match_hud_play_started', snapshot)
+        self.assertIn('match_scoreboard_visible', snapshot)
+        self.assertNotIn('match_hud_play_started', snapshot)
+
+    def test_nameplates_follow_native_scoreboard_visibility(self):
+        hooks = (ROOT / 'source/ue4_hooks.c').read_text()
+        snapshot = function(hooks, 'pes_controller_stamina_bars')
+        visibility = function(hooks, 'pes_match_scoreboard_need_disp')
+        install = hooks.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('match_scoreboard_need_disp_original(screen)', visibility)
+        self.assertIn('&match_scoreboard_visible, visible != 0', visibility)
+        self.assertIn('&match_scoreboard_visible_tick', visibility)
+        self.assertIn('armTicksToNs(armGetSystemTick() - scoreboard_tick)', snapshot)
+        self.assertIn('_ZN7match2D6Screen4Time8NeedDispEv', install)
+        self.assertIn('*scoreboard_need_disp_slot =', install)
+        self.assertIn('(uintptr_t)&pes_match_scoreboard_need_disp', install)
 
     def test_live_hud_gate_rejects_transitions_and_stale_frames(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()
@@ -292,6 +306,7 @@ int main(void) {
         self.assertIn("PES_MOBILE_CONTROL_UNKNOWN", snapshot)
         self.assertIn("PES_CONTROLLER_SURFACE_NONE", snapshot)
         self.assertIn("pause_settings_show_nameplate", snapshot)
+        self.assertIn("match_scoreboard_visible", snapshot)
         self.assertIn("pes_controller_replay_active()", snapshot)
         self.assertIn("pes_controller_pause_transition()", snapshot)
         self.assertIn("PES_VIRTUAL_CURSOR_NONE", snapshot)

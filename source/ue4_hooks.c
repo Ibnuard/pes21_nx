@@ -463,6 +463,8 @@ static uint32_t (*match_goal_demo_pad_main_original)(void *unit,
                                                      const void *input,
                                                      uint32_t kind);
 static void (*match_goal_button_update_original)(void *window);
+static uint32_t (*match_goal_button_need_disp_original)(void *window);
+static uint32_t (*match_scoreboard_need_disp_original)(void *screen);
 static void (*match_pause_button_update_original)(void *window);
 static void *(*match_task_manager_get_instance)(void);
 static void (*match_task_manager_push_msg_event)(void *manager,
@@ -1225,6 +1227,10 @@ static _Alignas(4) uint32_t match_goal_demo_own_goal;
 static _Alignas(8) uint64_t match_goal_demo_own_goal_tick;
 static _Alignas(4) uint32_t match_goal_demo_helper_consumed;
 static _Alignas(4) uint32_t match_goal_demo_action_request;
+static _Alignas(4) uint32_t match_goal_button_visible;
+static _Alignas(8) uint64_t match_goal_button_visible_tick;
+static _Alignas(4) uint32_t match_scoreboard_visible;
+static _Alignas(8) uint64_t match_scoreboard_visible_tick;
 // Generic cinematic detector.  Replay/GoalDemo transition hooks are kept
 // disabled because their object layouts differ between mobile builds; this
 // state is inferred from the safe mobile-control heartbeat instead.
@@ -1501,10 +1507,11 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
   }
   if (!__atomic_load_n(&pause_settings_show_nameplate, __ATOMIC_ACQUIRE))
     return 0u;
-  if (!__atomic_load_n(&match_hud_play_started, __ATOMIC_ACQUIRE))
-    return 0u;
-  const uint64_t started_tick = __atomic_load_n(&match_hud_play_started_tick, __ATOMIC_ACQUIRE);
-  if (!started_tick || armTicksToNs(armGetSystemTick() - started_tick) < 1000000000ULL)
+  const uint64_t scoreboard_tick = __atomic_load_n(
+      &match_scoreboard_visible_tick, __ATOMIC_ACQUIRE);
+  if (!scoreboard_tick ||
+      armTicksToNs(armGetSystemTick() - scoreboard_tick) > 80000000ULL ||
+      !__atomic_load_n(&match_scoreboard_visible, __ATOMIC_ACQUIRE))
     return 0u;
 
   // Complete the small asynchronous portrait reads requested by the active
@@ -1520,7 +1527,6 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
       pes_controller_match_result_skin() ||
       pes_controller_match_result_transition() ||
       pes_controller_virtual_cursor_context() != PES_VIRTUAL_CURSOR_NONE) {
-    match_hud_reset_ball_motion();
     return 0u;
   }
 
@@ -3177,6 +3183,10 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   __atomic_store_n(&match_goal_demo_owner_known, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_player_goal, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_helper_consumed, 1, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_button_visible, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_button_visible_tick, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_scoreboard_visible, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_scoreboard_visible_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_action_request,
                    PES_GOAL_DEMO_ACTION_NONE, __ATOMIC_RELEASE);
   __atomic_store_n(&match_button_setplay_owner, 0, __ATOMIC_RELEASE);
@@ -12342,13 +12352,25 @@ static uint32_t pes_match_goal_demo_is_own_goal(void *goal_demo) {
   return own_goal;
 }
 
+static void match_goal_demo_expire_own_goal(uint64_t now) {
+  const uint64_t own_goal_tick = __atomic_load_n(
+      &match_goal_demo_own_goal_tick, __ATOMIC_ACQUIRE);
+  if (own_goal_tick &&
+      armTicksToNs(now - own_goal_tick) <= 2000000000ULL)
+    return;
+  __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_demo_own_goal_tick, 0, __ATOMIC_RELEASE);
+}
+
 // InteractiveGoalDemoInit is one valid beginning of a new A/B choice page.
 // Some match paths reuse the GoalDemo object without calling Init again, so
 // the stable pad/button heartbeats also have a bounded session-gap rearm.
 uintptr_t pes_match_goal_demo_init_entry(void *goal_demo) {
   (void)goal_demo;
-  __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
-  __atomic_store_n(&match_goal_demo_own_goal_tick, 0, __ATOMIC_RELEASE);
+  // IsOwnGoalDemo can run immediately before this reusable page initializer.
+  // Preserve that fresh classification; replay end or the bounded expiry
+  // retires it before another goal session can inherit it.
+  match_goal_demo_expire_own_goal(armGetSystemTick());
   __atomic_store_n(&match_goal_demo_pad_seen_tick, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_helper_consumed, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_action_request,
@@ -12403,7 +12425,7 @@ uintptr_t pes_match_goal_demo_update_entry(void *goal_demo,
       // not guaranteed for every score. Re-arm on the first update of each
       // actual goal session, while continuous updates keep a consumed helper
       // hidden for the rest of that same celebration.
-      __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
+      match_goal_demo_expire_own_goal(now);
       __atomic_store_n(&match_goal_demo_helper_consumed, 0,
                        __ATOMIC_RELEASE);
       __atomic_store_n(&match_goal_demo_action_request,
@@ -12455,13 +12477,7 @@ static void match_goal_demo_publish_heartbeat(void) {
   const int new_session =
       !previous_seen || armTicksToNs(now - previous_seen) > 500000000ULL;
   if (new_session) {
-    const uint64_t own_goal_tick = __atomic_load_n(
-        &match_goal_demo_own_goal_tick, __ATOMIC_ACQUIRE);
-    if (!own_goal_tick ||
-        armTicksToNs(now - own_goal_tick) > 2000000000ULL) {
-      __atomic_store_n(&match_goal_demo_own_goal, 0, __ATOMIC_RELEASE);
-      __atomic_store_n(&match_goal_demo_own_goal_tick, 0, __ATOMIC_RELEASE);
-    }
+    match_goal_demo_expire_own_goal(now);
     __atomic_store_n(&match_goal_demo_helper_consumed, 0,
                      __ATOMIC_RELEASE);
     __atomic_store_n(&match_goal_demo_action_request,
@@ -12535,6 +12551,28 @@ static void pes_match_goal_button_update(void *window) {
   void *root = match_setplay_get_root(window);
   if (root)
     match_node_set_alpha(root, 0.0f);
+}
+
+static uint32_t pes_match_goal_button_need_disp(void *window) {
+  const uint32_t visible = match_goal_button_need_disp_original
+                               ? match_goal_button_need_disp_original(window)
+                               : 0u;
+  __atomic_store_n(&match_goal_button_visible, visible != 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_goal_button_visible_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+  return visible;
+}
+
+static uint32_t pes_match_scoreboard_need_disp(void *screen) {
+  const uint32_t visible = match_scoreboard_need_disp_original
+                               ? match_scoreboard_need_disp_original(screen)
+                               : 0u;
+  __atomic_store_n(&match_scoreboard_visible, visible != 0,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_scoreboard_visible_tick, armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+  return visible;
 }
 
 static void match_pause_dispatch_pending(void) {
@@ -13250,8 +13288,12 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
     // but the visible A/B legend must not survive the black hand-off into or
     // out of Replay.  Require a recent interactive-button heartbeat for the
     // legend while keeping the broader GoalDemo owner alive for input.
-    goal_helper_visible = goal_pad_seen &&
+    const uint64_t button_visible_tick = __atomic_load_n(
+        &match_goal_button_visible_tick, __ATOMIC_ACQUIRE);
+    goal_helper_visible = goal_pad_seen && button_visible_tick &&
         armTicksToNs(now - goal_pad_seen) <= 120000000ULL &&
+        armTicksToNs(now - button_visible_tick) <= 80000000ULL &&
+        __atomic_load_n(&match_goal_button_visible, __ATOMIC_ACQUIRE) &&
         !__atomic_load_n(&match_goal_demo_helper_consumed,
                          __ATOMIC_ACQUIRE);
   } else if (match_native_replay_active_at(now)) {
@@ -15526,7 +15568,7 @@ uintptr_t pes_mobile_screen_tap_entry(void *control_mode_ptr) {
 // The Android/mobile match initializer calls SetPadNo(1), which this binary
 // deliberately collapses to -1. In the 2P lab, use CursorData's side marker
 // (HOME=0, AWAY=2) to bind both stock cursors to their real Switch pad ports.
-// Outside the lab, preserve the proven port-zero behavior.
+// Outside the lab, bind only HOME to port zero and leave AWAY CPU-owned.
 static void pes_cursor_set_pad_no(void *cursor_ptr, uint32_t requested) {
   if (!cursor_ptr)
     return;
@@ -15539,6 +15581,12 @@ static void pes_cursor_set_pad_no(void *cursor_ptr, uint32_t requested) {
       pad_no = 0;
     else if (side == 2)
       pad_no = 1;
+  } else if (side == 2) {
+    // AWAY remains CPU-owned in one-player Exhibition. Mapping this cursor to
+    // pad zero made the selected COM defender user-controlled while the 1P
+    // command router correctly refused AWAY input, leaving it motionless when
+    // HOME had possession.
+    pad_no = -1;
   }
   memcpy((unsigned char *)cursor_ptr + 16, &pad_no, sizeof(pad_no));
   if (cursor_pad_log_count < 16) {
@@ -17559,6 +17607,19 @@ void install_ue4_hooks(so_module *module) {
     fatal_error("ButtonGoalPerformance update vtable slot not found");
   match_goal_button_update_original = (void *)goal_button_update_runtime;
   *goal_button_update_slot = (uintptr_t)&pes_match_goal_button_update;
+  const char *goal_button_need_disp_symbol =
+      "_ZN7match2D6Screen21ButtonGoalPerformance8NeedDispEv";
+  const uintptr_t goal_button_need_disp_runtime =
+      so_find_addr_rx(module, goal_button_need_disp_symbol);
+  uintptr_t *goal_button_need_disp_slot = find_vtable_method_slot(
+      module, "_ZTVN7match2D6Screen21ButtonGoalPerformanceE",
+      goal_button_need_disp_runtime, 128);
+  if (!goal_button_need_disp_slot)
+    fatal_error("ButtonGoalPerformance NeedDisp vtable slot not found");
+  match_goal_button_need_disp_original =
+      (uint32_t (*)(void *))goal_button_need_disp_runtime;
+  *goal_button_need_disp_slot =
+      (uintptr_t)&pes_match_goal_button_need_disp;
 
   const char *setplay_camera_main_symbol =
       "_ZN5match3pad34ThinkUnitMobileSetplayCameraChange4MainERKNS0_18ThinkUnitInputDataENS0_13ThinkUnitKindE";
@@ -18107,6 +18168,17 @@ void install_ue4_hooks(so_module *module) {
     debugPrintf("UE4 hook: Radar::Update vtable slot not found; "
                 "live radar toggle remains unavailable\n");
   }
+  const uintptr_t scoreboard_need_disp_runtime = so_find_addr_rx(
+      module, "_ZN7match2D6Screen4Time8NeedDispEv");
+  uintptr_t *scoreboard_need_disp_slot = find_vtable_method_slot(
+      module, "_ZTVN7match2D6Screen4TimeE", scoreboard_need_disp_runtime,
+      64);
+  if (!scoreboard_need_disp_slot)
+    fatal_error("Time::NeedDisp vtable slot not found");
+  match_scoreboard_need_disp_original =
+      (uint32_t (*)(void *))scoreboard_need_disp_runtime;
+  *scoreboard_need_disp_slot =
+      (uintptr_t)&pes_match_scoreboard_need_disp;
   const uintptr_t no_replay_plt =
       (uintptr_t)module->load_base + 0x380e790;
   const uint32_t no_replay_plt_words[] = {

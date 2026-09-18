@@ -551,6 +551,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertNotIn('FAKE_POINTER_GOAL_DEMO', android)
         self.assertIn('PES_GOAL_DEMO_ACTION_SKIP', goal_input)
         self.assertIn('PES_GOAL_DEMO_ACTION_CELEBRATE', goal_input)
+        self.assertIn('int helper_visible', goal_input)
+        self.assertIn('!connected || !helper_visible', goal_input)
         self.assertIn('? 0x01050066u', hooks)
         self.assertIn(': 0x01050067u', hooks)
         self.assertIn('&match_goal_demo_own_goal, 1', hooks)
@@ -597,6 +599,34 @@ class NativeGamepadLabTests(unittest.TestCase):
                 'void pes_controller_surface_read', 1)[0]
         self.assertIn('armTicksToNs(now - goal_pad_seen) <= 120000000ULL',
                       snapshot)
+        self.assertIn('match_goal_button_visible_tick', snapshot)
+        self.assertIn('match_goal_button_visible, __ATOMIC_ACQUIRE', snapshot)
+        self.assertIn('ButtonGoalPerformance8NeedDispEv', install)
+        self.assertIn('(uintptr_t)&pes_match_goal_button_need_disp', install)
+
+    def test_own_goal_latch_survives_goal_page_rearm(self):
+        expire = re.search(
+            r'static void match_goal_demo_expire_own_goal\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        update = re.search(
+            r'uintptr_t pes_match_goal_demo_update_entry\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        init = re.search(
+            r'uintptr_t pes_match_goal_demo_init_entry\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('<= 2000000000ULL', expire)
+        self.assertIn('match_goal_demo_expire_own_goal(now)', update)
+        self.assertIn('match_goal_demo_expire_own_goal(armGetSystemTick())', init)
+        self.assertNotIn('&match_goal_demo_own_goal, 0', update)
+
+    def test_single_player_away_cursor_remains_cpu_owned(self):
+        cursor = re.search(
+            r'static void pes_cursor_set_pad_no\(.*?\n\}',
+            self.hooks, re.S).group(0)
+        self.assertIn('else if (side == 2)', cursor)
+        self.assertIn('pad_no = -1;', cursor)
+        self.assertLess(cursor.index('pes_controller_native_pad_lab_two_player()'),
+                        cursor.index('else if (side == 2)'))
 
     def test_stamina_uses_custom_overlay_without_native_draw_hook(self):
         hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')

@@ -1762,6 +1762,7 @@ static uint32_t append_replay_controller(FakeTouchState *desired,
 static uint32_t append_goal_demo_controller(int connected, u64 buttons,
                                             u64 previous_buttons,
                                             int player_goal,
+                                            int helper_visible,
                                             uint64_t now_ms) {
   static uint64_t skip_until_ms;
   static uint32_t generation_seen;
@@ -1770,7 +1771,10 @@ static uint32_t append_goal_demo_controller(int connected, u64 buttons,
     skip_until_ms = 0;
   }
   replay_touch_requested = 0;
-  if (!connected)
+  // The broad GoalDemo surface intentionally spans short UI hand-offs, but
+  // native ButtonGoalPerformance::NeedDisp is the authority for whether A/B
+  // can be acted on. Do not accept a hidden input during either black frame.
+  if (!connected || !helper_visible)
     return 0;
 
   const u64 pressed = buttons & ~previous_buttons;
@@ -2491,7 +2495,8 @@ void android_input_poll(void) {
       replay_pad_buttons = append_goal_demo_controller(
           controller_connected || controller_connected_p2, any_buttons,
           any_buttons & ~any_pressed,
-          controller_snapshot.goal_player, now_ms);
+          controller_snapshot.goal_player,
+          controller_snapshot.goal_helper_visible, now_ms);
     } else if (generic_cinematic_active) {
       reset_virtual_surfaces();
       const u64 any_buttons = buttons | buttons_p2;
