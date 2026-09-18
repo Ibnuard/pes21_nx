@@ -421,6 +421,21 @@ static int emit_efootball_fit_line(const char *text, int len, float x, float y,
   return emit_efootball_line(text, len, x, y, gh, weight, verts);
 }
 
+static int emit_efootball_right_fit_line(
+    const char *text, int len, float right_x, float y, float max_width,
+    float max_gh, float min_gh, uint32_t weight, GLfloat *verts) {
+  if (!text || len <= 0 || max_width <= 0.0f)
+    return 0;
+  float gh = max_gh;
+  float width = measure_efootball_line(text, len, gh, weight);
+  while (width > max_width && gh > min_gh) {
+    gh *= 0.92f;
+    width = measure_efootball_line(text, len, gh, weight);
+  }
+  return emit_efootball_line(text, len, right_x - width, y, gh, weight,
+                             verts);
+}
+
 static int emit_efootball_centered_fit_line(
     const char *text, int len, float center_x, float y, float max_width,
     float max_gh, float min_gh, uint32_t weight, GLfloat *verts) {
@@ -2324,13 +2339,21 @@ static void overlay_render(void) {
     else
       snprintf(label, sizeof(label), "%u  %s", stamina_bars[i].shirt_number, stamina_bars[i].name);
     hud_text_quad[side] = quads;
-    hud_text_count[side] = emit_efootball_fit_line(label, (int)strlen(label),
-        text_x, card_y + card_h * 0.31f, text_w,
-        screen_height * 0.025f, screen_height * 0.019f,
-        EFOOTBALL_FONT_REGULAR, verts + quads * 24);
+    hud_text_count[side] = side
+        ? emit_efootball_right_fit_line(
+              label, (int)strlen(label), text_right,
+              card_y + card_h * 0.31f, text_w,
+              screen_height * 0.025f, screen_height * 0.019f,
+              EFOOTBALL_FONT_REGULAR, verts + quads * 24)
+        : emit_efootball_fit_line(
+              label, (int)strlen(label), text_x,
+              card_y + card_h * 0.31f, text_w,
+              screen_height * 0.025f, screen_height * 0.019f,
+              EFOOTBALL_FONT_REGULAR, verts + quads * 24);
     quads += hud_text_count[side];
     // The stamina meter belongs to the text plate, not the complete card.
-    // Its left edge deliberately matches the shirt-number/name baseline.
+    // Mirror the content flow: home fills from the left, away from the right
+    // next to its number and portrait.
     const float bar_w = text_w;
     const float bar_h = 0.0030f * screen_height;
     float x = text_x;
@@ -2348,6 +2371,7 @@ static void overlay_render(void) {
     const float inset = 0.25f;
     const float inner_h = fmaxf(1.0f, bar_h - inset * 2.0f);
     const float fill_w = fmaxf(0.0f, (bar_w - inset * 2.0f) * power);
+    const float fill_x = side ? x + bar_w - inset - fill_w : x + inset;
     stamina_alpha[side] = reveal;
 
     stamina_shadow_first_quad[side] = quads;
@@ -2371,7 +2395,7 @@ static void overlay_render(void) {
       stamina_fill_style[side] = (RoundedRectStyle){
           fill_w, inner_h, inner_h * 0.5f};
       stamina_fill_quads[side] = emit_round_rect_quad(
-          x + inset, y + inset, fill_w, inner_h, verts + quads * 24);
+          fill_x, y + inset, fill_w, inner_h, verts + quads * 24);
       quads += stamina_fill_quads[side];
 
       const float highlight_h = fmaxf(0.75f, inner_h * 0.28f);
@@ -2379,7 +2403,7 @@ static void overlay_render(void) {
       stamina_highlight_style[side] = (RoundedRectStyle){
           fill_w, highlight_h, highlight_h * 0.5f};
       stamina_highlight_quads[side] = emit_round_rect_quad(
-          x + inset, y + inset, fill_w, highlight_h,
+          fill_x, y + inset, fill_w, highlight_h,
           verts + quads * 24);
       quads += stamina_highlight_quads[side];
     }

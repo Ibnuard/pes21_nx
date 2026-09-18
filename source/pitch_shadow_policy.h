@@ -28,12 +28,11 @@ static char *pitch_shadow_source(const char *source) {
   const char *at = strstr(body, key);
   if (!at || at[strlen(key)] != ';' || strstr(at+strlen(key), key)) return NULL;
   // Day-only additive grazing highlight, not the base texture or scene tint.
-  // Retain peak green and use the accepted grass's approximate R:G:B ratio.
   const char *old_tint = "vec3(8.755540e-01,1.000000e+00,0.000000e+00)";
-  // Roof OFF exposes this view-dependent grazing term across the whole pitch.
-  // Keep its accepted hue, but reduce the amplitude by 20% so broad daylight
-  // patches no longer wash out the authored mow pattern and grain.
-  const char *new_tint = "vec3(4.800000e-01,8.000000e-01,2.320000e-01)";
+  // The roof-disabled mask makes this view-dependent term full-strength in
+  // places that used to be shadowed. Remove only this additive term: the
+  // authored diffuse, mowing stripes and grain still feed native lighting.
+  const char *new_tint = "vec3(0.000000e+00,0.000000e+00,0.000000e+00)";
   const char *tint = strstr(body, old_tint);
   if (!tint || strstr(tint+strlen(old_tint), old_tint)) return NULL;
   // Reduce the native depth comparison slope slightly; preserve all nine

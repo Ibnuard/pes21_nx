@@ -73,7 +73,7 @@ class PitchShadowTests(unittest.TestCase):
                 result = transform(body)
                 if key+b';' in body:
                     old_tint = b'vec3(8.755540e-01,1.000000e+00,0.000000e+00)'
-                    new_tint = b'vec3(4.800000e-01,8.000000e-01,2.320000e-01)'
+                    new_tint = b'vec3(0.000000e+00,0.000000e+00,0.000000e+00)'
                     self.assertEqual(len(old_tint), len(new_tint))
                     self.assertEqual(body.count(old_tint), 1)
                     self.assertEqual(result.count(b'// NX pitch hue begin'), 1)

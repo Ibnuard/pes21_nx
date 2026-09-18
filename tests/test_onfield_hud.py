@@ -333,7 +333,39 @@ int main(void) {
         self.assertIn('const float cell_gap', overlay)
         self.assertIn('const float bar_w = text_w', overlay)
         self.assertIn('float x = text_x', overlay)
+        self.assertIn('emit_efootball_right_fit_line(', overlay)
+        self.assertIn('text_right,', overlay)
+        self.assertIn('const float fill_x = side ? x + bar_w - inset - fill_w',
+                      overlay)
         self.assertNotIn('const float bar_w = card_w', overlay)
+
+    def test_away_nameplate_text_anchors_to_right_edge(self):
+        overlay = (ROOT / 'source/overlay.c').read_text()
+        code = r'''
+#include <assert.h>
+#include <math.h>
+#include <stdint.h>
+typedef float GLfloat;
+static float drawn_x, drawn_width;
+static float measure_efootball_line(const char *s, int n, float gh, uint32_t w) {
+  (void)s; (void)w; return (float)n * gh * 0.5f;
+}
+static int emit_efootball_line(const char *s, int n, float x, float y,
+                               float gh, uint32_t w, GLfloat *verts) {
+  (void)y; (void)verts;
+  drawn_x=x; drawn_width=measure_efootball_line(s,n,gh,w); return n;
+}
+''' + function(overlay, 'emit_efootball_right_fit_line') + r'''
+int main(void) {
+  GLfloat verts[24]={0};
+  assert(emit_efootball_right_fit_line("PLAYER 10",9,300,4,120,20,12,0,verts)==9);
+  assert(fabsf(drawn_x + drawn_width - 300.0f)<0.001f);
+  assert(emit_efootball_right_fit_line("LONG PLAYER NAME 10",19,300,4,120,20,12,0,verts)==19);
+  assert(fabsf(drawn_x + drawn_width - 300.0f)<0.001f);
+  assert(drawn_width <= 120.0f);
+}
+'''
+        build_and_run(self.cc, code)
 
 
     def test_buffer_matches_engine_request_even_with_720p_config(self):

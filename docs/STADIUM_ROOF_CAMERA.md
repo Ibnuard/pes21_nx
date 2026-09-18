@@ -2,6 +2,21 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Post-checkpoint Day grass candidate — 2026-09-18
+
+The hardware review of `checkpoint-nameplate-day-pitch-v2` confirms that the
+previous 20% reduction did not remove the broad bright/dark patches or restore
+visible grain. Inspection of the owned native Day shader shows that the roof
+mask sample controls an *additive, view-dependent grazing highlight* (`v55`),
+which is added after the diffuse, indirect, direct and skylight terms. With
+roof OFF the sample is forced to white, making this component full strength.
+This candidate replaces only that Day highlight color with zero in the same
+eight fingerprint-allowlisted shaders. It retains the accepted 4% grass-only
+luminance reduction, all base diffuse/grain/stripe inputs, native lighting,
+player shadows and Night shader bodies. This is meant to expose the existing
+pitch grain more like the supplied reference, without touching the expensive
+shadow/cascade policy. Actual tone and FPS still require Switch review.
+
 ## Day pitch flattening candidate — 2026-09-18
 
 Permanent roof OFF revealed the native Day grazing-highlight term as broad

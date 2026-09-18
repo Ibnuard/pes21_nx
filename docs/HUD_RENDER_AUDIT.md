@@ -1,5 +1,14 @@
 # HUD render candidate — 2026-09-16
 
+## Post-checkpoint away-card mirror — 2026-09-18
+
+Checkpoint `53874bf` (`checkpoint-nameplate-day-pitch-v2`) preserves the
+accepted HUD/settings/goal-helper build. The right-side card now anchors its
+name-number line at the right edge of the text cell, immediately before the
+portrait, and fills its stamina strip from right to left. Cell order remains
+name, shirt number, portrait, crest; the left-side card is unchanged. Switch
+visual confirmation is pending.
+
 ## Nameplate checkpoint follow-up — 2026-09-18
 
 The accepted custom portrait/crest/name/number/stamina card is checkpointed at
