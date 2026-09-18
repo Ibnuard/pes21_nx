@@ -30,7 +30,7 @@ int main(void) {
   assert(*pause_settings_camera_field(1,NULL)==7);
   assert(*pause_settings_camera_field(2,NULL)==4);
   assert(*pause_settings_camera_field(3,NULL)==9);
-  pause_settings_page=1;assert(pes_controller_pause_settings_count()==6);
+  pause_settings_page=1;assert(pes_controller_pause_settings_count()==7);
 }
 ''')
 

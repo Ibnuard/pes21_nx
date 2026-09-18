@@ -288,6 +288,7 @@ int main(void) {
         self.assertIn("match_utility_info_is_inplay_time(info)", publish)
         self.assertIn("PES_MOBILE_CONTROL_UNKNOWN", snapshot)
         self.assertIn("PES_CONTROLLER_SURFACE_NONE", snapshot)
+        self.assertIn("pause_settings_show_nameplate", snapshot)
         self.assertIn("pes_controller_replay_active()", snapshot)
         self.assertIn("pes_controller_pause_transition()", snapshot)
         self.assertIn("PES_VIRTUAL_CURSOR_NONE", snapshot)

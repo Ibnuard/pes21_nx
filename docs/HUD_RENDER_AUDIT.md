@@ -1,5 +1,20 @@
 # HUD render candidate — 2026-09-16
 
+## Nameplate checkpoint follow-up — 2026-09-18
+
+The accepted custom portrait/crest/name/number/stamina card is checkpointed at
+`1714d84` (`checkpoint-nameplate-hud-v1`). General Match Settings now exposes
+`SHOW NAME PLATE`, default ON. It gates only the custom card; native stamina
+gauges remain hidden and simulation remains untouched.
+
+Goal helpers use one right-side group in both one- and two-player matches.
+Full controllers share one sprite. When horizontal Joy-Con profiles require
+different buttons, both sprites are separated by `/` before one common label.
+The helper also requires a current interactive-button heartbeat (120 ms) and
+is suppressed as soon as native Replay owns the transition, preventing it
+from surviving the two black goal/replay hand-offs. Hardware validation of
+the transition timing is still required.
+
 ## HUD diagnostic capture — 2026-09-18
 
 Hardware capture: 22 live samples, 18 with zero cards despite valid fresh

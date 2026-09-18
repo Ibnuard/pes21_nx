@@ -35,10 +35,11 @@ class PitchShadowTests(unittest.TestCase):
             tinted = [x*s for x,s in zip(rgb, (0.82,1,1.12))]
             luminance = sum(x*w for x,w in zip(rgb, weights))
             scale = luminance/max(sum(x*w for x,w in zip(tinted, weights)),0.0001)
-            return tuple(x*(1-mask)+y*scale*mask for x,y in zip(rgb,tinted))
-        for rgb in ((0.30,0.42,0.08), (0.06,0.09,0.02), (0.8,0.8,0.8), (0,0,0)):
+            return tuple(x*(1-mask)+y*scale*0.96*mask for x,y in zip(rgb,tinted))
+        for rgb in ((0.30,0.42,0.08), (0.06,0.09,0.02)):
             out = grade(rgb)
-            self.assertAlmostEqual(sum(x*w for x,w in zip(rgb,weights)), sum(x*w for x,w in zip(out,weights)))
+            self.assertAlmostEqual(sum(x*w for x,w in zip(rgb,weights))*0.96,
+                                   sum(x*w for x,w in zip(out,weights)))
         self.assertEqual(grade((0.8,0.8,0.8)), (0.8,0.8,0.8))
         self.assertLess(grade((0.30,0.42,0.08))[0]/grade((0.30,0.42,0.08))[1], 0.30/0.42)
 
@@ -72,7 +73,7 @@ class PitchShadowTests(unittest.TestCase):
                 result = transform(body)
                 if key+b';' in body:
                     old_tint = b'vec3(8.755540e-01,1.000000e+00,0.000000e+00)'
-                    new_tint = b'vec3(6.000000e-01,1.000000e+00,2.900000e-01)'
+                    new_tint = b'vec3(4.800000e-01,8.000000e-01,2.320000e-01)'
                     self.assertEqual(len(old_tint), len(new_tint))
                     self.assertEqual(body.count(old_tint), 1)
                     self.assertEqual(result.count(b'// NX pitch hue begin'), 1)

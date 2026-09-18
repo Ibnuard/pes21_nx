@@ -47,10 +47,10 @@ int main(void) {
         self.assertNotIn('pause_stamina_disp_original', SOURCE)
 
     def test_pause_settings_are_split_into_general_and_camera_pages(self):
-        self.assertIn('return index < 6u ? general[index] : "";', SOURCE)
+        self.assertIn('return index < 7u ? general[index] : "";', SOURCE)
         self.assertIn('"RADAR", "GAME SPEED", "NEXT TARGET INDICATOR"', SOURCE)
         self.assertNotIn('SHOW STAMINA', SOURCE)
-        self.assertIn('"SHOW REPLAY", "CHANT SFX", "COMMENTARY"', SOURCE)
+        self.assertIn('"SHOW NAME PLATE", "SHOW REPLAY", "CHANT SFX", "COMMENTARY"', SOURCE)
         self.assertIn('"CAMERA TYPE", "CAMERA HEIGHT", "CAMERA DISTANCE", "CAMERA ANGLE"', SOURCE)
         self.assertIn('focus == 2u ? PAUSE_SETTINGS_PAGE_CAMERA', SOURCE)
         self.assertIn('const uint32_t native_route = focus == 2u ? 1u : focus;', SOURCE)

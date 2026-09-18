@@ -39,7 +39,7 @@ class GeneralSettingsTests(unittest.TestCase):
                         matching_slots.append(offset // 8)
             self.assertEqual(len(matching_slots), 1)
 
-    def test_six_rows_dispatch_and_wrap_with_and_without_profiling(self):
+    def test_seven_rows_dispatch_and_wrap_with_and_without_profiling(self):
         compiler = shutil.which('gcc')
         if not compiler:
             self.skipTest('gcc unavailable')
@@ -57,6 +57,7 @@ static uint32_t pause_settings_page, pause_settings_focus;
 static uint32_t pause_camera_dynamic_wide_custom, pause_settings_radar;
 static uint32_t pause_settings_chant=1, pause_settings_commentary=1;
 static uint32_t pause_settings_show_replay=1;
+static uint32_t pause_settings_show_nameplate=1;
 static unsigned char system_data[0x20], resident_data[0x50], camera_data[15];
 static uint32_t speed_calls, speed_action, target_calls, replay_calls;
 static uint32_t volume_calls, volume_kind, camera_calls, log_calls;
@@ -118,34 +119,35 @@ static void input(uint32_t action) {
 }
 int main(void) {
   const char *labels[]={"RADAR","GAME SPEED","NEXT TARGET INDICATOR",
-                        "SHOW REPLAY","CHANT SFX","COMMENTARY"};
-  const char *before[]={"OFF","0","ON","ON","ON","ON"};
-  const char *after[]={"ON","+1","OFF","OFF","OFF","OFF"};
+                        "SHOW NAME PLATE","SHOW REPLAY","CHANT SFX","COMMENTARY"};
+  const char *before[]={"OFF","0","ON","ON","ON","ON","ON"};
+  const char *after[]={"ON","+1","OFF","OFF","OFF","OFF","OFF"};
   const uint32_t actions[]={PES_PAUSE_INPUT_LEFT,PES_PAUSE_INPUT_RIGHT,
                             PES_PAUSE_INPUT_DECIDE};
   pause_settings_page=PAUSE_SETTINGS_PAGE_GENERAL;
-  assert(pes_controller_pause_settings_count()==6);
-  for(unsigned a=0;a<3;++a) for(unsigned row=0;row<6;++row) {
+  assert(pes_controller_pause_settings_count()==7);
+  for(unsigned a=0;a<3;++a) for(unsigned row=0;row<7;++row) {
     pause_settings_radar=0;
     system_data[0x14]=2; resident_data[0x47]=0;
-    pause_settings_show_replay=pause_settings_chant=pause_settings_commentary=1;
+    pause_settings_show_nameplate=pause_settings_show_replay=1;
+    pause_settings_chant=pause_settings_commentary=1;
     speed_calls=target_calls=replay_calls=volume_calls=log_calls=0;
     pause_settings_focus=row;
-    for(unsigned i=0;i<6;++i) {
+    for(unsigned i=0;i<7;++i) {
       assert(!strcmp(pes_controller_pause_settings_label(i),labels[i]));
       assert(!strcmp(pes_controller_pause_settings_value(i),before[i]));
     }
     input(actions[a]);
-    for(unsigned i=0;i<6;++i)
+    for(unsigned i=0;i<7;++i)
       assert(!strcmp(pes_controller_pause_settings_value(i),i==row?after[i]:before[i]));
-    assert(speed_calls==(row==1) && target_calls==(row==2) && replay_calls==(row==3));
-    assert(volume_calls==(row>=4));
+    assert(speed_calls==(row==1) && target_calls==(row==2) && replay_calls==(row==4));
+    assert(volume_calls==(row>=5));
     if(row==1) assert(speed_action==actions[a]);
-    if(row>=4) assert(volume_kind==(row==4?3:2) && volume_value==0.0f);
+    if(row>=5) assert(volume_kind==(row==5?3:2) && volume_value==0.0f);
     assert(camera_calls==0);
 #ifdef PERF_TRACE
     assert(log_calls==1 && strstr(last_log,"[SETTINGS] ns=1234567"));
-    assert(strstr(last_log,labels[row]) && strstr(last_log,"stamina=off"));
+    assert(strstr(last_log,labels[row]) && strstr(last_log,"nameplate="));
 #else
     assert(log_calls==0);
 #endif
@@ -153,23 +155,23 @@ int main(void) {
     if(row!=1) {
       input(actions[a]);
       assert(!strcmp(pes_controller_pause_settings_value(row),before[row]));
-      if(row>=4) assert(volume_value==1.0f);
+      if(row>=5) assert(volume_value==1.0f);
     }
   }
-  for(unsigned i=6;i<9;++i) {
+  for(unsigned i=7;i<10;++i) {
     assert(!strcmp(pes_controller_pause_settings_label(i),""));
     assert(!strcmp(pes_controller_pause_settings_value(i),""));
   }
   unsigned previous_logs=log_calls, previous_volumes=volume_calls;
-  pause_settings_adjust_general(6,PES_PAUSE_INPUT_DECIDE);
+  pause_settings_adjust_general(7,PES_PAUSE_INPUT_DECIDE);
   assert(log_calls==previous_logs && volume_calls==previous_volumes);
   pause_settings_focus=0;
-  input(PES_PAUSE_INPUT_UP); assert(pause_settings_focus==5);
+  input(PES_PAUSE_INPUT_UP); assert(pause_settings_focus==6);
   input(PES_PAUSE_INPUT_DOWN); assert(pause_settings_focus==0);
-  for(unsigned i=1;i<=6;++i) {
-    input(PES_PAUSE_INPUT_DOWN); assert(pause_settings_focus==i%6);
+  for(unsigned i=1;i<=7;++i) {
+    input(PES_PAUSE_INPUT_DOWN); assert(pause_settings_focus==i%7);
   }
-  pause_settings_focus=6; input(0); assert(pause_settings_focus==0);
+  pause_settings_focus=7; input(0); assert(pause_settings_focus==0);
   assert(camera_calls==0);
   // Camera page and its fixed FootballNX preset remain independent.
   pause_settings_page=PAUSE_SETTINGS_PAGE_CAMERA;

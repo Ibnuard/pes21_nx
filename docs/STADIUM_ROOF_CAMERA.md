@@ -2,6 +2,17 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Day pitch flattening candidate — 2026-09-18
+
+Permanent roof OFF revealed the native Day grazing-highlight term as broad
+bright/dark patches. The change remains restricted to the existing allowlist
+of eight owned Day pitch fragment shaders: the highlight keeps its accepted
+green hue at 80% amplitude and the grass-only luminance grade is reduced by
+4%. Neutral/non-grass pixels, Night shaders, pitch textures, mowing pattern,
+grain, player contact shadows and stadium geometry are untouched. The intent
+is a more even, slightly darker Day pitch without restoring roof/CSM cost;
+final appearance must be validated on Switch hardware.
+
 ## V12 candidate: native ball-target route, Stadium-scale view, simple Day shadows
 
 2026-09-18. User **confirms stable 60 FPS in Day with V11**, but rejects its

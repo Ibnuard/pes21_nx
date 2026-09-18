@@ -581,10 +581,22 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('PES_CONTROLLER_PROFILE_SINGLE_LEFT', overlay)
         self.assertIn('PES_CONTROLLER_PROFILE_SINGLE_RIGHT', overlay)
         self.assertIn('glUniform4f(gl.loc_color, 0.95f, 0.97f, 1.0f, 1.0f)', overlay)
-        self.assertIn('P1  SKIP', overlay)
-        self.assertIn('P2  SKIP', overlay)
-        self.assertIn('P1  CELEBRATE', overlay)
-        self.assertIn('P2  CELEBRATE', overlay)
+        self.assertIn('const int horizontal_dual', overlay)
+        self.assertIn('strcmp(skip_key0, skip_key1)', overlay)
+        self.assertIn('strcmp(celebrate_key0, celebrate_key1)', overlay)
+        self.assertIn('"GOAL CELEBRATION"', overlay)
+        self.assertNotIn('P1  SKIP', overlay)
+        self.assertNotIn('P2  SKIP', overlay)
+        self.assertNotIn('P1  CELEBRATE', overlay)
+        self.assertNotIn('P2  CELEBRATE', overlay)
+        cinematic_gate = overlay.split(
+            'int cinematic_helper_active =', 1)[1].split(';', 1)[0]
+        self.assertIn('!pes_controller_replay_active()', cinematic_gate)
+        snapshot = hooks.split(
+            'void pes_controller_surface_snapshot', 1)[1].split(
+                'void pes_controller_surface_read', 1)[0]
+        self.assertIn('armTicksToNs(now - goal_pad_seen) <= 120000000ULL',
+                      snapshot)
 
     def test_stamina_uses_custom_overlay_without_native_draw_hook(self):
         hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')

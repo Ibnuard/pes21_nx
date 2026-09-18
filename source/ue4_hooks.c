@@ -1270,6 +1270,7 @@ static void (*pause_registry_system_set_no_replay)(void *settings,
                                                    uint32_t value);
 static uint32_t (*pause_registry_system_is_no_replay_original)(void *settings);
 static _Alignas(4) uint32_t pause_settings_show_replay = 1;
+static _Alignas(4) uint32_t pause_settings_show_nameplate = 1;
 static _Alignas(4) uint32_t pause_game_speed_debug_tmpdb = 2;
 static _Alignas(4) uint32_t pause_game_speed_debug_registry = 2;
 static _Alignas(4) uint32_t pause_game_speed_debug_target_fps;
@@ -1461,6 +1462,8 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
     presented_mask = 0u;
     memset(presented, 0, sizeof(presented));
   }
+  if (!__atomic_load_n(&pause_settings_show_nameplate, __ATOMIC_ACQUIRE))
+    return 0u;
   if (!__atomic_load_n(&match_hud_play_started, __ATOMIC_ACQUIRE))
     return 0u;
 
@@ -1620,7 +1623,7 @@ uint32_t pes_controller_pause_settings_count(void) {
                  PAUSE_SETTINGS_PAGE_CAMERA
              ? (__atomic_load_n(&pause_camera_dynamic_wide_custom,
                                  __ATOMIC_ACQUIRE) ? 1u : 4u)
-             : 6u;
+             : 7u;
 }
 const char *pes_controller_pause_settings_title(void) {
   return __atomic_load_n(&pause_settings_page, __ATOMIC_ACQUIRE) ==
@@ -1631,14 +1634,14 @@ const char *pes_controller_pause_settings_title(void) {
 const char *pes_controller_pause_settings_label(uint32_t index) {
   static const char *const general[] = {
       "RADAR", "GAME SPEED", "NEXT TARGET INDICATOR",
-      "SHOW REPLAY", "CHANT SFX", "COMMENTARY"};
+      "SHOW NAME PLATE", "SHOW REPLAY", "CHANT SFX", "COMMENTARY"};
   static const char *const camera[] = {
       "CAMERA TYPE", "CAMERA HEIGHT", "CAMERA DISTANCE", "CAMERA ANGLE"};
   const uint32_t page = __atomic_load_n(&pause_settings_page,
                                          __ATOMIC_ACQUIRE);
   if (page == PAUSE_SETTINGS_PAGE_CAMERA)
     return index < 4u ? camera[index] : "";
-  return index < 6u ? general[index] : "";
+  return index < 7u ? general[index] : "";
 }
 static _Alignas(4) uint32_t match_gameplan_pause_route;
 static _Alignas(4) uint32_t match_result_input_action;
@@ -13064,7 +13067,12 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
     goal_player =
         __atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE) &&
         __atomic_load_n(&match_goal_demo_player_goal, __ATOMIC_ACQUIRE);
-    goal_helper_visible =
+    // The surface lifetime intentionally tolerates a 500 ms heartbeat gap,
+    // but the visible A/B legend must not survive the black hand-off into or
+    // out of Replay.  Require a recent interactive-button heartbeat for the
+    // legend while keeping the broader GoalDemo owner alive for input.
+    goal_helper_visible = goal_pad_seen &&
+        armTicksToNs(now - goal_pad_seen) <= 120000000ULL &&
         !__atomic_load_n(&match_goal_demo_helper_consumed,
                          __ATOMIC_ACQUIRE);
   } else if (match_native_replay_active_at(now)) {
@@ -14274,15 +14282,20 @@ static void pause_settings_adjust_general(uint32_t focus, uint32_t action) {
   } else if (focus == 2u) {
     pause_settings_toggle_next_target();
   } else if (focus == 3u) {
+    const uint32_t enabled =
+        !__atomic_load_n(&pause_settings_show_nameplate, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&pause_settings_show_nameplate, enabled,
+                     __ATOMIC_RELEASE);
+  } else if (focus == 4u) {
     pause_settings_toggle_replay();
-  } else if (focus == 4u || focus == 5u) {
-    uint32_t *value = focus == 4u ? &pause_settings_chant
-                                : &pause_settings_commentary;
+  } else if (focus == 5u || focus == 6u) {
+    uint32_t *value = focus == 5u ? &pause_settings_chant
+                                  : &pause_settings_commentary;
     const uint32_t enabled = !__atomic_load_n(value, __ATOMIC_ACQUIRE);
     __atomic_store_n(value, enabled, __ATOMIC_RELEASE);
     // Native categories: 2=Commentary, 3=Crowd (chants and cheers).
     if (pause_settings_volume)
-      pause_settings_volume(focus == 4u ? 3u : 2u, enabled ? 1.0f : 0.0f);
+      pause_settings_volume(focus == 5u ? 3u : 2u, enabled ? 1.0f : 0.0f);
   } else {
     return;
   }
@@ -14290,10 +14303,12 @@ static void pause_settings_adjust_general(uint32_t focus, uint32_t action) {
   // One event per user change, never per draw/frame. Identify the action so
   // a future capture can distinguish speed changes from other settings.
   char line[192];
-  snprintf(line, sizeof(line), "[SETTINGS] ns=%llu page=general row=%u action=%u label=\"%s\" value=\"%s\" stamina=off\n",
+  snprintf(line, sizeof(line), "[SETTINGS] ns=%llu page=general row=%u action=%u label=\"%s\" value=\"%s\" nameplate=%s\n",
            (unsigned long long)perf_trace_now_ns(), focus, action,
            pes_controller_pause_settings_label(focus),
-           pes_controller_pause_settings_value(focus));
+           pes_controller_pause_settings_value(focus),
+           __atomic_load_n(&pause_settings_show_nameplate, __ATOMIC_ACQUIRE)
+               ? "on" : "off");
   perf_trace_log_line(line);
 #endif
 }
@@ -14414,13 +14429,17 @@ const char *pes_controller_pause_settings_value(uint32_t index) {
     return !resident || resident[0x44 + 3] == 0u ? "ON" : "OFF";
   }
   if (index == 3u)
-    return __atomic_load_n(&pause_settings_show_replay, __ATOMIC_ACQUIRE)
+    return __atomic_load_n(&pause_settings_show_nameplate, __ATOMIC_ACQUIRE)
                ? "ON"
                : "OFF";
   if (index == 4u)
+    return __atomic_load_n(&pause_settings_show_replay, __ATOMIC_ACQUIRE)
+               ? "ON"
+               : "OFF";
+  if (index == 5u)
     return __atomic_load_n(&pause_settings_chant, __ATOMIC_ACQUIRE) ? "ON"
                                                                     : "OFF";
-  if (index == 5u)
+  if (index == 6u)
     return __atomic_load_n(&pause_settings_commentary, __ATOMIC_ACQUIRE)
                ? "ON"
                : "OFF";

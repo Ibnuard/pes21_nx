@@ -30,7 +30,10 @@ static char *pitch_shadow_source(const char *source) {
   // Day-only additive grazing highlight, not the base texture or scene tint.
   // Retain peak green and use the accepted grass's approximate R:G:B ratio.
   const char *old_tint = "vec3(8.755540e-01,1.000000e+00,0.000000e+00)";
-  const char *new_tint = "vec3(6.000000e-01,1.000000e+00,2.900000e-01)";
+  // Roof OFF exposes this view-dependent grazing term across the whole pitch.
+  // Keep its accepted hue, but reduce the amplitude by 20% so broad daylight
+  // patches no longer wash out the authored mow pattern and grain.
+  const char *new_tint = "vec3(4.800000e-01,8.000000e-01,2.320000e-01)";
   const char *tint = strstr(body, old_tint);
   if (!tint || strstr(tint+strlen(old_tint), old_tint)) return NULL;
   // Reduce the native depth comparison slope slightly; preserve all nine
@@ -58,6 +61,7 @@ static char *pitch_shadow_source(const char *source) {
     "highp float nxMask = smoothstep(0.05, 0.18, (nxGrass.g-max(nxGrass.r,nxGrass.b))/max(nxGrass.g,0.0001));\n"
     "highp vec3 nxTint = nxGrass*vec3(0.82,1.0,1.12);\n"
     "nxTint *= dot(nxGrass,vec3(0.2126,0.7152,0.0722))/max(dot(nxTint,vec3(0.2126,0.7152,0.0722)),0.0001);\n"
+    "nxTint *= 0.96;\n"
     "out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);\n"
     "// NX pitch hue end\n";
   size_t offset = (size_t)(end-result)+strlen(output), total = strlen(result);

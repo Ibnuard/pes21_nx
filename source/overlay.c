@@ -1662,7 +1662,8 @@ static void overlay_render(void) {
   // meanings.
   int cinematic_helper_active =
       !custom_2p_transition && goal_demo_active &&
-      controller_snapshot.goal_helper_visible;
+      controller_snapshot.goal_helper_visible &&
+      !pes_controller_replay_active();
   const int cinematic_goal_actions = goal_demo_player;
   const int cinematic_goal_two_player =
       goal_demo_active && pes_controller_native_pad_lab_two_player();
@@ -6356,53 +6357,81 @@ static void overlay_render(void) {
     const float skip_y = 0.865f * (float)screen_height;
     const float celebrate_y = 0.945f * (float)screen_height;
     const float generic_y = 0.925f * (float)screen_height;
-    const uint32_t group_count = cinematic_goal_two_player ? 2u : 1u;
-    const float helper_x[2] = {
-        (cinematic_goal_two_player ? 0.075f : 0.825f) * (float)screen_width,
-        0.705f * (float)screen_width};
-    for (uint32_t group = 0; group < group_count; ++group) {
-      const uint32_t profile = android_controller_profile(group);
-      const char *skip_key =
-          profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
-              ? "LEFT"
-              : (profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B");
-      const char *celebrate_key =
-          profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT
-              ? "DOWN"
-              : (profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "X" : "A");
-      ADD_SWITCH_HELPER(skip_key, helper_x[group],
+    const uint32_t profile0 = android_controller_profile(0);
+    const uint32_t profile1 = android_controller_profile(1);
+    const char *skip_key0 =
+        profile0 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+            ? "LEFT"
+            : (profile0 == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B");
+    const char *skip_key1 =
+        profile1 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+            ? "LEFT"
+            : (profile1 == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B");
+    const char *celebrate_key0 =
+        profile0 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+            ? "DOWN"
+            : (profile0 == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "X" : "A");
+    const char *celebrate_key1 =
+        profile1 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
+            ? "DOWN"
+            : (profile1 == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "X" : "A");
+    const int horizontal_dual = cinematic_goal_two_player &&
+        (profile0 != PES_CONTROLLER_PROFILE_FULL ||
+         profile1 != PES_CONTROLLER_PROFILE_FULL) &&
+        (strcmp(skip_key0, skip_key1) ||
+         strcmp(celebrate_key0, celebrate_key1));
+    const float first_x =
+        (horizontal_dual ? 0.785f : 0.825f) * (float)screen_width;
+    const float second_x = 0.825f * (float)screen_width;
+    ADD_SWITCH_HELPER(skip_key0, first_x,
+                      cinematic_goal_actions ? skip_y : generic_y,
+                      helper_radius * 2.0f);
+    if (horizontal_dual)
+      ADD_SWITCH_HELPER(skip_key1, second_x,
                         cinematic_goal_actions ? skip_y : generic_y,
                         helper_radius * 2.0f);
-      if (cinematic_goal_actions)
-        ADD_SWITCH_HELPER(celebrate_key, helper_x[group], celebrate_y,
+    if (cinematic_goal_actions) {
+      ADD_SWITCH_HELPER(celebrate_key0, first_x, celebrate_y,
+                        helper_radius * 2.0f);
+      if (horizontal_dual)
+        ADD_SWITCH_HELPER(celebrate_key1, second_x, celebrate_y,
                           helper_radius * 2.0f);
     }
 
     const float gh = helper_text_gh;
     cinematic_helper_text_first_quad = quads;
-    for (uint32_t group = 0; group < group_count; ++group) {
-      const float label_x = helper_x[group] + helper_radius * 1.55f;
-      const char *skip_label = cinematic_goal_two_player
-                                   ? (group ? "P2  SKIP" : "P1  SKIP")
-                                   : "SKIP";
-      int label_quads = emit_efootball_line(
-          skip_label, (int)strlen(skip_label), label_x,
+    if (horizontal_dual) {
+      const float slash_x = first_x + helper_radius * 1.42f;
+      int slash_quads = emit_efootball_line(
+          "/", 1, slash_x,
           (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f,
           gh, EFOOTBALL_FONT_REGULAR, verts + quads * 24);
+      cinematic_helper_text_quads += slash_quads;
+      quads += slash_quads;
+      if (cinematic_goal_actions) {
+        slash_quads = emit_efootball_line(
+            "/", 1, slash_x, celebrate_y - gh * 0.5f,
+            gh, EFOOTBALL_FONT_REGULAR, verts + quads * 24);
+        cinematic_helper_text_quads += slash_quads;
+        quads += slash_quads;
+      }
+    }
+    const float label_x = (horizontal_dual ? second_x : first_x) +
+                          helper_radius * 1.55f;
+    int label_quads = emit_efootball_line(
+        "SKIP", 4, label_x,
+        (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f,
+        gh, EFOOTBALL_FONT_REGULAR, verts + quads * 24);
+    cinematic_helper_text_quads += label_quads;
+    quads += label_quads;
+    if (cinematic_goal_actions) {
+      const char *celebrate_label = "GOAL CELEBRATION";
+      label_quads = emit_efootball_line(
+          celebrate_label, (int)strlen(celebrate_label), label_x,
+          celebrate_y - gh * 0.5f, gh, EFOOTBALL_FONT_REGULAR,
+          verts + quads * 24);
       cinematic_helper_text_quads += label_quads;
       quads += label_quads;
-      if (cinematic_goal_actions) {
-        const char *celebrate_label =
-            cinematic_goal_two_player
-                ? (group ? "P2  CELEBRATE" : "P1  CELEBRATE")
-                : "CELEBRATE";
-        label_quads = emit_efootball_line(
-            celebrate_label, (int)strlen(celebrate_label), label_x,
-            celebrate_y - gh * 0.5f, gh, EFOOTBALL_FONT_REGULAR,
-            verts + quads * 24);
-        cinematic_helper_text_quads += label_quads;
-        quads += label_quads;
-      }
     }
   }
   const char *setplay_keys[5] = {NULL, NULL, NULL, NULL, NULL};

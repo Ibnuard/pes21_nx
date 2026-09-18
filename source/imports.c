@@ -2119,7 +2119,7 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
     const GLchar *source = patched;
     glShaderSource(shader, 1, &source, NULL);
     debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
-    debugPrintf("pitch-shadow: day slope=0.85 tint=grass-v2 grade=0.82,1.00,1.12 luma-preserved shader=%u\n", shader);
+    debugPrintf("pitch-shadow: day slope=0.85 tint=grass-v3 highlight=0.80 grade=0.82,1.00,1.12 luminance=0.96 shader=%u\n", shader);
     free(patched);
   } else glShaderSource(shader, count, strings, lengths);
 }

@@ -39,6 +39,7 @@ static uint32_t pause_camera_saved_dynamic_wide_custom;
 static unsigned char pause_camera_saved_settings[15];
 static unsigned char manager[80], resident[0x18400];
 static uint32_t pause_settings_radar, pause_settings_show_replay;
+static uint32_t pause_settings_show_nameplate;
 static uint32_t pause_settings_chant, pause_settings_commentary;
 static uint32_t available=1, apply_calls;
 static void *get_manager(void) { return available ? manager : NULL; }
