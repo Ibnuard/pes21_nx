@@ -1,5 +1,19 @@
 # HUD render candidate — 2026-09-16
 
+## Set-play power gauge and authentic shirt numbers — 2026-09-19
+
+- **Shirt number resolution**: 	mpdb::util::GetUniformNo defaults to 10 (#0xa)
+  when a player's ID is not present in the static tmpdb database (such as updated
+  transfers or migrated squads). Shirt numbers are now resolved directly from
+  authoritative master rosters (xhibition_find_roster) using the player's 32-bit
+  unique identity, falling back to GetUniformNo only when uncatalogued.
+- **Set-play power gauges**: Custom action power bars now render for the four
+  dead-ball situations (corner, close free kick, far free kick, goal kick)
+  even though IsInplayTime() reports false. A bottom-centered fallback anchor is
+  used when 3D cursor foot projection is absent. Gauges are strictly dismissed on
+  replay transition, goal demo, pause, cinematic, or when button hold duration
+  exceeds 120 frames (2 seconds) to avoid lingering on lost balls.
+
 ## Post-checkpoint away-card mirror — 2026-09-18
 
 Checkpoint `53874bf` (`checkpoint-nameplate-day-pitch-v2`) preserves the

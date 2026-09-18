@@ -6635,9 +6635,29 @@ static void overlay_render(void) {
       quads += n; setplay_helper_text_quads += n;
     }
   }
+  const int setplay_gauge_supported =
+      (setplay_context == PES_SETPLAY_CORNER ||
+       setplay_context == PES_SETPLAY_FREE_KICK ||
+       setplay_context == PES_SETPLAY_GOAL_KICK);
+
+  const int match_active =
+      !pes_controller_replay_active() &&
+      !pes_controller_goal_demo_active() &&
+      !pes_controller_cinematic_skip_active() &&
+      !pes_controller_fix_demo_skip_active() &&
+      !pes_controller_pause_skin_active() &&
+      !pes_controller_pause_transition() &&
+      !pes_controller_match_result_skin() &&
+      !pes_controller_match_result_transition() &&
+      pes_controller_virtual_cursor_context() == PES_VIRTUAL_CURSOR_NONE;
+
+  const int gauge_allowed =
+      match_active &&
+      (pes_controller_match_hud_inplay() || setplay_gauge_supported);
+
   if (native_lab && !custom_popup && !modal_match_frontend &&
       !tutorial_play_active && !custom_2p_transition &&
-      pes_controller_match_hud_inplay() && (native_debug.gauge_active_mask & 3u)) {
+      gauge_allowed && (native_debug.gauge_active_mask & 3u)) {
     // Each local pad has an independent visual-only bar. Keeping both states
     // in the snapshot avoids the stock Screen2d PlayerNo/global gauge path,
     // which is why P2 previously appeared on P1's cursor.
@@ -6655,9 +6675,8 @@ static void overlay_render(void) {
       if (!(native_debug.gauge_active_mask & (1u << pad)))
         continue;
       const int anchor_valid =
-          (native_debug.gauge_anchor_valid_mask & (1u << pad)) != 0;
-      // Never render this as a fixed HUD widget. If the engine has not yet
-      // published the controlled player's CursorName projection, wait for it.
+          ((native_debug.gauge_anchor_valid_mask & (1u << pad)) != 0) ||
+          setplay_gauge_supported;
       if (!anchor_valid)
         continue;
       const int32_t anchor_x_milli =
@@ -6671,9 +6690,16 @@ static void overlay_render(void) {
       // Projected point is the controlled player's foot position. Center the
       // compact bar there and move it a few pixels down, matching the reference
       // without touching the engine's player/cursor data.
-      bar_x = (float)anchor_x_milli / 1000.0f - bar_w * 0.5f;
-      bar_y = (float)anchor_y_milli / 1000.0f +
-              0.007f * (float)screen_height;
+      const int has_anchor =
+          (native_debug.gauge_anchor_valid_mask & (1u << pad)) != 0;
+      if (has_anchor) {
+        bar_x = (float)anchor_x_milli / 1000.0f - bar_w * 0.5f;
+        bar_y = (float)anchor_y_milli / 1000.0f +
+                0.007f * (float)screen_height;
+      } else {
+        bar_x = (float)screen_width * 0.5f - bar_w * 0.5f;
+        bar_y = (float)screen_height * 0.82f;
+      }
       if (bar_x < padding)
         bar_x = padding;
       if (bar_x + bar_w + padding > (float)screen_width)

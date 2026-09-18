@@ -37,6 +37,7 @@ static void *(*exhibition_tmpdb_manager_get_instance)(void);
 static const void *(*match_tmpdb_match_get_player)(const void *,const uint32_t *,const uint32_t *);
 static const char *(*match_tmpdb_player_get_name)(const void *);
 static uint32_t (*match_hud_uniform_number)(const void *,const uint32_t *);
+static uint32_t (*match_hud_resolve_shirt_number)(uint32_t,uint32_t);
 static uint32_t prematch_gameplan_portrait_id(const void *p,const unsigned char *id) {
   uint32_t result=0; if(id) memcpy(&result,id,4); return result;
 }

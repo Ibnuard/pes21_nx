@@ -532,6 +532,8 @@ static float (*match_projection_display_height)(void);
 static uint32_t (*match_utility_info_is_inplay_time)(const void *info);
 static uint32_t (*match_hud_uniform_number)(const void *player_id,
                                            const uint32_t *team_id);
+static uint32_t (*match_hud_resolve_shirt_number)(uint32_t team_id,
+                                                  uint32_t unique_id);
 static const void *(*match_hud_get_player_info)(const void *registry, uint32_t player_no);
 static uint32_t (*match_hud_get_stamina_percentage)(const void *player);
 static void *(*exhibition_holder_get_duplicate)(void *holder,
@@ -4027,6 +4029,22 @@ static const ExhibitionMasterRoster *exhibition_find_roster(
   return NULL;
 }
 
+static uint32_t match_hud_resolve_shirt_number_impl(uint32_t team_id,
+                                                    uint32_t unique_id) {
+  if (!team_id || !unique_id)
+    return 0u;
+  const ExhibitionMasterRoster *roster = exhibition_find_roster(team_id);
+  if (roster && roster->player_unique_ids && roster->shirt_numbers) {
+    for (uint32_t i = 0; i < roster->player_count; ++i) {
+      if (roster->player_unique_ids[i] == unique_id)
+        return (uint32_t)roster->shirt_numbers[i];
+    }
+  }
+  return 0u;
+}
+static uint32_t (*match_hud_resolve_shirt_number)(uint32_t, uint32_t) =
+    &match_hud_resolve_shirt_number_impl;
+
 static int exhibition_is_valid_team(uint32_t team_id) {
   const ExhibitionMasterRoster *roster = exhibition_find_roster(team_id);
   // A selector entry without a full starting squad can never reach kickoff.
@@ -4767,9 +4785,14 @@ static void live_gameplan_capture_identity(void) {
       LiveGameplanIdentity *identity = &live_gameplan_identity[side][member];
       identity->common_player_id = id;
       snprintf(identity->name, sizeof(identity->name), "%s", name);
-      identity->hud_shirt_number = match_hud_uniform_number
-          ? match_hud_uniform_number((const char *)player + 44,
-                                    &live_gameplan_identity_team[side]) : 0;
+      const uint32_t portrait = (uint32_t)(id >> 32);
+      uint32_t shirt = match_hud_resolve_shirt_number
+          ? match_hud_resolve_shirt_number(live_gameplan_identity_team[side], portrait)
+          : 0u;
+      if (!shirt && match_hud_uniform_number)
+        shirt = match_hud_uniform_number((const char *)player + 44,
+                                         &live_gameplan_identity_team[side]);
+      identity->hud_shirt_number = shirt;
       ++live_gameplan_identity_count[side];
     }
     if (live_gameplan_identity_count[side] < 11) {
@@ -6587,7 +6610,10 @@ static int match_hud_player_info(PesStaminaBarSnapshot *bar) {
     bar->portrait_id = prematch_gameplan_portrait_id(NULL,
                                                    (const unsigned char *)&portrait);
     bar->badge = pes_controller_2p_prematch_hub_badge(side);
-    bar->shirt_number = identity->hud_shirt_number;
+    uint32_t shirt = identity->hud_shirt_number;
+    if (!shirt && match_hud_resolve_shirt_number)
+      shirt = match_hud_resolve_shirt_number(team, portrait);
+    bar->shirt_number = shirt;
     match_hud_cache_identity(bar, team);
     return 1;
   }
@@ -6604,8 +6630,17 @@ static int match_hud_player_info(PesStaminaBarSnapshot *bar) {
   snprintf(bar->name, sizeof(bar->name), "%s", name);
   bar->portrait_id = prematch_gameplan_portrait_id(player, NULL);
   bar->badge = pes_controller_2p_prematch_hub_badge(side);
-  bar->shirt_number = match_hud_uniform_number
-      ? match_hud_uniform_number((const char *)player + 44, &team) : 0;
+  uint32_t pid = 0;
+  uint64_t full_id = 0;
+  if (player) {
+    memcpy(&full_id, (const unsigned char *)player + 44, sizeof(full_id));
+    pid = (uint32_t)(full_id >> 32);
+  }
+  uint32_t fallback_shirt = match_hud_resolve_shirt_number
+      ? match_hud_resolve_shirt_number(team, pid) : 0u;
+  if (!fallback_shirt && match_hud_uniform_number)
+    fallback_shirt = match_hud_uniform_number((const char *)player + 44, &team);
+  bar->shirt_number = fallback_shirt;
   match_hud_cache_identity(bar, team);
   return 1;
 }

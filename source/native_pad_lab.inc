@@ -110,6 +110,7 @@ static uint32_t native_lab_gauge_active_mask;
 // poll cleared a newly pressed gauge before its next charge sample arrived.
 static uint32_t native_lab_gauge_charging_mask;
 static uint32_t native_lab_gauge_missing_hold_frames[2];
+static uint32_t native_lab_gauge_hold_duration_frames[2];
 static uint32_t native_lab_gauge_power_milli_p2;
 static uint32_t native_lab_gauge_power_milli_by_pad[2];
 static uint32_t native_lab_gauge_linger_frames_by_pad[2];
@@ -488,6 +489,7 @@ static void native_lab_gauge_clear_pad(uint32_t pad) {
   if (pad > 1)
     return;
   __atomic_store_n(&native_lab_gauge_missing_hold_frames[pad], 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&native_lab_gauge_hold_duration_frames[pad], 0, __ATOMIC_RELEASE);
   // BallInfo/action completion (or the cancellation safety timeout) releases
   // the trajectory snapshot along with the pad-owned gauge state.
   native_lab_clear_trajectory_cache(pad);
@@ -687,6 +689,10 @@ void pes_controller_native_pad_lab_debug_input(uint32_t port,
       (1u << port)) {
     if (connected && (buttons & 15u)) {
       __atomic_store_n(&native_lab_gauge_missing_hold_frames[port], 0, __ATOMIC_RELEASE);
+      if (__atomic_add_fetch(&native_lab_gauge_hold_duration_frames[port], 1u,
+                             __ATOMIC_ACQ_REL) >= 120u) {
+        native_lab_gauge_clear_pad(port);
+      }
     } else if (__atomic_add_fetch(&native_lab_gauge_missing_hold_frames[port],
                                   1u, __ATOMIC_ACQ_REL) >= 4u) {
       native_lab_gauge_clear_pad(port);
@@ -898,6 +904,16 @@ void pes_controller_native_pad_lab_debug_snapshot(
   if (!snapshot)
     return;
   memset(snapshot, 0, sizeof(*snapshot));
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+  if (pes_controller_replay_active() ||
+      pes_controller_goal_demo_active() ||
+      pes_controller_cinematic_skip_active() ||
+      pes_controller_pause_skin_active() ||
+      pes_controller_match_result_skin()) {
+    native_lab_gauge_clear_pad(0);
+    native_lab_gauge_clear_pad(1);
+  }
+#endif
   snapshot->status = pes_controller_native_pad_lab_status();
   snapshot->context = __atomic_load_n(&native_lab_debug_context,
                                       __ATOMIC_ACQUIRE);
@@ -1188,6 +1204,8 @@ static void native_lab_note_action(const void *input, uint32_t event,
     __atomic_store_n(&native_lab_gauge_power_milli_by_pad[pad], 0,
                      __ATOMIC_RELEASE);
     __atomic_store_n(&native_lab_gauge_linger_frames_by_pad[pad], 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&native_lab_gauge_hold_duration_frames[pad], 0,
                      __ATOMIC_RELEASE);
     uint32_t player_no = UINT32_MAX;
     if (input)
