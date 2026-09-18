@@ -152,6 +152,8 @@ int main(void) {
 #include <stdint.h>
 #include <string.h>
 static uint32_t match_hud_play_started;
+static uint64_t match_hud_play_started_tick;
+static uint64_t armGetSystemTick(void) { return 1000; }
 static uintptr_t match_hud_ball_owner;
 static float match_hud_ball_anchor_x,match_hud_ball_anchor_z;
 static uint32_t match_hud_ball_anchor_valid;

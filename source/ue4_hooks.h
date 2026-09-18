@@ -513,6 +513,10 @@ PesUniformPreviewPng *pes_controller_2p_take_uniform_preview_png(
 int pes_controller_2p_native_uniform_preview_active(void);
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void);
 uint32_t pes_controller_stadium_is_day(void);
+uint32_t pes_controller_stadium_weather(void);
+uint32_t pes_controller_stadium_season(void);
+uint32_t pes_controller_stadium_turf_length(void);
+uint32_t pes_controller_stadium_pitch_condition(void);
 uint32_t pes_controller_roof_shadow_enabled(void);
 #ifdef PERF_TRACE
 uint64_t pes_controller_stadium_perf_key(void);
@@ -547,12 +551,12 @@ uint32_t pes_controller_custom_cpu_popup_value(void);
 uint32_t pes_controller_custom_cpu_popup_count(void);
 const char *pes_controller_custom_cpu_popup_label(uint32_t index);
 int pes_controller_custom_match_settings_active(void);
-#define PES_MATCH_SETTINGS_COUNT 4u
-#define PES_MATCH_SETTINGS_ROW_Y 0.225f
-#define PES_MATCH_SETTINGS_ROW_STEP 0.105f
+#define PES_MATCH_SETTINGS_COUNT 8u
+#define PES_MATCH_SETTINGS_ROW_Y 0.165f
+#define PES_MATCH_SETTINGS_ROW_STEP 0.075f
 // The prematch hub has a taller header than the native settings popup.
-#define PES_HUB_MATCH_SETTINGS_ROW_Y 0.265f
-#define PES_HUB_MATCH_SETTINGS_ROW_STEP 0.105f
+#define PES_HUB_MATCH_SETTINGS_ROW_Y 0.195f
+#define PES_HUB_MATCH_SETTINGS_ROW_STEP 0.075f
 uint32_t pes_controller_custom_match_settings_focus(void);
 uint32_t pes_controller_custom_match_settings_count(void);
 const char *pes_controller_custom_match_settings_label(uint32_t index);

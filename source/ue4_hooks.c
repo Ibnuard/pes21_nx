@@ -314,6 +314,16 @@ static uint32_t (*exhibition_match_is_ex)(const void *match);
 static void (*exhibition_match_set_ex)(void *match, uint32_t enabled);
 static uint32_t (*exhibition_match_is_pk)(const void *match);
 static void (*exhibition_match_set_pk)(void *match, uint32_t enabled);
+static void (*exhibition_match_set_weather)(void *match, uint32_t weather);
+static void (*exhibition_match_set_season)(void *match, uint32_t season);
+static void (*exhibition_match_set_turf_length)(void *match, uint32_t turf_length);
+static void (*exhibition_match_set_pitch_condition)(void *match, uint32_t pitch_condition);
+static void (*exhibition_match_set_ball_id)(void *match, uint16_t ball_id);
+static void (*exhibition_match_set_injury)(void *match, const uint8_t *injury);
+static void (*exhibition_match_set_max_substitutions)(void *match, uint8_t max_subs);
+static void (*exhibition_match_set_max_extra_substitutions)(void *match, uint8_t max_extra);
+static void (*exhibition_competition_set_var)(void *competition, uint32_t var_enabled);
+static void *(*exhibition_commonwork_get_competition)(void *common_work, uint16_t id);
 static void (*match_pause_pad_event_back)(void *window);
 static void (*matchplan_squad_load)(void);
 static void (*matchplan_squad_save)(void);
@@ -1066,6 +1076,27 @@ static _Alignas(8) uint64_t stadium_perf_camera_tick;
 static _Alignas(4) uint32_t exhibition_settings_match_time = 10;
 static _Alignas(4) uint32_t exhibition_settings_extra_time;
 static _Alignas(4) uint32_t exhibition_settings_penalties;
+static _Alignas(4) uint32_t exhibition_settings_substitutions = 5u;
+static _Alignas(4) uint32_t exhibition_settings_injuries = 1u;
+static _Alignas(4) uint32_t exhibition_settings_ball_index;
+static _Alignas(4) uint32_t exhibition_settings_var = 1u;
+static _Alignas(4) uint32_t exhibition_settings_weather;
+static _Alignas(4) uint32_t exhibition_settings_season;
+static _Alignas(4) uint32_t exhibition_settings_turf_length = 1u;
+static _Alignas(4) uint32_t exhibition_settings_pitch_condition = 1u;
+
+uint32_t pes_controller_stadium_weather(void) {
+  return __atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
+}
+uint32_t pes_controller_stadium_season(void) {
+  return __atomic_load_n(&exhibition_settings_season, __ATOMIC_ACQUIRE);
+}
+uint32_t pes_controller_stadium_turf_length(void) {
+  return __atomic_load_n(&exhibition_settings_turf_length, __ATOMIC_ACQUIRE);
+}
+uint32_t pes_controller_stadium_pitch_condition(void) {
+  return __atomic_load_n(&exhibition_settings_pitch_condition, __ATOMIC_ACQUIRE);
+}
 static _Alignas(4) uint32_t exhibition_match_settings_armed;
 // Match Settings is shared by the matchmaking page and the custom prematch
 // hub. The hub replaces the native TIME row with COM LEVEL.
@@ -1288,6 +1319,7 @@ static _Alignas(8) uint64_t match_stamina_anchor_seen_tick[2];
 static _Alignas(8) uint64_t match_hud_inplay_tick;
 static _Alignas(4) uint32_t match_hud_session_serial;
 static _Alignas(4) uint32_t match_hud_play_started;
+static _Alignas(8) uint64_t match_hud_play_started_tick;
 static uintptr_t match_hud_ball_owner;
 static float match_hud_ball_anchor_x;
 static float match_hud_ball_anchor_z;
@@ -1318,6 +1350,7 @@ static void match_hud_reset_ball_motion(void) {
   match_hud_ball_anchor_z = 0.0f;
   match_hud_ball_anchor_valid = 0u;
   __atomic_store_n(&match_hud_play_started, 0u, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_hud_play_started_tick, 0, __ATOMIC_RELEASE);
 }
 
 static void match_hud_observe_ball_motion(const void *registry) {
@@ -1341,8 +1374,10 @@ static void match_hud_observe_ball_motion(const void *registry) {
   // by the Stadium camera gate, yet is reached immediately by a real touch.
   const float moved = hypotf(ball[0] - match_hud_ball_anchor_x,
                              ball[2] - match_hud_ball_anchor_z);
-  if (isfinite(moved) && moved > 0.5f)
+  if (isfinite(moved) && moved > 0.5f) {
     __atomic_store_n(&match_hud_play_started, 1u, __ATOMIC_RELEASE);
+    __atomic_store_n(&match_hud_play_started_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+  }
 }
 
 static void match_stamina_clear_side(uint32_t side) {
@@ -1468,6 +1503,9 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
     return 0u;
   if (!__atomic_load_n(&match_hud_play_started, __ATOMIC_ACQUIRE))
     return 0u;
+  const uint64_t started_tick = __atomic_load_n(&match_hud_play_started_tick, __ATOMIC_ACQUIRE);
+  if (!started_tick || armTicksToNs(armGetSystemTick() - started_tick) < 1000000000ULL)
+    return 0u;
 
   // Complete the small asynchronous portrait reads requested by the active
   // cards. No synchronous asset IO is performed in gameplay.
@@ -1481,8 +1519,10 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
       pes_controller_pause_skin_active() || pes_controller_pause_transition() ||
       pes_controller_match_result_skin() ||
       pes_controller_match_result_transition() ||
-      pes_controller_virtual_cursor_context() != PES_VIRTUAL_CURSOR_NONE)
+      pes_controller_virtual_cursor_context() != PES_VIRTUAL_CURSOR_NONE) {
+    match_hud_reset_ball_motion();
     return 0u;
+  }
 
   const uint32_t active_mask = __atomic_load_n(
       &match_stamina_active_mask, __ATOMIC_ACQUIRE);
@@ -2695,7 +2735,7 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
   if (page == MAIN_MENU_2P_PREMATCH_PAGE_STADIUM) {
     uint32_t row = __atomic_load_n(&main_menu_2p_prematch_hub_page_focus,
                                    __ATOMIC_ACQUIRE);
-    const uint32_t rows = 2u;
+    const uint32_t rows = 6u;
     if (row >= rows) row = rows - 1u;
     uint32_t stadium = __atomic_load_n(
         &main_menu_2p_prematch_stadium_index, __ATOMIC_ACQUIRE);
@@ -2705,17 +2745,33 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
       row = (row + 1u) % rows;
     } else if (pressed & ((1u << 12) | (1u << 13) | (1u << 1))) {
       const int direction = (pressed & (1u << 12)) ? -1 : 1;
+      void *match = exhibition_settings_match
+                        ? exhibition_settings_match
+                        : exhibition_get_tmpdb_match();
       if (row == 0) {
         stadium = direction < 0 ? (stadium ? stadium - 1 : 2)
                                 : (stadium + 1) % 3;
       } else if (row == 1u) {
         const uint32_t value = !__atomic_load_n(
             &exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
-        void *match = exhibition_get_tmpdb_match();
         if (match && exhibition_match_set_time_zone)
           exhibition_match_set_time_zone(match, value);
         __atomic_store_n(&exhibition_settings_time_zone, value,
                          __ATOMIC_RELEASE);
+      } else if (row == 2u) {
+        uint32_t w = !__atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&exhibition_settings_weather, w, __ATOMIC_RELEASE);
+      } else if (row == 3u) {
+        uint32_t s = !__atomic_load_n(&exhibition_settings_season, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&exhibition_settings_season, s, __ATOMIC_RELEASE);
+      } else if (row == 4u) {
+        uint32_t tl = __atomic_load_n(&exhibition_settings_turf_length, __ATOMIC_ACQUIRE);
+        tl = direction < 0 ? (tl ? tl - 1u : 2u) : (tl + 1u) % 3u;
+        __atomic_store_n(&exhibition_settings_turf_length, tl, __ATOMIC_RELEASE);
+      } else if (row == 5u) {
+        uint32_t pc = __atomic_load_n(&exhibition_settings_pitch_condition, __ATOMIC_ACQUIRE);
+        pc = direction < 0 ? (pc ? pc - 1u : 2u) : (pc + 1u) % 3u;
+        __atomic_store_n(&exhibition_settings_pitch_condition, pc, __ATOMIC_RELEASE);
       }
     } else if (pressed & (1u << 0)) {
       __atomic_store_n(&main_menu_2p_prematch_hub_page,
@@ -2876,12 +2932,62 @@ static void exhibition_apply_match_settings(void *match) {
     memcpy(&stadium_zone, (unsigned char *)&init + 4, sizeof(stadium_zone));
   }
   (void)stadium_zone;
+  const uint32_t season = __atomic_load_n(&exhibition_settings_season, __ATOMIC_ACQUIRE);
+  const uint32_t weather_choice = __atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
+  const uint32_t weather = (weather_choice ? 2u : 0u);
+  const uint32_t turf_length = __atomic_load_n(&exhibition_settings_turf_length, __ATOMIC_ACQUIRE);
+  const uint32_t pitch_cond = __atomic_load_n(&exhibition_settings_pitch_condition, __ATOMIC_ACQUIRE);
+  if (exhibition_match_get_stadium_init && exhibition_match_set_stadium_init) {
+    TmpdbStadiumInitParamValue init = exhibition_match_get_stadium_init(match);
+    memcpy((unsigned char *)&init + 8, &season, sizeof(season));
+    memcpy((unsigned char *)&init + 12, &weather, sizeof(weather));
+    memcpy((unsigned char *)&init + 0x78, &turf_length, sizeof(turf_length));
+    memcpy((unsigned char *)&init + 0x7c, &pitch_cond, sizeof(pitch_cond));
+    exhibition_match_set_stadium_init(match, &init);
+  }
+  if (exhibition_match_set_weather)
+    exhibition_match_set_weather(match, weather);
+  if (exhibition_match_set_season)
+    exhibition_match_set_season(match, season);
+  if (exhibition_match_set_turf_length)
+    exhibition_match_set_turf_length(match, turf_length);
+  if (exhibition_match_set_pitch_condition)
+    exhibition_match_set_pitch_condition(match, pitch_cond);
   if (exhibition_match_set_match_time)
     exhibition_match_set_match_time(match, match_time);
   if (exhibition_match_set_ex)
     exhibition_match_set_ex(match, extra_time);
   if (exhibition_match_set_pk)
     exhibition_match_set_pk(match, penalties);
+  if (exhibition_match_set_max_substitutions) {
+    const uint32_t subs = __atomic_load_n(&exhibition_settings_substitutions, __ATOMIC_ACQUIRE);
+    exhibition_match_set_max_substitutions(match, (uint8_t)subs);
+  }
+  if (exhibition_match_set_max_extra_substitutions) {
+    const uint8_t extra_sub = extra_time ? 1u : 0u;
+    exhibition_match_set_max_extra_substitutions(match, extra_sub);
+  }
+  if (exhibition_match_set_injury) {
+    const uint8_t inj = __atomic_load_n(&exhibition_settings_injuries, __ATOMIC_ACQUIRE) ? 1u : 0u;
+    exhibition_match_set_injury(match, &inj);
+  }
+  if (exhibition_match_set_ball_id) {
+    static const uint16_t match_ball_ids[10] = {
+      19u, 20u, 17u, 21u, 22u, 901u, 902u, 903u, 904u, 905u
+    };
+    const uint32_t bidx = __atomic_load_n(&exhibition_settings_ball_index, __ATOMIC_ACQUIRE) % 10u;
+    exhibition_match_set_ball_id(match, match_ball_ids[bidx]);
+  }
+  void *manager = exhibition_tmpdb_manager_get_instance ? exhibition_tmpdb_manager_get_instance() : NULL;
+  void *common_work = NULL;
+  if (manager) memcpy(&common_work, (const unsigned char *)manager + 64, sizeof(common_work));
+  if (common_work && exhibition_commonwork_get_competition && exhibition_competition_set_var) {
+    void *comp = exhibition_commonwork_get_competition(common_work, 0xffffu);
+    if (comp) {
+      const uint32_t var_on = __atomic_load_n(&exhibition_settings_var, __ATOMIC_ACQUIRE);
+      exhibition_competition_set_var(comp, var_on);
+    }
+  }
   debugPrintf("exhibition: committed match rules time=%u zone=%u ex=%u pk=%u "
               "match=%p\n",
               match_time, time_zone, extra_time, penalties, match);
@@ -3231,6 +3337,26 @@ static void exhibition_adjust_match_setting(int direction) {
       exhibition_match_set_pk(match, value);
     __atomic_store_n(&exhibition_settings_penalties, value,
                      __ATOMIC_RELEASE);
+  } else if (focus == 4) {
+    value = __atomic_load_n(&exhibition_settings_substitutions, __ATOMIC_ACQUIRE);
+    if (direction < 0)
+      value = value <= 3u ? 5u : value - 1u;
+    else
+      value = value >= 5u ? 3u : value + 1u;
+    __atomic_store_n(&exhibition_settings_substitutions, value, __ATOMIC_RELEASE);
+  } else if (focus == 5) {
+    value = !__atomic_load_n(&exhibition_settings_injuries, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&exhibition_settings_injuries, value, __ATOMIC_RELEASE);
+  } else if (focus == 6) {
+    value = __atomic_load_n(&exhibition_settings_ball_index, __ATOMIC_ACQUIRE);
+    if (direction < 0)
+      value = value ? value - 1u : 9u;
+    else
+      value = (value + 1u) % 10u;
+    __atomic_store_n(&exhibition_settings_ball_index, value, __ATOMIC_RELEASE);
+  } else if (focus == 7) {
+    value = !__atomic_load_n(&exhibition_settings_var, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&exhibition_settings_var, value, __ATOMIC_RELEASE);
   } else {
     return;
   }
@@ -6091,7 +6217,7 @@ uint32_t pes_controller_custom_match_settings_count(void) {
 
 const char *pes_controller_custom_match_settings_label(uint32_t index) {
   static const char *const labels[] = {
-      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES"};
+      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES", "SUBSTITUTIONS", "INJURIES", "BALL", "VAR"};
   const uint32_t native_index =
       index + exhibition_match_settings_first_index();
   if (native_index == 0 && exhibition_match_settings_cpu_level_visible())
@@ -6133,6 +6259,24 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
                            __ATOMIC_ACQUIRE)
                ? "ON"
                : "OFF";
+  if (index == 4) {
+    const uint32_t subs = __atomic_load_n(&exhibition_settings_substitutions, __ATOMIC_ACQUIRE);
+    if (subs == 3) return "3";
+    if (subs == 4) return "4";
+    return "5";
+  }
+  if (index == 5)
+    return __atomic_load_n(&exhibition_settings_injuries, __ATOMIC_ACQUIRE) ? "ON" : "OFF";
+  if (index == 6) {
+    static const char *const ball_names[10] = {
+      "TRIPLETTA", "UNIFORIA EURO", "WE-PES CLASSIC", "REGISTA", "MOMENTO",
+      "SPECIAL BRONZE", "SPECIAL SILVER", "SPECIAL GOLD", "SPECIAL BLACK", "METALLIC EDITION"
+    };
+    const uint32_t bidx = __atomic_load_n(&exhibition_settings_ball_index, __ATOMIC_ACQUIRE) % 10u;
+    return ball_names[bidx];
+  }
+  if (index == 7)
+    return __atomic_load_n(&exhibition_settings_var, __ATOMIC_ACQUIRE) ? "ON" : "OFF";
   return "";
 }
 
@@ -16983,6 +17127,26 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(module, "_ZNK5tmpdb5Match4IsPkEv");
   exhibition_match_set_pk =
       (void *)so_find_addr_rx(module, "_ZN5tmpdb5Match5SetPkEb");
+  exhibition_match_set_weather = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match10SetWeatherEN6common11WeatherTypeE");
+  exhibition_match_set_season = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match9SetSeasonEN6common10SeasonTypeE");
+  exhibition_match_set_turf_length = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match13SetTurfLengthEN6common11TURF_LENGTHE");
+  exhibition_match_set_pitch_condition = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match17SetPitchConditionEN6common15PITCH_CONDITIONE");
+  exhibition_match_set_ball_id = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match9SetBallIdEt");
+  exhibition_match_set_injury = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match9SetInjuryERKb");
+  exhibition_match_set_max_substitutions = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match19SetMaxSubstitutionsEh");
+  exhibition_match_set_max_extra_substitutions = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match24SetMaxExtraSubstitutionsEh");
+  exhibition_competition_set_var = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb11Competition6SetVarEb");
+  exhibition_commonwork_get_competition = (void *)so_find_addr_rx(
+      module, "_ZNK5tmpdb10CommonWork14GetCompetitionEt");
   exhibition_match_setting_create_child =
       (void *)so_find_addr_rx(
           module,

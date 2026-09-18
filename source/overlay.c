@@ -2295,6 +2295,7 @@ static void overlay_render(void) {
   RoundedRectStyle prematch_gameplan_field_plate_style = {0};
   RoundedRectStyle prematch_gameplan_context_plate_style = {0};
 
+
   for (uint32_t i = 0; i < stamina_bar_count; ++i) {
     const uint32_t side = stamina_bars[i].side;
     if (side >= PES_STAMINA_BAR_CAPACITY)
@@ -4402,41 +4403,39 @@ static void overlay_render(void) {
         quads++;
       }
   } else if (custom_hub_settings_popup) {
-    // Match Settings is a child of the pre-match hub, but it gets its own
-    // console-style page: dark title band, light selected row, blue value
-    // capsules and eFootball typography over the same custom background.
-    // TIME (DAY/NIGHT) has moved to Stadium. A 1P match keeps its COM-level
-    // row; the 2P hub exposes only the four settings shared by two humans.
+    // Match Settings / General Settings: viewport-windowed scrollable list.
+    // Container height is respected; items outside the visible window are not
+    // rendered and scrolling follows focus smoothly without overflowing.
     const uint32_t item_count = pause_settings_popup
                                     ? pes_controller_pause_settings_count()
                                     : pes_controller_custom_match_settings_count();
-    const int compact_settings = pause_settings_popup && item_count > 5u;
-    const uint32_t focus = pause_settings_popup ? pes_controller_pause_settings_focus() : pes_controller_custom_match_settings_focus();
+    const uint32_t max_visible = 5u;
+    const uint32_t visible_count = item_count < max_visible ? item_count : max_visible;
+    const uint32_t focus = pause_settings_popup
+                               ? pes_controller_pause_settings_focus()
+                               : pes_controller_custom_match_settings_focus();
+    uint32_t start_index = 0;
+    if (focus >= visible_count) {
+      start_index = focus - visible_count + 1u;
+      if (start_index + visible_count > item_count)
+        start_index = item_count - visible_count;
+    }
+    const uint32_t focus_slot = focus >= start_index ? focus - start_index : 0u;
+
     const float panel_x = 0.17f * (float)screen_width;
-    const float panel_y = (compact_settings ? 0.045f : 0.095f) *
-                          (float)screen_height;
+    const float panel_y = 0.080f * (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
-    const float panel_h = (compact_settings ? 0.825f : 0.700f) *
-                          (float)screen_height;
+    const float panel_h = 0.770f * (float)screen_height;
     const float panel_radius = 0.025f * (float)screen_height;
-    const float header_h = (compact_settings ? 0.095f : 0.125f) *
-                           (float)screen_height;
+    const float header_h = 0.115f * (float)screen_height;
     const float row_x = panel_x + 0.040f * (float)screen_width;
     const float row_w = panel_w - 0.080f * (float)screen_width;
-    const float row_y0 = panel_y + header_h +
-                         (compact_settings ? 0.025f : 0.045f) *
-                             (float)screen_height;
-    const float row_h = (compact_settings ? 0.064f : 0.078f) *
-                        (float)screen_height;
-    const float row_step = (compact_settings ? 0.085f : 0.105f) *
-                          (float)screen_height;
+    const float row_y0 = panel_y + header_h + 0.030f * (float)screen_height;
+    const float row_h = 0.082f * (float)screen_height;
+    const float row_step = 0.108f * (float)screen_height;
     const float value_w = 0.205f * (float)screen_width;
     const float value_h = 0.058f * (float)screen_height;
-    // Keep the focused row symmetric. Move the selector group left so both
-    // arrows live inside the white surface instead of stretching that surface
-    // toward the panel's right edge.
-    const float value_x = panel_x + panel_w -
-                          0.070f * (float)screen_width - value_w;
+    const float value_x = panel_x + panel_w - 0.070f * (float)screen_width - value_w;
     const float button_gh = helper_text_gh;
     const float key_r = (pause_settings_popup ? 0.0225f : 0.021f) * screen_height;
     const float key_gap = 0.017f * screen_height;
@@ -4475,21 +4474,35 @@ static void overlay_render(void) {
         0.014f * (float)screen_height};
     custom_selected_quads = emit_round_rect_quad(
         row_x + selector_inset,
-        row_y0 + row_step * (float)focus + selector_inset,
+        row_y0 + row_step * (float)focus_slot + selector_inset,
         row_w - selector_inset * 2.0f,
         row_h - selector_inset * 2.0f,
         verts + quads * 24);
     quads += custom_selected_quads;
-    for (uint32_t row = 0; row + 1 < item_count; row++) {
-      const float rule_y = row_y0 + row_step * (float)(row + 1) -
-                           (row_step - row_h) * 0.5f;
+
+    const float divider_h = fmaxf(1.8f, (float)screen_height / 450.0f);
+    for (uint32_t slot = 0; slot + 1 < visible_count; slot++) {
+      const float rule_y = floorf(row_y0 + row_step * (float)(slot + 1) -
+                           (row_step - row_h) * 0.5f);
       custom_rule_quads += emit_rect(
-          row_x, rule_y, row_w, (float)screen_height / 720.0f,
+          row_x, rule_y, row_w, divider_h,
           verts + quads * 24);
       quads++;
     }
-    for (uint32_t item = 0; item < item_count; item++) {
-      const float value_y = row_y0 + row_step * (float)item +
+    if (item_count > visible_count) {
+      const float rail_x = panel_x + panel_w - 0.020f * (float)screen_width;
+      const float rail_y = row_y0;
+      const float rail_w = fmaxf(2.0f, 0.003f * (float)screen_width);
+      const float rail_h = row_step * (float)(visible_count - 1) + row_h;
+      custom_rule_quads += emit_rect(rail_x, rail_y, rail_w, rail_h, verts + quads * 24);
+      quads++;
+      const float thumb_h = rail_h * (float)visible_count / (float)item_count;
+      const float thumb_y = rail_y + (rail_h - thumb_h) * (float)start_index / (float)(item_count - visible_count);
+      custom_rule_quads += emit_rect(rail_x - 0.001f * (float)screen_width, thumb_y, rail_w + 0.002f * (float)screen_width, thumb_h, verts + quads * 24);
+      quads++;
+    }
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const float value_y = row_y0 + row_step * (float)slot +
                             (row_h - value_h) * 0.5f;
       custom_value_plate_style =
           (RoundedRectStyle){value_w, value_h, value_h * 0.5f};
@@ -4499,8 +4512,8 @@ static void overlay_render(void) {
     }
     const float arrow_w = 0.007f * (float)screen_width;
     const float arrow_h = 0.012f * (float)screen_height;
-    for (uint32_t item = 0; item < item_count; item++) {
-      const float center_y = row_y0 + row_step * (float)item + row_h * 0.5f;
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const float center_y = row_y0 + row_step * (float)slot + row_h * 0.5f;
       const float left_x = value_x - 0.014f * (float)screen_width;
       custom_arrow_quads += emit_triangle(
           left_x + arrow_w, center_y - arrow_h,
@@ -4529,26 +4542,27 @@ static void overlay_render(void) {
     custom_dark_text_first_quad = quads;
     int line_quads = 0;
     custom_focus_text_first_quad = quads;
-    if (focus < item_count) {
+    if (focus < item_count && focus_slot < visible_count) {
       const char *label =
           pause_settings_popup ? pes_controller_pause_settings_label(focus) : pes_controller_custom_match_settings_label(focus);
       line_quads = emit_efootball_line(
           label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
-          row_y0 + row_step * (float)focus +
+          row_y0 + row_step * (float)focus_slot +
               (row_h - label_gh) * 0.5f,
           label_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
       custom_focus_text_quads += line_quads;
       quads += line_quads;
     }
     custom_white_text_first_quad = quads;
-    for (uint32_t item = 0; item < item_count; item++) {
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const uint32_t item = start_index + slot;
       if (item == focus)
         continue;
       const char *label =
           pause_settings_popup ? pes_controller_pause_settings_label(item) : pes_controller_custom_match_settings_label(item);
       line_quads = emit_efootball_line(
           label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
-          row_y0 + row_step * (float)item +
+          row_y0 + row_step * (float)slot +
               (row_h - label_gh) * 0.5f,
           label_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
       custom_white_text_quads += line_quads;
@@ -4565,12 +4579,13 @@ static void overlay_render(void) {
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     custom_white_text_quads += line_quads;
     quads += line_quads;
-    for (uint32_t item = 0; item < item_count; item++) {
+    for (uint32_t slot = 0; slot < visible_count; slot++) {
+      const uint32_t item = start_index + slot;
       const char *value =
           pause_settings_popup ? pes_controller_pause_settings_value(item) : pes_controller_custom_match_settings_value(item);
       const float width = measure_efootball_line(
           value, (int)strlen(value), value_gh, EFOOTBALL_FONT_BOLD);
-      const float value_y = row_y0 + row_step * (float)item +
+      const float value_y = row_y0 + row_step * (float)slot +
                             (row_h - value_gh) * 0.5f;
       line_quads = emit_efootball_line(
           value, (int)strlen(value), value_x + (value_w - width) * 0.5f,
@@ -4609,11 +4624,11 @@ static void overlay_render(void) {
     // Kits and Stadium use the same native-console settings language: one
     // modal card, a dark title band, white focused row, blue value capsule,
     // and arrows that remain completely inside the selected surface.
-    const uint32_t row_count = 2u;
+    const uint32_t row_count = custom_hub_kits_page ? 2u : 6u;
     const uint32_t raw_focus = pes_controller_2p_prematch_hub_page_focus();
     const uint32_t focus = raw_focus < row_count ? raw_focus : row_count - 1u;
-    static const char *const stadium_labels[] = {
-        "STADIUM", "MATCH TIME"};
+    static const char *const stadium_labels[6] = {
+        "STADIUM", "MATCH TIME", "WEATHER", "SEASON", "GRASS LENGTH", "PITCH CONDITION"};
     const float panel_x = 0.17f * (float)screen_width;
     const float panel_y = 0.075f * (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
@@ -4628,10 +4643,10 @@ static void overlay_render(void) {
                          (custom_hub_kits_page
                               ? 0.330f * (float)screen_height
                               : 0.0f);
-    const float row_h = 0.082f * (float)screen_height;
-    const float row_step = 0.110f * (float)screen_height;
+    const float row_h = (custom_hub_kits_page ? 0.082f : 0.066f) * (float)screen_height;
+    const float row_step = (custom_hub_kits_page ? 0.110f : 0.088f) * (float)screen_height;
     const float value_w = 0.205f * (float)screen_width;
-    const float value_h = 0.058f * (float)screen_height;
+    const float value_h = (custom_hub_kits_page ? 0.058f : 0.052f) * (float)screen_height;
     const float value_x = panel_x + panel_w -
                           0.070f * (float)screen_width - value_w;
     const float key_r = 0.021f * (float)screen_height;
@@ -4690,10 +4705,11 @@ static void overlay_render(void) {
       }
     }
 
+    const float stadium_divider_h = fmaxf(1.8f, (float)screen_height / 450.0f);
     for (uint32_t row = 1; row < row_count; row++) {
+      const float rule_y = floorf(row_y0 + row_step * (float)row - (row_step - row_h) * 0.5f);
       custom_rule_quads += emit_rect(
-          row_x, row_y0 + row_step * row - (row_step - row_h) * 0.5f,
-          row_w, (float)screen_height / 720.0f, verts + quads * 24);
+          row_x, rule_y, row_w, stadium_divider_h, verts + quads * 24);
       quads++;
     }
     for (uint32_t row = 0; row < row_count; row++) {
@@ -4809,8 +4825,19 @@ static void overlay_render(void) {
             "AUTO", "HOME", "AWAY"};
         value = stadium_options[
             pes_controller_2p_prematch_hub_stadium_index()];
-      } else {
+      } else if (row == 1) {
         value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
+      } else if (row == 2) {
+        static const char *const weather_options[2] = {"FINE", "CLOUDY"};
+        value = weather_options[pes_controller_stadium_weather() & 1u];
+      } else if (row == 3) {
+        value = pes_controller_stadium_season() ? "WINTER" : "SUMMER";
+      } else if (row == 4) {
+        static const char *const turf_options[3] = {"SHORT", "NORMAL", "LONG"};
+        value = turf_options[pes_controller_stadium_turf_length() % 3u];
+      } else {
+        static const char *const pitch_options[3] = {"DRY", "NORMAL", "WET"};
+        value = pitch_options[pes_controller_stadium_pitch_condition() % 3u];
       }
       const float width = measure_efootball_line(
           value, (int)strlen(value), value_gh, EFOOTBALL_FONT_BOLD);

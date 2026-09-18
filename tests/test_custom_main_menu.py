@@ -137,7 +137,7 @@ class CustomMainMenuTests(unittest.TestCase):
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
         header = (ROOT / "source/ue4_hooks.h").read_text(encoding="utf-8")
         config = (ROOT / "source/config.c").read_text(encoding="utf-8")
-        self.assertIn("#define PES_MATCH_SETTINGS_COUNT 4u", header)
+        self.assertIn("#define PES_MATCH_SETTINGS_COUNT 8u", header)
         self.assertNotIn("PLAYER CURSOR", hooks)
         self.assertNotIn("player_cursor_show", hooks)
         self.assertNotIn("player_cursor_show", config)
