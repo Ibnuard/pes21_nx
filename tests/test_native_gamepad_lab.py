@@ -586,16 +586,18 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('P1  CELEBRATE', overlay)
         self.assertIn('P2  CELEBRATE', overlay)
 
-    def test_stamina_is_fully_native_without_overlay_or_draw_hook(self):
+    def test_stamina_uses_custom_overlay_without_native_draw_hook(self):
         hooks = (ROOT/'source/ue4_hooks.c').read_text(encoding='utf-8')
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
         self.assertNotIn('pause_stamina_canvas_draw_item', hooks)
         self.assertNotIn('_ZN7UCanvas8DrawItemER11FCanvasItem', hooks)
         self.assertNotIn('pause_stamina_get_model_original', hooks)
         self.assertNotIn('(const char *)data + 0x6c', hooks)
-        self.assertNotIn('pause_stamina_hud_power_milli', hooks)
         self.assertNotIn('stamina_outline_first_quad', overlay)
-        self.assertNotIn('stamina_fill_first_quad', overlay)
+        self.assertIn('match_stamina_publish_from_model', hooks)
+        self.assertIn('pes_controller_stamina_bars(', overlay)
+        self.assertIn('stamina_fill_first_quad', overlay)
+        self.assertIn('stamina_appeared_tick', overlay)
 
     def test_substitute_names_are_left_aligned_and_keep_marquee(self):
         overlay = (ROOT/'source/overlay.c').read_text(encoding='utf-8')
@@ -1488,7 +1490,7 @@ class NativeGamepadLabTests(unittest.TestCase):
                       shim)
         self.assertIn('cursor_previous_buttons = pause_cursor_p2', shim)
         gauge = re.search(
-            r'if \(native_lab && !custom_popup && \(native_debug\.gauge_active_mask & 3u\)\).*?\n  \}',
+            r'if \(native_lab && !custom_popup && !modal_match_frontend &&.*?\n  \}',
             overlay, re.S).group(0)
         self.assertIn('bar_x, bar_y, bar_w, bar_h', gauge)
         self.assertNotIn('bar_x - padding, bar_y - padding', gauge)

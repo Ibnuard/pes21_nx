@@ -22,12 +22,17 @@ class SettingsExitTests(unittest.TestCase):
         self.assertNotIn('"STADIUM CUSTOM"', body)
         self.assertNotIn("PRESET", body)
 
-    def test_stamina_is_always_hidden_without_reading_player_state(self):
+    def test_native_stamina_is_hidden_without_publishing(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
 #include <stdint.h>
 #include <assert.h>
+static uint32_t published;
+static void match_stamina_publish_from_model(void *model, uint32_t index) {
+  (void)model;
+  published |= 1u << index;
+}
 ''' + function(SOURCE, "pause_stamina_disp") + r'''
 int main(void) {
   for (uint32_t i = 0; i < 4; ++i) {
@@ -35,6 +40,7 @@ int main(void) {
     assert(pause_stamina_disp(0, i) == 0);
   }
   assert(pause_stamina_disp(0, UINT32_MAX) == 0);
+  assert(published == 0u);
 }
 ''')
         self.assertNotIn('pause_settings_stamina', SOURCE)

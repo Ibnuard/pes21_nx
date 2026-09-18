@@ -75,9 +75,11 @@ typedef struct {
   uint32_t replay_feedback;
 } PesControllerSnapshot;
 
-// Compatibility layout retained for older overlay code. The current runtime
-// hides native stamina gauges and publishes no overlay bars.
-#define PES_STAMINA_BAR_CAPACITY 4u
+// Custom presentation data sourced from the native NamePlateInfo state. The
+// native ModelStaminaGauge renderer remains hidden because its Switch draw
+// path is not reliable; only the authoritative percentage and player identity
+// are forwarded to the overlay.
+#define PES_STAMINA_BAR_CAPACITY 2u
 typedef struct {
   float x;
   float y;
@@ -85,7 +87,19 @@ typedef struct {
   float height;
   float power;
   uint32_t rgba;
+  uint32_t player_no;
+  uint32_t side;
+  uint32_t portrait_id;
+  uint32_t badge;
+  uint32_t shirt_number;
+  char name[48];
 } PesStaminaBarSnapshot;
+int pes_controller_match_hud_inplay(void);
+uint32_t pes_controller_match_hud_session(void);
+#ifdef DEBUG_LOG
+void pes_controller_hud_diagnostic(uint32_t overlay_blockers, uint32_t cards,
+                                   uint32_t draws, float alpha0, float alpha1);
+#endif
 
 // Captured immediately after the custom pause page applies Game Speed. This
 // lets the overlay distinguish a UI-only value from the registry/runtime FPS

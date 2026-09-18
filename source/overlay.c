@@ -1900,10 +1900,84 @@ static void overlay_render(void) {
     native_setplay_debug = 0;
   }
 
+  PesStaminaBarSnapshot stamina_bars[PES_STAMINA_BAR_CAPACITY] = {{0}};
+  float stamina_reveal[PES_STAMINA_BAR_CAPACITY] = {0.0f};
+  uint32_t stamina_bar_count = 0;
+#ifdef DEBUG_LOG
+  static uint32_t hud_diag_draws;
+#endif
+  if (!custom_popup && !modal_match_frontend && !tutorial_play_active &&
+      !startup_transition && !start_prompt && !custom_main_menu &&
+      controller_snapshot.surface == PES_CONTROLLER_SURFACE_NONE) {
+    stamina_bar_count = pes_controller_stamina_bars(
+        stamina_bars, PES_STAMINA_BAR_CAPACITY);
+  }
+
+  // Replay/pause/loading is a hard visibility cut, but not a new presentation
+  // session. The entrance animation is played once per MatchSetup and never
+  // again for cursor changes or temporary gameplay transitions.
+  static uint32_t stamina_introduced_mask = 0;
+  static uint32_t stamina_reveal_session = UINT32_MAX;
+  static uint32_t stamina_player_no[PES_STAMINA_BAR_CAPACITY] = {
+      UINT32_MAX, UINT32_MAX};
+  static float stamina_display_power[PES_STAMINA_BAR_CAPACITY] = {0.0f};
+  static uint64_t stamina_appeared_tick[PES_STAMINA_BAR_CAPACITY] = {0};
+  const uint64_t stamina_now = armGetSystemTick();
+  const uint32_t stamina_session = pes_controller_match_hud_session();
+  if (stamina_reveal_session != stamina_session) {
+    stamina_reveal_session = stamina_session;
+    stamina_introduced_mask = 0;
+    memset(stamina_appeared_tick, 0, sizeof(stamina_appeared_tick));
+    for (uint32_t side = 0; side < PES_STAMINA_BAR_CAPACITY; ++side)
+      stamina_player_no[side] = UINT32_MAX;
+  }
+  for (uint32_t i = 0; i < stamina_bar_count; ++i) {
+    const uint32_t side = stamina_bars[i].side;
+    if (side >= PES_STAMINA_BAR_CAPACITY)
+      continue;
+    const uint32_t bit = 1u << side;
+    const int switched = stamina_player_no[side] != stamina_bars[i].player_no;
+    if (!(stamina_introduced_mask & bit)) {
+      stamina_appeared_tick[side] = stamina_now;
+      stamina_display_power[side] = stamina_bars[i].power;
+      stamina_player_no[side] = stamina_bars[i].player_no;
+      stamina_introduced_mask |= bit;
+    } else if (switched) {
+      // A control switch replaces the value immediately but must not replay
+      // the kickoff reveal every time selection moves to another player.
+      stamina_display_power[side] = stamina_bars[i].power;
+      stamina_player_no[side] = stamina_bars[i].player_no;
+    } else {
+      // Native stamina changes in discrete percentage steps. A short visual
+      // ease keeps depletion organic without adding simulation latency.
+      stamina_display_power[side] +=
+          (stamina_bars[i].power - stamina_display_power[side]) * 0.18f;
+    }
+    stamina_bars[i].power = stamina_display_power[side];
+    float reveal = stamina_appeared_tick[side]
+                       ? (float)armTicksToNs(
+                             stamina_now - stamina_appeared_tick[side]) /
+                             220000000.0f
+                       : 1.0f;
+    if (reveal > 1.0f)
+      reveal = 1.0f;
+    if (reveal < 0.0f)
+      reveal = 0.0f;
+    stamina_reveal[i] = reveal * reveal * (3.0f - 2.0f * reveal);
+  }
+#ifdef DEBUG_LOG
+  pes_controller_hud_diagnostic(
+      (!!custom_popup) | ((!!modal_match_frontend) << 1) |
+      ((!!tutorial_play_active) << 2) | ((!!startup_transition) << 3) |
+      ((!!start_prompt) << 4) | ((!!custom_main_menu) << 5) |
+      ((controller_snapshot.surface != PES_CONTROLLER_SURFACE_NONE) << 6),
+      stamina_bar_count, hud_diag_draws, stamina_reveal[0], stamina_reveal[1]);
+#endif
   if ((!config.show_fps || !fps.text[0]) && !selector && !custom_main_menu &&
       !startup_transition && !start_prompt && !custom_popup &&
       !gameplan_cursor &&
       !native_lab &&
+      !stamina_bar_count &&
       !result_skin && !result_transition &&
       !setplay_options && !pause_camera_active && !tutorial_play_active &&
       !cinematic_helper_active && penalty_role_p1 == PES_PENALTY_NONE &&
@@ -1912,7 +1986,7 @@ static void overlay_render(void) {
   if (!gl_init())
     return;
   prepare_uniform_thumbnail_preview(custom_hub_kits_page);
-  prepare_gameplan_portraits(custom_gameplan);
+  prepare_gameplan_portraits(custom_gameplan || stamina_bar_count);
   // A/B helper glyphs share the main-menu button textures. GoalDemo can be the
   // first custom surface in a session, so include it in the upload gate rather
   // than binding two generated-but-empty texture names.
@@ -1988,6 +2062,24 @@ static void overlay_render(void) {
   int power_gauge_segment_first_quad[2] = {0};
   int power_gauge_segment_quads[2] = {0};
   int power_gauge_active_segments[2] = {0};
+  int stamina_shadow_first_quad[2] = {0};
+  int stamina_shadow_quads[2] = {0};
+  int stamina_track_first_quad[2] = {0};
+  int stamina_track_quads[2] = {0};
+  int stamina_fill_first_quad[2] = {0};
+  int stamina_fill_quads[2] = {0};
+  int stamina_highlight_first_quad[2] = {0};
+  int stamina_highlight_quads[2] = {0};
+  RoundedRectStyle stamina_shadow_style[2] = {{0}};
+  RoundedRectStyle stamina_track_style[2] = {{0}};
+  RoundedRectStyle stamina_fill_style[2] = {{0}};
+  RoundedRectStyle stamina_highlight_style[2] = {{0}};
+  float stamina_alpha[2] = {0.0f};
+  float stamina_fill_rgb[2][3] = {{0}};
+  int hud_card_quad[2] = {0}, hud_portrait_quad[2] = {0};
+  int hud_badge_quad[2] = {0}, hud_text_quad[2] = {0}, hud_text_count[2] = {0};
+  GLuint hud_portrait_texture[2] = {0};
+  RoundedRectStyle hud_card_style[2] = {{0}};
   int cinematic_helper_text_first_quad = 0;
   int cinematic_helper_text_quads = 0;
   int gameplan_cursor_first_quad = 0;
@@ -2186,6 +2278,130 @@ static void overlay_render(void) {
   RoundedRectStyle prematch_gameplan_modal_style[2] = {{0}};
   RoundedRectStyle prematch_gameplan_field_plate_style = {0};
   RoundedRectStyle prematch_gameplan_context_plate_style = {0};
+
+  for (uint32_t i = 0; i < stamina_bar_count; ++i) {
+    const uint32_t side = stamina_bars[i].side;
+    if (side >= PES_STAMINA_BAR_CAPACITY)
+      continue;
+    float power = stamina_bars[i].power;
+    if (power < 0.0f)
+      power = 0.0f;
+    if (power > 1.0f)
+      power = 1.0f;
+    const float reveal = stamina_reveal[i];
+    const float card_w = 0.275f * screen_width;
+    const float card_h = 0.057f * screen_height;
+    const float card_x = side ? screen_width * 0.98f - card_w : screen_width * 0.02f;
+    const float card_y = screen_height * 0.918f + (1.0f - reveal) * 0.020f * screen_height;
+    const float horizontal_pad = 0.00625f * screen_width;
+    const float cell_gap = 0.0050f * screen_width;
+    const float portrait_size = 0.072f * screen_height;
+    const float badge_size = 0.032f * screen_height;
+    const float badge_x = side ? card_x + card_w - horizontal_pad - badge_size
+                               : card_x + horizontal_pad;
+    const float portrait_x = side ? badge_x - cell_gap - portrait_size
+                                  : badge_x + badge_size + cell_gap;
+    const float text_x = side ? card_x + horizontal_pad
+                              : portrait_x + portrait_size + cell_gap;
+    const float text_right = side ? portrait_x - cell_gap
+                                  : card_x + card_w - horizontal_pad;
+    const float text_w = fmaxf(1.0f, text_right - text_x);
+    hud_card_style[side] = (RoundedRectStyle){card_w, card_h, 1.5f};
+    hud_card_quad[side] = quads;
+    quads += emit_round_rect_quad(card_x, card_y, card_w, card_h, verts + quads * 24);
+    hud_portrait_quad[side] = quads;
+    hud_portrait_texture[side] = gameplan_portrait_texture(stamina_bars[i].portrait_id);
+    quads += emit_image_rect(portrait_x, card_y + card_h - portrait_size,
+                            portrait_size, portrait_size, verts + quads * 24);
+    hud_badge_quad[side] = quads;
+    quads += emit_badge(stamina_bars[i].badge, badge_x,
+                        card_y + (card_h - badge_size) * 0.5f,
+                        badge_size, badge_size, verts + quads * 24);
+    char label[80];
+    if (side)
+      snprintf(label, sizeof(label), "%s  %u", stamina_bars[i].name, stamina_bars[i].shirt_number);
+    else
+      snprintf(label, sizeof(label), "%u  %s", stamina_bars[i].shirt_number, stamina_bars[i].name);
+    hud_text_quad[side] = quads;
+    hud_text_count[side] = emit_efootball_fit_line(label, (int)strlen(label),
+        text_x, card_y + card_h * 0.31f, text_w,
+        screen_height * 0.025f, screen_height * 0.019f,
+        EFOOTBALL_FONT_REGULAR, verts + quads * 24);
+    quads += hud_text_count[side];
+    // The stamina meter belongs to the text plate, not the complete card.
+    // Its left edge deliberately matches the shirt-number/name baseline.
+    const float bar_w = text_w;
+    const float bar_h = 0.0030f * screen_height;
+    float x = text_x;
+    float y = card_y + 0.0030f * screen_height;
+    const float edge = 0.008f * (float)screen_width;
+    if (x < edge)
+      x = edge;
+    if (x + bar_w > (float)screen_width - edge)
+      x = (float)screen_width - edge - bar_w;
+    if (y < edge)
+      y = edge;
+    if (y + bar_h > (float)screen_height - edge)
+      y = (float)screen_height - edge - bar_h;
+
+    const float inset = 0.25f;
+    const float inner_h = fmaxf(1.0f, bar_h - inset * 2.0f);
+    const float fill_w = fmaxf(0.0f, (bar_w - inset * 2.0f) * power);
+    stamina_alpha[side] = reveal;
+
+    stamina_shadow_first_quad[side] = quads;
+    stamina_shadow_style[side] = (RoundedRectStyle){
+        bar_w, bar_h, bar_h * 0.5f};
+    stamina_shadow_quads[side] = emit_round_rect_quad(
+        x + 0.0012f * (float)screen_width,
+        y + 0.0018f * (float)screen_height, bar_w, bar_h,
+        verts + quads * 24);
+    quads += stamina_shadow_quads[side];
+
+    stamina_track_first_quad[side] = quads;
+    stamina_track_style[side] = (RoundedRectStyle){
+        bar_w, bar_h, bar_h * 0.5f};
+    stamina_track_quads[side] = emit_round_rect_quad(
+        x, y, bar_w, bar_h, verts + quads * 24);
+    quads += stamina_track_quads[side];
+
+    if (fill_w > 0.1f) {
+      stamina_fill_first_quad[side] = quads;
+      stamina_fill_style[side] = (RoundedRectStyle){
+          fill_w, inner_h, inner_h * 0.5f};
+      stamina_fill_quads[side] = emit_round_rect_quad(
+          x + inset, y + inset, fill_w, inner_h, verts + quads * 24);
+      quads += stamina_fill_quads[side];
+
+      const float highlight_h = fmaxf(0.75f, inner_h * 0.28f);
+      stamina_highlight_first_quad[side] = quads;
+      stamina_highlight_style[side] = (RoundedRectStyle){
+          fill_w, highlight_h, highlight_h * 0.5f};
+      stamina_highlight_quads[side] = emit_round_rect_quad(
+          x + inset, y + inset, fill_w, highlight_h,
+          verts + quads * 24);
+      quads += stamina_highlight_quads[side];
+    }
+
+    // Healthy stamina uses the same restrained turquoise family as the
+    // native eFootball UI. Only the final quarter warms toward amber/red.
+    if (power >= 0.45f) {
+      stamina_fill_rgb[side][0] = 0.03f;
+      stamina_fill_rgb[side][1] = 0.92f;
+      stamina_fill_rgb[side][2] = 0.70f;
+    } else if (power >= 0.22f) {
+      const float t = (power - 0.22f) / 0.23f;
+      stamina_fill_rgb[side][0] = 1.00f - 0.97f * t;
+      stamina_fill_rgb[side][1] = 0.72f + 0.20f * t;
+      stamina_fill_rgb[side][2] = 0.12f + 0.58f * t;
+    } else {
+      const float t = power / 0.22f;
+      stamina_fill_rgb[side][0] = 0.92f + 0.08f * t;
+      stamina_fill_rgb[side][1] = 0.24f + 0.48f * t;
+      stamina_fill_rgb[side][2] = 0.18f - 0.06f * t;
+    }
+  }
+
   if (custom_gameplan) {
     const float margin_x = 0.018f * (float)screen_width;
     const float center_gap = 0.014f * (float)screen_width;
@@ -6366,7 +6582,9 @@ static void overlay_render(void) {
       quads += n; setplay_helper_text_quads += n;
     }
   }
-  if (native_lab && !custom_popup && (native_debug.gauge_active_mask & 3u)) {
+  if (native_lab && !custom_popup && !modal_match_frontend &&
+      !tutorial_play_active && !custom_2p_transition &&
+      pes_controller_match_hud_inplay() && (native_debug.gauge_active_mask & 3u)) {
     // Each local pad has an independent visual-only bar. Keeping both states
     // in the snapshot avoids the stock Screen2d PlayerNo/global gauge path,
     // which is why P2 previously appeared on P1's cursor.
@@ -7005,6 +7223,70 @@ static void overlay_render(void) {
   glUniform1f(gl.loc_round_feather, 1.15f);
   glUniform1f(gl.loc_cursor, 0.0f);
   glUniform1f(gl.loc_cursor_border, 0.0f);
+  if (stamina_bar_count) {
+    // Native scene samplers can require mipmaps absent from HUD textures.
+    // Match the Game Plan portrait path and restore the engine sampler.
+    GLint hud_previous_sampler = 0;
+    if (gl.bind_sampler) {
+      glGetIntegerv(GL_SAMPLER_BINDING, &hud_previous_sampler);
+      gl.bind_sampler(0, 0);
+    }
+    glUniform1f(gl.loc_solid, 1.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    for (uint32_t side = 0; side < PES_STAMINA_BAR_CAPACITY; ++side) {
+      if (!stamina_track_quads[side])
+        continue;
+      const float alpha = stamina_alpha[side];
+      use_rounded_rect(&hud_card_style[side]);
+      glUniform4f(gl.loc_color, 0.025f, 0.09f, 0.075f, 0.76f * alpha);
+      glDrawArrays(GL_TRIANGLES, hud_card_quad[side] * 6, 6);
+#ifdef DEBUG_LOG
+      ++hud_diag_draws;
+#endif
+      use_rounded_rect(NULL);
+      glUniform1f(gl.loc_solid, 0.0f);
+      glUniform1f(gl.loc_image, 1.0f);
+      glUniform4f(gl.loc_color, 1, 1, 1, alpha);
+      glBindTexture(GL_TEXTURE_2D, gl.badge_tex);
+      glDrawArrays(GL_TRIANGLES, hud_badge_quad[side] * 6, 6);
+      if (hud_portrait_texture[side]) {
+        glBindTexture(GL_TEXTURE_2D, hud_portrait_texture[side]);
+        glDrawArrays(GL_TRIANGLES, hud_portrait_quad[side] * 6, 6);
+      }
+      glUniform1f(gl.loc_image, 0.0f);
+      glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+      glDrawArrays(GL_TRIANGLES, hud_text_quad[side] * 6, hud_text_count[side] * 6);
+      glBindTexture(GL_TEXTURE_2D, gl.tex);
+      glUniform1f(gl.loc_solid, 1.0f);
+      use_rounded_rect(&stamina_shadow_style[side]);
+      glUniform4f(gl.loc_color, 0.0f, 0.015f, 0.025f, 0.42f * alpha);
+      glDrawArrays(GL_TRIANGLES, stamina_shadow_first_quad[side] * 6,
+                   stamina_shadow_quads[side] * 6);
+      use_rounded_rect(&stamina_track_style[side]);
+      glUniform4f(gl.loc_color, 0.018f, 0.040f, 0.052f, 0.88f * alpha);
+      glDrawArrays(GL_TRIANGLES, stamina_track_first_quad[side] * 6,
+                   stamina_track_quads[side] * 6);
+      if (stamina_fill_quads[side]) {
+        use_rounded_rect(&stamina_fill_style[side]);
+        glUniform4f(gl.loc_color, stamina_fill_rgb[side][0],
+                    stamina_fill_rgb[side][1], stamina_fill_rgb[side][2],
+                    0.98f * alpha);
+        glDrawArrays(GL_TRIANGLES, stamina_fill_first_quad[side] * 6,
+                     stamina_fill_quads[side] * 6);
+      }
+      if (stamina_highlight_quads[side]) {
+        use_rounded_rect(&stamina_highlight_style[side]);
+        glUniform4f(gl.loc_color, 0.78f, 1.0f, 0.94f, 0.18f * alpha);
+        glDrawArrays(GL_TRIANGLES, stamina_highlight_first_quad[side] * 6,
+                     stamina_highlight_quads[side] * 6);
+      }
+    }
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    if (gl.bind_sampler)
+      gl.bind_sampler(0, (GLuint)hud_previous_sampler);
+  }
   if (start_prompt) {
     use_rounded_rect(NULL);
     glUniform1f(gl.loc_solid, 0.0f);

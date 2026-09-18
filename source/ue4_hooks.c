@@ -529,6 +529,11 @@ static void (*match_model_project_pos_3d_to_screen)(
     void *model, Match2DVector3 position, float *screen_x, float *screen_y);
 static float (*match_projection_display_width)(void);
 static float (*match_projection_display_height)(void);
+static uint32_t (*match_utility_info_is_inplay_time)(const void *info);
+static uint32_t (*match_hud_uniform_number)(const void *player_id,
+                                           const uint32_t *team_id);
+static const void *(*match_hud_get_player_info)(const void *registry, uint32_t player_no);
+static uint32_t (*match_hud_get_stamina_percentage)(const void *player);
 static void *(*exhibition_holder_get_duplicate)(void *holder,
                                                  uint32_t index);
 static void (*exhibition_node_set_visible)(void *node, uint32_t visible,
@@ -954,6 +959,7 @@ static _Alignas(4) uint32_t exhibition_pre_strategy_squad_snapshot_valid[2];
 typedef struct {
   uint64_t common_player_id;
   char name[48];
+  uint32_t hud_shirt_number;
 } LiveGameplanIdentity;
 static LiveGameplanIdentity live_gameplan_identity[2][PREMATCH_GAMEPLAN_MAX_PLAYERS];
 static uint32_t live_gameplan_identity_count[2];
@@ -1269,9 +1275,168 @@ static _Alignas(4) uint32_t pause_game_speed_debug_registry = 2;
 static _Alignas(4) uint32_t pause_game_speed_debug_target_fps;
 static _Alignas(4) uint32_t pause_game_speed_debug_runtime_fps_milli;
 static _Alignas(4) uint32_t pause_game_speed_debug_apply_count;
+static _Alignas(4) uint32_t match_stamina_active_mask;
+static _Alignas(4) uint32_t match_stamina_power_milli[2];
+static _Alignas(4) uint32_t match_stamina_player_no[2];
+static _Alignas(4) int32_t match_stamina_anchor_x_milli[2];
+static _Alignas(4) int32_t match_stamina_anchor_y_milli[2];
+static _Alignas(8) uint64_t match_stamina_info_seen_tick[2];
+static _Alignas(8) uint64_t match_stamina_anchor_seen_tick[2];
+static _Alignas(8) uint64_t match_hud_inplay_tick;
+static _Alignas(4) uint32_t match_hud_session_serial;
+static _Alignas(4) uint32_t match_hud_play_started;
+static uintptr_t match_hud_ball_owner;
+static float match_hud_ball_anchor_x;
+static float match_hud_ball_anchor_z;
+static uint32_t match_hud_ball_anchor_valid;
+static int match_hud_player_info(PesStaminaBarSnapshot *bar);
+static void live_gameplan_poll_portraits(void);
+typedef struct {
+  uint32_t team;
+  uint32_t player_no;
+  uint32_t portrait_id;
+  uint32_t badge;
+  uint32_t shirt_number;
+  uint64_t seen_tick;
+  char name[48];
+} MatchHudIdentityCache;
+static MatchHudIdentityCache match_hud_identity_cache[2];
+#ifdef DEBUG_LOG
+static uint32_t hud_diag_publish[6];
+static uint32_t hud_diag_identity_ok, hud_diag_identity_fail;
+#define HUD_DIAG_EVENT(n) __atomic_fetch_add(&hud_diag_publish[n], 1u, __ATOMIC_RELAXED)
+#else
+#define HUD_DIAG_EVENT(n) ((void)0)
+#endif
+
+static void match_hud_reset_ball_motion(void) {
+  match_hud_ball_owner = 0;
+  match_hud_ball_anchor_x = 0.0f;
+  match_hud_ball_anchor_z = 0.0f;
+  match_hud_ball_anchor_valid = 0u;
+  __atomic_store_n(&match_hud_play_started, 0u, __ATOMIC_RELEASE);
+}
+
+static void match_hud_observe_ball_motion(const void *registry) {
+  if (__atomic_load_n(&match_hud_play_started, __ATOMIC_ACQUIRE) ||
+      !registry || !match_ball_info_get_trans)
+    return;
+  const void *ball_info = NULL;
+  memcpy(&ball_info, (const char *)registry + 0x90, sizeof(ball_info));
+  const float *ball = ball_info ? match_ball_info_get_trans(ball_info) : NULL;
+  if (!ball || !isfinite(ball[0]) || !isfinite(ball[2]))
+    return;
+  if (match_hud_ball_owner != (uintptr_t)ball_info ||
+      !match_hud_ball_anchor_valid) {
+    match_hud_ball_owner = (uintptr_t)ball_info;
+    match_hud_ball_anchor_x = ball[0];
+    match_hud_ball_anchor_z = ball[2];
+    match_hud_ball_anchor_valid = 1u;
+    return;
+  }
+  // Half a world unit is above the stationary-ball noise already validated
+  // by the Stadium camera gate, yet is reached immediately by a real touch.
+  const float moved = hypotf(ball[0] - match_hud_ball_anchor_x,
+                             ball[2] - match_hud_ball_anchor_z);
+  if (isfinite(moved) && moved > 0.5f)
+    __atomic_store_n(&match_hud_play_started, 1u, __ATOMIC_RELEASE);
+}
+
+static void match_stamina_clear_side(uint32_t side) {
+  if (side >= 2u)
+    return;
+  __atomic_fetch_and(&match_stamina_active_mask, ~(1u << side),
+                     __ATOMIC_RELEASE);
+  __atomic_store_n(&match_stamina_info_seen_tick[side], 0,
+                   __ATOMIC_RELEASE);
+}
+
+static void match_stamina_hold_side(uint32_t side) {
+  if (side >= 2u ||
+      !(__atomic_load_n(&match_stamina_active_mask, __ATOMIC_ACQUIRE) &
+        (1u << side)))
+    return;
+  // Cursor hand-off briefly exposes neither the old nor new PlayerNo. Keep
+  // the last complete publication fresh until the replacement is complete.
+  __atomic_store_n(&match_stamina_info_seen_tick[side], armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+}
+
+static void match_stamina_publish_from_model(void *model, uint32_t index) {
+  HUD_DIAG_EVENT(0);
+  if (!model || index >= 2u || !match_utility_info_is_inplay_time) {
+    HUD_DIAG_EVENT(1);
+    __atomic_store_n(&match_hud_inplay_tick, 0, __ATOMIC_RELEASE);
+    match_stamina_clear_side(index);
+    return;
+  }
+
+  const void *info = NULL;
+  memcpy(&info, (const char *)model + 0x18, sizeof(info));
+  // Native gauge visibility is not a match-lifecycle signal. In particular,
+  // Info +0x1a30 has no verified scene-cover semantics; copying that gate can
+  // silence the replacement HUD as well. Use in-play plus the explicit
+  // replay/pause/loading owners in pes_controller_match_hud_inplay instead.
+  if (!info || !match_utility_info_is_inplay_time(info)) {
+    HUD_DIAG_EVENT(2);
+    __atomic_store_n(&match_hud_inplay_tick, 0, __ATOMIC_RELEASE);
+    match_stamina_clear_side(index);
+    return;
+  }
+
+  __atomic_store_n(&match_hud_inplay_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+
+  const void *registry = match_global_registry_get_instance
+      ? match_global_registry_get_instance() : NULL;
+  match_hud_observe_ball_motion(registry);
+
+  // Manager::UpdateNamePlateInfo maintains one 0x20-byte record per side.
+  // Use this record for identity, not its above-head gauge visibility. The
+  // fixed card must survive native cursor/gauge display changes during play.
+  const char *record = (const char *)info + index * 0x20u;
+  uint32_t team = 0;
+  uint32_t player_no = 0;
+  memcpy(&team, record + 0x18c, sizeof(team));
+  memcpy(&player_no, record + 0x190, sizeof(player_no));
+  if (team != index || player_no > 21u || player_no / 11u != index) {
+    // ModelCursorName slots 2/3 use the per-side NPC record. Exhibition's
+    // COM side has no controller gauge, but still owns an opponent nameplate.
+    const char *npc = (const char *)info + index * 0x20u;
+    memcpy(&team, npc + 0x48c, sizeof(team));
+    memcpy(&player_no, npc + 0x490, sizeof(player_no));
+    if (team != index || player_no > 21u || player_no / 11u != index) {
+      HUD_DIAG_EVENT(3);
+      match_stamina_hold_side(index);
+      return;
+    }
+  }
+
+  // Stamina simulation stays enabled natively even when GetDisp returns zero.
+  // Read the live player value directly rather than a presentation-only copy.
+  const void *player = registry && match_hud_get_player_info
+      ? match_hud_get_player_info(registry, player_no) : NULL;
+  if (!player || !match_hud_get_stamina_percentage) {
+    HUD_DIAG_EVENT(4);
+    match_stamina_hold_side(index);
+    return;
+  }
+  const uint32_t percentage = match_hud_get_stamina_percentage(player);
+  HUD_DIAG_EVENT(5);
+
+  const uint32_t clamped = percentage > 100u ? 100u : percentage;
+  __atomic_store_n(&match_stamina_power_milli[index], clamped * 10u,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_stamina_player_no[index], player_no,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&match_stamina_info_seen_tick[index], armGetSystemTick(),
+                   __ATOMIC_RELEASE);
+  __atomic_fetch_or(&match_stamina_active_mask, 1u << index,
+                    __ATOMIC_RELEASE);
+}
+
 static uint32_t pause_stamina_disp(void *model, uint32_t index) {
-  // Hide all native gauge slots until their Switch drawing path is reliable.
-  // This is presentation only: player stamina simulation remains native.
+  // Presentation only: disabled gauge drawing is not a reliable update clock.
+  // CursorName publishes the shared live Info for the replacement cards.
   (void)model;
   (void)index;
   return 0u;
@@ -1279,12 +1444,147 @@ static uint32_t pause_stamina_disp(void *model, uint32_t index) {
 
 uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
                                      uint32_t capacity) {
-  (void)bars;
-  (void)capacity;
-  // Compatibility ABI for older overlay callers. Both overlay and native
-  // stamina gauges are intentionally disabled.
-  return 0u;
+  if (!bars || !capacity || !pes_controller_match_hud_inplay() ||
+      pes_mobile_control_active_mode() == PES_MOBILE_CONTROL_UNKNOWN)
+    return 0u;
+
+  // Cache only complete snapshots. During a cursor hand-off the native
+  // PlayerNo can become visible one frame before its tmpdb identity; keep the
+  // previous complete card until the replacement is ready instead of
+  // dropping and rebuilding the whole plate.
+  static PesStaminaBarSnapshot presented[2];
+  static uint32_t presented_mask;
+  static uint32_t presented_session = UINT32_MAX;
+  const uint32_t session = pes_controller_match_hud_session();
+  if (presented_session != session) {
+    presented_session = session;
+    presented_mask = 0u;
+    memset(presented, 0, sizeof(presented));
+  }
+  if (!__atomic_load_n(&match_hud_play_started, __ATOMIC_ACQUIRE))
+    return 0u;
+
+  // Complete the small asynchronous portrait reads requested by the active
+  // cards. No synchronous asset IO is performed in gameplay.
+  live_gameplan_poll_portraits();
+
+  PesControllerSnapshot surface = {0};
+  pes_controller_surface_cached_snapshot(&surface);
+  if (surface.surface != PES_CONTROLLER_SURFACE_NONE ||
+      pes_controller_replay_active() || pes_controller_goal_demo_active() ||
+      pes_controller_cinematic_skip_active() ||
+      pes_controller_pause_skin_active() || pes_controller_pause_transition() ||
+      pes_controller_match_result_skin() ||
+      pes_controller_match_result_transition() ||
+      pes_controller_virtual_cursor_context() != PES_VIRTUAL_CURSOR_NONE)
+    return 0u;
+
+  const uint32_t active_mask = __atomic_load_n(
+      &match_stamina_active_mask, __ATOMIC_ACQUIRE);
+  uint32_t count = 0;
+  for (uint32_t side = 0; side < 2u && count < capacity; ++side) {
+    if (!(active_mask & (1u << side)))
+      continue;
+    const uint64_t info_seen = __atomic_load_n(
+        &match_stamina_info_seen_tick[side], __ATOMIC_ACQUIRE);
+    // Sample the clock AFTER the producer timestamp. Otherwise an update
+    // between the reads underflows unsigned subtraction and looks stale.
+    const uint64_t now = armGetSystemTick();
+    if (!info_seen || armTicksToNs(now - info_seen) > 80000000ULL)
+      continue;
+
+    PesStaminaBarSnapshot *bar = &bars[count];
+    memset(bar, 0, sizeof(*bar));
+    bar->x = (float)__atomic_load_n(
+                 &match_stamina_anchor_x_milli[side], __ATOMIC_ACQUIRE) /
+             1000.0f;
+    bar->y = (float)__atomic_load_n(
+                 &match_stamina_anchor_y_milli[side], __ATOMIC_ACQUIRE) /
+             1000.0f;
+    bar->width = 0.106f * (float)screen_width;
+    bar->height = 0.0075f * (float)screen_height;
+    bar->power = (float)__atomic_load_n(
+                     &match_stamina_power_milli[side], __ATOMIC_ACQUIRE) /
+                 1000.0f;
+    bar->rgba = side == 0u ? 0x14d9b6ffu : 0x38bdf8ffu;
+    bar->player_no = __atomic_load_n(
+        &match_stamina_player_no[side], __ATOMIC_ACQUIRE);
+    bar->side = side;
+    if (!match_hud_player_info(bar)) {
+#ifdef DEBUG_LOG
+      ++hud_diag_identity_fail;
+#endif
+      if (!(presented_mask & (1u << side)))
+        continue;
+      *bar = presented[side];
+    } else {
+#ifdef DEBUG_LOG
+      ++hud_diag_identity_ok;
+#endif
+      presented[side] = *bar;
+      presented_mask |= 1u << side;
+    }
+    ++count;
+  }
+  return count;
 }
+
+int pes_controller_match_hud_inplay(void) {
+  const uint64_t seen = __atomic_load_n(&match_hud_inplay_tick, __ATOMIC_ACQUIRE);
+  PesControllerSnapshot surface = {0};
+  pes_controller_surface_cached_snapshot(&surface);
+  return seen && armTicksToNs(armGetSystemTick() - seen) <= 80000000ULL &&
+      surface.surface == PES_CONTROLLER_SURFACE_NONE &&
+      pes_mobile_control_active_mode() != PES_MOBILE_CONTROL_UNKNOWN &&
+      !pes_controller_replay_active() && !pes_controller_goal_demo_active() &&
+      !pes_controller_cinematic_skip_active() &&
+      !pes_controller_fix_demo_skip_active() &&
+      !pes_controller_pause_skin_active() && !pes_controller_pause_transition() &&
+      !pes_controller_match_result_skin() && !pes_controller_match_result_transition() &&
+      pes_controller_virtual_cursor_context() == PES_VIRTUAL_CURSOR_NONE;
+}
+
+uint32_t pes_controller_match_hud_session(void) {
+  return __atomic_load_n(&match_hud_session_serial, __ATOMIC_ACQUIRE);
+}
+
+#ifdef DEBUG_LOG
+void pes_controller_hud_diagnostic(uint32_t overlay_blockers, uint32_t cards,
+                                   uint32_t draws, float alpha0, float alpha1) {
+  static uint64_t last;
+  const uint64_t now = armGetSystemTick();
+  if (last && armTicksToNs(now - last) < 1000000000ULL) return;
+  last = now;
+  PesControllerSnapshot surface = {0};
+  pes_controller_surface_cached_snapshot(&surface);
+  const uint64_t seen = __atomic_load_n(&match_hud_inplay_tick, __ATOMIC_ACQUIRE);
+  const uint64_t s0 = __atomic_load_n(&match_stamina_info_seen_tick[0], __ATOMIC_ACQUIRE);
+  const uint64_t s1 = __atomic_load_n(&match_stamina_info_seen_tick[1], __ATOMIC_ACQUIRE);
+  const uint64_t clock = armGetSystemTick();
+  debugPrintf("[HUD-DIAG-v1] overlay=%x cards=%u draws=%u alpha=%.3f/%.3f live=%d age_ms=%llu/%llu/%llu surface=%u mobile=%u replay=%d goal=%d cinematic=%d fixdemo=%d pause=%d transition=%d result=%d result_transition=%d cursor=%u active=%u player=%u/%u power=%u/%u publish=%u badmodel=%u notinplay=%u badidentity=%u noregistry=%u published=%u identity_ok=%u identity_fail=%u\n",
+      overlay_blockers, cards, draws, alpha0, alpha1, pes_controller_match_hud_inplay(),
+      (unsigned long long)(seen ? armTicksToNs(clock-seen)/1000000u : UINT64_MAX),
+      (unsigned long long)(s0 ? armTicksToNs(clock-s0)/1000000u : UINT64_MAX),
+      (unsigned long long)(s1 ? armTicksToNs(clock-s1)/1000000u : UINT64_MAX),
+      surface.surface, pes_mobile_control_active_mode(), pes_controller_replay_active(),
+      pes_controller_goal_demo_active(), pes_controller_cinematic_skip_active(),
+      pes_controller_fix_demo_skip_active(), pes_controller_pause_skin_active(),
+      pes_controller_pause_transition(), pes_controller_match_result_skin(),
+      pes_controller_match_result_transition(), pes_controller_virtual_cursor_context(),
+      __atomic_load_n(&match_stamina_active_mask, __ATOMIC_ACQUIRE),
+      __atomic_load_n(&match_stamina_player_no[0], __ATOMIC_ACQUIRE),
+      __atomic_load_n(&match_stamina_player_no[1], __ATOMIC_ACQUIRE),
+      __atomic_load_n(&match_stamina_power_milli[0], __ATOMIC_ACQUIRE),
+      __atomic_load_n(&match_stamina_power_milli[1], __ATOMIC_ACQUIRE),
+      __atomic_load_n(&hud_diag_publish[0], __ATOMIC_RELAXED),
+      __atomic_load_n(&hud_diag_publish[1], __ATOMIC_RELAXED),
+      __atomic_load_n(&hud_diag_publish[2], __ATOMIC_RELAXED),
+      __atomic_load_n(&hud_diag_publish[3], __ATOMIC_RELAXED),
+      __atomic_load_n(&hud_diag_publish[4], __ATOMIC_RELAXED),
+      __atomic_load_n(&hud_diag_publish[5], __ATOMIC_RELAXED),
+      hud_diag_identity_ok, hud_diag_identity_fail);
+}
+#endif
 
 int pes_controller_game_speed_debug(PesGameSpeedDebug *snapshot) {
   if (!snapshot)
@@ -2734,6 +3034,19 @@ static void exhibition_publish_prepared_matchplan(void) {
 }
 
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
+  // MatchSetup is the lifetime boundary for presentation-only HUD state.
+  // Replay, pause, and loading transitions occur inside this lifetime and
+  // therefore must not replay the HUD entrance animation.
+  __atomic_fetch_add(&match_hud_session_serial, 1u, __ATOMIC_ACQ_REL);
+  match_hud_reset_ball_motion();
+  __atomic_store_n(&match_stamina_active_mask, 0u, __ATOMIC_RELEASE);
+  __atomic_store_n(&match_hud_inplay_tick, 0u, __ATOMIC_RELEASE);
+  for (uint32_t side = 0; side < 2u; ++side) {
+    __atomic_store_n(&match_stamina_info_seen_tick[side], 0u,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&match_stamina_player_no[side], UINT32_MAX,
+                     __ATOMIC_RELEASE);
+  }
   __atomic_store_n(&stadium_shadow_budget_requested,
                    pes_controller_stadium_is_day() ? 1u : 2u, __ATOMIC_RELEASE);
 #ifdef PERF_TRACE
@@ -4451,6 +4764,9 @@ static void live_gameplan_capture_identity(void) {
       LiveGameplanIdentity *identity = &live_gameplan_identity[side][member];
       identity->common_player_id = id;
       snprintf(identity->name, sizeof(identity->name), "%s", name);
+      identity->hud_shirt_number = match_hud_uniform_number
+          ? match_hud_uniform_number((const char *)player + 44,
+                                    &live_gameplan_identity_team[side]) : 0;
       ++live_gameplan_identity_count[side];
     }
     if (live_gameplan_identity_count[side] < 11) {
@@ -6183,6 +6499,112 @@ static void live_gameplan_poll_portraits(void) {
     exhibition_gameplan_portrait_retry_tick[0] = 0;
     exhibition_gameplan_portrait_retry_tick[1] = 0;
   }
+}
+
+static void match_hud_queue_portrait(uint32_t side, uint32_t order,
+                                     uint32_t portrait_id) {
+  static uint32_t queued_id[2][11];
+  if (side > 1u || order >= 11u || !portrait_id ||
+      queued_id[side][order] == portrait_id)
+    return;
+  for (uint32_t i = 0; i < LIVE_PORTRAIT_CACHE_CAPACITY; ++i) {
+    const PesPrematchGameplanPortraitPng *cached = live_portrait_cache[i];
+    if (!cached || cached->portrait_id != portrait_id)
+      continue;
+    const size_t bytes = sizeof(*cached) + cached->byte_count;
+    PesPrematchGameplanPortraitPng *copy = malloc(bytes);
+    if (!copy) return;
+    memcpy(copy, cached, bytes);
+    free((void *)__atomic_exchange_n(
+        &exhibition_gameplan_portrait_pending[side][order], (uintptr_t)copy,
+        __ATOMIC_ACQ_REL));
+    queued_id[side][order] = portrait_id;
+    return;
+  }
+  // The fixture can start without opening the custom Game Plan. Queue only
+  // the currently selected portraits and let FileThread perform the read.
+  live_gameplan_request_portrait(portrait_id);
+}
+
+static int match_hud_cached_identity(PesStaminaBarSnapshot *bar,
+                                     uint32_t team) {
+  const uint32_t side = bar->side;
+  if (side > 1u) return 0;
+  const MatchHudIdentityCache *cached = &match_hud_identity_cache[side];
+  const uint64_t now = armGetSystemTick();
+  if (cached->team != team || cached->player_no != bar->player_no ||
+      !cached->name[0] || !cached->seen_tick ||
+      armTicksToNs(now - cached->seen_tick) > 500000000ULL)
+    return 0;
+  snprintf(bar->name, sizeof(bar->name), "%s", cached->name);
+  bar->portrait_id = cached->portrait_id;
+  bar->badge = cached->badge;
+  bar->shirt_number = cached->shirt_number;
+  match_hud_queue_portrait(side, bar->player_no % 11u, bar->portrait_id);
+  return 1;
+}
+
+static void match_hud_cache_identity(const PesStaminaBarSnapshot *bar,
+                                     uint32_t team) {
+  MatchHudIdentityCache *cached = &match_hud_identity_cache[bar->side];
+  cached->team = team;
+  cached->player_no = bar->player_no;
+  cached->portrait_id = bar->portrait_id;
+  cached->badge = bar->badge;
+  cached->shirt_number = bar->shirt_number;
+  cached->seen_tick = armGetSystemTick();
+  snprintf(cached->name, sizeof(cached->name), "%s", bar->name);
+  match_hud_queue_portrait(bar->side, bar->player_no % 11u,
+                           bar->portrait_id);
+}
+
+static int match_hud_player_info(PesStaminaBarSnapshot *bar) {
+  const uint32_t side = bar->side;
+  const uint32_t order = bar->player_no % 11u;
+  if (side > 1u)
+    return 0;
+  const uint32_t team = __atomic_load_n(
+      side ? &exhibition_away_team_id : &exhibition_home_team_id, __ATOMIC_ACQUIRE);
+  if (!match_global_registry_get_instance ||
+      !match_global_registry_get_order_info || !match_order_info_get_member_id)
+    return match_hud_cached_identity(bar, team);
+  const void *registry = match_global_registry_get_instance();
+  const void *orders = registry ? match_global_registry_get_order_info(registry, side) : NULL;
+  const uint32_t member = orders ? match_order_info_get_member_id(orders, order) : UINT32_MAX;
+  if (member >= PREMATCH_GAMEPLAN_MAX_PLAYERS)
+    return match_hud_cached_identity(bar, team);
+  const LiveGameplanIdentity *identity = &live_gameplan_identity[side][member];
+  // The fixture-owned MemberId map is captured before kickoff, including the
+  // bench. Do not require disposable tmpdb UI/player copies to exist before
+  // using it. Substitutions still resolve the current native order each call.
+  if (live_gameplan_identity_team[side] == team &&
+      identity->common_player_id && identity->name[0]) {
+    snprintf(bar->name, sizeof(bar->name), "%s", identity->name);
+    const uint32_t portrait = (uint32_t)(identity->common_player_id >> 32);
+    bar->portrait_id = prematch_gameplan_portrait_id(NULL,
+                                                   (const unsigned char *)&portrait);
+    bar->badge = pes_controller_2p_prematch_hub_badge(side);
+    bar->shirt_number = identity->hud_shirt_number;
+    match_hud_cache_identity(bar, team);
+    return 1;
+  }
+  if (!exhibition_tmpdb_manager_get_instance || !match_tmpdb_match_get_player)
+    return match_hud_cached_identity(bar, team);
+  void *manager = exhibition_tmpdb_manager_get_instance();
+  void *data = NULL;
+  if (manager) memcpy(&data, (const char *)manager + 72, sizeof(data));
+  const void *player = data ? match_tmpdb_match_get_player(
+      (const char *)data + 0x4b38, &side, &member) : NULL;
+  if (!player) return match_hud_cached_identity(bar, team);
+  const char *name = match_tmpdb_player_get_name ? match_tmpdb_player_get_name(player) : NULL;
+  if (!name || !name[0]) return match_hud_cached_identity(bar, team);
+  snprintf(bar->name, sizeof(bar->name), "%s", name);
+  bar->portrait_id = prematch_gameplan_portrait_id(player, NULL);
+  bar->badge = pes_controller_2p_prematch_hub_badge(side);
+  bar->shirt_number = match_hud_uniform_number
+      ? match_hud_uniform_number((const char *)player + 44, &team) : 0;
+  match_hud_cache_identity(bar, team);
+  return 1;
 }
 
 static int prematch_gameplan_load_portrait(uint32_t side, uint32_t index,
@@ -15422,6 +15844,44 @@ static uint32_t pes_match_cursor_name_get_position(
                               ? match_cursor_name_get_position_original(
                                     model, index, position)
                               : 0;
+
+  // Both models hold the same Utility::Info at +0x18. Refresh from the live
+  // name renderer, not the intentionally disabled stamina draw predicate.
+  // NPC slots 2/3 also refresh their side when its controller name is absent.
+  if (index < 4u)
+    match_stamina_publish_from_model(model, index & 1u);
+
+  // Reuse ModelCursorName's own world-space target so the custom stamina line
+  // remains visually attached to the native nameplate instead of becoming a
+  // second fixed HUD. This publication is independent from the controller
+  // power-gauge lab below and is consumed only while live play is confirmed.
+  if (index < 2u) {
+    int anchor_valid = 0;
+    if (result && position && match_model_project_pos_3d_to_screen &&
+        match_projection_display_width && match_projection_display_height) {
+      float anchor_x = 0.0f;
+      float anchor_y = 0.0f;
+      match_model_project_pos_3d_to_screen(model, *position,
+                                           &anchor_x, &anchor_y);
+      const float projection_w = match_projection_display_width();
+      const float projection_h = match_projection_display_height();
+      anchor_valid = match_gauge_project_to_overlay(
+          &anchor_x, &anchor_y, projection_w, projection_h) &&
+          fabsf(anchor_x) < 100000.0f && fabsf(anchor_y) < 100000.0f;
+      if (anchor_valid) {
+        __atomic_store_n(&match_stamina_anchor_x_milli[index],
+                         (int32_t)(anchor_x * 1000.0f), __ATOMIC_RELEASE);
+        __atomic_store_n(&match_stamina_anchor_y_milli[index],
+                         (int32_t)(anchor_y * 1000.0f), __ATOMIC_RELEASE);
+        __atomic_store_n(&match_stamina_anchor_seen_tick[index],
+                         armGetSystemTick(), __ATOMIC_RELEASE);
+      }
+    }
+    if (!anchor_valid)
+      __atomic_store_n(&match_stamina_anchor_seen_tick[index], 0,
+                       __ATOMIC_RELEASE);
+  }
+
   // ModelCursorName owns four draw models: indices 0/1 are the always-visible
   // HOME/AWAY controlled-player names, while 2/3 are NPC name layers. Unlike
   // ModelStaminaGauge this source is live even when stamina display is disabled.
@@ -16182,6 +16642,16 @@ void install_ue4_hooks(so_module *module) {
       module, "_ZN5basic6Status8GetDispWEv");
   match_projection_display_height = (void *)so_find_addr_rx(
       module, "_ZN5basic6Status8GetDispHEv");
+  match_utility_info_is_inplay_time = (void *)so_find_addr_rx(
+      module, "_ZN7match2D7Utility4Info12IsInplayTimeEv");
+  match_hud_uniform_number = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb4util12GetUniformNoERKN6common8PlayerIdERKNS1_6TeamIdE");
+  match_hud_get_player_info = (void *)so_find_addr_rx(
+      module, "_ZNK5match8registry14GlobalRegistry13GetPlayerInfoE8PlayerNo");
+  match_hud_get_stamina_percentage = (void *)so_find_addr_rx(
+      module, "_ZNK5match8registry10PlayerInfo20GetStaminaPercentageEv");
+  if (!match_utility_info_is_inplay_time)
+    fatal_error("Utility::Info::IsInplayTime unavailable for stamina HUD");
   match_global_registry_get_player_move =
       (void *)so_find_addr_rx(module, player_move_symbol);
   *cursor_position_slot =
