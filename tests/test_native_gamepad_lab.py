@@ -756,7 +756,7 @@ class NativeGamepadLabTests(unittest.TestCase):
             r'const int gameplan_cursor =\s*!custom_2p_transition')
         self.assertRegex(
             overlay,
-            r'const int cinematic_helper_active =\s*!custom_2p_transition')
+            r'int cinematic_helper_active =\s*!custom_2p_transition')
         self.assertRegex(
             overlay,
             r'const int pause_camera_active =\s*!custom_2p_transition')

@@ -1,5 +1,28 @@
 # HUD render candidate — 2026-09-16
 
+## Helper transitions — 2026-09-18, V11 candidate
+
+Pause and pause-loading ownership now clears set-piece, goal-action and penalty
+helpers before overlay drawing. In particular, stale goal-kick L/context flags
+must not appear above a pause submenu transition. The native free-kick
+heartbeat also overrides the ambiguous PositionShift bit, retaining only Set
+Piece Taker for a long free kick. Unknown-context fallback no longer constructs
+Position Shift from raw bits. Host tests cover modal flag combinations and
+fresh/stale free-kick precedence; Switch transition timing remains unverified.
+
+## Current policy — 2026-09-18, V8 candidate
+
+The user requested disabling the still-bugged stamina display. All four native
+`ModelStaminaGauge::GetDisp` slots now return hidden, with no mutable enable
+flag; the overlay snapshot API also stays empty. General Settings no longer
+contains SHOW STAMINA. This affects only presentation, not player stamina
+calculation, consumption or gameplay. The prior native visibility/fill-order
+instruction patches are removed. The compatible vtable slot is required at
+install time rather than silently leaving the gauge enabled on a mismatch.
+
+The following sections document historical experiments, not current behavior.
+No FPS improvement is claimed from hiding the gauges without a hardware A/B.
+
 Status: **failed hardware experiment, removed from current source**. This file
 records why it must not be repeated. No OBB/CPK or roster changes were involved.
 

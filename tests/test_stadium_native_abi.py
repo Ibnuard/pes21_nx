@@ -9,6 +9,67 @@ LIBRARY = ROOT / 'dist/pes21_nx/libUE4.so'
 
 @unittest.skipUnless(LIBRARY.is_file(), 'requires ignored compatible libUE4.so fixture')
 class StadiumNativeAbiTests(unittest.TestCase):
+    def test_rematch_stadium_snapshot_and_console_integer_abi(self):
+        try:
+            from elftools.elf.elffile import ELFFile
+        except ImportError:
+            self.skipTest('requires pyelftools')
+        names = [
+            '_ZNK5tmpdb5Match19GetStadiumInitParamEv',
+            '_ZN5tmpdb5Match19SetStadiumInitParamERKN6common9InitParamE',
+            '_ZN5tmpdb5Match11SetTimeZoneEN6common12TimeZoneTypeE',
+            '_ZNK16FConsoleVariableIiE6GetIntEv',
+            '_ZN16FConsoleVariableIiE3SetEPKDs21EConsoleVariableFlags',
+            '_ZNK20FConsoleVariableBase8GetFlagsEv',
+            '_ZTV16FConsoleVariableIiE', '_ZN15IConsoleManager9SingletonE',
+            '_ZNK15FConsoleManager19FindConsoleVariableEPKDs',
+        ]
+        with LIBRARY.open('rb') as f:
+            elf = ELFFile(f)
+            symbols = elf.get_section_by_name('.dynsym')
+            found = {s.name: s.entry for s in symbols.iter_symbols() if s.name in names}
+            self.assertEqual(set(found), set(names))
+            def words(addr, count):
+                f.seek(next(elf.address_offsets(addr)))
+                return struct.unpack('<' + 'I'*count, f.read(4*count))
+            # Rule lives at Match+0x13c. Renderer snapshot is separately
+            # copied from Match+0x170 through hidden x8, including its tail.
+            self.assertEqual(words(found[names[2]]['st_value'], 2), (0xb9013c01, 0xd65f03c0))
+            self.assertEqual(found[names[0]]['st_size'], 60)
+            self.assertEqual(words(found[names[0]]['st_value']+4, 1), (0x3dc05c01,))
+            self.assertEqual(words(found[names[0]]['st_value']+44, 1), (0xf9005109,))
+            # Native initializer copies input TimeZone to InitParam+4.
+            self.assertEqual(words(0x6d827f0,3), (0xb94003a8,0xeb1a029f,0xb9006fe8))
+            table = found[names[6]]
+            self.assertEqual(table['st_size'],160)
+            entries = []
+            for r in elf.get_section_by_name('.rela.dyn').iter_relocations():
+                if table['st_value']+16 <= r['r_offset'] < table['st_value']+160:
+                    base = symbols.get_symbol(r['r_info_sym'])['st_value'] if r['r_info_sym'] else 0
+                    entries.append(base+r['r_addend'])
+            for name in names[3:6]:
+                self.assertIn(found[name]['st_value'], entries)
+            # MatchMain retains both native speed refresh call sites. No
+            # wrapper timing override is necessary to keep gameplay speed.
+            for addr in (0x7bf9920, 0x7bf9ad4):
+                instruction = words(addr,1)[0]
+                imm = instruction & 0x3ffffff
+                if imm & 0x2000000: imm -= 0x4000000
+                self.assertEqual(addr+imm*4,0x3930c60)
+            # Native view initialization writes the bounded cascade count to
+            # FSceneView+0x278; directional-light shadow gathering reads it.
+            self.assertEqual(words(0x4d59c30, 5),
+                             (0x6b18011f, 0x1a98b109, 0x7100011f,
+                              0x1a89b3e8, 0xb9027a68))
+            self.assertEqual(words(0x5421710, 1), (0xb9427821,))
+            # GetNumShadowMappedCascades clamps the component count to this
+            # view limit instead of unconditionally rendering every cascade.
+            self.assertEqual(words(0x5423154, 2), (0x6b13011f, 0x1a88c260))
+            stream_offset = next(elf.address_offsets(0x7f0e1da))
+            f.seek(stream_offset)
+            label = 'r.Shadow.CSM.MaxCascades'.encode('utf-16-le')
+            self.assertEqual(f.read(len(label)), label)
+
     def test_shadow_hook_prologues_and_proxy_lifecycle_slots(self):
         try:
             from elftools.elf.elffile import ELFFile

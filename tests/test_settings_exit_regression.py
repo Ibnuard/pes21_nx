@@ -14,38 +14,36 @@ class SettingsExitTests(unittest.TestCase):
         body = SOURCE.split("const char *pes_controller_pause_settings_value", 1)[1].split("static void match_pause_go_top_menu", 1)[0]
         self.assertIn("pause_settings_tmpdb_camera(&tmpdb_type)", body)
         self.assertIn("switch (type)", body)
-        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (7, "LIVE BROADCAST"), (12, "STADIUM"), (13, "STADIUM CUSTOM")):
+        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (12, "STADIUM")):
             self.assertIn(f'case {enum}: return "{label}";', body)
-        self.assertIn('? "FOOTBALLNX CAM"', body)
-        self.assertIn(': "DYNAMIC WIDE"', body)
+        self.assertIn('? "FOOTBALLNX CAM" : "DYNAMIC WIDE"', body)
+        self.assertNotIn('"WIDE DYNAMIC CUSTOM"', body)
+        self.assertNotIn('"LIVE BROADCAST"', body)
+        self.assertNotIn('"STADIUM CUSTOM"', body)
         self.assertNotIn("PRESET", body)
 
-    def test_stamina_toggle_gates_native_active_player_visibility(self):
+    def test_stamina_is_always_hidden_without_reading_player_state(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
 #include <stdint.h>
 #include <assert.h>
-static uint32_t pause_settings_stamina, valid, calls;
-static uint32_t native_disp(void *model, uint32_t index) {
-  assert(model == (void *)123 && index < 4); ++calls; return valid;
-}
-static uint32_t (*pause_stamina_disp_original)(void *, uint32_t) = native_disp;
 ''' + function(SOURCE, "pause_stamina_disp") + r'''
 int main(void) {
-  for (valid = 0; valid <= 1; ++valid)
-    for (uint32_t i = 0; i < 4; ++i) {
-      pause_settings_stamina = 0; calls = 0;
-      assert(pause_stamina_disp((void *)123, i) == 0 && calls == 0);
-      pause_settings_stamina = 1; calls = 0;
-      assert(pause_stamina_disp((void *)123, i) == valid && calls == 1);
-    }
+  for (uint32_t i = 0; i < 4; ++i) {
+    assert(pause_stamina_disp((void *)123, i) == 0);
+    assert(pause_stamina_disp(0, i) == 0);
+  }
+  assert(pause_stamina_disp(0, UINT32_MAX) == 0);
 }
 ''')
+        self.assertNotIn('pause_settings_stamina', SOURCE)
+        self.assertNotIn('pause_stamina_disp_original', SOURCE)
 
     def test_pause_settings_are_split_into_general_and_camera_pages(self):
-        self.assertIn('return index < 7u ? general[index] : "";', SOURCE)
-        self.assertIn('"RADAR", "SHOW STAMINA", "GAME SPEED", "NEXT TARGET INDICATOR"', SOURCE)
+        self.assertIn('return index < 6u ? general[index] : "";', SOURCE)
+        self.assertIn('"RADAR", "GAME SPEED", "NEXT TARGET INDICATOR"', SOURCE)
+        self.assertNotIn('SHOW STAMINA', SOURCE)
         self.assertIn('"SHOW REPLAY", "CHANT SFX", "COMMENTARY"', SOURCE)
         self.assertIn('"CAMERA TYPE", "CAMERA HEIGHT", "CAMERA DISTANCE", "CAMERA ANGLE"', SOURCE)
         self.assertIn('focus == 2u ? PAUSE_SETTINGS_PAGE_CAMERA', SOURCE)
@@ -91,25 +89,24 @@ int main(void) {
         self.assertIn('&pause_settings_radar, 0', setup)
         self.assertIn('static uint32_t pause_settings_radar = 0', SOURCE)
 
-    def test_game_speed_targets_embedded_registry_settings_and_refreshes_match(self):
+    def test_game_speed_commits_registry_but_leaves_native_timing_ownership(self):
         body = function(SOURCE, 'pause_settings_set_game_speed')
         self.assertIn('(unsigned char *)registry_system + 0x14', body)
-        self.assertIn('pause_match_listener_change_game_speed(listener)', body)
+        self.assertNotIn('pause_match_listener_change_game_speed', SOURCE)
         self.assertIn('pause_registry_game_speed_get_fps(registry_speed)', body)
-        self.assertIn('pause_basic_status_set_pes_module_thread_fps((float)target_fps)', body)
+        self.assertNotIn('pause_basic_status_set_pes_module_thread_fps', SOURCE)
         self.assertIn('pause_basic_status_get_pes_module_thread_fps()', body)
         self.assertIn('&pause_game_speed_debug_apply_count, 1', body)
-        enforce = function(SOURCE, 'pause_settings_enforce_game_speed')
-        self.assertIn('fabsf(runtime_fps - (float)target_fps) > 0.01f', enforce)
+        self.assertNotIn('pause_settings_enforce_game_speed', SOURCE)
         tick = function(SOURCE, 'ue4_tickrate_clamp')
-        self.assertIn('pause_settings_enforce_game_speed();', tick)
+        self.assertNotIn('game_speed', tick)
         root = Path(__file__).resolve().parents[1]
         overlay = (root / 'source/overlay.c').read_text(encoding='utf-8')
         self.assertNotIn('pes_controller_game_speed_debug(&game_speed_debug)', overlay)
         self.assertNotIn('GAME SPEED DBG', overlay)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('"_ZNK5match8registry17GameSpeedSettings10GetGameFPSEv"', install)
-        self.assertIn('"_ZN5basic6Status21SetPesModuleThreadFPSEf"', install)
+        self.assertNotIn('"_ZN5basic6Status21SetPesModuleThreadFPSEf"', install)
         self.assertIn('"_ZN5basic6Status21GetPesModuleThreadFPSEv"', install)
 
     def test_replay_off_overrides_the_runtime_replay_decision(self):
@@ -140,17 +137,19 @@ int main(void) {
         self.assertIn('pause_match_listener_set_camera_from_tmpdb(listener, 1u)', apply)
         self.assertIn('match_pause_camera_update_registry(window, 1u)', apply)
         self.assertIn('static const PauseCameraPreset pause_camera_presets[]', SOURCE)
-        self.assertIn('{5u, 0u},\n    {5u, 1u}', SOURCE)
+        self.assertIn('{5u, 0u}, {12u, 0u}, {0u, 0u}, {1u, 0u}, {2u, 0u},', SOURCE)
         update = function(SOURCE, 'pes_match_pause_camera_update')
-        self.assertIn('settings[0] = preset.native_type', update)
+        cycle = function(SOURCE, 'pause_settings_cycle_camera')
+        self.assertIn('pause_settings_cycle_camera(window, action)', update)
+        self.assertIn('settings[0] = preset.native_type', cycle)
         self.assertNotIn('settings[9] =', update)
         self.assertNotIn('settings[10] =', update)
         self.assertNotIn('settings[11] =', update)
         self.assertIn('pes_controller_pause_settings_count()', update)
         self.assertIn('const int opening = window && window != match_pause_camera_window;', update)
         self.assertIn('pause_settings_restore_camera(window)', update)
-        self.assertIn('pause_settings_capture_camera()', update)
-        self.assertIn('pause_settings_apply_camera(window)', update)
+        self.assertIn('pause_settings_capture_camera()', cycle)
+        self.assertIn('pause_settings_apply_camera(window)', cycle)
         capture = function(SOURCE, 'pause_settings_capture_camera')
         restore = function(SOURCE, 'pause_settings_restore_camera')
         self.assertIn('sizeof(pause_camera_saved_settings)', capture)
@@ -158,8 +157,8 @@ int main(void) {
         self.assertIn('memcpy(settings, pause_camera_saved_settings', restore)
         self.assertIn('pause_settings_apply_camera(window)', restore)
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
-        self.assertIn('&pause_camera_saved_valid, 0', setup)
-        self.assertIn('&pause_camera_dynamic_wide_custom, 0', setup)
+        self.assertIn('pause_settings_prepare_match_camera();', setup)
+        self.assertNotIn('&pause_camera_saved_valid, 0', setup)
 
     def test_footballnx_keeps_native_type_and_uses_fixed_stadium_framing(self):
         compiler = shutil.which("gcc")
@@ -170,6 +169,7 @@ int main(void) {
 #include <string.h>
 static uint32_t pause_camera_dynamic_wide_custom;
 static uint32_t match_broadcast_anticipation_enabled;
+static uint32_t match_broadcast_ball_tracking_ready(const void *a,const float *b) {assert(!a && !b);return 0;}
 static void native_convert(void *registry, const void *tmpdb, void *resident) {
   (void)tmpdb; (void)resident;
   unsigned char *camera=registry;
@@ -198,10 +198,10 @@ int main(void) {
     tmpdb[0]=type;
     pause_camera_dynamic_wide_custom=0;
     pause_set_tmpdb_camera_settings(registry,tmpdb,(void*)1);
-    assert(match_broadcast_anticipation_enabled == (type==7 || type==12));
+    assert(match_broadcast_anticipation_enabled == (type==12));
     for (unsigned i=0;i<3;i++) {
       unsigned base=(unsigned[]){0,6,11}[i];
-      assert(registry[base+3]==((type==7 || type==12)?6:2));
+      assert(registry[base+3]==((type==12)?6:2));
     }
   }
 }
@@ -210,85 +210,58 @@ int main(void) {
         self.assertIn('module->load_base + 0x38bced0', install)
         self.assertIn('&pause_set_tmpdb_camera_settings', install)
 
-    def test_dynamic_wide_custom_angle_rotates_native_camera_about_look_target(self):
+    def test_footballnx_upper_tribune_compensates_near_far_zoom_continuously(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
         build_and_run(compiler, r'''
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
-''' + function(SOURCE, 'pause_dynamic_wide_apply_angle') + r'''
+''' + (Path(__file__).resolve().parents[1] / 'source/stadium_view_policy.h').read_text() + r'''
 int main(void) {
-  float zero[6] = {2.0f, 3.0f, 4.0f, 12.0f, 13.0f, 4.0f};
-  assert(pause_dynamic_wide_apply_angle(zero, 0.0f) == 0);
-  assert(zero[3] == 12.0f && zero[4] == 13.0f && zero[5] == 4.0f);
-
-  float camera[6] = {2.0f, 3.0f, 4.0f, 12.0f, 13.0f, 4.0f};
-  const float before_radius = hypotf(camera[3] - camera[0],
-                                     camera[5] - camera[2]);
-  assert(pause_dynamic_wide_apply_angle(camera, 0.6f) == 1);
-  assert(camera[3] != 12.0f && camera[5] != 4.0f);
-  assert(camera[4] == 13.0f);
-  const float after_radius = hypotf(camera[3] - camera[0],
-                                    camera[5] - camera[2]);
-  assert(fabsf(after_radius - before_radius) < 0.001f);
-
-  float raw[6] = {2.0f, 3.0f, 4.0f, 12.0f, 13.0f, 4.0f};
-  assert(pause_dynamic_wide_apply_angle(raw, 6.0f) == 1);
-  assert(fabsf(raw[3] - camera[3]) < 0.001f);
-  assert(fabsf(raw[5] - camera[5]) < 0.001f);
+  for (int x=-60; x<=60; ++x) for (int z=-40; z<=40; ++z) {
+    float camera[16] = {x, 1, z, x+20, 35, z+40}; camera[14]=42;
+    float last[16]={0};
+    for (int repeat=0; repeat<3; ++repeat) {
+      assert(footballnx_tribune_view(camera));
+      assert(camera[0]==x && camera[1]==1 && camera[2]==z);
+      assert(camera[3]==x && camera[4]>=19 && camera[4]<22 && camera[5]==55);
+      const float dz=camera[5]-camera[2], dy=camera[4]-camera[1];
+      assert(dy>=18 && dy<21); // close to Stadium's 17.68m, not V11's 35-50m
+      const float span=hypotf(dz,dy)*tanf(camera[13]*.5f);
+      assert(span>=9.499f && span<=11.001f); // Stadium scale, controlled near-side zoom
+      assert(camera[14]==42);
+      if(repeat) for(int j=0;j<16;j++) assert(camera[j]==last[j]);
+      for(int j=0;j<16;j++) last[j]=camera[j];
+    }
+  }
+  float previous[16]={0};
+  for(int i=0;i<=6800;i++) {
+    float p[16]={0,0,-34+i*.01f,0,0,0};
+    assert(footballnx_tribune_view(p));
+    if(i) {assert(fabsf(p[4]-previous[4])<.002f);assert(fabsf(p[13]-previous[13])<.001f);}
+    for(int j=0;j<16;j++) previous[j]=p[j];
+  }
+  assert(!footballnx_tribune_view(0));
+  float invalid[6]={NAN,0,0,1,2,3};
+  assert(!footballnx_tribune_view(invalid) && invalid[3]==1);
+  float outside[6]={100,0,0,1,2,3};
+  assert(!footballnx_tribune_view(outside) && outside[3]==1);
 }
 ''')
         wrapper = function(SOURCE, 'pes_inplay_camera_update')
         self.assertIn('match_inplay_camera_update_original(camera, parameter)', wrapper)
         self.assertIn('pause_camera_dynamic_wide_custom', wrapper)
         self.assertIn('camera_id != 5u', wrapper)
-        self.assertIn('const float panning = 0.6f', wrapper)
-        self.assertIn('pause_dynamic_wide_apply_angle((float *)parameter, panning)', wrapper)
+        self.assertIn('footballnx_tribune_view((float *)parameter)', wrapper)
+        self.assertNotIn('pause_dynamic_wide_apply_angle', SOURCE)
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('InplayCamera6UpdateERN4draw15CameraParameterE', install)
         self.assertIn('*inplay_camera_update_slot = (uintptr_t)&pes_inplay_camera_update;', install)
 
-    def test_broadcast_camera_uses_a_smooth_deadzone_ball_target(self):
+    def test_stadium_native_target_arms_after_ball_motion_and_resets_on_pause(self):
         compiler = shutil.which("gcc")
         if not compiler: self.skipTest("gcc unavailable")
-        build_and_run(compiler, r'''
-#include <assert.h>
-#include <math.h>
-#include <stdint.h>
-''' + function(SOURCE, 'match_broadcast_limit_anticipation') + r'''
-int main(void) {
-  float ball[3] = {0.0f, 0.0f, 0.0f};
-  float nearby[3] = {1.0f, 7.0f, 1.0f};
-  assert(match_broadcast_limit_anticipation(nearby, ball) == 0);
-  assert(nearby[0] == 1.0f && nearby[1] == 7.0f && nearby[2] == 1.0f);
-
-  float wider_safe_area[3] = {12.0f, 8.0f, 0.0f};
-  assert(match_broadcast_limit_anticipation(wider_safe_area, ball) == 1);
-  assert(wider_safe_area[0] > 6.0f && wider_safe_area[0] <= 10.001f);
-
-  float ramped[3] = {16.0f, 8.0f, 0.0f};
-  assert(match_broadcast_limit_anticipation(ramped, ball) == 1);
-  assert(ramped[0] > 6.0f && ramped[0] <= 10.001f);
-  assert(ramped[1] == 8.0f && ramped[2] == 0.0f);
-
-  float escaped[3] = {30.0f, 9.0f, 40.0f};
-  assert(match_broadcast_limit_anticipation(escaped, ball) == 1);
-  assert(fabsf(escaped[0]) <= 10.001f);
-  assert(escaped[1] == 9.0f && escaped[2] == 40.0f);
-  for (int direction = -1; direction <= 1; direction += 2) {
-    float pass[3] = {direction * 100.0f, 3.0f, 0.0f};
-    assert(match_broadcast_limit_anticipation(pass, ball) == 1);
-    assert(fabsf(pass[0]) <= 10.001f && pass[1] == 3.0f);
-    float lateral[3] = {0.0f, 6.0f, direction * 40.0f};
-    assert(match_broadcast_limit_anticipation(lateral, ball) == 0);
-    assert(lateral[2] == direction * 40.0f && lateral[1] == 6.0f);
-  }
-
-  float invalid[3] = {NAN, 2.0f, 0.0f};
-  assert(match_broadcast_limit_anticipation(invalid, ball) == 0);
-}
-''')
         build_and_run(compiler, r'''
 #include <assert.h>
 #include <math.h>
@@ -325,9 +298,10 @@ int main(void) {
         self.assertIn('match_ball_position_broadcast_original(', wrapper)
         self.assertIn('(const unsigned char *)camera + 0x198', wrapper)
         self.assertIn('match_broadcast_ball_tracking_ready(ball_info, ball_position)', wrapper)
-        self.assertIn('match_broadcast_limit_anticipation(target_position, ball_position)', wrapper)
+        self.assertNotIn('match_broadcast_limit_anticipation', SOURCE)
         self.assertIn('match_broadcast_frame.camera == camera', wrapper)
-        self.assertIn('match_broadcast_frame.sampled = 1u', wrapper)
+        self.assertIn('match_broadcast_frame.sampled = 1u',
+                      function(SOURCE, 'pes_stadium_ball_target_mode'))
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
         self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);', setup)
         self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);',
@@ -340,30 +314,13 @@ int main(void) {
         self.assertIn('pes_inplay_ball_position_broadcast_original:', assembly)
         self.assertIn('inplay_ball_position_broadcast_resume', assembly)
 
-    def test_stamina_mobile_branch_returns_validated_visibility(self):
-        # Frozen native tail: the instruction AFTER the patched CBZ clears
-        # w20. Execute that tail to catch NOP fall-through hiding every player.
-        patch = re.search(r"stamina_disp_code \+ 0x12c, 0x34000128, (0x[0-9a-f]+)", SOURCE)
-        self.assertIsNotNone(patch)
-        for visible in (0, 1):
-            words = {0x12c: int(patch[1], 16), 0x130: 0x2a1f03f4,
-                     0x134: 0x2a1403e0}
-            pc, w20, w0 = 0x12c, visible, None
-            for _ in range(4):
-                insn = words.get(pc)
-                if insn is None: self.fail(f"visibility left validated return path at {pc:x}")
-                if insn & 0xfc000000 == 0x14000000:
-                    imm = insn & 0x03ffffff
-                    if imm & 0x02000000: imm -= 0x04000000
-                    pc += imm * 4
-                    continue
-                if insn == 0x2a1f03f4: w20 = 0
-                elif insn == 0x2a1403e0:
-                    w0 = w20
-                    break
-                elif insn != 0xd503201f: self.fail(f"unhandled ARM instruction {insn:x}")
-                pc += 4
-            self.assertEqual(w0, visible)
+    def test_stamina_gate_replaces_draw_experiments(self):
+        install = SOURCE.split('void install_ue4_hooks', 1)[1]
+        self.assertIn('"_ZTVN7match2D6Screen17ModelStaminaGaugeE", stamina_disp_runtime, 25', install)
+        self.assertIn('*stamina_disp_slot = (uintptr_t)&pause_stamina_disp;', install)
+        self.assertIn('fatal_error("Unexpected ModelStaminaGauge::GetDisp vtable layout")', install)
+        for name in ('stamina_disp_code', 'stamina_color_code', 'stamina_exec_code'):
+            self.assertNotIn(name, SOURCE)
 
     def test_final_exit_uses_result_handshake_not_pause_event(self):
         compiler = shutil.which("gcc")

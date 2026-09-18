@@ -1,6 +1,6 @@
 # PES21 NX open issues and design notes
 
-Last reviewed: 2026-09-17, against the helper/camera/menu candidate produced
+Last reviewed: 2026-09-18, against the V12 native Stadium-target candidate
 after the full mobile kit migration.
 
 This file records confirmed runtime problems and design decisions that still
@@ -47,7 +47,10 @@ fixed merely because a hook or overlay already exists.
   after the keeper enters the kick animation. Ordinary long free kicks expose
   only Set Piece Taker; offside restarts are identified from native `FoulKind`
   and intentionally expose no helper. Both restart variants need hardware
-  confirmation.
+  confirmation. V11 additionally suppresses all gameplay helper families
+  during pause/loading ownership and prioritizes a fresh free-kick heartbeat
+  over ambiguous PositionShift bits. Goal-kick -> pause submenu transitions
+  still need hardware verification.
 
 ## Requested simplified match UI
 
@@ -81,29 +84,42 @@ fixed merely because a hook or overlay already exists.
 
 ## Stadium camera tracking
 
-- Stadium/Live Broadcast keeps its native zoom and interpolation. Its
-  broadcast-only calculator now leaves the native planar target untouched
-  inside a fourteen-unit safe area, then smoothly ramps a maximum 35% correction
-  toward live `BallInfo` over the following eight units. This prevents tiny
-  ball-physics changes from moving the camera every frame and removes the old
-  threshold discontinuity. Tracking remains disarmed while the ball is still
-  at the initial kickoff and warms up one native frame after real ball motion,
-  avoiding the uninitialised-target glitch when Stadium is selected before the
-  match starts. The failed shared `gcViewTraceBroadcast` patch and the old
-  global clock/velocity override remain removed. Keeper catches, saves, goal
-  kicks, rapid backwards switches and cursor/name pacing still require a
-  hardware pass.
-- `DYNAMIC WIDE CUSTOM` is now available as a separate pause-camera preset. It
-  stays on the native Dynamic-Wide tracking/projection path but starts with the
-  Stadium framing values (Distance 2, Height 3, Angle 6), all three of which
-  remain editable. Dynamic Wide's native horizontal shot ignores its Angle
-  field, so the custom preset applies that value after the native update by
-  rotating the camera position around the native look-at point; native ball
-  tracking and interpolation remain untouched. This is the preferred hardware
-  candidate when the broadcast correction still makes native player names or
-  cursor sprites jitter.
+- V12 removes Stadium's post-target soft clamp and selects the calculator's
+  existing live-ball branch before group/predicted-receive composition. Scope
+  remains selected Stadium (tmpdb 12), live CAMERA_ID 6, same native Update and
+  movement readiness. Final pose and downstream tracing remain native; the
+  ball-only branch supplies its own native zoom input instead of group framing.
+  Shared future-vector/speed-cap and trace routines remain untouched. Keeper
+  throw/counter-pass/midfield stopping behavior still needs device validation.
+- V11 restores fixed `FOOTBALLNX CAM`, without sliders, alongside Dynamic Wide
+  (default), Stadium, Medium, Long and Wide. It retains Wide's native smoothed
+  target. V11's eagle-eye framing was rejected; V12 reduces the eye to roughly
+  native Stadium height and tightens field coverage, retaining continuous lens
+  compensation for the near touchline. This is not a pixel-identical Stadium pose;
+  far/near framing and tracking need hardware acceptance. The selected allowed
+  preset survives rematch bootstrap.
+- The user confirms stable Day 60 FPS with V11, but rejects its shadow shape.
+  V12 retains roof always OFF/no toggle and zero Day CSM cascades, replacing
+  the forced Night board with each time's own native low-quality ShadowBoard.
+  Real Day lighting and custom pitch remain unchanged. Native CVar originals
+  are restored for Night/Top Menu. Shadow appearance and performance of this
+  revised combination remain unverified; no Night-only fallback is forced.
+- The user narrowed frame glitching to **Game Speed** changes. V7 removes the
+  wrapper's immediate and per-frame simulation-FPS forcing, leaving the
+  native MatchMain timing handoff. Before-kickoff, resume and all five speeds
+  need hardware validation; not every General Settings action is implicated.
+- V7 synchronizes both tmpdb's timezone rule and the renderer InitParam copy,
+  and retains Hub COM/rules across bootstrap. Night/Legend -> Top Menu -> new
+  match needs verification. See `STADIUM_ROOF_CAMERA.md` for the current V12
+  shadow policy, historical evidence and hardware test steps.
 - Radar now starts `OFF` in each exhibition match, matching the mobile screen's
   actual initial state. It can still be enabled from General Settings.
+- V8 hides the bugged native stamina gauges unconditionally and removes SHOW
+  STAMINA from General Settings; stamina gameplay is unchanged. A new Night
+  capture still identifies V6, with about 41 FPS across two matches, including
+  slow gameplay before the first pause. It cannot isolate the cost of a stamina
+  toggle and does not validate V7's speed-ownership fix. V8 adds action-level
+  `[SETTINGS]` events for the next performance comparison; hardware pending.
 
 ## Native controller route
 

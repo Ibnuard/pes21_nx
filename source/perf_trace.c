@@ -151,7 +151,7 @@ void perf_trace_log_line(const char *line) {
   if (!trace_file) {
     trace_file = fopen("perf.log", "w");
     if (trace_file)
-      fputs("PES21 NX stadium-perf v6; wall/draw/swap are CPU-side timings, not GPU timers\n",trace_file);
+      fputs("PES21 NX stadium-perf v12; native ball-only Stadium target, stadium-scale FootballNX, native low player boards; Day roof OFF zero cascades; wall/draw/swap are CPU-side timings, not GPU timers\n",trace_file);
   }
   if (trace_file) fputs(line,trace_file);
   mutexUnlock(&trace_file_mutex);

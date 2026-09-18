@@ -16,22 +16,20 @@ class RoofCasterTests(unittest.TestCase):
             self.skipTest('gcc unavailable')
         build_and_run(cc, '#include <assert.h>\n' + POLICY + text)
 
-    def test_roof_is_one_live_session_preference_default_off(self):
-        self.run_c('static uint32_t stadium_roof_shadow_enabled;\n' +
-                   function(SOURCE, 'pes_controller_roof_shadow_enabled') + r'''
+    def test_roof_is_always_off_without_a_toggle(self):
+        self.run_c(function(SOURCE, 'pes_controller_roof_shadow_enabled') + r'''
 int main(void) {
   assert(!pes_controller_roof_shadow_enabled());
   for (unsigned i=0;i<100;++i) {
-    __atomic_store_n(&stadium_roof_shadow_enabled, i&1, __ATOMIC_RELEASE);
-    assert(pes_controller_roof_shadow_enabled()==(i&1));
+    assert(pes_controller_roof_shadow_enabled()==0);
   }
 }
 ''')
-        self.assertIn('uint32_t stadium_roof_shadow_enabled = 0;', SOURCE)
+        self.assertNotIn('uint32_t stadium_roof_shadow_enabled', SOURCE)
         overlay = (ROOT / 'source/overlay.c').read_text()
-        self.assertIn('"ENABLE ROOF SHADOW"', overlay)
-        self.assertIn('pes_controller_roof_shadow_enabled() ? "ON" : "OFF"', overlay)
-        self.assertIn('pes_controller_stadium_is_day() ? 3u : 2u;',
+        self.assertNotIn('"ENABLE ROOF SHADOW"', overlay)
+        self.assertNotIn('pes_controller_roof_shadow_enabled() ? "ON" : "OFF"', overlay)
+        self.assertIn('const uint32_t rows = 2u;',
                       function(SOURCE, 'pes_controller_2p_prematch_hub_pad_event'))
 
     def test_exact_asset_and_bounded_registry(self):

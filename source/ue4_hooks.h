@@ -76,7 +76,7 @@ typedef struct {
 } PesControllerSnapshot;
 
 // Compatibility layout retained for older overlay code. The current runtime
-// renders stamina through the native ModelStaminaGauge and publishes no bars.
+// hides native stamina gauges and publishes no overlay bars.
 #define PES_STAMINA_BAR_CAPACITY 4u
 typedef struct {
   float x;

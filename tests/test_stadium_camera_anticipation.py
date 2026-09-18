@@ -36,7 +36,7 @@ static void native_update(void *camera,void *parameter) {
   match_broadcast_frame.ball[0]=-5.f;match_broadcast_frame.ball[2]=29.f;
 }
 static void (*match_inplay_camera_update_original)(void*,void*)=native_update;
-static uint32_t pause_dynamic_wide_apply_angle(float *p,float angle) {assert(0);return 0;}
+static uint32_t footballnx_tribune_view(float *p) {assert(0);return 0;}
 ''' + function(SOURCE, 'pes_inplay_camera_update') + r'''
 int main(void) {
   unsigned char camera[32]={0};float p[8]={0};
@@ -61,27 +61,27 @@ int main(void) {
 
     def test_fixed_footballnx_angle_does_not_follow_stale_custom_values(self):
         body = function(SOURCE, 'pes_inplay_camera_update')
-        self.assertIn('const float panning = 0.6f', body)
+        self.assertIn('footballnx_tribune_view((float *)parameter)', body)
         self.assertNotIn('camera + 0x14', body)
 
-    def test_horizontal_soft_limit_not_a_ball_lock_and_preserves_native_z(self):
-        self.run_c(function(SOURCE, 'match_broadcast_limit_anticipation') + r'''
+    def test_native_ball_route_preserves_camera_flags_and_other_camera_types(self):
+        self.run_c(r'''
+static uint32_t match_broadcast_anticipation_enabled;
+static __thread struct {void *camera;float ball[3];uint32_t ready,sampled;} match_broadcast_frame;
+''' + function(SOURCE, 'pes_stadium_ball_target_mode') + r'''
 int main(void) {
-  const float ball[3]={20.f,.1f,29.f};
-  float natural[3]={16.f,.5f,14.f};
-  assert(!match_broadcast_limit_anticipation(natural,ball));
-  float lead[3]={0.f,.5f,14.f};
-  assert(match_broadcast_limit_anticipation(lead,ball));
-  assert(lead[0]>10 && lead[0]<14); // not locked to ball X=20
-  assert(lead[1]==.5f && lead[2]==14.f);
-  float prev=0;
-  for (unsigned i=0;i<4000;++i) {
-    float b[3]={0,0,0},p[3]={i*.01f,7,19};
-    match_broadcast_limit_anticipation(p,b);
-    assert(p[0]>=prev && p[0]-prev<=.01001f); // continuous, no deadzone snap
-    assert(p[1]==7 && p[2]==19 && p[0]<=10.001f);
-    prev=p[0];
+  unsigned char camera[64]={0},before[64];
+  for(unsigned id=0;id<14;id++) for(unsigned bits=0;bits<16;bits++) {
+    memcpy(camera+8,&id,4);camera[0x24]=(bits&1)?3:0;
+    match_broadcast_frame.camera=(bits&2)?camera:0;
+    match_broadcast_frame.ready=!!(bits&4);
+    match_broadcast_anticipation_enabled=!!(bits&8);
+    memcpy(before,camera,64);
+    unsigned override=id==6 && (bits&2) && (bits&4) && (bits&8);
+    assert(pes_stadium_ball_target_mode(camera)==(override?1:camera[0x24]));
+    assert(!memcmp(before,camera,64));
   }
+  assert(!pes_stadium_ball_target_mode(0));
 }
 ''')
 
@@ -90,4 +90,4 @@ int main(void) {
         wrapper=function(SOURCE,'pes_inplay_camera_update')
         self.assertNotIn('limit_anticipation(',wrapper)
         self.assertIn('match_inplay_camera_update_original(camera, parameter)',wrapper)
-        self.assertIn('pause_dynamic_wide_apply_angle((float *)parameter, panning)',wrapper)
+        self.assertIn('footballnx_tribune_view((float *)parameter)',wrapper)

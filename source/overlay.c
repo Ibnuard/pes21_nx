@@ -1660,7 +1660,7 @@ static void overlay_render(void) {
   // transition and made the old "ANY BUTTON - SKIP" text visibly blink. Keep
   // a helper only for the interactive GoalDemo page where A/B have distinct
   // meanings.
-  const int cinematic_helper_active =
+  int cinematic_helper_active =
       !custom_2p_transition && goal_demo_active &&
       controller_snapshot.goal_helper_visible;
   const int cinematic_goal_actions = goal_demo_player;
@@ -1680,11 +1680,11 @@ static void overlay_render(void) {
       !custom_2p_transition && pes_controller_pause_camera_active();
   const int tutorial_play_active =
       !custom_2p_transition && pes_controller_inmatch_tutorial_active();
-  const uint32_t penalty_role_p1 =
+  uint32_t penalty_role_p1 =
       custom_2p_transition ? PES_PENALTY_NONE
                            : pes_controller_penalty_role_for_pad(0);
   const int penalty_two_player = pes_controller_native_pad_lab_two_player();
-  const uint32_t penalty_role_p2 =
+  uint32_t penalty_role_p2 =
       (!custom_2p_transition && penalty_two_player)
           ? pes_controller_penalty_role_for_pad(1)
           : PES_PENALTY_NONE;
@@ -1863,6 +1863,7 @@ static void overlay_render(void) {
       !pes_controller_custom_prematch_gameplan_active();
 
   const int modal_match_frontend =
+      pause_skin || pause_transition ||
       virtual_cursor_context == PES_VIRTUAL_CURSOR_PAUSE ||
       virtual_cursor_context == PES_VIRTUAL_CURSOR_GAMEPLAN || result_skin ||
       result_transition ||
@@ -1874,6 +1875,9 @@ static void overlay_render(void) {
     setplay_context = PES_SETPLAY_NONE;
     setplay_options = 0;
     native_setplay_debug = 0;
+    cinematic_helper_active = 0;
+    penalty_role_p1 = PES_PENALTY_NONE;
+    penalty_role_p2 = PES_PENALTY_NONE;
   }
 
   // The custom selector owns the modal presentation. Do not let the
@@ -4364,12 +4368,11 @@ static void overlay_render(void) {
     // Kits and Stadium use the same native-console settings language: one
     // modal card, a dark title band, white focused row, blue value capsule,
     // and arrows that remain completely inside the selected surface.
-    const uint32_t row_count = !custom_hub_kits_page &&
-        pes_controller_stadium_is_day() ? 3u : 2u;
+    const uint32_t row_count = 2u;
     const uint32_t raw_focus = pes_controller_2p_prematch_hub_page_focus();
     const uint32_t focus = raw_focus < row_count ? raw_focus : row_count - 1u;
     static const char *const stadium_labels[] = {
-        "STADIUM", "MATCH TIME", "ENABLE ROOF SHADOW"};
+        "STADIUM", "MATCH TIME"};
     const float panel_x = 0.17f * (float)screen_width;
     const float panel_y = 0.075f * (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
@@ -4565,10 +4568,8 @@ static void overlay_render(void) {
             "AUTO", "HOME", "AWAY"};
         value = stadium_options[
             pes_controller_2p_prematch_hub_stadium_index()];
-      } else if (row == 1u) {
-        value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
       } else {
-        value = pes_controller_roof_shadow_enabled() ? "ON" : "OFF";
+        value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
       }
       const float width = measure_efootball_line(
           value, (int)strlen(value), value_gh, EFOOTBALL_FONT_BOLD);
@@ -6266,30 +6267,13 @@ static void overlay_render(void) {
     setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET THROWER";
     setplay_helper_count = 1;
-  } else if (setplay_options) {
-    // Native option bits are retained as a fallback for short transition
-    // frames before the semantic set-piece context has settled.
+  } else if (setplay_options && !native_lab) {
+    // Unknown context is not evidence of a goal kick. A raw PositionShift
+    // bit also occurs at long free kicks; never invent a Y helper from it.
     if ((setplay_options & PES_SETPLAY_OPTION_KICKER) &&
         setplay_helper_count < 3) {
       setplay_keys[setplay_helper_count] = setplay_taker_key;
       setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
-    }
-    if ((setplay_options & PES_SETPLAY_OPTION_TEAM_UP) &&
-        setplay_helper_count < 3) {
-      setplay_keys[setplay_helper_count] =
-          (setplay_options & PES_SETPLAY_OPTION_KICKER) ? "X" : "Y";
-      setplay_labels[setplay_helper_count++] = "POSITION SHIFT";
-    }
-    if ((setplay_options & PES_SETPLAY_OPTION_SHORT_CORNER) &&
-        setplay_helper_count < 3) {
-      setplay_keys[setplay_helper_count] = "X";
-      setplay_labels[setplay_helper_count++] = "SHORT CORNER";
-    }
-    if ((setplay_options & PES_SETPLAY_OPTION_CAMERA) &&
-        setplay_helper_count < 3) {
-      setplay_keys[setplay_helper_count] =
-          (setplay_options & PES_SETPLAY_OPTION_KICKER) ? "Y" : "X";
-      setplay_labels[setplay_helper_count++] = "SWITCH VIEW";
     }
   }
   const int penalty_helper_active =

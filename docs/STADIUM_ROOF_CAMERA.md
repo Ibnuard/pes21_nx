@@ -2,6 +2,403 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## V12 candidate: native ball-target route, Stadium-scale view, simple Day shadows
+
+2026-09-18. User **confirms stable 60 FPS in Day with V11**, but rejects its
+eagle-eye FootballNX framing and odd player shadow appearance. Keep the accepted
+zero Day cascades, permanent roof OFF/no toggle and custom pitch PAK. V12's
+camera/shadow appearance and continued performance still need hardware testing.
+
+### Native Stadium anticipation, not a final-pose correction
+
+`GetBallPositionBroadcast` reads actual `BallInfo::GetTrans`, then its normal
+composition path consults `TeamAIInfo`, possession/keeper/player records,
+predicted receive coordinates and `BallInfoBase::GetFuture`. It also blends
+separate target banks when possession changes. That is evidence of native
+group/prediction-based framing, not proof of a mobile-exclusive feature named
+"counter attack" or identification of every reported jerk from a screenshot.
+
+The same calculator already has a **live-ball branch** at +0x244: copy the
+unmodified GetTrans sample and return its native ball-only zoom factor 1.6.
+V12 adds an instruction-checked branch selector at +0x150, before the normal
+group/possession calculations. It chooses this existing branch only for selected
+Stadium (tmpdb 12), live CAMERA_ID 6, within the same InplayCamera Update and
+after the existing ball-motion readiness gate. Other camera/initial/set-piece
+paths retain the original flag/phase decisions. No camera flag, world BallInfo
+or TeamAI registry is overwritten. The hook preserves NZCV, live GPRs and SIMD
+registers; both native continuations are validated against the compatible ELF.
+
+The old 6-to-10-unit post-target soft clamp is **removed**, eliminating its
+competing pull-back. Final eye/look remain native. Downstream native zoom,
+field-bound composition, interpolation and acceleration/deceleration still
+execute; the former group-driven zoom input is replaced by the native
+ball-only branch's factor, so identical zoom behavior is not promised.
+`GetFutureMoveVec` remains untouched: the tracer also uses it as a speed cap.
+No shared trace/grid patch or additional temporal smoother is introduced.
+Changing camera/pause/rematch resets scope/readiness as before.
+
+### FootballNX and inexpensive shadows
+
+FootballNX keeps Wide's interpolated target but moves back to the audited
+Stadium Z=55 rail. Eye elevation is `18 + 0.025 * (55 - lookZ)` (about 18-21m,
+close to native Stadium D2/H6's 17.68m), replacing V11's roughly 35-50m.
+The continuous lens compensation uses 9.5-11m target-plane half-span instead
+of 22-25m. This tightens framing and player scale without restoring the old
+near-touchline zoom spike. It is a Stadium-scale approximation, not a promise
+of screenshot-identical framing at unmatched ball positions.
+
+V11 forced Night's board asset into Day. V12 removes that class override:
+native Day uses **AShadowBoardActorDay**, Night still uses its own board.
+Only `UEPlayerModel::Tick`'s local shadow-quality selector (+0x1e4) is set to
+the simple board route. Actual RenderManager time, quality, player LOD,
+lighting and Day/Night board creation remain native. Board transform, lifetime,
+visibility and planar-shadow suppression remain native. No extra shadow map,
+cascade, asset edit or global quality downgrade is introduced. Day should now
+use its own simple shadow shape, not the Night lighting pattern; visual quality
+must still be checked on Switch. Optional Day grading is not added speculatively.
+
+Artifact: `local-debug/native-stadium-v12/pes21_nx.nro`, 51,884,237 bytes.
+SHA-256 `b6b9cba0e7d44957b602e9f086958e4b95573b41908622c63570b0f0b2d51492`.
+Built `-PerfTrace -Jobs 2`, no diagnostic overlay. Replace NRO only. The prepared
+`dist/` NRO, V11 rollback NRO and accepted pitch PAK are untouched.
+Verification: 136 focused tests plus two native-route tests pass (one optional
+historical HUD fixture unavailable). The compiled ARM64 trampoline was emulated
+for normal/live/nonzero-native-flag routes with an ABI-conforming register-
+clobbering selector, checking continuation, stack, NZCV, GPRs and all SIMD
+registers. Native opcode guards, camera scope/reset, geometry continuity,
+shadow budget, helper/settings regressions, NRO markers, whitespace and public-
+tree checks pass. The temporary local disassembly helper was removed; no raw
+disassembly or proprietary game payload is added to the public tree.
+
+Next device test: Day High; FootballNX near/far touchlines; Stadium goalkeeper
+throw, aerial forward pass after a turnover, defensive return pass, midfield
+receive/stop; switch Stadium -> Dynamic Wide and back; then Night. A short video
+and this build's `stadium-perf v12` log are useful if any behavior remains wrong.
+Do not infer full on-device acceptance from host tests or compilation.
+No commit/push requested or performed.
+
+## V11 candidate: permanent roof OFF, player contact shadows, upper tribune
+
+2026-09-18; **hardware validation pending**. The user reports acceptable Day
+FPS with V10, but missing player shadows and unacceptable coarse roof edges.
+The latest request supersedes the old toggle policy: roof shadows must always
+be OFF, with no Hub toggle. Day/Night selection remains available; there is no
+Night-default fallback in this revision. The accepted pitch PAK is untouched.
+
+- Hub Stadium contains only Stadium and Match Time. The roof policy accessor
+  returns zero, with no mutable option. The accepted exact native roof-caster
+  filter remains active. Day `r.Shadow.CSM.MaxCascades` is now **0**, removing
+  directional cascade submissions rather than merely hiding their output;
+  the two resolution ceilings remain 512. Checked native CVar writes retain
+  ownership/priority guards and restore the original values for Night or
+  Top Menu. The allowlisted Day pitch shader uses a uniform conditional for
+  its disabled roof-mask sample instead of sampling then mixing it away.
+  Actual driver execution and depth-draw counts still require a new capture.
+- Thin player shadows use the existing **Night ShadowBoard** path, independent
+  of Day CSM. Two instruction-checked selectors in `UEPlayerModel::LoadImpl`
+  (+0x70) and `Tick` (+0x1dc) select Night for board class and visibility only.
+  Both replace `mov w21,w0` with `mov w21,#1`; quality, real match time, Day
+  lighting, player LOD and pitch materials are not changed. The native Tick
+  continues to own board transforms, player visibility and lifetime. Night's
+  own selector already returns 1, so that path is unchanged. No speculative
+  Day color grading is added before the native board is tested on hardware.
+- **FOOTBALLNX CAM** returns as the sixth fixed camera, alongside Dynamic Wide
+  (default), Stadium, Medium, Long and Wide. It retains Dynamic Wide's native
+  interpolated target, raises the side rail to Z=65 and uses elevation
+  `32 + 0.16 * (65 - lookZ)`. A continuous vertical FOV mapping limits target-
+  plane half-span to 22-25 units, reducing near-touchline magnification while
+  maintaining an elevated far-side view. This is not a pixel-identical Stadium
+  pose. No sliders, target predictor or new frame-history state are added.
+  The compatible native FOV field is CameraParameter+0x34, in radians.
+- The Stadium correction is now gated by both tmpdb type **12** and the live
+  InplayCamera **CAMERA_ID 6**. These are distinct enum spaces (Dynamic Wide's
+  live ID is 5, Live Broadcast's is 3). Selecting another type resets readiness;
+  its target hook returns the original native result unchanged. Native Stadium
+  zoom, angle, height, future-vector and shared trace routines remain intact.
+- Pause and pause-loading surfaces clear all gameplay helper families,
+  including set pieces, goal actions and penalties. A fresh native free-kick
+  heartbeat takes precedence over an ambiguous PositionShift bit; long free
+  kicks keep only Set Piece Taker. Unknown-context fallback cannot invent a
+  Position Shift helper. Goal-kick/corner controls remain contextual.
+
+Artifact: `local-debug/upper-tribune-shadow-v11/pes21_nx.nro`, 51,884,237 bytes.
+SHA-256 `8fa9908d098da009b7abfc0f8cd6c86e8ec86aa2df5402a6be7f35827cd87141`.
+Built with `-PerfTrace -Jobs 2`, without diagnostic overlay. Replace **NRO only**;
+the prepared `dist/` NRO and accepted pitch PAK were not overwritten.
+Verification: 136 focused tests and 21 subtests passed; one optional native HUD
+fixture test was unavailable. Coverage includes upper-tribune continuity and
+idempotence, camera ownership, all three CVar caps/restoration, roof UI removal,
+helper modal combinations, and compatible ELF player-shadow/camera ABI.
+NRO markers, whitespace and public-tree audit pass. The disposable audit helper
+was removed after recording its findings here and in the ABI tests.
+
+Hardware checklist: Day High with roof absent and thin player shadows; Night
+High in the same session; FootballNX near/far touchlines; Stadium -> each other
+camera; long free kick and goal kick -> Pause -> each submenu/loading -> Resume.
+Use this build's `stadium-perf v11` log to assess actual performance. Compile,
+host policy tests and compatible-library ABI checks do not establish Switch
+visual quality, frame pacing or FPS. No commit/push performed.
+
+The following sections are historical candidates, not the current roof policy.
+
+## V10 candidate: final Day High budget attempt, five cameras
+
+2026-09-18; **hardware acceptance pending**. The user allows one more Day High
+performance attempt before choosing a Night-default fallback. Do not treat a
+successful build as a performance result, or force Night before that test.
+
+Supplied log SHA-256:
+`2bf3c13ca7996c0ef1a2e2edbf3584d8fc11b4f294d580745ce92a850913d755`.
+Its header is V7 (not V9). Selected complete active-camera, unpaused windows:
+
+| Match / setting | Windows | Aggregate FPS | Mean depth draws/frame |
+| --- | ---: | ---: | ---: |
+| 1 / Night High, Stadium | 25 | 59.71 | 0 |
+| 2 / Night Standard, Dynamic Wide | 30 | 59.91 | 0 |
+| 3 / Day Standard, Dynamic Wide, roof ON | 3 | 59.99 | 0 |
+| 4 / Day High, Dynamic Wide, roof ON | 14 | 43.41 | 145.0 |
+
+Day High reports 276.4 mean draws/frame and 1016x1016 depth viewports. Native
+readback confirms the V7 2048 -> 1024 resolution caps took effect. Resolution
+was not ignored, but the workload remained large. Quality/time/camera are
+different scenes, so this is evidence to target the extra shadow work, not
+a measured GPU-cost breakdown or a controlled shadow-only A/B.
+
+V10 caps Day `r.Shadow.MaxCSMResolution` and `r.Shadow.MaxResolution` at **512**,
+and adds `r.Shadow.CSM.MaxCascades` capped at **1**. All use the checked native
+integer-CVar setter on the UE game thread, with existing priority and ownership
+guards. Lower/zero native values are not raised. Owned originals are restored
+for Night/Top Menu, respecting detectable external changes. No ShadowQuality=0,
+global High-to-Standard downgrade, scene-resolution change, frame skipping,
+GPU readback, arbitrary GL viewport override or pitch asset edit is introduced.
+The accepted roof filter still independently controls the roof casters.
+
+Native audit: FViewInfo::Init bounds its cascade count and stores it at
+FSceneView+0x278; directional-light shadow gathering reads that field and
+GetNumShadowMappedCascades clamps the light's requested count to it. The runtime
+contains the CSM MaxCascades setting. This supports a native count reduction;
+the next CVar readback/depth-draw capture must establish its effective result.
+`[SHADOWBUDGET] observe` records already-low values once per match as well as
+setter readbacks, so an absent write is no longer ambiguous. Missing/different
+CVar types retain native behavior and are logged, never blindly cast.
+
+Tradeoff: reduced shadow detail / potentially coarser edges or cascade coverage.
+Player and stadium shadows remain enabled by policy; no guarantee of 60 FPS.
+Test Day High, same camera/roof/team settings as match 4, then Night High in the
+same app session to verify restoration. Check roof ON/OFF and player shadows.
+If the resulting Day experience is still unacceptable, stop tuning and follow
+the user's requested Night-default fallback in the next change.
+
+Camera choices now contain only Dynamic Wide (default), Stadium, Medium, Long
+and Wide. Wide Dynamic Custom is removed; any legacy custom snapshot falls
+back to ordinary Dynamic Wide with the custom flag cleared. Previous stamina
+OFF and V7 native-speed/rematch changes remain included.
+
+Artifact: `local-debug/day-high-final-v10/pes21_nx.nro`, 51,884,237 bytes.
+SHA-256 `96025b2655b1749db183a2f3a6f21962c8360c69e7168e4cbf7eacdea0c19a6e`.
+Built with `-PerfTrace -Jobs 2`, without `-Diagnostics`. Replace **NRO only**;
+keep the accepted pitch PAK. The prepared `dist/` NRO was not overwritten.
+69 focused tests and 2 subtests passed; 1 optional historical HUD fixture was
+unavailable. Tests cover five-choice wrap/legacy-custom removal, all three
+shadow caps, refused writes/restores, throttling, lower native values, wrong
+CVar type, quality ownership, Night/Top Menu restoration and compatible ELF
+view/cascade ABI. NRO marker checks, whitespace and public-tree audits pass.
+Disposable native audit dumps were removed; findings remain here and in tests.
+No commit/push performed. None of these checks establishes on-device FPS.
+
+## V9 candidate: six-choice camera selector
+
+2026-09-18; hardware validation pending. The only selectable types, in order,
+are **Dynamic Wide (default), Stadium, Medium, Long, Wide, Wide Dynamic Custom**.
+Live Broadcast and Stadium Custom are removed from the picker. Wide Dynamic
+Custom is the renamed FootballNX fixed tribune preset from V8; it does not
+restore editable sliders or change tracking, lens or framing in this revision.
+Its native type remains 5 and the existing internal/perf `footballnx` flag
+still distinguishes it from ordinary Dynamic Wide.
+
+The first match of an app session seeds native tmpdb with Dynamic Wide before
+MatchSetup consumes it, regardless of old saved camera types. Subsequent
+matches retain the player's in-session selection, including the custom flag.
+Only the chosen type is carried into the new match; its other camera bytes
+come from the new resident rather than an old match snapshot. Removed/unknown
+snapshot types fall back to Dynamic Wide. Pause-page restore and the native
+registry/MatchEnv update path are retained; no per-frame camera forcing added.
+
+V8 stamina OFF, the accepted pitch/roof toggle and the V7 candidate fixes stay
+unchanged. The light profiling build now identifies itself as V9, without a
+diagnostic overlay. Hardware check: cycle all six choices in both directions,
+verify the default before first kickoff, then Top Menu -> new teams -> new
+match and confirm the selected camera remains active.
+
+Artifact: `local-debug/footballnx-camera-perf-v9/pes21_nx.nro`, 51,884,237 bytes,
+SHA-256 `71529095280bc1a7f98b4f57a8aff61e5f1c6df345db5b4b76de6607b3855374`.
+Built with `-PerfTrace -Jobs 2`, without `-Diagnostics`. Replace NRO only; the
+prepared runtime and pitch PAK remain untouched. 67 focused tests and 2 subtests
+passed; 1 optional historical HUD fixture was unavailable. Executable coverage
+includes both-direction six-choice wrap, Decide, all seven resident modes,
+old-type/default normalization, missing manager, per-session rematch choice,
+and pause restore without stale camera bytes. NRO inspection confirms the six
+labels and excludes LIVE BROADCAST, STADIUM CUSTOM, FOOTBALLNX CAM and SHOW
+STAMINA. Public-tree and whitespace audits pass; no commit/push performed.
+
+## V8 candidate: stamina display disabled, settings action trace
+
+2026-09-18; **not yet accepted on hardware**. Supersedes the V7 candidate for
+the next test and retains its native speed ownership, rematch rules, FootballNX
+view and Day shadow budget. The accepted roof toggle and pitch PAK are unchanged.
+
+New input: `Videos/perf.log`, SHA-256
+`89b18bb7c683c404d193e9a567d575e3985cf4eb82d71abe1691b67a22fda1b3`.
+The header is **stadium-perf v6**, not V7. It contains no `[GAMESPEED]`,
+`[MATCHRULES]` or `[SHADOWBUDGET]` events, so it cannot validate those changes.
+Complete unpaused active-camera windows (loading/menus/transitions excluded):
+
+| Match | Windows | Frames | Aggregate FPS | Window FPS range |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 17 | 3512 | 41.24 | 36.24–44.76 |
+| 2 | 13 | 2671 | 40.98 | 38.38–45.30 |
+
+Aggregate FPS uses total frames / sum(frames / reported FPS), with rounding
+from the log. Both matches report Night, native camera 5, FootballNX off,
+and zero depth-only draws. Draw-submission CPU time averages about 3.23/3.45ms
+per frame and swap time 0.37/0.35ms. These are **not GPU timings** and do not
+explain the whole 24ms frame. The first complete active window before the first
+recorded pause is already 36.24 FPS. V6 has neither stamina state nor action
+timestamps, so no causal stamina-toggle or Game-Speed-change conclusion can
+be drawn. Its cached quality/fps-mode labels also cannot establish identical
+native quality to the earlier smooth Night capture.
+
+At the user's request, V8 removes SHOW STAMINA and always hides native stamina
+gauge slots. It removes the old visibility/fill-order experiments; gameplay
+stamina is untouched. General Settings now has six rows: Radar, Game Speed,
+Next Target Indicator, Show Replay, Chant SFX, Commentary. Labels, values,
+input dispatch and focus wrap use the new order. Camera settings are unchanged.
+
+The light `-PerfTrace` build logs one `[SETTINGS]` record per General action,
+with monotonic timestamp, row, action, label and resulting value. No per-draw
+logging or diagnostic HUD is added. This identifies UI state, not proof that
+a renderer/simulation has consumed it. The file header identifies **v8**;
+`[STADIUMPERF] v=6` continues to identify the unchanged record schema.
+
+Next hardware test: use the same Night/camera/quality setup, play first without
+opening settings, then change Radar/Replay/audio one at a time, resume between
+changes, and finally exercise Game Speed. Confirm no stamina bars/toggle and
+retain the log. Also repeat the V7 before-kickoff and Night/Legend rematch tests
+below. This build does not claim to have restored 60 FPS before measurement.
+
+Artifact: `local-debug/footballnx-camera-perf-v8/pes21_nx.nro`, 51,884,237 bytes,
+SHA-256 `216f21e2ddb93eb452c82bf9c40030cc4c7f9877e81a9fadd721b0bc9afaabe4`.
+Built with `-PerfTrace -Jobs 2`, without `-Diagnostics`. Replace **NRO only**;
+the prepared `dist/` NRO and pitch PAK were not overwritten. Local validation:
+66 distinct focused tests and 2 subtests passed across the focused run plus
+the additional native stamina-slot audit; one older optional HUD fixture test
+was unavailable. Menu tests execute all six labels/values/actions, focus wrap,
+and both profiling/release paths. NRO contains the V8/event markers and no
+SHOW STAMINA label, old fill-order patch label or removed Status setter symbol.
+Public-tree and whitespace audits pass. No new commit/push.
+
+## V7 candidate: native speed ownership, rematch rules and Day budget
+
+Built 2026-09-18; **not yet accepted on hardware**. Roof-toggle acceptance
+remains at `38f0d46` / `checkpoint-roof-shadow-toggle-v6`. V7 does not alter
+the roof caster filter, roof preference, pitch assets or High shader fixes.
+
+### Game Speed, not all General Settings
+
+The user isolated frame glitching to changing **Game Speed**, including
+before the first kickoff. The previous wrapper changed the native Status
+FPS immediately and then re-enforced that target from every UE tick for the
+rest of the match. This fights legitimate loading, pause, replay and FixDemo
+rates. Native `MatchMain` already calls its speed updater (at +0x1ec and
++0x3a0); it reads `SystemSettings::GameSpeedSettings`. The async renderer's
+`BeginWriteBuffer` also reads Status FPS to compute buffer timestamps.
+
+V7 commits only tmpdb + the embedded registry speed settings at +0x14.
+It removes the direct Status setter, the UI-triggered high-speed updater,
+and the unconditional UE-tick enforcement. Native gameplay now owns when
+the requested speed takes effect; menus/cinematics retain their own timing.
+The conflicting writers are demonstrated by native call-site inspection;
+their removal is a **candidate fix**, not visual proof of the glitch's cause.
+The old claim that every General Settings change caused this is superseded.
+
+`[GAMESPEED]` records setting, native target (21/24/27/30/33 simulation Hz),
+and sampled live rate. These are **not** the 30/60 render-FPS option. Live may
+legitimately differ while paused/loading. No rate is forced to make the log
+match the requested target.
+
+### Night/COM after Top Menu and new teams
+
+Hub preferences remain authoritative instead of importing bootstrap defaults.
+Rules are armed before Hub -> Strategy and reapplied at active Exhibition
+MatchSetup even when a native footer was bypassed. Opening COM Level no
+longer replaces its choice with the stock debug selector's reset value.
+
+There are two different Day/Night copies in the compatible runtime:
+
+- `tmpdb::Match` rule at +0x13c (`Get/SetTimeZone`).
+- Its 0xa8-byte `common::InitParam` renderer snapshot at +0x170, timezone +4.
+
+Updating the rule alone did not update the prebuilt stadium snapshot. V7
+round-trips the native getter/setter and changes only that word; stadium ID,
+weather, team and all other snapshot fields are preserved. Its AArch64 return
+ABI uses x8. `[MATCHRULES]` logs desired zone/level and both tmpdb readbacks,
+including `stadium_zone`. This is handoff evidence, not a rendered-scene probe.
+Preferences still last for the current app session, not across app restarts.
+
+### FootballNX tribune view
+
+Native Stadium D2/H3 audit yields eye height 16.5 and side rail Z=55. V7 replaces
+the old yaw-only rotation with that fixed rail/height, taking eye X from Wide's
+already-interpolated look X. Wide owns tracking, look target and lens; the
+mapping is absolute/idempotent, never an accumulating rotation or a translation
+of the whole eye/look pair toward the near stand. Only native camera ID 5 with
+the FootballNX flag is affected. This is Stadium-like fixed tribune framing,
+not Stadium's dynamic lens/yaw or a promise of pixel-identical composition.
+Native Stadium retains V6's X-only soft bias and native future-vector motion;
+shared tracing and native final Stadium eye/look remain untouched.
+
+### Night comparison and targeted Day experiment
+
+Night-only input SHA-256:
+`a4741c426fe33616a7481e8cd04483f0d9ef29d7eb63de1840c532096082930b`.
+Nine complete active-camera windows: 59.14 FPS overall; the eight after the
+initial slow window are 59.99-60.02 FPS. Approximately 153.6 draws/frame,
+**zero depth-only draws**, compared with the Day capture's 135-146 depth draws
+and 2040x2040 maximum depth viewport. These are submission counts, not GPU
+timings; positions/cameras differ, so this is not a controlled GPU-cost A/B.
+
+V7 caps `r.Shadow.MaxCSMResolution` and `r.Shadow.MaxResolution` at 1024 in Day,
+without raising lower quality values or disabling player/cascade shadows.
+The native console setter propagates changes on the UE game thread; exact
+integer-CVar vtable identity is checked first. It restores only a value it
+owns on Night/Top Menu, respecting detectable external quality/value/priority
+changes. A same-value, same-priority external write cannot be distinguished.
+Missing/different CVar types fail open. `[SHADOWBUDGET]` reports the actual
+readback; the next depth viewport samples establish whether the renderer
+consumed it. Expected tradeoff: lower shadow detail for reduced depth workload;
+no 60-FPS guarantee. Roof ON/OFF remains independent.
+
+### Artifact and verification
+
+- `local-debug/footballnx-camera-perf-v7/pes21_nx.nro`, 51,884,237 bytes.
+- SHA-256 `fa5d42292b84adbc101d69d0fe16bcdd7322e9680f8ea9db8dc0bfb5f21ed9cf`.
+- Built with `-PerfTrace`, `-Jobs 2`, without `-Diagnostics`; no debug HUD.
+- 53 focused tests passed. Host tests cover all speed values without forcing live timing,
+  rematch bootstrap/default replacement and both Day/Night copies, snapshot
+  byte preservation, view idempotence, shadow ownership/restore/type guards,
+  plus existing camera/roof/result tests. Optional local ELF ABI tests passed.
+- NRO markers include all three new log categories and exclude the removed
+  Status setter symbol. Public-tree audit and whitespace checks pass.
+- Replace **NRO only**; keep the accepted pitch PAK. The prepared `dist/`
+  NRO was not overwritten. No new commit/push performed.
+
+Hardware verification: before kickoff cycle every Game Speed (-2..+2),
+resume, repeat during play and check replay/goal transitions; change a non-speed
+General setting as a control. Play Night/Legend -> Top Menu -> new teams ->
+kickoff without changing either choice, then repeat Day. Compare Day roof
+ON/OFF and Night with the same camera/quality and check the FootballNX near/far
+touchlines. Copy `perf.log` before the next app launch overwrites it.
+
 ## Hardware checkpoint: Roof ON/OFF accepted (2026-09-18)
 
 User explicitly confirmed both states work with the V6 NRO below. Local Git

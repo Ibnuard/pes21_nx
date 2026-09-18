@@ -79,9 +79,9 @@ class PitchShadowTests(unittest.TestCase):
                     self.assertIn(b'out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);', result)
                     ungraded = re.sub(rb'\n// NX pitch hue begin\n.*?// NX pitch hue end\n', b'', result, flags=re.S)
                     self.assertEqual(result.count(b'uniform highp float nxRoofDisabled;'), 1)
-                    self.assertEqual(result.count(b'mix(texture(ps1,in_TEXCOORD0.zw),vec4(1.0),nxRoofDisabled)'), 1)
+                    self.assertEqual(result.count(b'(nxRoofDisabled > 0.5 ? vec4(1.0) : texture(ps1,in_TEXCOORD0.zw))'), 1)
                     ungraded = ungraded.replace(b'uniform highp float nxRoofDisabled;\n', b'').replace(
-                        b'mix(texture(ps1,in_TEXCOORD0.zw),vec4(1.0),nxRoofDisabled)',
+                        b'(nxRoofDisabled > 0.5 ? vec4(1.0) : texture(ps1,in_TEXCOORD0.zw))',
                         b'texture(ps1,in_TEXCOORD0.zw)')
                     self.assertEqual(ungraded, body.replace(key+b';', key+b' * 0.85;').replace(old_tint, new_tint))
                     self.assertIsNone(transform(result))
