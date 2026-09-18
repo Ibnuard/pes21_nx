@@ -71,26 +71,31 @@ class PitchShadowTests(unittest.TestCase):
             key = b'MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition.w'
             for body in bodies(native/'M_Pitch_Default.uexp'):
                 result = transform(body)
-                if key+b';' in body:
+                if b'texture(ps1,in_TEXCOORD0.zw)' in body:
                     old_tint = b'vec3(8.755540e-01,1.000000e+00,0.000000e+00)'
                     new_tint = b'vec3(0.000000e+00,0.000000e+00,0.000000e+00)'
                     self.assertEqual(len(old_tint), len(new_tint))
                     self.assertEqual(body.count(old_tint), 1)
                     self.assertEqual(result.count(b'// NX pitch hue begin'), 1)
-                    self.assertIn(b'out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);', result)
+                    is_v1 = key+b';' in body
+                    var = b'v1' if is_v1 else b'v0'
+                    self.assertIn(b'out_Target0.xyz = mix(' + var + b'.xyz,nxTint,nxMask);', result)
                     ungraded = re.sub(rb'\n// NX pitch hue begin\n.*?// NX pitch hue end\n', b'', result, flags=re.S)
                     self.assertEqual(result.count(b'uniform highp float nxRoofDisabled;'), 1)
                     self.assertEqual(result.count(b'(nxRoofDisabled > 0.5 ? vec4(1.0) : texture(ps1,in_TEXCOORD0.zw))'), 1)
                     ungraded = ungraded.replace(b'uniform highp float nxRoofDisabled;\n', b'').replace(
                         b'(nxRoofDisabled > 0.5 ? vec4(1.0) : texture(ps1,in_TEXCOORD0.zw))',
                         b'texture(ps1,in_TEXCOORD0.zw)')
-                    self.assertEqual(ungraded, body.replace(key+b';', key+b' * 0.85;').replace(old_tint, new_tint))
+                    expected = body.replace(old_tint, new_tint)
+                    if is_v1:
+                        expected = expected.replace(key+b';', key+b' * 0.85;')
+                    self.assertEqual(ungraded, expected)
                     self.assertIsNone(transform(result))
                     self.assertIsNone(transform(body+b'//unknown variant'))
                     changed += 1
                 else:
                     self.assertIsNone(result)
-            self.assertGreater(changed, 0)
+            self.assertEqual(changed, 20)
             for name in ('M_Pitch_Default_night', 'M_Pitch_Default_night_Low'):
                 for body in bodies(native/(name+'.uexp')):
                     self.assertIsNone(transform(body))

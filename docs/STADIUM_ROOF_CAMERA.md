@@ -2,6 +2,16 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Day flat lighting and non-CSM coverage — 2026-09-18
+
+Extends Day pitch shader modification to all 18 unique fingerprint variants (8 CSM
+and 10 non-CSM). With Day CSM cascades capped at 0, non-CSM shaders write to 0
+without directional shadow terms; their missing fingerprints previously allowed
+raw roof shadowmap texture sampling and unpatched grazing highlights. Both CSM
+and non-CSM Day bodies now zero the additive grazing highlight, route roof
+disable to uniform 1.0 (eliminating the two-tone pitch split), and apply the 4%
+grass luminance grade. Night shader bodies remain strictly rejected and unchanged.
+
 ## Post-checkpoint Day grass candidate — 2026-09-18
 
 The hardware review of `checkpoint-nameplate-day-pitch-v2` confirms that the
