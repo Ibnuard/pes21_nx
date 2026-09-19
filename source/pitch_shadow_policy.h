@@ -50,8 +50,6 @@ static char *pitch_shadow_source(const char *source) {
   if (!out_target) return NULL;
   if (is_v1 && strstr(out_target+strlen(out_v1), out_v1)) return NULL;
   if (!is_v1 && strstr(out_target+strlen(out_v0), out_v0)) return NULL;
-  const char *target_token = is_v1 ? out_v1 : out_v0;
-
   // Optional CSM depth comparison slope adjustment.
   const char *key = "MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition.w";
   const char *at = strstr(body, key);
@@ -76,40 +74,10 @@ static char *pitch_shadow_source(const char *source) {
   // Equal-length tokens preserve every other byte in the shader.
   memcpy(result+tint_offset, new_tint, strlen(new_tint));
 
-  // A pitch-local artistic grade after lighting. Preserve luminance and alpha;
-  // fade out on neutral paint instead of grading the entire composed scene.
-  char *end = strstr(result, target_token);
-  if (!end || strstr(end+strlen(target_token), target_token)) { free(result); return NULL; }
-
-  const char *grade_v1 =
-    "\n// NX pitch hue begin\n"
-    "highp vec3 nxGrass = max(v1.xyz, vec3(0.0));\n"
-    "highp float nxMask = smoothstep(0.05, 0.18, (nxGrass.g-max(nxGrass.r,nxGrass.b))/max(nxGrass.g,0.0001));\n"
-    "highp vec3 nxTint = nxGrass*vec3(0.82,1.0,1.12);\n"
-    "nxTint *= dot(nxGrass,vec3(0.2126,0.7152,0.0722))/max(dot(nxTint,vec3(0.2126,0.7152,0.0722)),0.0001);\n"
-    "nxTint *= 0.96;\n"
-    "out_Target0.xyz = mix(v1.xyz,nxTint,nxMask);\n"
-    "// NX pitch hue end\n";
-
-  const char *grade_v0 =
-    "\n// NX pitch hue begin\n"
-    "highp vec3 nxGrass = max(v0.xyz, vec3(0.0));\n"
-    "highp float nxMask = smoothstep(0.05, 0.18, (nxGrass.g-max(nxGrass.r,nxGrass.b))/max(nxGrass.g,0.0001));\n"
-    "highp vec3 nxTint = nxGrass*vec3(0.82,1.0,1.12);\n"
-    "nxTint *= dot(nxGrass,vec3(0.2126,0.7152,0.0722))/max(dot(nxTint,vec3(0.2126,0.7152,0.0722)),0.0001);\n"
-    "nxTint *= 0.96;\n"
-    "out_Target0.xyz = mix(v0.xyz,nxTint,nxMask);\n"
-    "// NX pitch hue end\n";
-
-  const char *grade = is_v1 ? grade_v1 : grade_v0;
-  size_t offset = (size_t)(end-result)+strlen(target_token), total = strlen(result);
-  char *graded = (char *)malloc(total+strlen(grade)+1);
-  if (!graded) { free(result); return NULL; }
-  memcpy(graded, result, offset);
-  memcpy(graded+offset, grade, strlen(grade));
-  memcpy(graded+offset+strlen(grade), result+offset, total-offset+1);
-  free(result);
-  return graded;
+  // The previous post-light green/blue grass grade is intentionally removed:
+  // native pitch UV colour now passes through unchanged. Keep the independent
+  // roof-mask and additive-highlight fixes above.
+  return result;
 }
 
 // Called only after the day allowlist accepted the original shader.

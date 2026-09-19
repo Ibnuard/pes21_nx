@@ -2,6 +2,27 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Native Day pitch colour restoration — 2026-09-20
+
+Hardware feedback rejected the added green/blue grass grade. The Day shader
+patch now leaves the native post-light pitch UV colour unchanged: the
+`nxGrass`/`nxTint` post-light blend and its 4% luminance reduction are removed
+from both CSM and non-CSM variants. The separately accepted roof-mask branch,
+zero additive grazing highlight, and optional depth slope adjustment remain.
+The allowlist still excludes Night and unrelated materials. This requires an
+NRO rebuild; the pitch texture PAK itself is unchanged. Switch appearance
+needs review.
+
+The deployed dummy-OBB runtime requires the full loose CPK build profile.
+Building with bare `build-wsl.ps1` selects the legacy large-OBB validator and
+will reject the 53,248-byte dummy OBB before gameplay. Use the documented
+`-PlayerMigrationCanary -LooseCpkFull -ExpectedPatchObbSize 53248` flags,
+plus the league badge atlas and team migration include from
+`local-debug/full-mobile-kit-migration-v1/league-branding/`. The current
+compiled migration ID is `1852ec648d2ebd75`, matching that package's
+`LooseCpk/manifest.txt`; the older `loose-cpk-full-v1` manifest uses another
+ID and is not interchangeable.
+
 ## Day flat lighting and non-CSM coverage — 2026-09-18
 
 Extends Day pitch shader modification to all 18 unique fingerprint variants (8 CSM
