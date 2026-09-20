@@ -88,6 +88,8 @@ def parse_args() -> argparse.Namespace:
                         help="Preserve the established runtime left/right convention when compensating the bind pose")
     parser.add_argument("--tuck-lower-neck", action="store_true",
                         help="Inset only the lower chest flare of the small skin/neck mesh beneath the shirt collar")
+    parser.add_argument("--lower-chest-cm", type=float, default=0.0,
+                        help="Lower the chest attachment smoothly without narrowing the neck")
     return parser.parse_args(sys.argv[separator + 1 :])
 
 
@@ -160,6 +162,25 @@ def tuck_lower_neck(obj, center_y=5.43, bottom_z=154.0, top_z=161.0, scale=0.52)
     obj.data.update()
     return {"vertices": changed, "bottom_z_cm": bottom_z,
             "top_z_cm": top_z, "scale": scale}
+
+
+def lower_chest_attachment(obj, distance, bottom_z=154.0, top_z=161.0):
+    """Move the chest below the collar while preserving neck circumference."""
+    if not math.isfinite(distance) or not 0 < distance <= 3 or obj.data.shape_keys:
+        raise ValueError("Chest lowering requires a finite distance in (0, 3] cm")
+    inverse = obj.matrix_world.inverted()
+    changed = 0
+    for vertex in obj.data.vertices:
+        point = obj.matrix_world @ vertex.co
+        if point.z >= top_z:
+            continue
+        t = max(0.0, min(1.0, (top_z - point.z) / (top_z - bottom_z)))
+        point.z -= distance * t * t * (3.0 - 2.0 * t)
+        vertex.co = inverse @ point
+        changed += 1
+    obj.data.update()
+    return {"vertices": changed, "lower_cm": distance,
+            "bottom_z_cm": bottom_z, "top_z_cm": top_z}
 
 
 def fit_mesh_island(obj, axis: str, index: int, scale: float, offset, count: int):
@@ -335,12 +356,15 @@ def main() -> int:
         raise RuntimeError(f"expected one armature, found {len(armatures)}")
     armature = armatures[0]
     neck_report = None
-    if args.tuck_lower_neck:
+    if args.tuck_lower_neck and args.lower_chest_cm:
+        raise ValueError("Choose neck inset or chest lowering, not both")
+    if args.tuck_lower_neck or args.lower_chest_cm:
         targets = [obj for obj in meshes if len(obj.data.vertices) == 236
                    and [material.name for material in obj.data.materials] == ["fox_skin_mat"]]
         if len(targets) != 1:
             raise ValueError("Lower-neck inset requires the audited 236-vertex mesh")
-        neck_report = tuck_lower_neck(targets[0])
+        neck_report = (lower_chest_attachment(targets[0], args.lower_chest_cm)
+                       if args.lower_chest_cm else tuck_lower_neck(targets[0]))
     if args.runtime_bind_reference and args.rotate_z_degrees:
         raise ValueError("Runtime bind compensation replaces rigid geometry rotation")
     if args.runtime_mirror_x and not args.runtime_bind_reference:

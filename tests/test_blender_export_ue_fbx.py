@@ -8,6 +8,51 @@ import subprocess
 import pytest
 
 
+def test_lower_chest_preserves_width_upper_neck_and_skinning(tmp_path):
+    blender = os.environ.get("PESNX_TEST_BLENDER") or shutil.which("blender")
+    if not blender or not Path(blender).is_file():
+        pytest.skip("Set PESNX_TEST_BLENDER to run the Blender integration check")
+    root = Path(__file__).resolve().parents[1]
+    script = tmp_path / "check_chest.py"
+    script.write_text("import sys\nsys.path.insert(0, " + repr(str(root)) + ")\n" + r'''
+import bpy
+from tools.blender_export_ue_fbx import lower_chest_attachment
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new('chest')
+mesh.from_pydata([(-4,2,153),(4,2,153),(-3,2,157.5),(3,2,157.5),
+                 (-2,2,161),(2,2,161)], [], [(0,1,3,2),(2,3,5,4)])
+obj = bpy.data.objects.new('chest',mesh)
+bpy.context.collection.objects.link(obj)
+group = obj.vertex_groups.new(name='neck')
+group.add(list(range(6)),1.0,'REPLACE')
+uv = mesh.uv_layers.new(name='UV0')
+for i, loop in enumerate(uv.data): loop.uv = (i / 10, i / 20)
+before = [tuple(v.co) for v in mesh.vertices]
+weights = [[(g.group,g.weight) for g in v.groups] for v in mesh.vertices]
+uvs = [tuple(loop.uv) for loop in uv.data]
+result = lower_chest_attachment(obj,1.2)
+assert result['vertices'] == 4
+for i, v in enumerate(mesh.vertices):
+    assert tuple(v.co)[:2] == before[i][:2], 'Neck circumference must not shrink'
+assert abs(mesh.vertices[0].co.z - 151.8) < 0.0001
+assert abs(mesh.vertices[2].co.z - 156.9) < 0.0001
+assert tuple(mesh.vertices[4].co) == before[4]
+assert tuple(mesh.vertices[5].co) == before[5]
+assert weights == [[(g.group,g.weight) for g in v.groups] for v in mesh.vertices]
+assert uvs == [tuple(loop.uv) for loop in uv.data]
+for invalid in (-1, float('nan'), 4):
+    try: lower_chest_attachment(obj,invalid)
+    except ValueError: pass
+    else: raise AssertionError('Invalid displacement accepted')
+print('PESNX_CHEST_CHECK_OK')
+''', encoding="utf-8")
+    result = subprocess.run([str(blender), "--background", "--python-exit-code", "1",
+                             "--python", str(script)], text=True, capture_output=True,
+                            timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PESNX_CHEST_CHECK_OK" in result.stdout
+
+
 def test_recomputed_normals_preserve_uvs_and_skinning(tmp_path):
     blender = os.environ.get("PESNX_TEST_BLENDER") or shutil.which("blender")
     if not blender or not Path(blender).is_file():
