@@ -19,7 +19,7 @@ repository. Project-authored response transformations and an empty runtime
 directory template are included so a legally supplied target can be prepared
 reproducibly.
 
-## Wrapper version 0.1.99
+## Wrapper version 2.0.0
 
 The current compatibility target is the Nyan Mod Offline edition of PES 2021
 Mobile v5.3.0 (`versionCode 305030001`, package `jp.nyan2021.pesam`). The
@@ -45,9 +45,8 @@ Working in the currently tested revision:
   layout, including simultaneous movement, Dash, and action input
 - an Exhibition matchup hub with independent HOME/COM selection, COM level,
   General Match Settings, and a deliberate Proceed > Game Plan > Play flow
-- 105 validated master-data teams: 48 clubs and 57 national teams with squad
-  membership, shirt numbers, differentiated player ratings, and refreshed
-  stock kit selection
+- 443 selectable teams in 33 categories in the player-migration build, with
+  squad membership, shirt numbers, differentiated player ratings, and kit data
 - ten legacy eFootball10 PESDB club-membership migrations layered over the
   PES21 master records; the newer binary schema is not loaded directly
 - libnx AudioOut-backed AAudio compatibility for menu and match audio, plus
@@ -63,9 +62,9 @@ Working in the currently tested revision:
 - a one-folder runtime preparer that discovers the APK, both OBBs, and release
   NRO, with an independently implemented minimal CPK table reader for the ten
   required locale archives
-- local NRO icon personalization: the preparer converts the verified APK's
-  application icon to the Switch JPEG format and rebuilds the NRO ASET section
-  without committing or redistributing the proprietary artwork
+- FNX Ronaldo launcher artwork from root `icon.jpg` (256x256 RGB JPEG):
+  local builds verify the embedded icon, and the preparer preserves the release
+  NRO byte-for-byte by default; `--apk-icon` opts into legacy APK artwork
 
 ## Runtime packaging findings
 
@@ -233,6 +232,8 @@ version 0.1.94. Advanced controls and user-relocated mobile button layouts are
 not supported by this coordinate-based handler yet.
 
 ## Testing notes
+
+- Launcher artwork and forwarder feasibility: [NRO icon](docs/NRO_ICON.md).
 
 - Use full-memory title override on hardware.
 - Keep emulator-only patches and emulator build artifacts outside this repo.

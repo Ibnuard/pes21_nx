@@ -465,8 +465,39 @@ def resolve_nro(explicit: Path | None) -> Path:
     )
 
 
+def prepare_nro(apk: Path, nro: Path, output: Path, *, apk_icon: bool = False) -> dict[str, Any]:
+    """Keep release artwork by default; APK personalization is explicit opt-in."""
+    if apk_icon:
+        return inject_apk_icon_into_nro(apk, nro, output)
+    source = nro.read_bytes()
+    if len(source) < 0x1C or source[0x10:0x14] != b"NRO0":
+        raise RuntimeError("release NRO has an invalid NRO header")
+    offset = struct.unpack_from("<I", source, NRO_ASSET_OFFSET_FIELD)[0]
+    if (offset < NRO_ASSET_HEADER_SIZE or offset + NRO_ASSET_HEADER_SIZE > len(source)
+            or source[offset:offset + 4] != NRO_ASSET_MAGIC):
+        raise RuntimeError("release NRO has no valid ASET metadata header")
+    relative, size = struct.unpack_from("<QQ", source, offset + 8)
+    if relative < NRO_ASSET_HEADER_SIZE or not size or offset + relative + size > len(source):
+        raise RuntimeError("release NRO has an invalid icon asset range")
+    icon = source[offset + relative:offset + relative + size]
+    from PIL import Image
+
+    with Image.open(io.BytesIO(icon)) as image:
+        image.load()
+        if image.format != "JPEG" or image.size != NRO_ICON_DIMENSIONS or image.mode != "RGB":
+            raise RuntimeError("release NRO icon must be a 256x256 RGB JPEG")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(nro, output)
+    return {
+        "source": "release-nro", "preserved": True, "format": "JPEG",
+        "width": 256, "height": 256, "size": size,
+        "sha256": hashlib.sha256(icon).hexdigest(),
+    }
+
+
 def prepare_runtime(
-    apk: Path, main_obb: Path, patch_obb: Path, nro: Path, output: Path
+    apk: Path, main_obb: Path, patch_obb: Path, nro: Path, output: Path,
+    *, apk_icon: bool = False,
 ) -> None:
     apk = apk.resolve()
     main_obb = main_obb.resolve()
@@ -514,9 +545,10 @@ def prepare_runtime(
         apply_compatibility_overrides(responses)
         write_responses(responses, staging / "assets" / "responses", keep_json=False)
 
-        print("Embedding the APK application icon into the NRO...")
+        print("Preparing the NRO (APK icon override)..." if apk_icon
+              else "Preserving the release NRO and its launcher icon...")
         prepared_nro = staging / "pes21_nx.nro"
-        nro_icon = inject_apk_icon_into_nro(apk, nro, prepared_nro)
+        nro_icon = prepare_nro(apk, nro, prepared_nro, apk_icon=apk_icon)
         (staging / "SaveData").mkdir()
 
         print("Hashing and validating the completed runtime...")
@@ -583,6 +615,8 @@ def main() -> None:
     parser.add_argument("--patch-obb", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--nro", type=Path)
+    parser.add_argument("--apk-icon", action="store_true",
+                        help="replace the release FNX icon with the supplied APK icon (opt-in)")
     args = parser.parse_args()
 
     explicit_inputs = (args.apk, args.main_obb, args.patch_obb)
@@ -612,7 +646,7 @@ def main() -> None:
             apk, main_obb, patch_obb = explicit_inputs  # type: ignore[misc]
             nro = resolve_nro(args.nro)
             output = args.output
-        prepare_runtime(apk, main_obb, patch_obb, nro, output)
+        prepare_runtime(apk, main_obb, patch_obb, nro, output, apk_icon=args.apk_icon)
         if interactive_mode:
             from tkinter import messagebox
 

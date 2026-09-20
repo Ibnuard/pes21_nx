@@ -38,9 +38,10 @@ include $(DEVKITPRO)/libnx/switch_rules
 #   NACP building is skipped as well.
 #---------------------------------------------------------------------------------
 TARGET		:=	pes21_nx
-APP_TITLE	:=	PES 2021 NX
-APP_AUTHOR	:=	PES21 NX project
-APP_VERSION	:=	0.1.99
+APP_TITLE	:=	FootballNX 26
+APP_AUTHOR	:=	Androswitch Project
+APP_VERSION	:=	2.0.0
+# Shared FNX Ronaldo artwork for local and CI builds.
 ICON		:=	icon.jpg
 BUILD		:=	build
 SOURCES		:=	source
@@ -236,6 +237,12 @@ ifeq ($(strip $(NO_NACP)),)
 $(OUTPUT).nro	:	$(OUTPUT).elf $(OUTPUT).nacp
 else
 $(OUTPUT).nro	:	$(OUTPUT).elf
+endif
+
+# Repackage incremental builds when only the launcher artwork changes.
+# Keep the ELF first: the devkitPro recipe uses $< as its input.
+ifeq ($(strip $(NO_ICON)),)
+$(OUTPUT).nro : $(APP_ICON)
 endif
 
 else

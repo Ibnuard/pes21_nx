@@ -4,6 +4,22 @@ All notable changes to the public PES 2021 NX wrapper are recorded here.
 Game files and changes made by the compatibility target are outside the scope
 of this changelog.
 
+## [2.0.0] - 2026-09-20
+
+### Changed
+
+- Updated the NRO metadata title to FootballNX 26, version to 2.0.0, and author
+  to Androswitch Project.
+- Adopted the FNX Ronaldo icon for the NRO and preserved release artwork in
+  newly prepared runtimes by default.
+- Built the player-migration selector with 443 teams across 33 categories;
+  the 105-team figure below documents the historical v0.1.99 release.
+
+### Verified
+
+- Built the local full-loose NRO candidate and checked its embedded icon against
+  the source JPEG. The NSP forwarder is a separate local test artifact.
+
 ## [0.1.99] - 2026-08-26
 
 ### Added

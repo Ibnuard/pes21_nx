@@ -25,6 +25,7 @@ Subsystem notes and historical implementation audits live here.
 
 ## Runtime, controls, and UI
 
+- [NRO launcher icon and NSP forwarder notes](NRO_ICON.md)
 - [Loose CPK canary](LOOSE_CPK_CANARY.md)
 - [Full loose CPK runtime](LOOSE_CPK_FULL.md)
 - [Known issues](KNOWN_ISSUES.md)

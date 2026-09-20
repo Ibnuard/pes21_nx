@@ -25,13 +25,13 @@ work without source changes.
 The Nyan Mod files are not included, maintained, or distributed here. Credit
 goes to **Nyan Mod** for the offline modification used during development.
 
-## Current release: v0.1.99
+## Current build: FootballNX 26 v2.0.0
 
-This release expands the port from a small Exhibition proof of concept into a
+This build expands the port from a small Exhibition proof of concept into a
 more complete offline match flow:
 
-- 105 selectable teams: 48 clubs and 57 national teams, with validated squads
-  and shirt numbers from the supported master data;
+- 443 selectable teams across 33 categories, with validated squads and shirt
+  numbers from the supported master data and migration inputs;
 - ten additional club membership mappings migrated from the audited legacy
   eFootball10 PESDB: Manchester B, Everton B, Tottenham WB, Brighton WB,
   Benfica, Porto, Sporting CP, Atalanta, Napoli, and Torino;
@@ -90,8 +90,8 @@ Title Screen > Main Menu > Exhibition > Matchmaking
    - `main.305030001.jp.nyan2021.pesam.obb`;
    - `patch.305030001.jp.nyan2021.pesam.obb`.
 3. Run `PES21NX-Prepare.exe` and select that folder. The release NRO is already
-   included in the preparation bundle. The preparer also embeds the PES
-   application icon extracted from your APK into the installed NRO.
+   included in the preparation bundle. The preparer preserves its FNX Ronaldo
+   launcher icon. APK-icon personalization is available with `--apk-icon`.
 4. Wait for the tool to create `switch/pes21_nx/`, then copy the generated
    `switch` folder to the root of the Nintendo Switch SD card and merge it with
    the existing folder.

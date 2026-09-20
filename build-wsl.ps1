@@ -14,6 +14,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+# Fail before compiling if the shared FNX launcher artwork is missing/invalid.
+$iconChecker = Join-Path $projectRoot "scripts\check-nro-icon.ps1"
+$buildIcon = Join-Path $projectRoot "icon.jpg"
+& $iconChecker -IconPath $buildIcon
 $oldProjectRoot = $env:PES21_NX_PROJECT_ROOT
 $oldWslEnv = $env:WSLENV
 $oldDiagnostics = $env:PES21_NX_DIAGNOSTICS
@@ -126,6 +130,7 @@ make -j"$jobs" \
   PES_PLAYER_MIGRATION_CANARY="${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
   PES_LOOSE_CPK_FULL="${PES21_NX_LOOSE_CPK_FULL:-0}" \
   PES_EXPECTED_PATCH_OBB_SIZE="${PES21_NX_EXPECTED_PATCH_OBB_SIZE:-0}" \
+  ICON=icon.jpg \
   LINK_BUILD_ID="$link_build_id"
 
 cp pes21_nx.nro "$PES21_NX_BUILD_OUTPUT_ROOT/"
@@ -152,6 +157,8 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
   }
 
   $builtNro = Join-Path $buildOutputRoot "pes21_nx.nro"
+  # Verify the embedded artwork before promoting any output to dist.
+  & $iconChecker -IconPath $buildIcon -NroPath $builtNro
   $runtimeNro = Join-Path $projectRoot "dist\pes21_nx\pes21_nx.nro"
   if (-not $OutputDirectory -and
       (Test-Path -LiteralPath (Split-Path -Parent $runtimeNro))) {
