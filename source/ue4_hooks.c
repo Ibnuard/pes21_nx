@@ -1948,6 +1948,7 @@ static void main_menu_video_close(void);
 static void main_menu_info_close(void);
 static void main_menu_apply_focus(uint32_t index);
 static void main_menu_activate_match_mode(uint32_t mode);
+static void main_menu_activate_cup_fixture(void);
 static void main_menu_2p_team_selector_open(void);
 static void main_menu_2p_team_selector_close(void);
 static int main_menu_start_two_player_match(void);
@@ -2813,14 +2814,19 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
   }
 
   uint32_t focus = pes_controller_2p_prematch_hub_focus();
+  const uint32_t button_count = pes_controller_2p_prematch_hub_button_count();
   if (pressed & ((1u << 10) | (1u << 12))) {
-    focus = focus ? focus - 1 : PES_2P_PREMATCH_HUB_BUTTON_COUNT - 1;
+    focus = focus ? focus - 1 : button_count - 1u;
   } else if (pressed & ((1u << 11) | (1u << 13))) {
-    focus = (focus + 1) % PES_2P_PREMATCH_HUB_BUTTON_COUNT;
+    focus = (focus + 1u) % button_count;
   } else if (pressed & (1u << 1)) {
     __atomic_store_n(&main_menu_2p_prematch_hub_input_pending, focus + 1,
                      __ATOMIC_RELEASE);
   } else if (pressed & (1u << 0)) {
+    if (competition_frontend_cup_match_active()) {
+      main_menu_2p_team_selector_close();
+      return;
+    }
     __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&main_menu_2p_team_selector_active, 1,
                      __ATOMIC_RELEASE);
@@ -4494,7 +4500,12 @@ uint32_t pes_controller_2p_transition_kind(void) {
 uint32_t pes_controller_2p_prematch_hub_focus(void) {
   const uint32_t focus = __atomic_load_n(&main_menu_2p_prematch_hub_focus,
                                          __ATOMIC_ACQUIRE);
-  return focus < PES_2P_PREMATCH_HUB_BUTTON_COUNT ? focus : 0;
+  return focus < pes_controller_2p_prematch_hub_button_count() ? focus : 0;
+}
+
+uint32_t pes_controller_2p_prematch_hub_button_count(void) {
+  return competition_frontend_cup_match_active() ? 4u
+                                                 : PES_2P_PREMATCH_HUB_BUTTON_COUNT;
 }
 
 uint32_t pes_controller_2p_prematch_hub_page(void) {
@@ -5594,6 +5605,8 @@ static void exhibition_search_focus_apply(void *window) {
 
 void pes_exhibition_search_pad_event(uint32_t buttons,
                                      uint32_t previous_buttons) {
+  if (competition_frontend_active())
+    return;
   if (!__atomic_load_n(&exhibition_searching_active, __ATOMIC_ACQUIRE))
     return;
 
@@ -10295,7 +10308,8 @@ static int main_menu_require_two_controller_slots(int preserve_match_ui) {
 // Pad::Update hook), not from the HID polling thread where the selector reads
 // controller edges.
 static int main_menu_start_two_player_match(void) {
-  if (!main_menu_require_two_controller_slots(0))
+  if (!main_menu_require_two_controller_slots(
+          competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET))
     return 0;
   void *listener = exhibition_flow_listener_instance
                        ? *exhibition_flow_listener_instance
@@ -10464,7 +10478,7 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
     main_menu_2p_prematch_hub_input_armed[0] = 0;
     return;
   }
-  if (action == 5) {
+  if (action == 5 && !competition_frontend_cup_match_active()) {
     exhibition_open_match_settings(exhibition_search_window);
     exhibition_popup_focus_index = 0;
     return;
@@ -10570,6 +10584,10 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     main_menu_activate_match_mode(queued_action);
     return;
   }
+  if (queued_action == COMPETITION_ACTION_CUP_FIXTURE) {
+    main_menu_activate_cup_fixture();
+    return;
+  }
   if (!__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE))
     return;
 
@@ -10579,6 +10597,8 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     if (action == COMPETITION_ACTION_EXHIBITION ||
         action == COMPETITION_ACTION_TWO_PLAYER)
       main_menu_activate_match_mode(action);
+    else if (action == COMPETITION_ACTION_CUP_FIXTURE)
+      main_menu_activate_cup_fixture();
     if (competition_frontend_take_controller_gate_request() &&
         competition_frontend_cup_required_controller_mask() == 3u)
       main_menu_require_two_controller_slots(1);
@@ -10796,6 +10816,7 @@ void pes_main_menu_simplify(void *window) {
   // actually been rebuilt. Clearing it in the Pause destructor was too early
   // and exposed the stock Pause exit animation for several frames.
   __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
+  competition_frontend_cup_restore_after_match();
 }
 
 uintptr_t pes_main_menu_selected_entry(void *window,
@@ -10846,6 +10867,37 @@ static void main_menu_activate_match_mode(uint32_t mode) {
     competition_frontend_match_action_result(1);
     return;
   }
+}
+
+static void main_menu_activate_cup_fixture(void) {
+  uint32_t home = 0, away = 0;
+  if (!competition_frontend_cup_match_teams(&home, &away)) {
+    competition_frontend_cup_handoff_result(0);
+    return;
+  }
+  __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_match_time,
+                   competition_frontend_cup_game_time(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_extra_time,
+                   competition_frontend_cup_extra_time(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_penalties,
+                   competition_frontend_cup_penalty(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_substitutions,
+                   competition_frontend_cup_max_substitutions(),
+                   __ATOMIC_RELEASE);
+  exhibition_apply_cpu_level(competition_frontend_cup_com_level(), NULL);
+  __atomic_store_n(&main_menu_2p_prematch_bootstrap_mode,
+                   MAIN_MENU_2P_PREMATCH_BOOT_HUB, __ATOMIC_RELEASE);
+  const int two_humans =
+      competition_frontend_cup_team_is_human(home) &&
+      competition_frontend_cup_team_is_human(away);
+  const int started = two_humans ? main_menu_start_two_player_match()
+                                 : main_menu_start_exhibition_match();
+  competition_frontend_cup_handoff_result(started);
+  if (started)
+    debugPrintf("cup: match handoff HOME=%u AWAY=%u human-versus-human=%d\n",
+                home, away, two_humans);
 }
 
 static void main_menu_activate_choice(uint32_t choice) {
@@ -14908,6 +14960,22 @@ static void match_result_prepare_skin(void *window) {
   }
 }
 
+static int match_result_cup_finished(void) {
+  return competition_frontend_cup_match_active() &&
+      __atomic_load_n(&match_result_page, __ATOMIC_ACQUIRE) ==
+          MATCH_RESULT_PAGE_FINAL &&
+      (__atomic_load_n(&match_result_final_seen, __ATOMIC_ACQUIRE) != 0 ||
+       match_result_current_phase() == MATCH_PHASE_END);
+}
+
+static void match_result_record_cup_score(void) {
+  if (!match_result_cup_finished()) return;
+  uint32_t home_goals = 0, away_goals = 0;
+  if (pes_controller_pause_score(0, &home_goals) &&
+      pes_controller_pause_score(1, &away_goals))
+    competition_frontend_cup_match_result(home_goals, away_goals);
+}
+
 static void match_result_process_controller_input(void *window) {
   const uint32_t action = __atomic_exchange_n(
       &match_result_input_action, 0, __ATOMIC_ACQ_REL);
@@ -14929,6 +14997,7 @@ static void match_result_process_controller_input(void *window) {
                            context == PES_VIRTUAL_CURSOR_FULL_TIME;
     if (action != PES_PAUSE_INPUT_BACK && !final_next)
       return;
+    match_result_record_cup_score();
     __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_result_exit_requested, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
@@ -15010,6 +15079,7 @@ static void match_result_process_controller_input(void *window) {
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   if (chosen == MATCH_RESULT_ACTION_BACK_TO_MENU) {
+    match_result_record_cup_score();
     __atomic_store_n(&pause_top_menu_transition_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
     debugPrintf("result-exit-v3: dispatch exit window=%p page=%u "
@@ -15092,7 +15162,7 @@ const char *pes_controller_match_result_card_label(uint32_t index) {
     case MATCH_RESULT_ACTION_GAME_PLAN:
       return "GAME PLAN";
     case MATCH_RESULT_ACTION_BACK_TO_MENU:
-      return "TOP TO MENU";
+      return match_result_cup_finished() ? "BACK TO CUP" : "TOP TO MENU";
     default:
       return "";
   }

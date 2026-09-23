@@ -233,9 +233,11 @@ Urutan field:
 5. Match Mode.
 6. Game Time.
 7. Extra Time.
-8. Penalty.
+8. Max Substitutions.
 9. Next.
-10. Back.
+
+Kembali menggunakan helper B, bukan tile Back tambahan. Penalty selalu ON
+karena setiap fixture Cup harus memiliki pemenang.
 
 #### Select Cup
 
@@ -323,18 +325,12 @@ Jika Knockout dipilih, tim yang kalah langsung tersingkir. Jumlah tim yang bukan
 
 Gunakan pilihan waktu yang sama dengan Exhibition dan 2 Player. Jangan membuat enum waktu baru.
 
-#### Extra Time dan Penalty
+#### Extra Time, Penalty, dan Max Substitutions
 
-Setting ini diteruskan ke MatchSetup native bila fixture membutuhkan penentuan pemenang.
-
-Validasi:
-
-- Pada Knockout satu leg, Cup wajib mempunyai resolusi seri.
-- Jika Extra Time dan Penalty sama-sama false, UI harus menampilkan warning dan menggunakan Replay Policy internal, atau menolak kombinasi tersebut.
-- Pada Home Away, aggregate draw dapat menggunakan replay atau penalty sesuai competition definition.
-- Final dapat memiliki rule khusus jika competition manifest menetapkannya.
-
-Runtime tidak boleh mengaktifkan penalty secara diam-diam tanpa menampilkan rule yang berlaku. Rule yang dipilih harus terlihat pada Cup Hub dan bracket metadata.
+Extra Time dapat ON/OFF. Penalty selalu ON dan tidak menjadi pilihan setting;
+aturan ini harus terlihat pada Cup Hub. Max Substitutions memakai rentang yang
+sama dengan General Setting (3-5) dan diteruskan ke MatchSetup native. Setiap
+fixture Cup harus menghasilkan pemenang, termasuk jika Extra Time OFF.
 
 ### 5.3 Select Team
 
@@ -403,10 +399,18 @@ Hub wajib menampilkan:
 - Slot save aktif.
 - Status player/controller assignment jika fixture berikutnya melibatkan human team.
 
+Bagan memakai slot ringkas `[crest] MUN - P1/COM` dengan skor pertandingan.
+Tim yang mendapat bye hanya memakai satu slot; fixture ronde mendatang yang
+belum terisi menampilkan dua slot TBD. L/R (SL/SR pada Joy-Con horizontal)
+mengganti halaman bagan; kiri/kanan hanya memindahkan fokus antara Next dan
+Top to Menu. Match History menampilkan crest, kode tiga huruf, skor pra-laga
+`0 - 0`, dan maksimal empat hasil terakhir. Kedua tombol berada di luar
+container utama.
+
 Tombol utama hanya:
 
 1. Next.
-2. Back to Menu.
+2. Top to Menu.
 
 Helper B tetap dapat ditampilkan sebagai shortcut Back to Menu, tetapi tidak dihitung sebagai tombol konten ketiga.
 
@@ -455,6 +459,12 @@ Setelah pertandingan:
 5. Update bracket atau aggregate score.
 6. Simpan slot.
 7. Kembali ke Cup Bracket Result.
+
+Implementasi awal membaca skor reguler/extra time dari cache native saat
+halaman final ditutup melalui `Back to Cup`, lalu memperbarui fixture dan
+mensimulasikan laga COM yang tersisa. Pembacaan pemenang adu penalti native
+masih perlu diverifikasi di hardware; skor imbang belum cukup untuk menentukan
+pemenang PK secara otoritatif.
 
 Halaman result menampilkan:
 

@@ -353,6 +353,9 @@ static void footer(void *w, uint32_t key) { assert(w==(void *)123 && key==0); ++
 static void stats(void *w, uint32_t key) { assert(w==(void *)123 && key==0); ++stats_calls; }
 static void wait_control(void *w, uint32_t on) { assert(w==(void *)123 && on==1); ++wait_calls; }
 static void match_pause_go_top_menu(void *w) { assert(w==(void *)123); ++pause_calls; }
+/* Cup score capture is tested in its own frontend path; this isolated
+ * result handshake harness exercises the non-Cup native footer route. */
+static void match_result_record_cup_score(void) {}
 static void match_result_dispatch_event(void *w, const char *event) {
   assert(w==(void *)123 && !strcmp(event,"plan")); ++event_calls;
 }

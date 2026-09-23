@@ -481,6 +481,7 @@ void pes_controller_2p_team_selector_pad_event(uint32_t pad,
                                                uint32_t previous_buttons);
 
 #define PES_2P_PREMATCH_HUB_BUTTON_COUNT 5u
+uint32_t pes_controller_2p_prematch_hub_button_count(void);
 #define PES_2P_PREMATCH_HUB_PAGE_MAIN 0u
 #define PES_2P_PREMATCH_HUB_PAGE_KITS 1u
 #define PES_2P_PREMATCH_HUB_PAGE_STADIUM 2u
