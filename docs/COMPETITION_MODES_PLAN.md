@@ -127,7 +127,7 @@ Hierarki Back:
 - Cup landing > Select Modes.
 - Cup save slots > Cup landing.
 - Cup Settings > Cup landing.
-- Cup bracket editor > empat tombol Cup Hub.
+- Cup bracket editor > lima tombol Cup Hub.
 - Cup Hub > Top to Menu.
 - Bracket setelah result > tetap di Cup Hub.
 - League dan Master League mengikuti pola yang sama.
@@ -231,12 +231,9 @@ Urutan field:
 1. Select Cup.
 2. Number of Player.
 3. Number of Teams.
-4. COM Level.
-5. Match Mode.
-6. Game Time.
-7. Extra Time.
-8. Max Substitutions.
-9. Next.
+4. Home Away (ON/OFF).
+5. 3rd Place Match (ON/OFF).
+6. Next.
 
 Kembali menggunakan helper B, bukan tile Back tambahan. Penalty selalu ON
 karena setiap fixture Cup harus memiliki pemenang.
@@ -302,7 +299,7 @@ dapat dipilih melalui selector untuk mengganti peserta. Saat manifest
 kompetisi yang lebih lengkap tersedia, peserta awal diambil dari manifest
 tersebut dengan validasi roster/kit.
 
-#### COM Level
+#### General Setting di Cup Hub
 
 COM Level hanya ditampilkan apabila:
 
@@ -310,23 +307,33 @@ COM Level hanya ditampilkan apabila:
 
 Artinya masih terdapat tim yang tidak dimiliki logical human player.
 
-Jika semua tim dimiliki player, field disembunyikan. Namun pada fixture tertentu dua tim human tetap dapat bertemu dan input assignment tetap dilakukan.
+Jika semua tim dimiliki player, field disembunyikan. Pengaturan lain memakai
+komponen General Settings Exhibition yang sama dari Cup Hub: Match Time,
+Overtime, Substitutions, Injuries, Ball, dan VAR. Penalties selalu ON.
 
-#### Match Mode
+#### Home Away
 
 Label UI:
 
-- Home Away.
-- Knockout.
+- Home Away ON = tie dua leg dengan aggregate score pada ronde sebelum final.
+- Home Away OFF = satu pertandingan eliminasi pada tiap pairing.
 
 Interpretasi internal:
 
-- Home Away = tie dua leg dengan aggregate score.
-- Knockout = satu pertandingan eliminasi.
+- Semua Cup memakai format knockout.
+- Final dan laga juara 3 adalah pertandingan tunggal.
 
-Jika Home Away dipilih, setiap pairing memiliki leg 1 dan leg 2. Home/away dapat dibalik pada leg kedua.
+Jika Home Away ON, pairing sebelum final memiliki leg 1 dan leg 2;
+kelolosan ditentukan dari jumlah gol agregat.
 
-Jika Knockout dipilih, tim yang kalah langsung tersingkir. Jumlah tim yang bukan power-of-two ditangani dengan bye atau preliminary round.
+Jika Home Away OFF, tim yang kalah langsung tersingkir. Jumlah tim yang bukan
+power-of-two ditangani dengan bye atau preliminary round.
+
+#### 3rd Place Match
+
+Jika ON dan minimal empat tim, dua tim yang kalah di semifinal memainkan
+perebutan juara 3. Fixture ini diprioritaskan sebelum final bila ada tim
+player; COM vs COM baru disimulasikan setelah match player selesai.
 
 #### Game Time
 
@@ -350,7 +357,7 @@ P1 memilih `Bracket` untuk masuk edit mode. Fokus melintasi slot pembuka dari
 atas ke bawah; A membuka selector tim satu sisi yang memakai carousel, atlas,
 dan pengelompokan Exhibition/2 Player. Selector predefined Cup langsung
 membuka kategori liga yang eligible; FootballNX Cup membuka daftar kategori.
-B mengembalikan fokus ke empat tombol Hub.
+B mengembalikan fokus ke lima tombol Hub.
 
 X mengisi hanya slot kosong babak pembuka secara acak, tanpa mengganti pilihan
 manual. Ronde lanjutan dan Champion tetap TBD sampai hasil fixture sebelumnya
@@ -396,14 +403,16 @@ halaman bagan aktif dan ronde lanjutannya, termasuk TBD untuk lawan yang
 belum diketahui; hasil selesai memakai crest, kode tiga huruf, dan skor.
 Tombol berada di luar container utama dengan jarak yang jelas.
 
-Urutan tombol: `Bracket`, `Next`, `Save`, `Top to Menu`. `Bracket` hanya aktif
+Urutan tombol: `Bracket`, `Next`, `General Setting`, `Save`, `Top to Menu`. `Bracket` hanya aktif
 sebelum match pertama. `Next` baru aktif jika seluruh tim ter-assign; setelah
 Cup selesai tombol ini hilang dan fokus otomatis pindah ke `Top to Menu`.
 `Save` membuka tiga slot persistent yang bisa dilanjutkan dari `Continue`.
 
 Helper B tetap dapat ditampilkan sebagai shortcut Back to Menu, tetapi tidak dihitung sebagai tombol konten ketiga.
 
-Tidak ada General Match Settings di Cup Hub. Setting kompetisi dikunci setelah Cup dibuat agar rule tidak berubah di tengah kompetisi. Match-specific setup hanya menampilkan data yang diwariskan dari Cup state.
+`General Setting` memakai layout dan kontrol Exhibition. Nilainya dapat
+diubah dari Cup Hub lalu diteruskan ke match berikutnya; aturan turnamen
+(Home Away dan 3rd Place Match) tetap berasal dari Cup Settings.
 
 ### 5.5 Next dan match handoff
 

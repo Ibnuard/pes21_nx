@@ -17,8 +17,32 @@ uint32_t cup_tournament_fixture_count(const CupTournament *cup,
 
 const CupFixture *cup_tournament_fixture(const CupTournament *cup,
                                          uint32_t round, uint32_t index) {
+  if (cup && cup->third_place_enabled && cup->team_count >= 4u &&
+      round + 1u == cup->round_count && index == CUP_THIRD_PLACE_INDEX)
+    return &cup->fixtures[round][CUP_THIRD_PLACE_INDEX];
   return index < cup_tournament_fixture_count(cup, round)
              ? &cup->fixtures[round][index] : NULL;
+}
+
+const CupFixture *cup_tournament_third_place_fixture(
+    const CupTournament *cup) {
+  return cup && cup->round_count
+      ? cup_tournament_fixture(cup, cup->round_count - 1u,
+                               CUP_THIRD_PLACE_INDEX) : NULL;
+}
+
+void cup_tournament_set_rules(CupTournament *cup, int home_away,
+                              int third_place) {
+  if (!cup || cup->active_round || cup->history_count) return;
+  cup->home_away = home_away != 0;
+  cup->third_place_enabled = third_place != 0 && cup->team_count >= 4u;
+}
+
+static int cup_has_second_leg(const CupTournament *cup, uint32_t round,
+                              uint32_t index) {
+  /* The final and bronze match remain single-game deciders. */
+  return cup->home_away && round + 1u < cup->round_count &&
+         index < cup_tournament_fixture_count(cup, round);
 }
 
 static void cup_complete(CupTournament *cup, uint32_t round, uint32_t index,
@@ -86,6 +110,16 @@ int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,
   if (!cup || cup->champion)
     return 0;
   for (uint32_t r = cup->active_round; r < cup->round_count; r++) {
+    if (r + 1u == cup->round_count) {
+      const CupFixture *bronze = cup_tournament_third_place_fixture(cup);
+      if (bronze && !bronze->complete && bronze->home && bronze->away &&
+          (cup_is_human(cup, bronze->home) ||
+           cup_is_human(cup, bronze->away))) {
+        if (round) *round = r;
+        if (index) *index = CUP_THIRD_PLACE_INDEX;
+        return 1;
+      }
+    }
     const uint32_t count = cup_tournament_fixture_count(cup, r);
     for (uint32_t i = 0; i < count; i++) {
       const CupFixture *fixture = &cup->fixtures[r][i];
@@ -105,12 +139,23 @@ int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,
 
 int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
                           uint32_t home_goals, uint32_t away_goals) {
-  if (!cup || round != cup->active_round ||
-      index >= cup_tournament_fixture_count(cup, round))
+  if (!cup || round != cup->active_round)
     return 0;
+  const CupFixture *target = cup_tournament_fixture(cup, round, index);
+  if (!target) return 0;
   CupFixture *fixture = &cup->fixtures[round][index];
   if (fixture->complete || !fixture->home || !fixture->away)
     return 0;
+  if (cup_has_second_leg(cup, round, index)) {
+    if (!fixture->first_leg_complete) {
+      fixture->first_leg_home_goals = (uint8_t)(home_goals > 99u ? 99u : home_goals);
+      fixture->first_leg_away_goals = (uint8_t)(away_goals > 99u ? 99u : away_goals);
+      fixture->first_leg_complete = 1u;
+      return 1;
+    }
+    home_goals += fixture->first_leg_home_goals;
+    away_goals += fixture->first_leg_away_goals;
+  }
   cup_complete(cup, round, index, home_goals, away_goals, 0);
   cup_tournament_advance(cup);
   return 1;
@@ -130,6 +175,13 @@ void cup_tournament_advance(CupTournament *cup) {
            cup_is_human(cup, fixture->away)))
         human_pending++;
     }
+    if (round + 1u == cup->round_count) {
+      const CupFixture *bronze = cup_tournament_third_place_fixture(cup);
+      if (bronze && !bronze->complete && bronze->home && bronze->away &&
+          (cup_is_human(cup, bronze->home) ||
+           cup_is_human(cup, bronze->away)))
+        human_pending++;
+    }
     if (human_pending)
       return;
     for (uint32_t i = 0; i < count; i++) {
@@ -141,10 +193,30 @@ void cup_tournament_advance(CupTournament *cup) {
       const uint32_t roll = cup->seed ^ fixture->home * 1664525u ^
                             fixture->away * 1013904223u ^
                             (round * 97u + i * 31u);
-      cup_complete(cup, round, i, (roll >> 5) % 4u,
-                   (roll >> 13) % 4u, 1);
+      uint32_t home_goals = (roll >> 5) % 4u;
+      uint32_t away_goals = (roll >> 13) % 4u;
+      if (cup_has_second_leg(cup, round, i)) {
+        if (!fixture->first_leg_complete) {
+          fixture->first_leg_home_goals = (uint8_t)home_goals;
+          fixture->first_leg_away_goals = (uint8_t)away_goals;
+          fixture->first_leg_complete = 1u;
+        }
+        home_goals = fixture->first_leg_home_goals + ((roll >> 17) % 4u);
+        away_goals = fixture->first_leg_away_goals + ((roll >> 23) % 4u);
+      }
+      cup_complete(cup, round, i, home_goals, away_goals, 1);
     }
     if (round + 1u >= cup->round_count) {
+      CupFixture *bronze = &cup->fixtures[round][CUP_THIRD_PLACE_INDEX];
+      if (cup->third_place_enabled && bronze->home && bronze->away) {
+        if (!bronze->complete) {
+          const uint32_t roll = cup->seed ^ bronze->home * 2246822519u ^
+                                bronze->away * 3266489917u;
+          cup_complete(cup, round, CUP_THIRD_PLACE_INDEX,
+                       (roll >> 6) % 4u, (roll >> 14) % 4u, 1);
+        }
+        cup->third_place = bronze->winner;
+      }
       cup->champion = cup->fixtures[round][0].winner;
       return;
     }
@@ -153,6 +225,15 @@ void cup_tournament_advance(CupTournament *cup) {
       CupFixture *next = &cup->fixtures[round + 1u][i];
       next->home = cup->fixtures[round][i * 2u].winner;
       next->away = cup->fixtures[round][i * 2u + 1u].winner;
+    }
+    if (round + 2u == cup->round_count && cup->third_place_enabled) {
+      CupFixture *bronze = &cup->fixtures[round + 1u][CUP_THIRD_PLACE_INDEX];
+      const CupFixture *semi_home = &cup->fixtures[round][0];
+      const CupFixture *semi_away = &cup->fixtures[round][1];
+      bronze->home = semi_home->winner == semi_home->home
+                         ? semi_home->away : semi_home->home;
+      bronze->away = semi_away->winner == semi_away->home
+                         ? semi_away->away : semi_away->home;
     }
     cup->active_round++;
   }

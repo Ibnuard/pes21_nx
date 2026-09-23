@@ -35,10 +35,16 @@ static uint32_t cup_player_count = 1;
 static uint32_t cup_team_count = 8;
 static uint32_t cup_select = 0;
 static uint32_t cup_com_level = 3;
-static uint32_t cup_match_mode = 1;
+static uint32_t cup_home_away;
+static uint32_t cup_third_place;
 static uint32_t cup_game_time = 10;
 static uint32_t cup_extra_time = 1;
 static uint32_t cup_max_substitutions = 5;
+static uint32_t cup_injuries = 1;
+static uint32_t cup_ball_index;
+static uint32_t cup_var = 1;
+static uint32_t cup_general_open;
+static uint32_t cup_general_focus;
 static uint32_t cup_team_catalog_index[COMPETITION_MAX_PLAYER_SLOTS];
 static uint8_t cup_team_selected[COMPETITION_MAX_PLAYER_SLOTS];
 static uint32_t cup_team_picker_active;
@@ -69,8 +75,9 @@ static uint32_t cup_active_slot = UINT32_MAX;
 enum {
   CUP_HUB_ACTION_BRACKET = 0,
   CUP_HUB_ACTION_NEXT = 1,
-  CUP_HUB_ACTION_SAVE = 2,
-  CUP_HUB_ACTION_TOP = 3,
+  CUP_HUB_ACTION_GENERAL = 2,
+  CUP_HUB_ACTION_SAVE = 3,
+  CUP_HUB_ACTION_TOP = 4,
 };
 
 static uint32_t competition_bracket_stage_count(void) {
@@ -135,10 +142,16 @@ static void competition_reset_cup_setup(void) {
   cup_team_count = 8;
   cup_select = 0;
   cup_com_level = 3;
-  cup_match_mode = 1;
+  cup_home_away = 0;
+  cup_third_place = 0;
   cup_game_time = 10;
   cup_extra_time = 1;
   cup_max_substitutions = 5;
+  cup_injuries = 1;
+  cup_ball_index = 0;
+  cup_var = 1;
+  cup_general_open = 0;
+  cup_general_focus = 0;
   cup_team_picker_active = 0;
   cup_team_picker_category = 0;
   cup_team_picker_phase = 1;
@@ -170,11 +183,7 @@ static uint32_t competition_cup_effective_team_count(void) {
 }
 
 static int competition_cup_setting_visible(uint32_t row) {
-  if ((row == 1u || row == 2u) && !competition_cup_is_custom())
-    return 0;
-  if (row == 3u && cup_player_count >= competition_cup_effective_team_count())
-    return 0;
-  return row < 8u;
+  return row < 5u;
 }
 
 static int competition_cup_teams_complete(void) {
@@ -185,6 +194,8 @@ static void competition_set_state(CompetitionFrontendState state,
                                   uint32_t focus) {
   frontend_state = state;
   frontend_focus = focus;
+  if (state != COMPETITION_FRONTEND_CUP_BRACKET)
+    cup_general_open = 0u;
   frontend_pending_action = COMPETITION_ACTION_NONE;
   competition_clear_status();
 }
@@ -200,14 +211,14 @@ static uint32_t competition_item_count_for_state(void) {
     case COMPETITION_FRONTEND_CUP_SLOTS:
       return COMPETITION_SAVE_SLOT_COUNT;
     case COMPETITION_FRONTEND_CUP_SETTINGS:
-      /* Eight setting rows plus the floating Next action. Back is the
+      /* Five Cup rule rows plus the floating Next action. Back is the
        * global B affordance, matching the Hub Settings page. */
-      return 9;
+      return 6;
     case COMPETITION_FRONTEND_CUP_TEAMS:
       /* Team rows plus the floating Next action; B backs out of the page. */
       return cup_player_count + 1u;
     case COMPETITION_FRONTEND_CUP_BRACKET:
-      return 4;
+      return 5;
     case COMPETITION_FRONTEND_CUP_CHECKPOINT:
     case COMPETITION_FRONTEND_NOTICE:
       return 1;
@@ -266,11 +277,9 @@ static void competition_adjust_setting(int direction) {
       }
       break;
     case 1:
-      if (!competition_cup_is_custom())
-        break;
       if (direction > 0) {
         if (cup_player_count < COMPETITION_MAX_PLAYER_SLOTS &&
-            cup_player_count < cup_team_count) {
+            cup_player_count < competition_cup_effective_team_count()) {
           cup_team_selected[cup_player_count] = 0;
           cup_player_count++;
         }
@@ -291,17 +300,36 @@ static void competition_adjust_setting(int direction) {
       }
       if (cup_player_count > cup_team_count)
         cup_player_count = cup_team_count;
+      if (cup_team_count < 4u)
+        cup_third_place = 0u;
       break;
     case 3:
-      cup_com_level = (uint32_t)((int)cup_com_level +
-                                 (direction > 0 ? 1 : -1));
-      if (cup_com_level > 6)
-        cup_com_level = direction > 0 ? 0 : 6;
+      cup_home_away = !cup_home_away;
       break;
     case 4:
-      cup_match_mode = cup_match_mode ? 0u : 1u;
+      if (competition_cup_effective_team_count() >= 4u)
+        cup_third_place = !cup_third_place;
       break;
-    case 5:
+    default:
+      break;
+  }
+  competition_clear_status();
+}
+
+static uint32_t competition_general_first_row(void) {
+  return cup_player_count >= competition_cup_effective_team_count()
+      ? 1u : 0u;
+}
+
+static void competition_adjust_general(int direction) {
+  if (!direction) return;
+  const uint32_t row = cup_general_focus + competition_general_first_row();
+  switch (row) {
+    case 0:
+      cup_com_level = direction > 0 ? (cup_com_level + 1u) % 7u
+                                    : (cup_com_level + 6u) % 7u;
+      break;
+    case 1:
       if (direction < 0)
         cup_game_time = cup_game_time <= 3u ? 10u
                             : cup_game_time <= 5u ? 3u : cup_game_time - 1u;
@@ -309,18 +337,20 @@ static void competition_adjust_setting(int direction) {
         cup_game_time = cup_game_time >= 10u ? 3u
                             : cup_game_time < 5u ? 5u : cup_game_time + 1u;
       break;
-    case 6:
-      cup_extra_time = cup_extra_time ? 0u : 1u;
-      break;
-    case 7:
+    case 2: cup_extra_time = !cup_extra_time; break;
+    case 3: break; /* A knockout Cup always resolves a winner. */
+    case 4:
       cup_max_substitutions = direction > 0
           ? (cup_max_substitutions >= 5u ? 3u : cup_max_substitutions + 1u)
           : (cup_max_substitutions <= 3u ? 5u : cup_max_substitutions - 1u);
       break;
-    default:
+    case 5: cup_injuries = !cup_injuries; break;
+    case 6:
+      cup_ball_index = direction > 0 ? (cup_ball_index + 1u) % 10u
+                                     : (cup_ball_index + 9u) % 10u;
       break;
+    case 7: cup_var = !cup_var; break;
   }
-  competition_clear_status();
 }
 
 static void competition_move_focus(int direction) {
@@ -334,13 +364,17 @@ static void competition_move_focus(int direction) {
                              : (frontend_focus + 1u) % count;
     frontend_focus = candidate;
     if (frontend_state == COMPETITION_FRONTEND_CUP_SETTINGS &&
-        candidate < 8u && !competition_cup_setting_visible(candidate))
+        candidate < 5u && !competition_cup_setting_visible(candidate))
       continue;
     return;
   }
 }
 
 static void competition_back(void) {
+  if (cup_general_open) {
+    cup_general_open = 0u;
+    return;
+  }
   switch (frontend_state) {
     case COMPETITION_FRONTEND_MATCH_MODE:
     case COMPETITION_FRONTEND_MODES:
@@ -445,9 +479,15 @@ static void competition_rebuild_cup_bracket(void) {
     cup_tournament_valid = cup_tournament_init(
         &cup_tournament, participants, target, humans, cup_player_count,
         cup_draft.seed);
+    if (cup_tournament_valid)
+      cup_tournament_set_rules(&cup_tournament, cup_home_away,
+                               cup_third_place);
   } else {
     competition_sync_human_teams();
   }
+  if (!cup_tournament_valid)
+    cup_tournament_set_rules(&cup_tournament, cup_home_away,
+                             cup_third_place);
   competition_bracket_view_active();
 }
 
@@ -475,6 +515,12 @@ static int competition_cup_save_valid(const CupSaveState *save) {
       save->game_time >= 3u && save->game_time <= 10u &&
       save->max_substitutions >= 3u &&
       save->max_substitutions <= 5u &&
+      save->home_away <= 1u && save->third_place <= 1u &&
+      save->injuries <= 1u && save->ball_index < 10u &&
+      save->var_enabled <= 1u &&
+      save->tournament.home_away == save->home_away &&
+      save->tournament.third_place_enabled ==
+          (save->third_place && save->team_count >= 4u) &&
       save->draft.team_count == save->team_count &&
       save->draft.player_count == save->player_count &&
       save->tournament.team_count == save->team_count &&
@@ -503,10 +549,14 @@ static int competition_load_cup_slot(uint32_t slot) {
   cup_player_count = save.player_count;
   cup_team_count = save.team_count;
   cup_com_level = save.com_level;
-  cup_match_mode = save.match_mode;
+  cup_home_away = save.home_away;
+  cup_third_place = save.third_place;
   cup_game_time = save.game_time;
   cup_extra_time = save.extra_time;
   cup_max_substitutions = save.max_substitutions;
+  cup_injuries = save.injuries;
+  cup_ball_index = save.ball_index;
+  cup_var = save.var_enabled;
   cup_draft = save.draft;
   cup_tournament = save.tournament;
   cup_tournament_valid = save.tournament_valid;
@@ -534,10 +584,14 @@ static int competition_save_cup_slot(uint32_t slot) {
   save.player_count = cup_player_count;
   save.team_count = cup_team_count;
   save.com_level = cup_com_level;
-  save.match_mode = cup_match_mode;
+  save.home_away = cup_home_away;
+  save.third_place = cup_third_place;
   save.game_time = cup_game_time;
   save.extra_time = cup_extra_time;
   save.max_substitutions = cup_max_substitutions;
+  save.injuries = cup_injuries;
+  save.ball_index = cup_ball_index;
+  save.var_enabled = cup_var;
   save.tournament_valid = cup_tournament_valid;
   save.first_match_started = cup_first_match_started;
   save.draft = cup_draft;
@@ -592,10 +646,10 @@ static void competition_focus_cup_slot(uint32_t slot) {
 }
 
 static void competition_move_cup_action(int direction) {
-  for (uint32_t attempt = 0; attempt < 4u; attempt++) {
+  for (uint32_t attempt = 0; attempt < 5u; attempt++) {
     const uint32_t next = direction > 0
-        ? (frontend_focus + 1u) % 4u
-        : (frontend_focus + 3u) % 4u;
+        ? (frontend_focus + 1u) % 5u
+        : (frontend_focus + 4u) % 5u;
     frontend_focus = next;
     if (competition_frontend_item_enabled(next)) return;
   }
@@ -653,7 +707,7 @@ static void competition_confirm(void) {
       }
       return;
     case COMPETITION_FRONTEND_CUP_SETTINGS:
-      if (frontend_focus == 8) {
+      if (frontend_focus == 5u) {
         competition_open_bracket();
       } else {
         competition_adjust_setting(1);
@@ -690,6 +744,11 @@ static void competition_confirm(void) {
         cup_bracket_editing = 1;
         cup_bracket_swap_source = UINT32_MAX;
         competition_focus_cup_slot(0u);
+        return;
+      }
+      if (frontend_focus == CUP_HUB_ACTION_GENERAL) {
+        cup_general_open = 1u;
+        cup_general_focus = 0u;
         return;
       }
       if (frontend_focus == CUP_HUB_ACTION_SAVE) {
@@ -864,9 +923,9 @@ const char *competition_frontend_item_label(uint32_t index) {
   static const char *const match_labels[2] = {"EXHIBITION", "2 PLAYER"};
   static const char *const mode_labels[3] = {"CUP", "LEAGUE", "MASTER LEAGUE"};
   static const char *const landing_labels[2] = {"NEW", "CONTINUE"};
-  static const char *const settings_labels[9] = {
-      "SELECT CUP", "NUMBER OF PLAYER", "NUMBER OF TEAMS", "COM LEVEL",
-      "MATCH MODE", "GAME TIME", "EXTRA TIME", "MAX SUBSTITUTIONS", "NEXT"};
+  static const char *const settings_labels[6] = {
+      "CUP TYPE", "NUMBER OF PLAYER", "NUMBER OF TEAMS", "HOME AWAY",
+      "3RD PLACE MATCH", "NEXT"};
   static const char *const checkpoint_labels[1] = {"BACK TO BRACKET"};
   switch (frontend_state) {
     case COMPETITION_FRONTEND_MATCH_MODE:
@@ -884,7 +943,7 @@ const char *competition_frontend_item_label(uint32_t index) {
       return "";
     }
     case COMPETITION_FRONTEND_CUP_SETTINGS:
-      return index < 9 ? settings_labels[index] : "";
+      return index < 6u ? settings_labels[index] : "";
     case COMPETITION_FRONTEND_CUP_TEAMS:
       if (index < cup_player_count) {
         static char player_label[24];
@@ -897,6 +956,7 @@ const char *competition_frontend_item_label(uint32_t index) {
         case CUP_HUB_ACTION_BRACKET: return "BRACKET";
         case CUP_HUB_ACTION_NEXT:
           return cup_tournament.champion ? "" : "NEXT";
+        case CUP_HUB_ACTION_GENERAL: return "GENERAL SETTING";
         case CUP_HUB_ACTION_SAVE: return "SAVE";
         case CUP_HUB_ACTION_TOP: return "TOP TO MENU";
         default: return "";
@@ -918,27 +978,14 @@ const char *competition_frontend_item_value(uint32_t index) {
         return cup_select ? "ENGLISH CUP" : "FOOTBALLNX CUP";
       case 1:
         snprintf(value, sizeof(value), "%u", cup_player_count);
-        if (!competition_cup_is_custom())
-          return "1";
         return value;
       case 2:
         snprintf(value, sizeof(value), "%u", competition_cup_effective_team_count());
         return value;
       case 3:
-        static const char *const levels[7] = {
-            "BEGINNER", "AMATEUR", "REGULAR", "PROFESSIONAL",
-            "TOP PLAYER", "SUPERSTAR", "LEGEND"};
-        return levels[cup_com_level <= 6u ? cup_com_level : 0u];
+        return cup_home_away ? "ON" : "OFF";
       case 4:
-        return cup_match_mode ? "KNOCKOUT" : "HOME AWAY";
-      case 5:
-        snprintf(value, sizeof(value), "%u MIN", cup_game_time);
-        return value;
-      case 6:
-        return cup_extra_time ? "ON" : "OFF";
-      case 7:
-        snprintf(value, sizeof(value), "%u", cup_max_substitutions);
-        return value;
+        return cup_third_place ? "ON" : "OFF";
       default:
         return "";
     }
@@ -964,7 +1011,7 @@ const char *competition_frontend_item_value(uint32_t index) {
 
 int competition_frontend_item_enabled(uint32_t index) {
   if (frontend_state == COMPETITION_FRONTEND_CUP_SETTINGS) {
-    return index == 8u || competition_cup_setting_visible(index);
+    return index == 5u || competition_cup_setting_visible(index);
   }
   if (frontend_state == COMPETITION_FRONTEND_CUP_TEAMS &&
       index == cup_player_count)
@@ -976,7 +1023,8 @@ int competition_frontend_item_enabled(uint32_t index) {
     if (index == CUP_HUB_ACTION_BRACKET) return !cup_first_match_started;
     if (index == CUP_HUB_ACTION_NEXT)
       return cup_tournament_valid && !cup_tournament.champion;
-    return index == CUP_HUB_ACTION_SAVE || index == CUP_HUB_ACTION_TOP;
+    return index == CUP_HUB_ACTION_GENERAL ||
+           index == CUP_HUB_ACTION_SAVE || index == CUP_HUB_ACTION_TOP;
   }
   return index < competition_item_count_for_state();
 }
@@ -1006,31 +1054,77 @@ uint32_t competition_frontend_cup_team_count(void) {
 
 uint32_t competition_frontend_cup_setting_count(void) {
   uint32_t count = 0;
-  for (uint32_t row = 0; row < 8u; row++)
+  for (uint32_t row = 0; row < 5u; row++)
     if (competition_cup_setting_visible(row))
       count++;
   return count;
 }
 
 uint32_t competition_frontend_cup_setting_row(uint32_t visible_index) {
-  for (uint32_t row = 0; row < 8u; row++) {
+  for (uint32_t row = 0; row < 5u; row++) {
     if (!competition_cup_setting_visible(row))
       continue;
     if (!visible_index)
       return row;
     visible_index--;
   }
-  return 8u;
+  return 5u;
 }
 
 uint32_t competition_frontend_cup_setting_focus(void) {
-  if (frontend_focus >= 8u)
+  if (frontend_focus >= 5u)
     return competition_frontend_cup_setting_count();
   uint32_t visible = 0;
   for (uint32_t row = 0; row < frontend_focus; row++)
     if (competition_cup_setting_visible(row))
       visible++;
   return visible;
+}
+
+int competition_frontend_cup_general_open(void) {
+  return cup_general_open != 0u;
+}
+
+uint32_t competition_frontend_cup_general_count(void) {
+  return 8u - competition_general_first_row();
+}
+
+uint32_t competition_frontend_cup_general_focus(void) {
+  return cup_general_focus;
+}
+
+const char *competition_frontend_cup_general_label(uint32_t index) {
+  static const char *const labels[8] = {
+      "COM LEVEL", "MATCH TIME", "OVERTIME", "PENALTIES",
+      "SUBSTITUTIONS", "INJURIES", "BALL", "VAR"};
+  index += competition_general_first_row();
+  return index < 8u ? labels[index] : "";
+}
+
+const char *competition_frontend_cup_general_value(uint32_t index) {
+  static char value[24];
+  static const char *const levels[7] = {
+      "BEGINNER", "AMATEUR", "REGULAR", "PROFESSIONAL",
+      "TOP PLAYER", "SUPERSTAR", "LEGEND"};
+  static const char *const balls[10] = {
+      "TRIPLETTA", "UNIFORIA EURO", "WE-PES CLASSIC", "REGISTA",
+      "MOMENTO", "SPECIAL BRONZE", "SPECIAL SILVER", "SPECIAL GOLD",
+      "SPECIAL BLACK", "METALLIC EDITION"};
+  switch (index + competition_general_first_row()) {
+    case 0: return levels[cup_com_level <= 6u ? cup_com_level : 3u];
+    case 1:
+      snprintf(value, sizeof(value), "%u MIN", cup_game_time);
+      return value;
+    case 2: return cup_extra_time ? "ON" : "OFF";
+    case 3: return "ON";
+    case 4:
+      snprintf(value, sizeof(value), "%u", cup_max_substitutions);
+      return value;
+    case 5: return cup_injuries ? "ON" : "OFF";
+    case 6: return balls[cup_ball_index % 10u];
+    case 7: return cup_var ? "ON" : "OFF";
+    default: return "";
+  }
 }
 
 const char *competition_frontend_cup_team_name(uint32_t index) {
@@ -1290,8 +1384,25 @@ uint32_t competition_frontend_cup_com_level(void) { return cup_com_level; }
 uint32_t competition_frontend_cup_max_substitutions(void) {
   return cup_max_substitutions;
 }
-int competition_frontend_cup_extra_time(void) { return cup_extra_time != 0; }
-int competition_frontend_cup_penalty(void) { return 1; }
+uint32_t competition_frontend_cup_injuries(void) { return cup_injuries; }
+uint32_t competition_frontend_cup_ball_index(void) { return cup_ball_index; }
+uint32_t competition_frontend_cup_var(void) { return cup_var; }
+int competition_frontend_cup_home_away(void) { return cup_home_away != 0; }
+int competition_frontend_cup_third_place(void) { return cup_third_place != 0; }
+static int competition_cup_first_leg_pending(void) {
+  const CupFixture *fixture = cup_tournament_valid
+      ? cup_tournament_fixture(&cup_tournament, cup_pending_round,
+                               cup_pending_index) : NULL;
+  return fixture && cup_home_away &&
+         cup_pending_round + 1u < cup_tournament.round_count &&
+         !fixture->first_leg_complete;
+}
+int competition_frontend_cup_extra_time(void) {
+  return !competition_cup_first_leg_pending() && cup_extra_time != 0;
+}
+int competition_frontend_cup_penalty(void) {
+  return !competition_cup_first_leg_pending();
+}
 int competition_frontend_cup_match_active(void) { return cup_match_active != 0; }
 
 void competition_frontend_cup_handoff_result(int opened) {
@@ -1455,6 +1566,22 @@ void competition_frontend_pad_event(uint32_t buttons,
     }
     if (pressed & COMPETITION_BUTTON_A)
       competition_confirm();
+    return;
+  }
+  if (frontend_state == COMPETITION_FRONTEND_CUP_BRACKET &&
+      cup_general_open) {
+    const uint32_t count = competition_frontend_cup_general_count();
+    if (pressed & COMPETITION_BUTTON_B)
+      cup_general_open = 0u;
+    else if (pressed & COMPETITION_BUTTON_UP)
+      cup_general_focus = cup_general_focus ? cup_general_focus - 1u
+                                            : count - 1u;
+    else if (pressed & COMPETITION_BUTTON_DOWN)
+      cup_general_focus = (cup_general_focus + 1u) % count;
+    else if (pressed & COMPETITION_BUTTON_LEFT)
+      competition_adjust_general(-1);
+    else if (pressed & (COMPETITION_BUTTON_RIGHT | COMPETITION_BUTTON_A))
+      competition_adjust_general(1);
     return;
   }
   if (frontend_state == COMPETITION_FRONTEND_CUP_BRACKET &&

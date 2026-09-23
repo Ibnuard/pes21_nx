@@ -33,8 +33,8 @@ int main(void) {
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_LANDING);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SETTINGS);
-  for (uint32_t row = 0; row < 8u; row++) press(BUTTON_DOWN);
-  assert(competition_frontend_focus() == 8u);
+  for (uint32_t row = 0; row < 5u; row++) press(BUTTON_DOWN);
+  assert(competition_frontend_focus() == 5u);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   assert(competition_frontend_cup_draft());
@@ -84,6 +84,15 @@ int main(void) {
   assert(competition_frontend_focus() == 1u);
   press(BUTTON_RIGHT);
   assert(competition_frontend_focus() == 2u);
+  press(BUTTON_A); /* General Setting reuses the hub settings viewport. */
+  assert(competition_frontend_cup_general_open());
+  assert(competition_frontend_cup_general_count() == 8u);
+  press(BUTTON_DOWN);
+  assert(competition_frontend_cup_general_focus() == 1u);
+  press(BUTTON_B);
+  assert(!competition_frontend_cup_general_open());
+  press(BUTTON_RIGHT);
+  assert(competition_frontend_focus() == 3u);
   press(BUTTON_A); /* Save */
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SLOTS);
   press(BUTTON_A); /* Slot 1 */
@@ -116,7 +125,7 @@ int main(void) {
   press(BUTTON_DOWN);
   for (uint32_t i = 0; i < 5u; i++) press(BUTTON_LEFT);
   assert(competition_frontend_cup_team_count() == 3u);
-  while (competition_frontend_focus() != 8u) press(BUTTON_DOWN);
+  while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
   press(BUTTON_A);
   assert(competition_frontend_cup_view_count() == 1u);
   press(BUTTON_A);
@@ -141,7 +150,7 @@ int main(void) {
     if (competition_frontend_cup_tournament()->champion) break;
   }
   assert(competition_frontend_cup_tournament()->champion);
-  assert(competition_frontend_focus() == 3u);
+  assert(competition_frontend_focus() == 4u);
   assert(!competition_frontend_item_enabled(1u));
   assert(!competition_frontend_item_label(1u)[0]);
 
@@ -156,7 +165,7 @@ int main(void) {
       exhibition_team_categories[0].team_count < 16u
           ? exhibition_team_categories[0].team_count : 16u;
   assert(competition_frontend_cup_team_count() == english_field);
-  while (competition_frontend_focus() != 8u) press(BUTTON_DOWN);
+  while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
   press(BUTTON_A);
   assert(competition_frontend_cup_draft()->team_count == english_field);
   assert(competition_frontend_cup_view_stage_count() == 3u);
@@ -212,6 +221,67 @@ int main(void) {
   assert(competition_frontend_cup_draft()->teams[0] == english_second);
   assert(competition_frontend_cup_draft()->teams[1] == english_first);
   assert(competition_frontend_cup_tournament()->history_count == 0u);
+
+  /* A fully player-owned Cup hides COM Level in the reused General Setting. */
+  competition_frontend_close();
+  competition_frontend_finish_close();
+  competition_frontend_open_modes();
+  competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);
+  press(BUTTON_A);
+  press(BUTTON_DOWN);
+  press(BUTTON_DOWN);
+  for (uint32_t i = 0; i < 4u; i++) press(BUTTON_LEFT); /* 8 -> 4 teams */
+  press(BUTTON_UP);
+  press(BUTTON_RIGHT);
+  press(BUTTON_RIGHT);
+  press(BUTTON_RIGHT); /* 4 logical player owners */
+  assert(competition_frontend_cup_player_count() == 4u);
+  press(BUTTON_DOWN);
+  press(BUTTON_DOWN);
+  assert(competition_frontend_focus() == 3u);
+  press(BUTTON_A);
+  assert(competition_frontend_cup_home_away());
+  press(BUTTON_DOWN);
+  press(BUTTON_A);
+  assert(competition_frontend_cup_third_place());
+  press(BUTTON_DOWN);
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  assert(competition_frontend_cup_tournament()->home_away);
+  assert(competition_frontend_cup_tournament()->third_place_enabled);
+  press(BUTTON_RIGHT);
+  assert(competition_frontend_focus() == 2u); /* disabled Next skipped */
+  press(BUTTON_A);
+  assert(competition_frontend_cup_general_count() == 7u);
+  assert(competition_frontend_cup_general_open());
+  assert(competition_frontend_cup_general_label(0u)[0] == 'M');
+  press(BUTTON_B);
+  press(BUTTON_LEFT); /* Next disabled, return directly to Bracket. */
+  assert(competition_frontend_focus() == 0u);
+  press(BUTTON_A);
+  press(BUTTON_X);
+  assert(competition_draft_ready(competition_frontend_cup_draft()));
+  press(BUTTON_B);
+  press(BUTTON_RIGHT);
+  press(BUTTON_RIGHT);
+  press(BUTTON_RIGHT);
+  assert(competition_frontend_focus() == 3u);
+  press(BUTTON_A); /* persist new Cup and General rules in version 2 */
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  competition_frontend_close();
+  competition_frontend_finish_close();
+  competition_frontend_open_modes();
+  competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);
+  press(BUTTON_DOWN);
+  press(BUTTON_A);
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  assert(competition_frontend_cup_home_away());
+  assert(competition_frontend_cup_third_place());
+  assert(competition_frontend_cup_tournament()->third_place_enabled);
   puts("Cup frontend flow tests passed");
   return 0;
 }

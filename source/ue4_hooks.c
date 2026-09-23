@@ -10886,6 +10886,12 @@ static void main_menu_activate_cup_fixture(void) {
   __atomic_store_n(&exhibition_settings_substitutions,
                    competition_frontend_cup_max_substitutions(),
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_injuries,
+                   competition_frontend_cup_injuries(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_ball_index,
+                   competition_frontend_cup_ball_index(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_var,
+                   competition_frontend_cup_var(), __ATOMIC_RELEASE);
   exhibition_apply_cpu_level(competition_frontend_cup_com_level(), NULL);
   __atomic_store_n(&main_menu_2p_prematch_bootstrap_mode,
                    MAIN_MENU_2P_PREMATCH_BOOT_HUB, __ATOMIC_RELEASE);

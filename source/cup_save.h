@@ -13,10 +13,14 @@ typedef struct {
   uint32_t player_count;
   uint32_t team_count;
   uint32_t com_level;
-  uint32_t match_mode;
+  uint32_t home_away;
+  uint32_t third_place;
   uint32_t game_time;
   uint32_t extra_time;
   uint32_t max_substitutions;
+  uint32_t injuries;
+  uint32_t ball_index;
+  uint32_t var_enabled;
   uint32_t tournament_valid;
   uint32_t first_match_started;
   CompetitionEntryDraft draft;
