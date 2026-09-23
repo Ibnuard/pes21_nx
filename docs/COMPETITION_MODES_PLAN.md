@@ -1,6 +1,6 @@
 # FootballNX 26 — Competition Modes Plan
 
-Status: design baseline
+Status: design baseline; Cup implementation flow updated 2026-09-24
 Branch: cupleague
 Owner: Androswitch Project
 Scope: Match menu, Cup, League, Master League, persistence, and local multiplayer
@@ -44,7 +44,9 @@ Branch cupleague berjalan di atas fondasi yang sudah ada:
 - Controller support applet sudah dipakai untuk memastikan dua Npad slot ketika mode dua pemain dimulai.
 - Custom overlay dan custom input sudah tersedia untuk menu, popup, Game Plan, pause, result, team selector, dan settings.
 - Mode 2 Player saat ini belum menjadi sistem Cup/League multiplayer dengan banyak logical player.
-- Scheduler musim, bracket, career state, transfer market, dan tiga slot save kompetisi belum ada.
+- Scheduler musim, career state, dan transfer market belum ada. Cup bracket,
+  handoff/result, dan tiga slot save Cup sudah diimplementasikan; perlu QA hardware
+  untuk flow bracket editor dan resume lintas restart.
 
 Perubahan pada mode kompetisi harus menjaga Exhibition sebagai regression baseline. Perubahan visual stadium atau roof camera yang tidak terkait tidak boleh dicampur ke milestone mode kompetisi.
 
@@ -125,16 +127,16 @@ Hierarki Back:
 - Cup landing > Select Modes.
 - Cup save slots > Cup landing.
 - Cup Settings > Cup landing.
-- Cup Select Team > Cup Settings.
-- Cup Hub > Back to Menu dengan confirmation.
-- Bracket result > Cup Hub.
+- Cup bracket editor > empat tombol Cup Hub.
+- Cup Hub > Top to Menu.
+- Bracket setelah result > tetap di Cup Hub.
 - League dan Master League mengikuti pola yang sama.
 
 B tidak boleh meneruskan event ke native page di belakang custom page. Setiap custom state harus memakan input B sendiri dan hanya menutup state yang sedang aktif.
 
-Jika ada setting yang belum disimpan, B memunculkan confirmation:
-
-    Discard current setup?
+Confirmation untuk keluar dari Cup yang belum di-save adalah kandidat UX
+lanjutan; implementasi Cup saat ini memakai `Save` eksplisit dan B langsung
+kembali ke menu.
     [A] Yes    [B] No
 
 ## 4. State machine frontend
@@ -273,7 +275,7 @@ Controller fisik v1 tetap dua. Dengan demikian, tiga player tidak berarti tiga o
 - Jika ingin dua orang mengontrol satu tim, gunakan same-team co-op sebagai mode terpisah setelah local versus stabil.
 
 Semua halaman setup Cup dimiliki oleh P1. P1 yang membuka New/Continue, mengubah
-seluruh Match Settings, dan mengonfirmasi semua slot pada Select Teams. P2 tidak
+seluruh Match Settings, dan mengisi slot langsung di Cup Hub. P2 tidak
 boleh menggeser fokus atau mengubah setting pada halaman-halaman tersebut. Saat
 Cup Hub pertama kali dibuka, runtime menampilkan gate controller berdasarkan
 `Number of Player`: nilai 1 memerlukan pad 1; nilai 2 atau lebih memerlukan pad
@@ -293,7 +295,11 @@ Untuk FootballNX Cup custom:
 - Tim harus unique.
 - Semua tim harus eligible untuk Cup.
 
-Untuk predefined Cup, jumlah tim dapat fixed sesuai definisi kompetisinya. Jika format menyatakan 20 tim tetapi hanya 18 yang memiliki data valid, Cup tidak boleh diam-diam mengisi dua slot dengan duplicate. Runtime harus menampilkan error atau memakai fallback participant list yang ditentukan oleh manifest.
+Untuk predefined Cup, jumlah tim fixed berdasarkan participant pool yang
+tersedia di katalog build. Contoh English Cup migrasi saat ini memiliki 19
+tim eligible, sehingga bagan berisi 19 tim, bukan memaksa 20 lalu menggandakan
+satu tim. Saat manifest kompetisi yang lebih lengkap tersedia, jumlah fixed
+diambil dari manifest tersebut dengan validasi roster/kit.
 
 #### COM Level
 
@@ -332,55 +338,25 @@ aturan ini harus terlihat pada Cup Hub. Max Substitutions memakai rentang yang
 sama dengan General Setting (3-5) dan diteruskan ke MatchSetup native. Setiap
 fixture Cup harus menghasilkan pemenang, termasuk jika Extra Time OFF.
 
-### 5.3 Select Team
+### 5.3 Bracket editor menggantikan halaman Select Teams
 
-Jika Number of Player lebih besar dari satu, setelah Match Settings muncul halaman Select Team sebelum Cup Hub.
+Flow baru: `Cup > Cup Settings > Cup Hub`. Bagan pembuka tampil dengan semua
+tim kosong tetapi setiap slot telah bertanda `P1`, `P2`, atau `COM`. Editor
+bagan adalah bagian Cup Hub, bukan halaman Select Teams terpisah. Tombol
+`Next` disabled sampai seluruh slot terisi tim unik dan valid.
 
-Judul:
+P1 memilih `Bracket` untuk masuk edit mode. Fokus melintasi slot pembuka dari
+atas ke bawah; A membuka selector tim satu sisi yang memakai carousel, atlas,
+dan pengelompokan Exhibition/2 Player. Selector predefined Cup langsung
+membuka kategori liga yang eligible; FootballNX Cup membuka daftar kategori.
+B mengembalikan fokus ke empat tombol Hub.
 
-    Select Teams
-
-Slot:
-
-    P1
-    P2
-    P3
-    ...
-
-Setiap slot memilih satu tim. Player dapat:
-
-- berpindah slot;
-- mengganti tim;
-- melihat badge dan team rating;
-- kembali ke slot sebelumnya;
-- membatalkan setup;
-- melanjutkan hanya jika semua slot valid.
-
-Validation:
-
-- Tim antar-slot tidak boleh sama.
-- Tim harus berada di participant pool Cup.
-- Tim harus mempunyai roster dan kit fallback yang valid.
-- Jumlah logical player tidak boleh melebihi jumlah tim.
-- Slot yang belum dipilih tidak dapat dilewati.
-
-Setelah semua player memilih tim, sisa slot diisi:
-
-- Dari participant pool predefined Cup; atau
-- random dari selector eligible untuk FootballNX Cup.
-
-Random harus menggunakan deterministic seed yang disimpan di Cup state. Jadi hasil random dapat direproduksi setelah load atau crash recovery.
-
-Halaman ini juga menampilkan informasi controller:
-
-    P1 — Controller 1
-    P2 — Controller 2
-    P3 — Assigned per fixture
-
-Assignment tidak perlu dipilih manual untuk setiap ronde. Mapping dibuat otomatis, ditampilkan sebelum pertandingan, dan dapat diacak ulang jika aturan Cup mengizinkan.
-
-Input halaman ini tetap P1-only. Slot P2/P3 adalah logical owner slot yang
-dipilih berurutan oleh P1; status controller fisik hanya dibaca dari gate Hub.
+X mengisi hanya slot kosong secara acak, tanpa mengganti pilihan manual.
+Y mengacak urutan tim sekaligus owner P1/P2/COM, dan helper Y baru muncul
+setelah semua slot terisi. Seed disimpan agar proses dapat direproduksi.
+Setelah pertandingan pertama dimulai, `Bracket` disabled dan semua assignment
+terkunci. Maksimum delapan logical player tetap dikontrol lewat dua controller
+fisik; P1 mengurus seluruh setup.
 
 ### 5.4 Full-page Cup Hub dan bracket
 
@@ -401,16 +377,18 @@ Hub wajib menampilkan:
 
 Bagan memakai slot ringkas `[crest] MUN - P1/COM` dengan skor pertandingan.
 Tim yang mendapat bye hanya memakai satu slot; fixture ronde mendatang yang
-belum terisi menampilkan dua slot TBD. L/R (SL/SR pada Joy-Con horizontal)
-mengganti halaman bagan; kiri/kanan hanya memindahkan fokus antara Next dan
-Top to Menu. Match History menampilkan crest, kode tiga huruf, skor pra-laga
-`0 - 0`, dan maksimal empat hasil terakhir. Kedua tombol berada di luar
-container utama.
+belum terisi menampilkan dua slot TBD. Untuk Cup 3–4 tim, Semi Final,
+Final, dan Champion muat dalam satu panel dengan konektor pendek. Cup lebih
+besar tetap memakai halaman bagan; L/R (SL/SR pada Joy-Con horizontal)
+mengganti halaman, dengan ikon shoulder saja di kedua pojok. Kiri/kanan
+memindahkan fokus antartombol. Match History menampilkan crest, kode tiga
+huruf, skor, dan maksimal empat hasil terakhir. Tombol berada di luar
+container utama dengan jarak yang jelas.
 
-Tombol utama hanya:
-
-1. Next.
-2. Top to Menu.
+Urutan tombol: `Bracket`, `Next`, `Save`, `Top to Menu`. `Bracket` hanya aktif
+sebelum match pertama. `Next` baru aktif jika seluruh tim ter-assign; setelah
+Cup selesai tombol ini hilang dan fokus otomatis pindah ke `Top to Menu`.
+`Save` membuka tiga slot persistent yang bisa dilanjutkan dari `Continue`.
 
 Helper B tetap dapat ditampilkan sebagai shortcut Back to Menu, tetapi tidak dihitung sebagai tombol konten ketiga.
 
@@ -787,8 +765,8 @@ Custom full page dipakai untuk:
 - Cup landing.
 - tiga save slot.
 - Cup Settings.
-- Number of Player.
-- Select Team multi-slot.
+- Number of Player sebagai baris Cup Settings.
+- Bracket editor dengan logical player slot.
 - full bracket.
 - Cup Hub.
 - Cup result/completion.
@@ -943,7 +921,7 @@ Exit criteria: fixture dummy dapat dibuat, disimpan, diload, dan diteruskan ke n
 - 8 tim.
 - knockout satu leg.
 - extra time/penalty.
-- Select Team multi-player.
+- Bracket editor multi-player.
 - full bracket.
 - three save slots.
 - after-match update.
@@ -1024,7 +1002,7 @@ Setiap milestone harus dibuild dengan command full-loose terbaru yang sudah lolo
 - Main Menu > Match > Exhibition.
 - Main Menu > Match > 2 Player.
 - Main Menu > Modes > Cup.
-- Cup Settings > Select Team > Bracket.
+- Cup Settings > Bracket kosong > assign/random/auto-order > Next.
 - Bracket > MatchContext > Game Plan.
 - Result > Bracket update.
 - Continue > three save slots > resume.
@@ -1100,7 +1078,8 @@ Pekerjaan pertama pada branch cupleague sebaiknya bukan langsung membuat seluruh
 2. Tambahkan Select Match Mode dan Select Modes sebagai custom state.
 3. Tambahkan Cup landing dengan New, Continue, dan Back.
 4. Implementasikan Cup Settings.
-5. Implementasikan Select Team untuk minimal tiga logical player slot dengan dua physical controller.
+5. Implementasikan assignment langsung di bracket untuk minimal tiga logical
+   player slot dengan dua physical controller.
 6. Buat FootballNX Cup knockout 8 tim.
 7. Bangun full bracket custom.
 8. Handoff satu fixture ke native MatchSetup/Game Plan/gameplay.

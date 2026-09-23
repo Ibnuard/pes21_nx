@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "cup_tournament.h"
+#include "competition_entry_draft.h"
 
 typedef enum {
   COMPETITION_FRONTEND_NONE = 0,
@@ -72,6 +73,10 @@ uint32_t competition_frontend_cup_picker_category(uint32_t index);
 int competition_frontend_cup_team_allowed(uint32_t team_id);
 void competition_frontend_cup_team_picker_result(uint32_t team_id);
 const CupTournament *competition_frontend_cup_tournament(void);
+const CompetitionEntryDraft *competition_frontend_cup_draft(void);
+int competition_frontend_cup_bracket_editing(void);
+uint32_t competition_frontend_cup_bracket_slot_focus(void);
+int competition_frontend_cup_bracket_editable(void);
 const char *competition_frontend_cup_name(void);
 const char *competition_frontend_cup_round_name(uint32_t round);
 int competition_frontend_cup_next_fixture(uint32_t *round, uint32_t *index);
