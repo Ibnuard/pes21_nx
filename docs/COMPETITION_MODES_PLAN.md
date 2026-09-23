@@ -352,7 +352,9 @@ dan pengelompokan Exhibition/2 Player. Selector predefined Cup langsung
 membuka kategori liga yang eligible; FootballNX Cup membuka daftar kategori.
 B mengembalikan fokus ke empat tombol Hub.
 
-X mengisi hanya slot kosong secara acak, tanpa mengganti pilihan manual.
+X mengisi hanya slot kosong babak pembuka secara acak, tanpa mengganti pilihan
+manual. Ronde lanjutan dan Champion tetap TBD sampai hasil fixture sebelumnya
+diproses; bye pembuka pun tidak mengisi slot ronde lanjutan lebih awal.
 Y memilih slot asal, lalu Y pada slot tujuan menukar tim sekaligus owner
 P1/P2/COM; menekan Y lagi pada slot asal membatalkan swap. Memilih tim yang
 sudah terpasang lewat A juga menukar tim kedua slot tanpa duplikasi. Tidak
@@ -381,14 +383,18 @@ Hub wajib menampilkan:
 Bagan memakai slot ringkas `[crest] MUN - P1/COM` dengan skor pertandingan.
 Tim yang mendapat bye hanya memakai satu slot; fixture ronde mendatang yang
 belum terisi menampilkan dua slot TBD. Untuk Cup 3–4 tim, Semi Final,
-Final, dan Champion muat dalam satu panel dengan konektor pendek. Cup lebih
-besar tetap memakai halaman bagan; L/R (SL/SR pada Joy-Con horizontal)
-mengganti halaman, dengan ikon shoulder saja di kedua pojok header bagan.
-Kiri/kanan memindahkan fokus antartombol. Match Schedule menampilkan semua
-fixture pada halaman bagan aktif dan fixture lanjutan, termasuk TBA untuk
-lawan yang belum diketahui; hasil selesai memakai crest, kode tiga huruf,
-dan skor. Tombol berada di luar
-container utama dengan jarak yang jelas.
+Final, dan Champion muat dalam satu panel dengan konektor pendek. Setiap
+halaman vertikal menampilkan maksimal dua fixture/empat tim babak aktif,
+dengan crest dan pelat skor berukuran lebih besar. Cup 16 tim mempunyai
+empat halaman vertikal pada Round of 16 dan dua pada Quarter Final.
+L/R (SL/SR pada Joy-Con horizontal) berpindah antar-stage secara horizontal,
+sedangkan Y pada fokus tombol Hub mengganti halaman vertikal di stage aktif.
+Ikon shoulder berada di kedua pojok header bagan dan tersembunyi saat editor
+bagan aktif; pada editor, Y tetap untuk Swap. Kiri/kanan memindahkan fokus
+antartombol. Match Schedule menampilkan maksimal empat fixture relevan pada
+halaman bagan aktif dan ronde lanjutannya, termasuk TBD untuk lawan yang
+belum diketahui; hasil selesai memakai crest, kode tiga huruf, dan skor.
+Tombol berada di luar container utama dengan jarak yang jelas.
 
 Urutan tombol: `Bracket`, `Next`, `Save`, `Top to Menu`. `Bracket` hanya aktif
 sebelum match pertama. `Next` baru aktif jika seluruh tim ter-assign; setelah

@@ -62,8 +62,7 @@ static void future_final_is_unresolved_not_bye(void) {
   CupTournament cup;
   assert(cup_tournament_init(&cup, ids, 3u, ids, 1u, 0x57u));
   const CupFixture *future = cup_tournament_fixture(&cup, 1u, 0u);
-  assert(future && !future->complete && !future->home &&
-         future->away == ids[1]);
+  assert(future && !future->complete && !future->home && !future->away);
   assert(cup_tournament_record(&cup, 0u, 0u, 2u, 0u));
   future = cup_tournament_fixture(&cup, 1u, 0u);
   assert(future && !future->complete && future->home && future->away);
@@ -74,6 +73,8 @@ static void no_eager_com_simulation_for_human_bye(void) {
   CupTournament cup;
   assert(cup_tournament_init(&cup, ids, 3u, ids + 1u, 1u, 0x58u));
   assert(cup.history_count == 0u && !cup.fixtures[0][0].complete);
+  const CupFixture *future = cup_tournament_fixture(&cup, 1u, 0u);
+  assert(future && !future->home && !future->away);
   uint32_t round = 0, index = 0;
   assert(!cup_tournament_next_human(&cup, &round, &index));
   cup_tournament_advance(&cup); /* only after the user presses Next */

@@ -10,6 +10,8 @@ enum {
   BUTTON_A = 1u << 1,
   BUTTON_Y = 1u << 2,
   BUTTON_X = 1u << 3,
+  BUTTON_L = 1u << 4,
+  BUTTON_R = 1u << 7,
   BUTTON_UP = 1u << 10,
   BUTTON_DOWN = 1u << 11,
   BUTTON_LEFT = 1u << 12,
@@ -119,6 +121,10 @@ int main(void) {
   assert(competition_frontend_cup_view_count() == 1u);
   press(BUTTON_A);
   press(BUTTON_X);
+  const CupFixture *unplayed_final = cup_tournament_fixture(
+      competition_frontend_cup_tournament(), 1u, 0u);
+  assert(unplayed_final && !unplayed_final->home &&
+         !unplayed_final->away && !unplayed_final->winner);
   press(BUTTON_B);
   press(BUTTON_RIGHT);
   for (uint32_t match = 0; match < 2u; match++) {
@@ -153,8 +159,32 @@ int main(void) {
   while (competition_frontend_focus() != 8u) press(BUTTON_DOWN);
   press(BUTTON_A);
   assert(competition_frontend_cup_draft()->team_count == english_field);
-  assert(competition_frontend_cup_view_count() < 9u);
+  assert(competition_frontend_cup_view_stage_count() == 3u);
+  assert(competition_frontend_cup_view_page_count() == 4u);
+  assert(competition_frontend_cup_view_count() == 7u);
+  assert(competition_frontend_cup_view_first_fixture() == 0u);
+  press(BUTTON_Y); /* button focus scrolls down within the same round */
+  assert(competition_frontend_cup_view_round() == 0u);
+  assert(competition_frontend_cup_view_first_fixture() == 2u);
+  press(BUTTON_Y);
+  assert(competition_frontend_cup_view_first_fixture() == 4u);
+  press(BUTTON_Y);
+  assert(competition_frontend_cup_view_first_fixture() == 6u);
+  press(BUTTON_Y);
+  assert(competition_frontend_cup_view_first_fixture() == 0u);
+  press(BUTTON_R); /* shoulder moves horizontally to quarter-final */
+  assert(competition_frontend_cup_view_round() == 1u);
+  assert(competition_frontend_cup_view_first_fixture() == 0u);
+  assert(competition_frontend_cup_view_page_count() == 2u);
+  press(BUTTON_R); /* semi-final, final, champion share a stage */
+  assert(competition_frontend_cup_view_round() == 2u);
+  assert(competition_frontend_cup_view_page_count() == 1u);
+  press(BUTTON_L);
+  assert(competition_frontend_cup_view_round() == 1u);
   press(BUTTON_A);
+  assert(competition_frontend_cup_view_round() == 0u);
+  press(BUTTON_R); /* shoulders do not move the bracket while editing */
+  assert(competition_frontend_cup_view_round() == 0u);
   press(BUTTON_X);
   assert(competition_draft_ready(competition_frontend_cup_draft()));
   assert(competition_frontend_cup_tournament()->history_count == 0u);
@@ -163,6 +193,16 @@ int main(void) {
     const CupFixture *fixture = cup_tournament_fixture(
         competition_frontend_cup_tournament(), 0u, i);
     assert(fixture && fixture->home && fixture->away && !fixture->complete);
+  }
+  for (uint32_t round = 1u; round < 4u; round++) {
+    const uint32_t count = cup_tournament_fixture_count(
+        competition_frontend_cup_tournament(), round);
+    for (uint32_t i = 0; i < count; i++) {
+      const CupFixture *fixture = cup_tournament_fixture(
+          competition_frontend_cup_tournament(), round, i);
+      assert(fixture && !fixture->home && !fixture->away &&
+             !fixture->winner && !fixture->complete);
+    }
   }
   const uint32_t english_first = competition_frontend_cup_draft()->teams[0];
   const uint32_t english_second = competition_frontend_cup_draft()->teams[1];

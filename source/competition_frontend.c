@@ -56,7 +56,8 @@ static uint32_t cup_pending_index;
 static uint32_t cup_match_active;
 static uint32_t cup_match_result_received;
 static uint32_t cup_match_swapped;
-static uint32_t cup_bracket_view;
+static uint32_t cup_bracket_stage;
+static uint32_t cup_bracket_page;
 static CompetitionEntryDraft cup_draft;
 static uint32_t cup_bracket_editing;
 static uint32_t cup_bracket_slot_focus;
@@ -72,30 +73,38 @@ enum {
   CUP_HUB_ACTION_TOP = 3,
 };
 
+static uint32_t competition_bracket_stage_count(void) {
+  /* The semi-final, final and champion share the final horizontal stage. */
+  return cup_tournament.round_count >= 2u
+      ? cup_tournament.round_count - 1u : 0u;
+}
+
+static uint32_t competition_bracket_stage_pages(uint32_t stage) {
+  const uint32_t stages = competition_bracket_stage_count();
+  if (stage >= stages) return 0u;
+  if (stage + 1u == stages) return 1u;
+  const uint32_t fixtures = cup_tournament_fixture_count(&cup_tournament,
+                                                          stage);
+  return (fixtures + 1u) / 2u;
+}
+
 static uint32_t competition_bracket_view_count(void) {
-  if (cup_tournament.bracket_size == 4u) return 1u;
   uint32_t views = 0;
-  for (uint32_t round = 0; round < cup_tournament.round_count; round++) {
-    const uint32_t fixtures = cup_tournament_fixture_count(&cup_tournament,
-                                                            round);
-    views += (fixtures + 3u) / 4u;
-  }
+  for (uint32_t stage = 0; stage < competition_bracket_stage_count(); stage++)
+    views += competition_bracket_stage_pages(stage);
   return views;
 }
 
 static void competition_bracket_view_active(void) {
-  if (cup_tournament.bracket_size == 4u) {
-    cup_bracket_view = 0;
-    return;
-  }
-  cup_bracket_view = 0;
-  for (uint32_t round = 0; round < cup_tournament.active_round; round++)
-    cup_bracket_view +=
-        (cup_tournament_fixture_count(&cup_tournament, round) + 3u) / 4u;
+  const uint32_t stages = competition_bracket_stage_count();
+  cup_bracket_stage = stages && cup_tournament.active_round < stages
+      ? cup_tournament.active_round : stages ? stages - 1u : 0u;
+  cup_bracket_page = 0u;
   uint32_t next_round = 0, next_index = 0;
   if (cup_tournament_next_human(&cup_tournament, &next_round, &next_index) &&
-      next_round == cup_tournament.active_round)
-    cup_bracket_view += next_index / 4u;
+      next_round == cup_bracket_stage &&
+      competition_bracket_stage_pages(cup_bracket_stage) > 1u)
+    cup_bracket_page = next_index / 2u;
 }
 
 static void competition_clear_status(void) {
@@ -111,7 +120,8 @@ static void competition_set_status(const char *status) {
 static void competition_reset_cup_setup(void) {
   memset(&cup_tournament, 0, sizeof(cup_tournament));
   cup_tournament_valid = 0;
-  cup_bracket_view = 0;
+  cup_bracket_stage = 0;
+  cup_bracket_page = 0;
   cup_match_active = 0;
   cup_match_result_received = 0;
   memset(&cup_draft, 0, sizeof(cup_draft));
@@ -574,9 +584,11 @@ static void competition_focus_cup_slot(uint32_t slot) {
   if (slot >= cup_draft.team_count) return;
   cup_bracket_slot_focus = slot;
   uint32_t fixture = 0;
-  if (competition_draft_slot_fixture(&cup_draft, slot, &fixture, NULL))
-    cup_bracket_view = cup_tournament.bracket_size == 4u
-                           ? 0u : fixture / 4u;
+  if (competition_draft_slot_fixture(&cup_draft, slot, &fixture, NULL)) {
+    cup_bracket_stage = 0u;
+    cup_bracket_page = competition_bracket_stage_pages(0u) > 1u
+        ? fixture / 2u : 0u;
+  }
 }
 
 static void competition_move_cup_action(int direction) {
@@ -1185,27 +1197,11 @@ int competition_frontend_cup_bracket_editable(void) {
 }
 
 uint32_t competition_frontend_cup_view_round(void) {
-  if (cup_tournament.bracket_size == 4u) return 0u;
-  uint32_t view = cup_bracket_view;
-  for (uint32_t round = 0; round < cup_tournament.round_count; round++) {
-    const uint32_t pages =
-        (cup_tournament_fixture_count(&cup_tournament, round) + 3u) / 4u;
-    if (view < pages) return round;
-    view -= pages;
-  }
-  return cup_tournament.active_round;
+  return cup_bracket_stage;
 }
 
 uint32_t competition_frontend_cup_view_first_fixture(void) {
-  if (cup_tournament.bracket_size == 4u) return 0u;
-  uint32_t view = cup_bracket_view;
-  for (uint32_t round = 0; round < cup_tournament.round_count; round++) {
-    const uint32_t pages =
-        (cup_tournament_fixture_count(&cup_tournament, round) + 3u) / 4u;
-    if (view < pages) return view * 4u;
-    view -= pages;
-  }
-  return 0;
+  return cup_bracket_page * 2u;
 }
 
 uint32_t competition_frontend_cup_view_count(void) {
@@ -1213,7 +1209,22 @@ uint32_t competition_frontend_cup_view_count(void) {
 }
 
 uint32_t competition_frontend_cup_view_index(void) {
-  return cup_bracket_view;
+  uint32_t index = cup_bracket_page;
+  for (uint32_t stage = 0; stage < cup_bracket_stage; stage++)
+    index += competition_bracket_stage_pages(stage);
+  return index;
+}
+
+uint32_t competition_frontend_cup_view_stage_count(void) {
+  return competition_bracket_stage_count();
+}
+
+uint32_t competition_frontend_cup_view_page_count(void) {
+  return competition_bracket_stage_pages(cup_bracket_stage);
+}
+
+uint32_t competition_frontend_cup_view_page_index(void) {
+  return cup_bracket_page;
 }
 
 const char *competition_frontend_cup_name(void) {
@@ -1490,13 +1501,18 @@ void competition_frontend_pad_event(uint32_t buttons,
     return;
   }
   if (frontend_state == COMPETITION_FRONTEND_CUP_BRACKET) {
-    const uint32_t views = competition_bracket_view_count();
-    if ((pressed & COMPETITION_BUTTON_L) && cup_bracket_view)
-      cup_bracket_view--;
-    else if ((pressed & COMPETITION_BUTTON_R) &&
-             cup_bracket_view + 1u < views)
-      cup_bracket_view++;
-    else if (pressed & COMPETITION_BUTTON_LEFT)
+    const uint32_t stages = competition_bracket_stage_count();
+    const uint32_t pages = competition_bracket_stage_pages(cup_bracket_stage);
+    if ((pressed & COMPETITION_BUTTON_L) && cup_bracket_stage) {
+      cup_bracket_stage--;
+      cup_bracket_page = 0u;
+    } else if ((pressed & COMPETITION_BUTTON_R) &&
+               cup_bracket_stage + 1u < stages) {
+      cup_bracket_stage++;
+      cup_bracket_page = 0u;
+    } else if ((pressed & COMPETITION_BUTTON_Y) && pages > 1u) {
+      cup_bracket_page = (cup_bracket_page + 1u) % pages;
+    } else if (pressed & COMPETITION_BUTTON_LEFT)
       competition_move_cup_action(-1);
     else if (pressed & COMPETITION_BUTTON_RIGHT)
       competition_move_cup_action(1);
