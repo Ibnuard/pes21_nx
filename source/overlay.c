@@ -21,6 +21,7 @@
 
 #include "config.h"
 #include "android_shim.h"
+#include "competition_frontend.h"
 #include "overlay.h"
 #include "badge_atlas.h"
 #include "efootball_font_atlas.h"
@@ -1710,17 +1711,21 @@ static void overlay_render(void) {
   float selector_y = 0.0f;
   float selector_width = 0.0f;
   float selector_height = 0.0f;
+  const int cup_team_picker = competition_frontend_cup_team_picker_active();
+  const int cup_settings_popup =
+      competition_frontend_state() == COMPETITION_FRONTEND_CUP_SETTINGS;
   const int custom_2p_team_selector =
-      pes_controller_2p_team_selector_active();
+      pes_controller_2p_team_selector_active() || cup_team_picker;
   const int custom_selector_exhibition =
-      custom_2p_team_selector &&
+      custom_2p_team_selector && !cup_team_picker &&
       pes_controller_2p_team_selector_exhibition_mode();
   const int custom_2p_prematch_hub_raw =
       pes_controller_2p_prematch_hub_active();
   const int custom_settings_popup =
       pes_controller_custom_match_settings_active();
   const int pause_settings_popup = pes_controller_pause_camera_active();
-  const int custom_hub_settings_popup = pause_settings_popup ||
+  const int custom_hub_settings_popup = cup_settings_popup ||
+      pause_settings_popup ||
       (custom_settings_popup && custom_2p_prematch_hub_raw);
   const uint32_t custom_hub_page = custom_2p_prematch_hub_raw
                                        ? pes_controller_2p_prematch_hub_page()
@@ -1734,12 +1739,67 @@ static void overlay_render(void) {
   const int custom_hub_choice_page =
       custom_hub_kits_page || custom_hub_stadium_page;
   const int main_menu_host = pes_main_menu_controller_active();
+  const int custom_competition = competition_frontend_active() &&
+                                 !cup_settings_popup && !cup_team_picker;
+  static CompetitionFrontendState competition_previous_state =
+      COMPETITION_FRONTEND_NONE;
+  static CompetitionFrontendState competition_render_state =
+      COMPETITION_FRONTEND_NONE;
+  static uint32_t competition_render_focus;
+  static uint32_t competition_render_item_count;
+  static u64 competition_transition_tick;
+  static int competition_closing_transition;
+  const CompetitionFrontendState competition_current_state =
+      competition_frontend_state();
+  if (custom_competition && competition_current_state !=
+                              COMPETITION_FRONTEND_NONE) {
+    if (competition_current_state != competition_previous_state ||
+        competition_closing_transition) {
+      competition_transition_tick = armGetSystemTick();
+      competition_closing_transition = 0;
+    }
+    competition_previous_state = competition_current_state;
+    competition_render_state = competition_current_state;
+    competition_render_focus = competition_frontend_focus();
+    competition_render_item_count = competition_frontend_item_count();
+  } else if (custom_competition && competition_frontend_closing()) {
+    if (!competition_closing_transition) {
+      competition_transition_tick = armGetSystemTick();
+      competition_closing_transition = 1;
+    }
+  } else if (!custom_competition) {
+    competition_previous_state = COMPETITION_FRONTEND_NONE;
+    competition_render_state = COMPETITION_FRONTEND_NONE;
+    competition_transition_tick = 0;
+    competition_closing_transition = 0;
+  }
+  float competition_menu_mix = 1.0f;
+  if (custom_competition && competition_transition_tick) {
+    const u64 elapsed = armTicksToNs(armGetSystemTick() -
+                                     competition_transition_tick);
+    competition_menu_mix = (float)elapsed / 240000000.0f;
+    if (competition_menu_mix > 1.0f)
+      competition_menu_mix = 1.0f;
+    competition_menu_mix = competition_menu_mix * competition_menu_mix *
+                           (3.0f - 2.0f * competition_menu_mix);
+    if (competition_closing_transition) {
+      competition_menu_mix = 1.0f - competition_menu_mix;
+      if (competition_menu_mix <= 0.001f) {
+        competition_frontend_finish_close();
+        competition_menu_mix = 0.0f;
+      }
+    }
+  }
+  const CompetitionFrontendState competition_display_state =
+      competition_render_state;
+  const uint32_t competition_display_focus = competition_render_focus;
+  const uint32_t competition_display_item_count = competition_render_item_count;
   // The stock selector's blue focus/glow belongs to the native menu.  Both
   // custom 2P surfaces fully own the frame, so letting that geometry draw on
   // top makes the entire hub look like a blue selection wash.
   const int selector = !set_piece_selector && !custom_2p_team_selector &&
                        !custom_2p_prematch_hub_raw && !custom_2p_transition &&
-                       !main_menu_host &&
+                       !main_menu_host && !custom_competition &&
                        pes_controller_selector_rect(
       &selector_x, &selector_y, &selector_width, &selector_height);
   const int selector_custom =
@@ -1778,8 +1838,9 @@ static void overlay_render(void) {
   const int custom_popup =
       pause_settings_popup || custom_team_popup || custom_cpu_popup || custom_settings_popup ||
       custom_video_settings_popup || custom_info_popup || set_piece_selector ||
-      custom_2p_team_selector || custom_2p_prematch_hub_raw ||
-      custom_2p_transition || custom_gameplan;
+      custom_2p_team_selector || custom_hub_settings_popup ||
+      custom_2p_prematch_hub_raw ||
+      custom_2p_transition || custom_gameplan || custom_competition;
   // Keep the ready transition entirely presentation-side. The controller
   // state remains a simple lock while the focused card eases toward its
   // header for the PES-style confirmed layout.
@@ -1838,7 +1899,9 @@ static void overlay_render(void) {
   const float title_portrait_mix = update_title_portrait_cycle(
       start_prompt, &title_portrait_previous, &title_portrait_current);
   const int custom_main_menu =
-      main_menu_host && !start_prompt && !custom_2p_team_selector &&
+      main_menu_host && !start_prompt && !custom_competition &&
+      !cup_settings_popup &&
+      !custom_2p_team_selector &&
       !custom_2p_prematch_hub_raw && !custom_2p_transition &&
       !startup_transition &&
       !custom_gameplan && !pause_skin && !result_skin && !result_transition &&
@@ -1990,6 +2053,7 @@ static void overlay_render(void) {
       stamina_bar_count, hud_diag_draws, stamina_reveal[0], stamina_reveal[1]);
 #endif
   if ((!config.show_fps || !fps.text[0]) && !selector && !custom_main_menu &&
+      !custom_competition &&
       !startup_transition && !start_prompt && !custom_popup &&
       !gameplan_cursor &&
       !native_lab &&
@@ -2149,6 +2213,52 @@ static void overlay_render(void) {
   int main_menu_brand_quad = 0;
   int main_menu_button_a_quad = 0;
   int main_menu_helper_first_quad = 0, main_menu_helper_quads = 0;
+  int competition_background_quad = 0;
+  int competition_brand_quad = 0;
+  int competition_portrait_quad = 0;
+  int competition_departing_card_quads[4] = {0};
+  int competition_departing_icon_quads[4] = {0};
+  int competition_departing_label_first_quad[4] = {0};
+  int competition_departing_label_quads[4] = {0};
+  int competition_focus_quad = -1;
+  int competition_row_quads[12] = {0};
+  int competition_icon_quads[12] = {0};
+  int competition_value_plate_quads[12] = {0};
+  int competition_title_first_quad = 0, competition_title_quads = 0;
+  int competition_label_first_quad[12] = {0};
+  int competition_label_quads[12] = {0};
+  int competition_value_first_quad[12] = {0};
+  int competition_value_quads[12] = {0};
+  int competition_status_first_quad = 0, competition_status_quads = 0;
+  int competition_helper_first_quad = 0, competition_helper_quads = 0;
+  int competition_bracket_card_quads[8] = {0};
+  int competition_bracket_text_first_quad[8] = {0};
+  int competition_bracket_text_quads[8] = {0};
+  int competition_full_panel_quad = 0;
+  int competition_full_header_round_quad = 0;
+  int competition_full_header_fill_quad = 0;
+  int competition_full_selected_quad = 0;
+  int competition_full_rule_first_quad = 0;
+  int competition_full_rule_quads = 0;
+  int competition_full_arrow_first_quad = 0;
+  int competition_full_arrow_quads = 0;
+  int competition_full_action_button_quad = 0;
+  int competition_full_action_text_first_quad = 0;
+  int competition_full_action_text_quads = 0;
+  int competition_team_picker_quad = 0;
+  int competition_team_picker_candidate_quad = 0;
+  int competition_team_picker_title_first_quad = 0;
+  int competition_team_picker_title_quads = 0;
+  int competition_team_picker_value_first_quad = 0;
+  int competition_team_picker_value_quads = 0;
+  int competition_team_picker_row_quads[5] = {0};
+  int competition_team_picker_row_text_first_quad[5] = {0};
+  int competition_team_picker_row_text_quads[5] = {0};
+  int competition_team_slot_quads[8] = {0};
+  int competition_team_slot_badge_quads[8] = {0};
+  RoundedRectStyle competition_team_picker_style = {0};
+  RoundedRectStyle competition_team_picker_candidate_style = {0};
+  RoundedRectStyle competition_team_slot_style = {0};
   int switch_helper_quads[48], switch_helper_count = 0;
   GLuint switch_helper_textures[48];
 #define ADD_SWITCH_HELPER(KEY, CENTER_X, CENTER_Y, SIZE)                 \
@@ -2165,6 +2275,14 @@ static void overlay_render(void) {
                              verts + quads * 24);                        \
   } while (0)
   RoundedRectStyle main_menu_card_style = {0};
+  RoundedRectStyle competition_departing_style = {0};
+  RoundedRectStyle competition_row_style = {0};
+  RoundedRectStyle competition_value_style = {0};
+  RoundedRectStyle competition_full_panel_style = {0};
+  RoundedRectStyle competition_full_header_style = {0};
+  RoundedRectStyle competition_full_selected_style = {0};
+  RoundedRectStyle competition_full_value_style = {0};
+  RoundedRectStyle competition_full_action_style = {0};
   int gameplan_cursor_quads = 0;
   enum {
     PREMATCH_GAMEPLAN_FIELD_SLOTS = 11,
@@ -3865,10 +3983,594 @@ static void overlay_render(void) {
       prematch_gameplan_accent_text_quads[side] += line_quads;
       quads += line_quads;
     }
+  } else if (custom_competition) {
+    /*
+     * Competition pages deliberately live in their own render branch.  The
+     * input/state machine is in competition_frontend.c; this adapter only
+     * turns its small, stable data surface into PES-style cards.  Keeping the
+     * two concerns separate lets Cup grow without adding another switch to
+     * the 10k-line native hook file.
+     */
+    const CompetitionFrontendState state = competition_display_state;
+    const int bracket_page =
+        state == COMPETITION_FRONTEND_CUP_BRACKET ||
+        state == COMPETITION_FRONTEND_CUP_CHECKPOINT;
+    const int competition_settings_page =
+        state == COMPETITION_FRONTEND_CUP_SETTINGS ||
+        state == COMPETITION_FRONTEND_CUP_TEAMS;
+    const int competition_team_page =
+        state == COMPETITION_FRONTEND_CUP_TEAMS;
+    const int competition_team_picker_page =
+        competition_team_page && competition_frontend_cup_team_picker_active();
+    const int competition_tile_page =
+        state == COMPETITION_FRONTEND_MATCH_MODE ||
+        state == COMPETITION_FRONTEND_MODES ||
+        state == COMPETITION_FRONTEND_CUP_LANDING ||
+        state == COMPETITION_FRONTEND_CUP_SLOTS;
+    const float panel_x = competition_team_picker_page
+                              ? 0.035f * (float)screen_width
+                              : competition_settings_page
+                                    ? 0.170f * (float)screen_width
+                              : 0.055f * (float)screen_width;
+    const float panel_y = bracket_page
+                              ? 0.070f * (float)screen_height
+                              : competition_team_picker_page
+                                    ? 0.040f * (float)screen_height
+                              : competition_settings_page
+                                    ? 0.080f * (float)screen_height
+                                    : 0.275f * (float)screen_height;
+    const float panel_w = bracket_page
+                              ? 0.890f * (float)screen_width
+                              : competition_team_picker_page
+                                    ? 0.430f * (float)screen_width
+                              : competition_settings_page
+                                    ? 0.660f * (float)screen_width
+                                    : 0.450f * (float)screen_width;
+    const float panel_h = bracket_page
+                              ? 0.835f * (float)screen_height
+                              : competition_team_picker_page
+                                    ? 0.850f * (float)screen_height
+                              : competition_team_page
+                                    ? 0.640f * (float)screen_height
+                              : competition_settings_page
+                                    ? 0.770f * (float)screen_height
+                                    : 0.590f * (float)screen_height;
+    const float header_h = competition_settings_page
+                               ? (competition_team_picker_page
+                                      ? 0.120f * (float)screen_height
+                                      : 0.115f * (float)screen_height)
+                               : 0.0f;
+    const float title_h = screen_height / 21.0f;
+    const float subtitle_h = screen_height / 39.0f;
+    const float body_x = panel_x +
+                         (bracket_page ? 0.0f
+                                       : (1.0f - competition_menu_mix) *
+                                             0.500f * (float)screen_width);
+    const float body_w = panel_w;
+    const float body_top = bracket_page
+                               ? 0.270f * (float)screen_height
+                               : competition_settings_page
+                                     ? panel_y + header_h +
+                                           0.030f * (float)screen_height
+                                     : competition_tile_page
+                                           ? 0.365f * (float)screen_height
+                                           : 0.315f * (float)screen_height;
+    const float helper_y = 0.945f * (float)screen_height;
+
+    competition_background_quad = quads;
+    quads += emit_image_rect(0.0f, 0.0f, (float)screen_width,
+                             (float)screen_height, verts + quads * 24);
+    /* Keep the brand and portrait in the same places as the main page. */
+    competition_brand_quad = quads;
+    quads += emit_image_rect(0.055f * screen_width,
+                             0.052f * screen_height,
+                             0.245f * screen_width,
+                             0.245f * screen_width * (496.0f / 1310.0f),
+                             verts + quads * 24);
+    competition_portrait_quad = quads;
+    quads += emit_image_rect(0.540f * screen_width,
+                             0.035f * screen_height,
+                             0.425f * screen_width,
+                             1.010f * screen_height,
+                             verts + quads * 24);
+    /* The four native tiles leave to the left while the submenu cards enter
+     * from the right.  The transition is driven by the frontend state and is
+     * shared by Match, Modes, and the Cup landing page. */
+    static const char *const departing_labels[4] = {
+        "MATCH", "MODES", "SETTINGS", "CREDITS"};
+    const float departing_x =
+        0.055f * screen_width - (1.0f - competition_menu_mix) *
+                                   0.550f * screen_width;
+    const float departing_y = 0.315f * screen_height;
+    const float departing_w = 0.450f * screen_width;
+    const float departing_h = 0.115f * screen_height;
+    const float departing_step = 0.135f * screen_height;
+    competition_departing_style =
+        (RoundedRectStyle){departing_w, departing_h,
+                           0.014f * (float)screen_height};
+    for (uint32_t row = 0; row < 4; row++) {
+      competition_departing_card_quads[row] = quads;
+      quads += emit_round_rect_quad(
+          departing_x, departing_y + row * departing_step, departing_w,
+          departing_h, verts + quads * 24);
+      const float icon_size = 0.078f * screen_height;
+      const float icon_x = departing_x + departing_w -
+                           0.022f * screen_width - icon_size;
+      const float icon_y = departing_y + row * departing_step +
+                           (departing_h - icon_size) * 0.5f;
+      const float u0 = (row & 1u) ? 0.5f : 0.0f;
+      const float v0 = (row >= 2u) ? 0.5f : 0.0f;
+      competition_departing_icon_quads[row] = quads;
+      quads += emit_image_rect_uv(icon_x, icon_y, icon_size, icon_size,
+                                  u0, v0, u0 + 0.5f, v0 + 0.5f,
+                                  verts + quads * 24);
+      const float departing_label_h = screen_height / 20.0f;
+      competition_departing_label_first_quad[row] = quads;
+      competition_departing_label_quads[row] = emit_efootball_line(
+          departing_labels[row], (int)strlen(departing_labels[row]),
+          departing_x + 0.030f * screen_width,
+          departing_y + row * departing_step +
+              (departing_h - departing_label_h) * 0.5f,
+          departing_label_h, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      quads += competition_departing_label_quads[row];
+    }
+    if (!competition_settings_page) {
+      competition_title_first_quad = quads;
+      competition_title_quads = emit_efootball_fit_line(
+          competition_frontend_title(),
+          (int)strlen(competition_frontend_title()), panel_x,
+          bracket_page ? 0.120f * (float)screen_height
+                       : 0.285f * (float)screen_height,
+          panel_w * 0.96f, title_h,
+          title_h * 0.65f, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+      quads += competition_title_quads;
+    }
+    if (bracket_page) {
+      const uint32_t bracket_count =
+          competition_frontend_cup_team_count() < 8u
+              ? competition_frontend_cup_team_count()
+              : 8u;
+      const float card_w = 0.325f * (float)screen_width;
+      const float card_h = 0.073f * (float)screen_height;
+      const float card_gap_x = 0.045f * (float)screen_width;
+      const float card_gap_y = 0.017f * (float)screen_height;
+      const float card_x0 = panel_x + 0.035f * (float)screen_width;
+      const float card_y0 = body_top + 0.010f * (float)screen_height;
+      competition_row_style =
+          (RoundedRectStyle){card_w, card_h, 0.012f * (float)screen_height};
+      for (uint32_t index = 0; index < bracket_count; index++) {
+        const uint32_t column = index / 4u;
+        const uint32_t row = index % 4u;
+        const float x = card_x0 + (float)column * (card_w + card_gap_x);
+        const float y = card_y0 + (float)row * (card_h + card_gap_y);
+        competition_bracket_card_quads[index] = quads;
+        quads += emit_round_rect_quad(x, y, card_w, card_h,
+                                      verts + quads * 24);
+        competition_bracket_text_first_quad[index] = quads;
+        const char *team = competition_frontend_cup_team_name(index);
+        competition_bracket_text_quads[index] = emit_efootball_fit_line(
+            team, (int)strlen(team), x + 0.018f * (float)screen_width,
+            y + (card_h - subtitle_h) * 0.5f, card_w * 0.88f, subtitle_h,
+            subtitle_h * 0.65f, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        quads += competition_bracket_text_quads[index];
+      }
+      competition_status_first_quad = quads;
+      const char *status = competition_frontend_status();
+      competition_status_quads = emit_efootball_centered_fit_line(
+          status, (int)strlen(status), screen_width * 0.5f,
+          panel_y + panel_h - 0.135f * (float)screen_height, panel_w * 0.88f,
+          subtitle_h, subtitle_h * 0.65f, EFOOTBALL_FONT_BOLD,
+          verts + quads * 24);
+      quads += competition_status_quads;
+    } else if (competition_settings_page) {
+      /* Cup setup follows the Hub Settings vocabulary.  Settings expose at
+       * most five rows at once; team assignment gets its own centered slot
+       * strip and a single-sided team picker instead of arrow/value rows. */
+      const uint32_t focus = competition_display_focus;
+      const uint32_t row_count = 8u;
+      const uint32_t visible_rows = 5u;
+      const float row_x = panel_x + 0.040f * (float)screen_width;
+      const float row_w = panel_w - 0.080f * (float)screen_width;
+      const float row_h = 0.082f * (float)screen_height;
+      const float row_step = 0.108f * (float)screen_height;
+      const float value_w = 0.205f * (float)screen_width;
+      const float value_h = 0.058f * (float)screen_height;
+      const float value_x = panel_x + panel_w -
+                            0.070f * (float)screen_width - value_w;
+      const float selector_inset = 0.006f * (float)screen_height;
+
+      competition_full_panel_style =
+          (RoundedRectStyle){panel_w, panel_h,
+                             0.025f * (float)screen_height};
+      competition_full_panel_quad = quads;
+      quads += emit_round_rect_quad(panel_x, panel_y, panel_w, panel_h,
+                                    verts + quads * 24);
+      competition_full_header_style =
+          (RoundedRectStyle){panel_w, header_h,
+                             0.025f * (float)screen_height};
+      competition_full_header_round_quad = quads;
+      quads += emit_round_rect_quad(panel_x, panel_y, panel_w, header_h,
+                                    verts + quads * 24);
+      competition_full_header_fill_quad = quads;
+      quads += emit_rect(panel_x, panel_y + header_h -
+                                   0.025f * (float)screen_height,
+                         panel_w, 0.025f * (float)screen_height,
+                         verts + quads * 24);
+
+      if (competition_team_page && !competition_team_picker_page) {
+        const uint32_t slots = competition_frontend_cup_player_count() > 8u
+                                   ? 8u
+                                   : competition_frontend_cup_player_count();
+        const float slot_gap = 0.012f * (float)screen_width;
+        const float slot_w = fminf(0.160f * (float)screen_width,
+                                   (panel_w - 0.075f * (float)screen_width -
+                                    slot_gap * (slots ? slots - 1u : 0u)) /
+                                       (float)(slots ? slots : 1u));
+        const float slot_h = fminf(0.245f * (float)screen_height,
+                                   slot_w * 0.94f);
+        const float slots_w = slots * slot_w +
+                              (slots ? slots - 1u : 0u) * slot_gap;
+        const float slot_x0 = panel_x + (panel_w - slots_w) * 0.5f;
+        const float slot_y = panel_y + header_h +
+                             (panel_h - header_h - slot_h) * 0.5f;
+        competition_team_slot_style =
+            (RoundedRectStyle){slot_w, slot_h,
+                               0.014f * (float)screen_height};
+        const float slot_label_h = (float)screen_height / 40.0f;
+        const float slot_value_h = (float)screen_height / 52.0f;
+        for (uint32_t slot = 0; slot < slots; slot++) {
+          const float x = slot_x0 + slot * (slot_w + slot_gap);
+          competition_team_slot_quads[slot] = quads;
+          quads += emit_round_rect_quad(x, slot_y, slot_w, slot_h,
+                                        verts + quads * 24);
+          char player_label[8];
+          snprintf(player_label, sizeof(player_label), "P%u", slot + 1u);
+          competition_label_first_quad[slot] = quads;
+          competition_label_quads[slot] = emit_efootball_centered_fit_line(
+              player_label, (int)strlen(player_label), x + slot_w * 0.5f,
+              slot_y + 0.020f * (float)screen_height, slot_w * 0.78f,
+              slot_label_h, slot_label_h * 0.62f, EFOOTBALL_FONT_STENCIL,
+              verts + quads * 24);
+          quads += competition_label_quads[slot];
+          const char *value = competition_frontend_item_value(slot);
+          competition_value_first_quad[slot] = quads;
+          competition_value_quads[slot] = emit_efootball_centered_fit_line(
+              value, (int)strlen(value), x + slot_w * 0.5f,
+              slot_y + slot_h - 0.035f * (float)screen_height,
+              slot_w * 0.88f, slot_value_h, slot_value_h * 0.58f,
+              EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          quads += competition_value_quads[slot];
+        }
+        for (uint32_t slot = 0; slot < slots; slot++) {
+          if (!competition_frontend_cup_team_selected(slot))
+            continue;
+          const float badge_size = fminf(slot_w * 0.55f, slot_h * 0.52f);
+          competition_team_slot_badge_quads[slot] = quads;
+          quads += emit_badge(
+              competition_frontend_cup_team_badge(slot),
+              slot_x0 + slot * (slot_w + slot_gap) +
+                  (slot_w - badge_size) * 0.5f,
+              slot_y + (slot_h - badge_size) * 0.48f,
+              badge_size, badge_size, verts + quads * 24);
+        }
+
+      } else if (competition_team_picker_page) {
+        const float picker_x = panel_x;
+        const float picker_w = panel_w;
+        const float picker_y = panel_y + header_h;
+        const float picker_h = panel_h - header_h;
+        const float card_h = 0.340f * (float)screen_height;
+        const float card_y = 0.350f * (float)screen_height;
+        const float text_h = (float)screen_height / 52.0f;
+        const float small_h = (float)screen_height / 57.0f;
+        competition_team_picker_style =
+            (RoundedRectStyle){picker_w, picker_h, 0.014f * (float)screen_height};
+        competition_team_picker_candidate_style =
+            (RoundedRectStyle){picker_w, card_h, 0.014f * (float)screen_height};
+        competition_team_picker_quad = quads;
+        quads += emit_round_rect_quad(picker_x, picker_y, picker_w, picker_h,
+                                      verts + quads * 24);
+        competition_team_picker_candidate_quad = quads;
+        quads += emit_round_rect_quad(picker_x, card_y, picker_w, card_h,
+                                      verts + quads * 24);
+        competition_team_picker_title_first_quad = quads;
+        competition_team_picker_title_quads = emit_efootball_centered_fit_line(
+            "SELECT TEAM", 11, picker_x + picker_w * 0.5f,
+            panel_y + 0.078f * (float)screen_height, picker_w * 0.86f,
+            text_h, text_h * 0.62f, EFOOTBALL_FONT_BOLD,
+            verts + quads * 24);
+        quads += competition_team_picker_title_quads;
+        const char *candidate = competition_frontend_cup_team_picker_name();
+        competition_team_picker_value_first_quad = quads;
+        competition_team_picker_value_quads = emit_efootball_centered_fit_line(
+            candidate, (int)strlen(candidate), picker_x + picker_w * 0.5f,
+            card_y + 0.020f * (float)screen_height,
+            picker_w * 0.84f, (float)screen_height / 31.0f,
+            (float)screen_height / 44.0f, EFOOTBALL_FONT_STENCIL,
+            verts + quads * 24);
+        quads += competition_team_picker_value_quads;
+        const float small_row_h = card_h * 0.25f;
+        for (uint32_t item = 0; item < 5u; item++) {
+          const int relative = (int)item - 2;
+          if (!relative)
+            continue;
+          const float row_y =
+              (relative < 0
+                   ? 0.180f + (float)(relative + 2) * 0.085f
+                   : 0.690f + (float)(relative - 1) * 0.085f) *
+              (float)screen_height;
+          competition_team_picker_row_quads[item] = quads;
+          quads += emit_round_rect_quad(picker_x, row_y, picker_w, small_row_h,
+                                        verts + quads * 24);
+          const char *name =
+              competition_frontend_cup_team_picker_name_at(relative);
+          competition_team_picker_row_text_first_quad[item] = quads;
+          competition_team_picker_row_text_quads[item] = emit_efootball_fit_line(
+              name, (int)strlen(name), picker_x + 0.052f * (float)screen_width,
+              row_y + (small_row_h - small_h) * 0.5f, picker_w * 0.82f,
+              small_h, small_h * 0.60f, EFOOTBALL_FONT_BOLD,
+              verts + quads * 24);
+          quads += competition_team_picker_row_text_quads[item];
+        }
+      } else {
+        uint32_t start_row = 0;
+        if (focus >= visible_rows)
+          start_row = focus - visible_rows + 1u;
+        if (start_row > row_count - visible_rows)
+          start_row = row_count - visible_rows;
+        const uint32_t end_row = start_row + visible_rows;
+        competition_full_selected_style =
+            (RoundedRectStyle){row_w - selector_inset * 2.0f,
+                               row_h - selector_inset * 2.0f,
+                               0.014f * (float)screen_height};
+        if (focus < row_count) {
+          const uint32_t visible_focus = focus - start_row;
+          competition_full_selected_quad = quads;
+          quads += emit_round_rect_quad(
+              row_x + selector_inset,
+              body_top + row_step * (float)visible_focus + selector_inset,
+              row_w - selector_inset * 2.0f,
+              row_h - selector_inset * 2.0f, verts + quads * 24);
+        }
+        competition_full_rule_first_quad = quads;
+        for (uint32_t visible = 1; visible < visible_rows; visible++) {
+          const float rule_y = floorf(body_top + row_step * (float)visible -
+                                      (row_step - row_h) * 0.5f);
+          competition_full_rule_quads += emit_rect(
+              row_x, rule_y, row_w,
+              fmaxf(1.8f, (float)screen_height / 450.0f),
+              verts + quads * 24);
+          quads++;
+        }
+        competition_full_value_style =
+            (RoundedRectStyle){value_w, value_h, value_h * 0.5f};
+        for (uint32_t row = start_row; row < end_row && row < 12u; row++) {
+          const uint32_t visible = row - start_row;
+          const float value_y = body_top + row_step * (float)visible +
+                                (row_h - value_h) * 0.5f;
+          competition_value_plate_quads[row] = quads;
+          quads += emit_round_rect_quad(value_x, value_y, value_w, value_h,
+                                        verts + quads * 24);
+          const float center_y = body_top + row_step * (float)visible +
+                                 row_h * 0.5f;
+          const float arrow_w = 0.007f * (float)screen_width;
+          const float arrow_h = 0.012f * (float)screen_height;
+          if (competition_frontend_item_enabled(row)) {
+            if (!competition_full_arrow_quads)
+              competition_full_arrow_first_quad = quads;
+            const float left_x = value_x - 0.014f * (float)screen_width;
+            competition_full_arrow_quads += emit_triangle(
+                left_x + arrow_w, center_y - arrow_h,
+                left_x - arrow_w, center_y,
+                left_x + arrow_w, center_y + arrow_h, verts + quads * 24);
+            quads++;
+            const float right_x = value_x + value_w +
+                                  0.014f * (float)screen_width;
+            competition_full_arrow_quads += emit_triangle(
+                right_x - arrow_w, center_y - arrow_h,
+                right_x + arrow_w, center_y,
+                right_x - arrow_w, center_y + arrow_h, verts + quads * 24);
+            quads++;
+          }
+        }
+        const float label_h = (float)screen_height / 42.0f;
+        const float value_gh = (float)screen_height / 43.0f;
+        for (uint32_t row = start_row; row < end_row && row < 12u; row++) {
+          const uint32_t visible = row - start_row;
+          const float row_y = body_top + row_step * (float)visible;
+          const char *label = competition_frontend_item_label(row);
+          competition_label_first_quad[row] = quads;
+          competition_label_quads[row] = emit_efootball_fit_line(
+              label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
+              row_y + (row_h - label_h) * 0.5f, row_w * 0.50f, label_h,
+              label_h * 0.65f, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+          quads += competition_label_quads[row];
+          const char *value = competition_frontend_item_value(row);
+          if (value && value[0]) {
+            competition_value_first_quad[row] = quads;
+            competition_value_quads[row] = emit_efootball_fit_line(
+                value, (int)strlen(value), value_x + 0.016f * (float)screen_width,
+                row_y + (row_h - value_gh) * 0.5f, value_w * 0.90f, value_gh,
+                value_gh * 0.60f, EFOOTBALL_FONT_STENCIL,
+                verts + quads * 24);
+            quads += competition_value_quads[row];
+          }
+        }
+      }
+
+      const float action_w = 0.260f * (float)screen_width;
+      const float action_h = 0.074f * (float)screen_height;
+      const float action_x = (screen_width - action_w) * 0.5f;
+      const float action_y = panel_y + panel_h +
+                             0.015f * (float)screen_height;
+      competition_full_action_style =
+          (RoundedRectStyle){action_w, action_h,
+                             0.018f * (float)screen_height};
+      competition_full_action_button_quad = quads;
+      quads += emit_round_rect_quad(action_x, action_y, action_w, action_h,
+                                    verts + quads * 24);
+      competition_full_action_text_first_quad = quads;
+      competition_full_action_text_quads = emit_efootball_centered_fit_line(
+          "NEXT", 4, action_x + action_w * 0.5f,
+          action_y + (action_h - (float)screen_height / 46.0f) * 0.5f,
+          action_w * 0.86f, (float)screen_height / 46.0f,
+          (float)screen_height / 64.0f, EFOOTBALL_FONT_BOLD,
+          verts + quads * 24);
+      quads += competition_full_action_text_quads;
+
+      competition_title_first_quad = quads;
+      competition_title_quads = emit_efootball_centered_fit_line(
+          competition_frontend_title(),
+          (int)strlen(competition_frontend_title()), panel_x + panel_w * 0.5f,
+          panel_y + (header_h - title_h) * 0.5f, panel_w * 0.90f,
+          title_h, title_h * 0.65f, EFOOTBALL_FONT_STENCIL,
+          verts + quads * 24);
+      quads += competition_title_quads;
+    } else {
+      uint32_t item_count = competition_display_item_count;
+      if (item_count > 12u)
+        item_count = 12u;
+      const float available_h =
+          panel_h - header_h - 0.170f * (float)screen_height;
+      const float row_h = competition_tile_page
+                              ? 0.115f * (float)screen_height
+                              : fmaxf(0.045f * (float)screen_height,
+                                      available_h /
+                                              (float)(item_count ? item_count : 1u) -
+                                          0.006f * (float)screen_height);
+      const float row_gap = competition_tile_page
+                                ? 0.020f * (float)screen_height
+                                : 0.008f * (float)screen_height;
+      const float value_x = body_x + body_w * 0.59f;
+      const float value_w = body_w * 0.35f;
+      competition_row_style =
+          (RoundedRectStyle){body_w, row_h,
+                             (competition_tile_page ? 0.014f : 0.010f) *
+                                 (float)screen_height};
+      competition_value_style =
+          (RoundedRectStyle){value_w, row_h * 0.78f,
+                             0.008f * (float)screen_height};
+      for (uint32_t index = 0; index < item_count; index++) {
+        const float y = body_top + (float)index * (row_h + row_gap);
+        competition_row_quads[index] = quads;
+        quads += emit_round_rect_quad(body_x, y, body_w, row_h,
+                                      verts + quads * 24);
+        if (index == competition_display_focus)
+          competition_focus_quad = competition_row_quads[index];
+        const char *label = competition_frontend_item_label(index);
+        const char *value = competition_frontend_item_value(index);
+        const float label_h = competition_tile_page
+                                  ? (float)screen_height / 20.0f
+                                  : subtitle_h;
+        const float tile_focus_amount =
+            competition_tile_page && index == competition_display_focus
+                ? 1.0f
+                : 0.0f;
+        competition_label_first_quad[index] = quads;
+        competition_label_quads[index] = emit_efootball_fit_line(
+            label, (int)strlen(label),
+            body_x + (competition_tile_page
+                           ? (0.030f + 0.012f * tile_focus_amount)
+                           : 0.020f) *
+                         (float)screen_width,
+            y + (row_h - label_h) * 0.5f, body_w * 0.50f, label_h,
+            label_h * 0.65f,
+            competition_tile_page ? EFOOTBALL_FONT_STENCIL
+                                   : EFOOTBALL_FONT_BOLD,
+            verts + quads * 24);
+        quads += competition_label_quads[index];
+        if (value && value[0]) {
+          competition_value_plate_quads[index] = quads;
+          quads += emit_round_rect_quad(
+              value_x, y + (row_h - row_h * 0.78f) * 0.5f, value_w,
+              row_h * 0.78f, verts + quads * 24);
+          competition_value_first_quad[index] = quads;
+          competition_value_quads[index] = emit_efootball_fit_line(
+              value, (int)strlen(value), value_x + 0.016f * (float)screen_width,
+              y + (row_h - label_h) * 0.5f, value_w * 0.90f, label_h,
+              label_h * 0.60f, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
+          quads += competition_value_quads[index];
+        } else {
+          const float focus_amount = index == competition_display_focus
+                                         ? 1.0f
+                                         : 0.0f;
+          const float icon_size =
+              (0.078f + 0.006f * focus_amount) * (float)screen_height;
+          const float icon_x = body_x + body_w -
+                               0.022f * (float)screen_width - icon_size -
+                               0.004f * (float)screen_width * focus_amount;
+          const float icon_y = y + (row_h - icon_size) * 0.5f;
+          const uint32_t icon_index = index % 4u;
+          const float u0 = (icon_index & 1u) ? 0.5f : 0.0f;
+          const float v0 = (icon_index >= 2u) ? 0.5f : 0.0f;
+          competition_icon_quads[index] = quads;
+          quads += emit_image_rect_uv(
+              icon_x, icon_y, icon_size, icon_size, u0, v0, u0 + 0.5f,
+              v0 + 0.5f, verts + quads * 24);
+        }
+      }
+      const char *status = competition_frontend_status();
+      if (status && status[0]) {
+        competition_status_first_quad = quads;
+        competition_status_quads = emit_efootball_centered_fit_line(
+            status, (int)strlen(status), screen_width * 0.5f,
+            panel_y + panel_h - 0.135f * (float)screen_height,
+            panel_w * 0.88f, subtitle_h, subtitle_h * 0.65f,
+            EFOOTBALL_FONT_BOLD, verts + quads * 24);
+        quads += competition_status_quads;
+      }
+    }
+    const int show_a = state != COMPETITION_FRONTEND_CUP_CHECKPOINT;
+    const char *a_label = bracket_page ? "NEXT" : "SELECT";
+    const char *b_label = "BACK";
+    const float helper_icon_size = 0.034f * (float)screen_height;
+    float helper_x = panel_x + 0.030f * (float)screen_width;
+    if (show_a) {
+      ADD_SWITCH_HELPER("A", helper_x + helper_icon_size * 0.5f,
+                        helper_y, helper_icon_size);
+      helper_x += helper_icon_size +
+                  measure_efootball_line(a_label, (int)strlen(a_label),
+                                         helper_text_gh,
+                                         EFOOTBALL_FONT_BOLD) +
+                  0.035f * (float)screen_width;
+    }
+    ADD_SWITCH_HELPER("B", helper_x + helper_icon_size * 0.5f, helper_y,
+                      helper_icon_size);
+    helper_x += helper_icon_size +
+                measure_efootball_line(b_label, (int)strlen(b_label),
+                                       helper_text_gh,
+                                       EFOOTBALL_FONT_BOLD) +
+                0.025f * (float)screen_width;
+    competition_helper_first_quad = quads;
+    if (show_a) {
+      int n = emit_efootball_line(
+          a_label, (int)strlen(a_label),
+          panel_x + 0.030f * (float)screen_width + helper_icon_size +
+              0.009f * (float)screen_width,
+          helper_y - helper_text_gh * 0.5f, helper_text_gh,
+          EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      competition_helper_quads += n;
+      quads += n;
+    }
+    const float back_label_x =
+        show_a ? panel_x + 0.030f * (float)screen_width + helper_icon_size +
+                     measure_efootball_line(a_label, (int)strlen(a_label),
+                                            helper_text_gh,
+                                            EFOOTBALL_FONT_BOLD) +
+                     0.070f * (float)screen_width
+               : panel_x + 0.030f * (float)screen_width + helper_icon_size +
+                     0.009f * (float)screen_width;
+    int n = emit_efootball_line(
+        b_label, (int)strlen(b_label), back_label_x,
+        helper_y - helper_text_gh * 0.5f, helper_text_gh,
+        EFOOTBALL_FONT_BOLD, verts + quads * 24);
+    competition_helper_quads += n;
+    quads += n;
   } else if (custom_2p_team_selector) {
-    // PES-PC-style dual carousel: the focused entry expands into the large
-    // centre card, with its two neighbours above and below. Each controller
-    // owns one half and the opaque backdrop fully replaces the stock page.
+    // Exhibition, 2P, and Cup share the same atlas-backed carousel. Cup
+    // renders one panel and supplies its league/team state through the same
+    // selector accessors.
+    const uint32_t selector_sides = cup_team_picker ? 1u : 2u;
     const float panel_y = 0.040f * (float)screen_height;
     const float panel_w = 0.430f * (float)screen_width;
     const float panel_x[2] = {0.035f * (float)screen_width,
@@ -3881,7 +4583,7 @@ static void overlay_render(void) {
     const float row_confirm_y = panel_y + header_h;
     const float confirm_bar_h = 0.085f * (float)screen_height;
     float focused_y[2] = {row_y0, row_y0};
-    for (uint32_t pad = 0; pad < 2; pad++)
+    for (uint32_t pad = 0; pad < selector_sides; pad++)
       focused_y[pad] =
           row_y0 + (row_confirm_y - row_y0) *
                         team_selector_confirm_progress[pad];
@@ -3912,7 +4614,7 @@ static void overlay_render(void) {
     // Deliberately no side-container layer: backdrop -> header -> carousel.
     custom_panel_style = (RoundedRectStyle){0};
     custom_header_style = (RoundedRectStyle){0};
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       int header_quads = emit_rect(
           panel_x[pad], panel_y, panel_w, header_h, verts + quads * 24);
       custom_header_round_quads += header_quads;
@@ -3920,7 +4622,7 @@ static void overlay_render(void) {
     }
     // A plain rectangle keeps the five carousel blocks perfectly joined.
     custom_selected_style = (RoundedRectStyle){0};
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       custom_selected_quads += emit_rect(
           panel_x[pad] + row_x_inset, focused_y[pad], row_w, row_h,
           verts + quads * 24);
@@ -3928,7 +4630,7 @@ static void overlay_render(void) {
     }
     // The ready state gets its own full-width strip. It is deliberately not
     // painted over the badge card, matching the detached OK row in PES PC.
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (!pes_controller_2p_team_selector_confirmed(pad))
         continue;
       custom_confirm_bar_quads += emit_rect(
@@ -3936,7 +4638,7 @@ static void overlay_render(void) {
           confirm_bar_h, verts + quads * 24);
       quads++;
     }
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (pes_controller_2p_team_selector_confirmed(pad))
         continue;
       const uint32_t focus = pes_controller_2p_team_selector_focus(pad);
@@ -3963,7 +4665,7 @@ static void overlay_render(void) {
     // language without baking another texture atlas.
     custom_team_stat_track_style = (RoundedRectStyle){
         team_stat_bar_w, team_stat_track_h, team_stat_track_h * 0.5f};
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (pes_controller_2p_team_selector_phase(pad) !=
               PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
           !team_selector_stats_valid[pad])
@@ -4002,7 +4704,7 @@ static void overlay_render(void) {
     }
 
     custom_team_star_border_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (pes_controller_2p_team_selector_phase(pad) !=
               PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
           !team_selector_stats_valid[pad])
@@ -4021,7 +4723,7 @@ static void overlay_render(void) {
       }
     }
     custom_team_star_empty_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (pes_controller_2p_team_selector_phase(pad) !=
               PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
           !team_selector_stats_valid[pad])
@@ -4040,7 +4742,7 @@ static void overlay_render(void) {
       }
     }
     custom_team_star_fill_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (pes_controller_2p_team_selector_phase(pad) !=
               PES_2P_TEAM_SELECTOR_PHASE_TEAM ||
           !team_selector_stats_valid[pad])
@@ -4079,7 +4781,7 @@ static void overlay_render(void) {
     ADD_SWITCH_HELPER("A", 0.875f * (float)screen_width, helper_y,
                       helper_r * 2.0f);
 
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       const uint32_t focus = pes_controller_2p_team_selector_focus(pad);
       const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
       const uint32_t visible =
@@ -4129,7 +4831,7 @@ static void overlay_render(void) {
     const float feature_text_gh = (float)screen_height / 31.0f;
     const float stat_text_gh = (float)screen_height / 43.0f;
     custom_dark_text_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       const float left = panel_x[pad];
       const uint32_t focus = pes_controller_2p_team_selector_focus(pad);
       const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
@@ -4214,7 +4916,7 @@ static void overlay_render(void) {
     // While browsing, the focused team/league name is the red accent. Once
     // confirmed it moves back into the neutral text pass above.
     custom_focus_text_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (custom_selector_exhibition &&
           pad != selector_active_side)
         continue;
@@ -4240,7 +4942,7 @@ static void overlay_render(void) {
     }
 
     custom_ok_text_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       if (!pes_controller_2p_team_selector_confirmed(pad))
         continue;
       static const char ok[] = "OK";
@@ -4256,9 +4958,10 @@ static void overlay_render(void) {
     }
 
     custom_white_text_first_quad = quads;
-    for (uint32_t pad = 0; pad < 2; pad++) {
+    for (uint32_t pad = 0; pad < selector_sides; pad++) {
       const float left = panel_x[pad];
-      const char *player = pad == 0 ? "HOME" : "AWAY";
+      const char *player = cup_team_picker ? "P1" :
+                           pad == 0 ? "HOME" : "AWAY";
       if (custom_selector_exhibition && pad == 1)
         player = "COM";
       const float player_gh = (float)screen_height / 29.0f;
@@ -4403,15 +5106,18 @@ static void overlay_render(void) {
         quads++;
       }
   } else if (custom_hub_settings_popup) {
-    // Match Settings / General Settings: viewport-windowed scrollable list.
-    // Container height is respected; items outside the visible window are not
-    // rendered and scrolling follows focus smoothly without overflowing.
-    const uint32_t item_count = pause_settings_popup
+    // Cup and match settings share one viewport, row geometry, value capsule,
+    // arrow pair, and scrollbar. Only their data sources differ.
+    const uint32_t item_count = cup_settings_popup
+                                    ? competition_frontend_cup_setting_count()
+                                : pause_settings_popup
                                     ? pes_controller_pause_settings_count()
                                     : pes_controller_custom_match_settings_count();
     const uint32_t max_visible = 5u;
     const uint32_t visible_count = item_count < max_visible ? item_count : max_visible;
-    const uint32_t focus = pause_settings_popup
+    const uint32_t focus = cup_settings_popup
+                               ? competition_frontend_cup_setting_focus()
+                           : pause_settings_popup
                                ? pes_controller_pause_settings_focus()
                                : pes_controller_custom_match_settings_focus();
     uint32_t start_index = 0;
@@ -4425,7 +5131,11 @@ static void overlay_render(void) {
     const float panel_x = 0.17f * (float)screen_width;
     const float panel_y = 0.080f * (float)screen_height;
     const float panel_w = 0.66f * (float)screen_width;
-    const float panel_h = 0.770f * (float)screen_height;
+    const float panel_h = (cup_settings_popup
+                               ? 0.115f + 0.030f + 0.108f *
+                                     (float)(visible_count - 1u) + 0.082f +
+                                     0.032f
+                               : 0.770f) * (float)screen_height;
     const float panel_radius = 0.025f * (float)screen_height;
     const float header_h = 0.115f * (float)screen_height;
     const float row_x = panel_x + 0.040f * (float)screen_width;
@@ -4472,13 +5182,15 @@ static void overlay_render(void) {
         row_w - selector_inset * 2.0f,
         row_h - selector_inset * 2.0f,
         0.014f * (float)screen_height};
-    custom_selected_quads = emit_round_rect_quad(
-        row_x + selector_inset,
-        row_y0 + row_step * (float)focus_slot + selector_inset,
-        row_w - selector_inset * 2.0f,
-        row_h - selector_inset * 2.0f,
-        verts + quads * 24);
-    quads += custom_selected_quads;
+    if (focus < item_count) {
+      custom_selected_quads = emit_round_rect_quad(
+          row_x + selector_inset,
+          row_y0 + row_step * (float)focus_slot + selector_inset,
+          row_w - selector_inset * 2.0f,
+          row_h - selector_inset * 2.0f,
+          verts + quads * 24);
+      quads += custom_selected_quads;
+    }
 
     const float divider_h = fmaxf(1.8f, (float)screen_height / 450.0f);
     for (uint32_t slot = 0; slot + 1 < visible_count; slot++) {
@@ -4530,6 +5242,17 @@ static void overlay_render(void) {
           verts + quads * 24);
       quads++;
     }
+    if (cup_settings_popup) {
+      const float next_w = 0.260f * (float)screen_width;
+      const float next_h = 0.070f * (float)screen_height;
+      const float next_x = ((float)screen_width - next_w) * 0.5f;
+      const float next_y = panel_y + panel_h + 0.013f * (float)screen_height;
+      custom_action_button_style = (RoundedRectStyle){
+          next_w, next_h, 0.018f * (float)screen_height};
+      custom_action_button_quads = emit_round_rect_quad(
+          next_x, next_y, next_w, next_h, verts + quads * 24);
+      quads += custom_action_button_quads;
+    }
     const float key_size = key_r * 2.0f;
     custom_action_key_bg_quads = 1;
     ADD_SWITCH_HELPER("A", action_key_x, key_y, key_size);
@@ -4543,8 +5266,12 @@ static void overlay_render(void) {
     int line_quads = 0;
     custom_focus_text_first_quad = quads;
     if (focus < item_count && focus_slot < visible_count) {
-      const char *label =
-          pause_settings_popup ? pes_controller_pause_settings_label(focus) : pes_controller_custom_match_settings_label(focus);
+      const char *label = cup_settings_popup
+                              ? competition_frontend_item_label(
+                                    competition_frontend_cup_setting_row(focus))
+                          : pause_settings_popup
+                              ? pes_controller_pause_settings_label(focus)
+                              : pes_controller_custom_match_settings_label(focus);
       line_quads = emit_efootball_line(
           label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
           row_y0 + row_step * (float)focus_slot +
@@ -4558,8 +5285,12 @@ static void overlay_render(void) {
       const uint32_t item = start_index + slot;
       if (item == focus)
         continue;
-      const char *label =
-          pause_settings_popup ? pes_controller_pause_settings_label(item) : pes_controller_custom_match_settings_label(item);
+      const char *label = cup_settings_popup
+                              ? competition_frontend_item_label(
+                                    competition_frontend_cup_setting_row(item))
+                          : pause_settings_popup
+                              ? pes_controller_pause_settings_label(item)
+                              : pes_controller_custom_match_settings_label(item);
       line_quads = emit_efootball_line(
           label, (int)strlen(label), row_x + 0.020f * (float)screen_width,
           row_y0 + row_step * (float)slot +
@@ -4568,7 +5299,9 @@ static void overlay_render(void) {
       custom_white_text_quads += line_quads;
       quads += line_quads;
     }
-    const char *title = pause_settings_popup
+    const char *title = cup_settings_popup
+                            ? "CUP SETTINGS"
+                        : pause_settings_popup
                             ? pes_controller_pause_settings_title()
                             : "GENERAL SETTINGS";
     const float title_w = measure_efootball_line(
@@ -4581,8 +5314,12 @@ static void overlay_render(void) {
     quads += line_quads;
     for (uint32_t slot = 0; slot < visible_count; slot++) {
       const uint32_t item = start_index + slot;
-      const char *value =
-          pause_settings_popup ? pes_controller_pause_settings_value(item) : pes_controller_custom_match_settings_value(item);
+      const char *value = cup_settings_popup
+                              ? competition_frontend_item_value(
+                                    competition_frontend_cup_setting_row(item))
+                          : pause_settings_popup
+                              ? pes_controller_pause_settings_value(item)
+                              : pes_controller_custom_match_settings_value(item);
       const float width = measure_efootball_line(
           value, (int)strlen(value), value_gh, EFOOTBALL_FONT_BOLD);
       const float value_y = row_y0 + row_step * (float)slot +
@@ -4590,6 +5327,19 @@ static void overlay_render(void) {
       line_quads = emit_efootball_line(
           value, (int)strlen(value), value_x + (value_w - width) * 0.5f,
           value_y, value_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
+      custom_white_text_quads += line_quads;
+      quads += line_quads;
+    }
+    if (cup_settings_popup) {
+      const float next_gh = (float)screen_height / 32.0f;
+      const char *next = "NEXT";
+      const float next_w = measure_efootball_line(
+          next, 4, next_gh, EFOOTBALL_FONT_BOLD);
+      line_quads = emit_efootball_line(
+          next, 4, ((float)screen_width - next_w) * 0.5f,
+          panel_y + panel_h + 0.013f * (float)screen_height +
+              (0.070f * (float)screen_height - next_gh) * 0.5f,
+          next_gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
       custom_white_text_quads += line_quads;
       quads += line_quads;
     }
@@ -7179,7 +7929,7 @@ static void overlay_render(void) {
   }
   if (custom_main_menu) {
     static const char *const labels[4] = {
-        "EXHIBITION", "2 PLAYER", "SETTINGS", "CREDITS"};
+        "MATCH", "MODES", "SETTINGS", "CREDITS"};
     main_menu_background_quad = quads;
     quads += emit_image_rect(0, 0, screen_width, screen_height,
                              verts + quads * 24);
@@ -7521,6 +8271,339 @@ static void overlay_render(void) {
     glUniform4f(gl.loc_color, 0.88f, 0.93f, 1.0f, 0.92f);
     glDrawArrays(GL_TRIANGLES, main_menu_helper_first_quad * 6,
                  main_menu_helper_quads * 6);
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+  }
+  if (custom_competition) {
+    const int competition_settings_page =
+        competition_display_state == COMPETITION_FRONTEND_CUP_SETTINGS ||
+        competition_display_state == COMPETITION_FRONTEND_CUP_TEAMS;
+    const int competition_team_page =
+        competition_display_state == COMPETITION_FRONTEND_CUP_TEAMS;
+    const int competition_team_picker_page =
+        competition_team_page && competition_frontend_cup_team_picker_active();
+    /* Dedicated competition surface: opaque background first, then the
+     * shared card vocabulary used by the native/custom PES pages. */
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 1.0f);
+    glUniform2f(gl.loc_off, 0.0f, 0.0f);
+    glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glBindTexture(GL_TEXTURE_2D,
+                  competition_settings_page ? gl.team_select_bg_tex
+                                              : gl.main_menu_background_tex);
+    glDrawArrays(GL_TRIANGLES, competition_background_quad * 6, 6);
+
+    if (!competition_settings_page) {
+      glBindTexture(GL_TEXTURE_2D, gl.main_menu_brand_tex);
+      glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, competition_brand_quad * 6, 6);
+      const uint32_t portrait = main_menu_portrait_transition.current < 4u
+                                    ? main_menu_portrait_transition.current
+                                    : 0u;
+      glBindTexture(GL_TEXTURE_2D, gl.main_menu_portrait_tex[portrait]);
+      glDrawArrays(GL_TRIANGLES, competition_portrait_quad * 6, 6);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+    glUniform1f(gl.loc_image, 0.0f);
+    glUniform1f(gl.loc_solid, 1.0f);
+    if (!competition_settings_page) {
+      use_rounded_rect(&competition_departing_style);
+      glUniform4f(gl.loc_color, 0.006f, 0.025f, 0.105f,
+                  0.88f * (1.0f - competition_menu_mix));
+      for (uint32_t row = 0; row < 4; row++)
+        glDrawArrays(GL_TRIANGLES, competition_departing_card_quads[row] * 6,
+                     6);
+      use_rounded_rect(NULL);
+      glUniform1f(gl.loc_solid, 0.0f);
+      /* The runtime atlas is a luminance mask.  Use the same mask path as
+       * the main menu so transparent/black atlas space never becomes a solid
+       * square on the submenu tiles. */
+      glUniform1f(gl.loc_image, 0.0f);
+      glBindTexture(GL_TEXTURE_2D, gl.main_menu_icons_tex);
+      glUniform4f(gl.loc_color, 0.72f, 0.80f, 0.96f,
+                  0.94f * (1.0f - competition_menu_mix));
+      for (uint32_t row = 0; row < 4; row++)
+        glDrawArrays(GL_TRIANGLES, competition_departing_icon_quads[row] * 6,
+                     6);
+      glUniform1f(gl.loc_image, 0.0f);
+      glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+      glUniform4f(gl.loc_color, 0.95f, 0.97f, 1.0f,
+                  0.95f * (1.0f - competition_menu_mix));
+      for (uint32_t row = 0; row < 4; row++)
+        glDrawArrays(GL_TRIANGLES,
+                     competition_departing_label_first_quad[row] * 6,
+                     competition_departing_label_quads[row] * 6);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, gl.tex);
+    glUniform1f(gl.loc_solid, 1.0f);
+    if (competition_settings_page) {
+      use_rounded_rect(&competition_full_panel_style);
+      glUniform4f(gl.loc_color, 0.06f, 0.09f, 0.17f, 0.92f);
+      glDrawArrays(GL_TRIANGLES, competition_full_panel_quad * 6, 6);
+      use_rounded_rect(&competition_full_header_style);
+      glUniform4f(gl.loc_color, 0.025f, 0.045f, 0.11f, 0.97f);
+      glDrawArrays(GL_TRIANGLES, competition_full_header_round_quad * 6, 6);
+      use_rounded_rect(NULL);
+      glDrawArrays(GL_TRIANGLES, competition_full_header_fill_quad * 6, 6);
+      if (!competition_team_page && competition_full_selected_quad) {
+        use_rounded_rect(&competition_full_selected_style);
+        glUniform4f(gl.loc_color, 0.93f, 0.96f, 1.0f, 0.78f);
+        glDrawArrays(GL_TRIANGLES, competition_full_selected_quad * 6, 6);
+      }
+      if (!competition_team_page) {
+        use_rounded_rect(NULL);
+        glUniform4f(gl.loc_color, 0.80f, 0.86f, 0.93f, 0.34f);
+        glDrawArrays(GL_TRIANGLES, competition_full_rule_first_quad * 6,
+                     competition_full_rule_quads * 6);
+        use_rounded_rect(&competition_full_value_style);
+        glUniform4f(gl.loc_color, 0.04f, 0.43f, 0.76f, 0.96f);
+        for (uint32_t index = 0; index < 12u; index++) {
+          if (competition_value_plate_quads[index])
+            glDrawArrays(GL_TRIANGLES,
+                         competition_value_plate_quads[index] * 6, 6);
+        }
+        use_rounded_rect(NULL);
+        glDrawArrays(GL_TRIANGLES, competition_full_arrow_first_quad * 6,
+                     competition_full_arrow_quads * 6);
+      }
+      if (competition_team_page && !competition_team_picker_page) {
+        use_rounded_rect(&competition_team_slot_style);
+        const uint32_t slot_count = competition_frontend_cup_player_count() > 8u
+                                        ? 8u
+                                        : competition_frontend_cup_player_count();
+        for (uint32_t slot = 0; slot < slot_count; slot++) {
+          const int selected = competition_frontend_cup_team_selected(slot);
+          glUniform4f(gl.loc_color, selected ? 0.055f : 0.006f,
+                      selected ? 0.27f : 0.025f,
+                      selected ? 0.48f : 0.105f, 0.98f);
+          glDrawArrays(GL_TRIANGLES, competition_team_slot_quads[slot] * 6,
+                       6);
+        }
+        if (competition_display_focus < slot_count) {
+          glUniform4f(gl.loc_color, 1.0f, 0.91f, 0.02f, 0.98f);
+          glDrawArrays(GL_TRIANGLES,
+                       competition_team_slot_quads[competition_display_focus] * 6,
+                       6);
+        }
+        use_rounded_rect(NULL);
+        glUniform1f(gl.loc_solid, 0.0f);
+        glUniform1f(gl.loc_image, 1.0f);
+        glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+        glBindTexture(GL_TEXTURE_2D, gl.badge_tex);
+        for (uint32_t slot = 0; slot < slot_count; slot++)
+          if (competition_team_slot_badge_quads[slot])
+            glDrawArrays(GL_TRIANGLES,
+                         competition_team_slot_badge_quads[slot] * 6, 6);
+        glBindTexture(GL_TEXTURE_2D, gl.tex);
+        glUniform1f(gl.loc_image, 0.0f);
+        glUniform1f(gl.loc_solid, 1.0f);
+      } else if (competition_team_picker_page) {
+        use_rounded_rect(&competition_team_picker_style);
+        glUniform4f(gl.loc_color, 0.006f, 0.025f, 0.105f, 0.98f);
+        glDrawArrays(GL_TRIANGLES, competition_team_picker_quad * 6, 6);
+        use_rounded_rect(&competition_team_picker_candidate_style);
+        glUniform4f(gl.loc_color, 0.04f, 0.43f, 0.76f, 0.98f);
+        glDrawArrays(GL_TRIANGLES,
+                     competition_team_picker_candidate_quad * 6, 6);
+        for (uint32_t item = 0; item < 5u; item++) {
+          if (!competition_team_picker_row_quads[item])
+            continue;
+          use_rounded_rect(&competition_team_picker_candidate_style);
+          glUniform4f(gl.loc_color, 0.02f, 0.07f, 0.14f, 0.96f);
+          glDrawArrays(GL_TRIANGLES,
+                       competition_team_picker_row_quads[item] * 6, 6);
+        }
+      }
+      if (!competition_team_picker_page)
+        use_rounded_rect(&competition_full_action_style);
+      const uint32_t action_focus =
+          competition_display_state == COMPETITION_FRONTEND_CUP_SETTINGS
+              ? 8u
+              : competition_frontend_cup_player_count();
+      const int action_enabled =
+          competition_display_state == COMPETITION_FRONTEND_CUP_SETTINGS
+              ? 1
+              : competition_frontend_cup_teams_ready();
+      const int action_selected = competition_display_focus == action_focus;
+      glUniform4f(gl.loc_color,
+                  action_selected && action_enabled ? 0.98f
+                                                     : action_enabled ? 0.04f
+                                                                       : 0.04f,
+                  action_selected && action_enabled ? 0.91f
+                                                     : action_enabled ? 0.42f
+                                                                       : 0.20f,
+                  action_selected && action_enabled ? 0.02f
+                                                     : action_enabled ? 0.72f
+                                                                       : 0.28f,
+                  0.96f);
+      if (!competition_team_picker_page)
+        glDrawArrays(GL_TRIANGLES, competition_full_action_button_quad * 6, 6);
+    } else {
+      use_rounded_rect(&competition_row_style);
+      glUniform4f(gl.loc_color, 0.006f, 0.025f, 0.105f,
+                  0.88f * competition_menu_mix);
+      for (uint32_t index = 0; index < competition_display_item_count &&
+                               index < 12u; index++) {
+        if (competition_row_quads[index])
+          glDrawArrays(GL_TRIANGLES, competition_row_quads[index] * 6, 6);
+      }
+      if (competition_focus_quad >= 0) {
+        use_rounded_rect(&competition_row_style);
+        glUniform4f(gl.loc_color, 1.0f, 0.91f, 0.02f,
+                    0.98f * competition_menu_mix);
+        glDrawArrays(GL_TRIANGLES, competition_focus_quad * 6, 6);
+      }
+      use_rounded_rect(&competition_value_style);
+      glUniform4f(gl.loc_color, 0.055f, 0.16f, 0.30f,
+                  0.98f * competition_menu_mix);
+      for (uint32_t index = 0; index < 12u; index++) {
+        if (competition_value_plate_quads[index])
+          glDrawArrays(GL_TRIANGLES, competition_value_plate_quads[index] * 6,
+                       6);
+      }
+    }
+    if (competition_display_state == COMPETITION_FRONTEND_CUP_BRACKET ||
+        competition_display_state == COMPETITION_FRONTEND_CUP_CHECKPOINT) {
+      use_rounded_rect(&competition_row_style);
+      glUniform4f(gl.loc_color, 0.025f, 0.095f, 0.18f, 0.98f);
+      for (uint32_t index = 0; index < 8u; index++) {
+        if (competition_bracket_card_quads[index])
+          glDrawArrays(GL_TRIANGLES, competition_bracket_card_quads[index] * 6,
+                       6);
+      }
+    }
+    if (!competition_settings_page) {
+      use_rounded_rect(NULL);
+      glUniform1f(gl.loc_solid, 0.0f);
+      /* main_menu_icons_tex is an RGBA copy of a luminance mask.  Sampling
+       * it through the font-mask path preserves transparent atlas space on
+       * all Switch GPU drivers and matches the main menu exactly. */
+      glUniform1f(gl.loc_image, 0.0f);
+      glBindTexture(GL_TEXTURE_2D, gl.main_menu_icons_tex);
+      for (uint32_t index = 0; index < 12u; index++) {
+        if (!competition_icon_quads[index])
+          continue;
+        const float focused = index == competition_display_focus ? 1.0f : 0.0f;
+        glUniform4f(gl.loc_color,
+                    0.72f + (0.02f - 0.72f) * focused,
+                    0.80f + (0.10f - 0.80f) * focused,
+                    0.96f + (0.34f - 0.96f) * focused,
+                    competition_menu_mix * (0.94f + 0.06f * focused));
+        glDrawArrays(GL_TRIANGLES, competition_icon_quads[index] * 6, 6);
+      }
+      glUniform1f(gl.loc_image, 0.0f);
+    }
+    use_rounded_rect(NULL);
+    glUniform1f(gl.loc_solid, 0.0f);
+    glUniform1f(gl.loc_image, 0.0f);
+    glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f,
+                competition_settings_page ? 1.0f : competition_menu_mix);
+    glDrawArrays(GL_TRIANGLES, competition_title_first_quad * 6,
+                 competition_title_quads * 6);
+    if (!competition_team_page) {
+      for (uint32_t index = 0; index < 12u; index++) {
+        if (!competition_label_quads[index])
+          continue;
+        const float focused =
+            !competition_settings_page && index == competition_display_focus
+                ? 1.0f
+                : 0.0f;
+        const int item_enabled = competition_frontend_item_enabled(index);
+        glUniform4f(
+            gl.loc_color,
+            competition_settings_page
+                ? (item_enabled ? 0.98f : 0.52f)
+                : 0.95f + (0.015f - 0.95f) * focused,
+            competition_settings_page
+                ? (item_enabled ? 0.99f : 0.56f)
+                : 0.97f + (0.075f - 0.97f) * focused,
+            competition_settings_page
+                ? (item_enabled ? 1.0f : 0.64f)
+                : 1.00f + (0.29f - 1.00f) * focused,
+            competition_settings_page ? 1.0f
+                                       : competition_menu_mix *
+                                             (0.95f + 0.05f * focused));
+        glDrawArrays(GL_TRIANGLES, competition_label_first_quad[index] * 6,
+                     competition_label_quads[index] * 6);
+        if (competition_value_quads[index]) {
+          glUniform4f(gl.loc_color, item_enabled ? 0.98f : 0.58f,
+                      item_enabled ? 0.99f : 0.62f,
+                      item_enabled ? 1.0f : 0.70f, competition_menu_mix);
+          glDrawArrays(GL_TRIANGLES, competition_value_first_quad[index] * 6,
+                       competition_value_quads[index] * 6);
+        }
+      }
+    }
+    if (competition_team_page && !competition_team_picker_page) {
+      glUniform4f(gl.loc_color, 0.92f, 0.96f, 1.0f, 1.0f);
+      const uint32_t slot_count = competition_frontend_cup_player_count() > 8u
+                                      ? 8u
+                                      : competition_frontend_cup_player_count();
+      for (uint32_t index = 0; index < slot_count; index++) {
+        const int focused = competition_display_focus == index;
+        glUniform4f(gl.loc_color, focused ? 0.025f : 0.92f,
+                    focused ? 0.055f : 0.96f,
+                    focused ? 0.095f : 1.0f, 1.0f);
+        glDrawArrays(GL_TRIANGLES, competition_label_first_quad[index] * 6,
+                     competition_label_quads[index] * 6);
+        glUniform4f(gl.loc_color, focused ? 0.025f : 0.90f,
+                    focused ? 0.055f : 0.94f,
+                    focused ? 0.095f : 1.0f, 1.0f);
+        glDrawArrays(GL_TRIANGLES, competition_value_first_quad[index] * 6,
+                     competition_value_quads[index] * 6);
+      }
+    }
+    if (competition_team_picker_page) {
+      if (competition_team_picker_title_quads) {
+        glUniform4f(gl.loc_color, 0.92f, 0.96f, 1.0f, 1.0f);
+        glDrawArrays(GL_TRIANGLES,
+                     competition_team_picker_title_first_quad * 6,
+                     competition_team_picker_title_quads * 6);
+        glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+        glDrawArrays(GL_TRIANGLES,
+                     competition_team_picker_value_first_quad * 6,
+                     competition_team_picker_value_quads * 6);
+      }
+      glUniform4f(gl.loc_color, 0.82f, 0.89f, 1.0f, 0.94f);
+      for (uint32_t item = 0; item < 5u; item++) {
+        if (competition_team_picker_row_text_quads[item])
+          glDrawArrays(GL_TRIANGLES,
+                       competition_team_picker_row_text_first_quad[item] * 6,
+                       competition_team_picker_row_text_quads[item] * 6);
+      }
+    }
+    if (!competition_team_page && competition_settings_page &&
+        competition_display_focus < 12u &&
+        competition_label_quads[competition_display_focus]) {
+      /* The Hub settings renderer repaints the focused label dark over the
+       * light row, leaving every other label white. */
+      glUniform4f(gl.loc_color, 0.025f, 0.055f, 0.095f, 1.0f);
+      glDrawArrays(GL_TRIANGLES,
+                   competition_label_first_quad[competition_display_focus] * 6,
+                   competition_label_quads[competition_display_focus] * 6);
+    }
+    if (competition_settings_page && !competition_team_picker_page) {
+      glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, 1.0f);
+      glDrawArrays(GL_TRIANGLES, competition_full_action_text_first_quad * 6,
+                   competition_full_action_text_quads * 6);
+    }
+    glUniform4f(gl.loc_color, 0.98f, 0.99f, 1.0f, competition_menu_mix);
+    for (uint32_t index = 0; index < 8u; index++) {
+      if (competition_bracket_text_quads[index])
+        glDrawArrays(GL_TRIANGLES,
+                     competition_bracket_text_first_quad[index] * 6,
+                     competition_bracket_text_quads[index] * 6);
+    }
+    if (competition_status_quads)
+      glDrawArrays(GL_TRIANGLES, competition_status_first_quad * 6,
+                   competition_status_quads * 6);
+    glUniform4f(gl.loc_color, 0.78f, 0.88f, 1.0f, 0.95f * competition_menu_mix);
+    if (competition_helper_quads)
+      glDrawArrays(GL_TRIANGLES, competition_helper_first_quad * 6,
+                   competition_helper_quads * 6);
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (custom_gameplan) {
@@ -7878,7 +8961,8 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_solid, 0.0f);
   } else if (custom_popup) {
     int custom_offset = 0;
-    if (pause_settings_popup || custom_2p_team_selector || custom_2p_prematch_hub_raw ||
+    if (pause_settings_popup || cup_settings_popup ||
+        custom_2p_team_selector || custom_2p_prematch_hub_raw ||
         custom_2p_transition) {
       glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
       glUniform1f(gl.loc_solid, 0.0f);
@@ -8083,6 +9167,10 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_solid, 1.0f);
     if (custom_2p_prematch_hub)
       glUniform4f(gl.loc_color, 0.97f, 0.98f, 1.0f, 0.75f);
+    else if (cup_settings_popup &&
+             competition_frontend_cup_setting_focus() ==
+                 competition_frontend_cup_setting_count())
+      glUniform4f(gl.loc_color, 0.08f, 0.57f, 0.91f, 1.0f);
     else if (custom_hub_settings_popup || custom_hub_choice_page ||
              custom_main_menu_dark_popup)
       glUniform4f(gl.loc_color, 0.04f, 0.43f, 0.76f, 0.96f);
@@ -8355,7 +9443,7 @@ static void overlay_render(void) {
                  gameplan_cursor_quads * 6);
     glUniform1f(gl.loc_cursor, 0.0f);
   }
-  if (set_piece_selector || custom_2p_team_selector ||
+  if (set_piece_selector || cup_settings_popup || custom_2p_team_selector ||
       custom_2p_prematch_hub_raw || custom_2p_transition)
     glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
   if (custom_dark_text_quads) {
@@ -8376,7 +9464,8 @@ static void overlay_render(void) {
                  custom_hub_button_text_quads * 6);
   }
   if (custom_focus_text_quads) {
-    if (pause_settings_popup) glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
+    if (pause_settings_popup || cup_settings_popup)
+      glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 0.72f, 0.025f, 0.055f, 1.0f);
@@ -8424,11 +9513,12 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES, custom_rating_first_quad[band] * 6,
                  custom_rating_quads[band] * 6);
   }
-  if (set_piece_selector || custom_2p_team_selector ||
+  if (set_piece_selector || cup_settings_popup || custom_2p_team_selector ||
       custom_2p_prematch_hub_raw || custom_2p_transition)
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   if (custom_white_text_quads) {
-    if (pause_settings_popup || custom_2p_team_selector || custom_2p_prematch_hub_raw ||
+    if (pause_settings_popup || cup_settings_popup ||
+        custom_2p_team_selector || custom_2p_prematch_hub_raw ||
         custom_2p_transition)
       glBindTexture(GL_TEXTURE_2D, gl.efootball_tex);
     glUniform1f(gl.loc_solid, 0.0f);
@@ -8436,7 +9526,8 @@ static void overlay_render(void) {
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, custom_white_text_first_quad * 6,
                  custom_white_text_quads * 6);
-    if (custom_2p_team_selector || custom_2p_prematch_hub_raw ||
+    if (cup_settings_popup || custom_2p_team_selector ||
+        custom_2p_prematch_hub_raw ||
         custom_2p_transition)
       glBindTexture(GL_TEXTURE_2D, gl.tex);
   }

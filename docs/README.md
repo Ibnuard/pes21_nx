@@ -25,6 +25,7 @@ Subsystem notes and historical implementation audits live here.
 
 ## Runtime, controls, and UI
 
+- [Competition modes plan: Match, Cup, League, and Master League](COMPETITION_MODES_PLAN.md)
 - [NRO launcher icon and NSP forwarder notes](NRO_ICON.md)
 - [Loose CPK canary](LOOSE_CPK_CANARY.md)
 - [Full loose CPK runtime](LOOSE_CPK_FULL.md)

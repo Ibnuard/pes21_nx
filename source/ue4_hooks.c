@@ -7,6 +7,7 @@
 
 #include "aaudio_shim.h"
 #include "config.h"
+#include "competition_frontend.h"
 #include "exhibition_team_catalog.h"
 #include "experimental_inter_miami.h"
 #include "match_visual_policy.h"
@@ -625,9 +626,9 @@ static uint64_t main_menu_focus_started_ms;
 static uint64_t main_menu_focus_repeat_ms;
 static int main_menu_focus_painted;
 static const char *main_menu_titles[4] = {
-    "Exhibition", "Credits", "2 Player", "Settings"};
+    "Match", "Credits", "Modes", "Settings"};
 static const char *main_menu_descriptions[4] = {
-    "Local match", "Credits and support", "Native 2P Lab",
+    "Exhibition and 2P", "Credits and support", "Cup, League, Master League",
     "Graphics and FPS"};
 
 static uint32_t main_menu_native_to_visual(uint32_t native_index) {
@@ -1946,6 +1947,7 @@ static void main_menu_video_apply_current(void);
 static void main_menu_video_close(void);
 static void main_menu_info_close(void);
 static void main_menu_apply_focus(uint32_t index);
+static void main_menu_activate_match_mode(uint32_t mode);
 static void main_menu_2p_team_selector_open(void);
 static void main_menu_2p_team_selector_close(void);
 static int main_menu_start_two_player_match(void);
@@ -1960,6 +1962,7 @@ static void main_menu_2p_native_uniform_track_init(void);
 static void main_menu_2p_native_uniform_select(uint32_t side);
 static void main_menu_2p_uniform_preview_clear_pending(void);
 static void main_menu_2p_uniform_preview_load(uint32_t side);
+static int main_menu_require_two_controller_slots(int preserve_match_ui);
 static void native_lab_assign_matchplan_pads(void *data);
 static int exhibition_gameplan_open_custom(void);
 static void exhibition_gameplan_process_pending(void);
@@ -2148,12 +2151,15 @@ static void main_menu_2p_team_selector_invalidate_rating(uint32_t pad) {
 }
 
 static void main_menu_2p_team_selector_refresh_ratings(void) {
-  if (!__atomic_load_n(&main_menu_2p_team_selector_active,
+  const int cup_picker = competition_frontend_cup_team_picker_active();
+  if (!cup_picker &&
+      !__atomic_load_n(&main_menu_2p_team_selector_active,
                        __ATOMIC_ACQUIRE))
     return;
-  for (uint32_t pad = 0; pad < 2; pad++) {
+  for (uint32_t pad = 0; pad < (cup_picker ? 1u : 2u); pad++) {
     const uint32_t team_id =
-        main_menu_2p_team_selector_focused_team(pad);
+        cup_picker ? competition_frontend_cup_picker_focused_team()
+                   : main_menu_2p_team_selector_focused_team(pad);
     if (__atomic_load_n(&main_menu_2p_team_selector_rating_team[pad],
                         __ATOMIC_ACQUIRE) == team_id)
       continue;
@@ -2595,19 +2601,27 @@ int pes_controller_exhibition_single_controller_mode(void) {
 }
 
 uint32_t pes_controller_2p_team_selector_phase(uint32_t pad) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_phase();
   return pad < 2 ? main_menu_2p_team_selector_phase[pad]
                  : MAIN_MENU_2P_TEAM_SELECTOR_CLOSED;
 }
 
 uint32_t pes_controller_2p_team_selector_focus(uint32_t pad) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_focus();
   return pad < 2 ? main_menu_2p_team_selector_focus[pad] : 0;
 }
 
 uint32_t pes_controller_2p_team_selector_scroll(uint32_t pad) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_scroll();
   return pad < 2 ? main_menu_2p_team_selector_scroll[pad] : 0;
 }
 
 uint32_t pes_controller_2p_team_selector_visible_count(uint32_t pad) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_visible_count();
   const uint32_t count = main_menu_2p_team_selector_item_count(pad);
   const uint32_t scroll = pes_controller_2p_team_selector_scroll(pad);
   if (scroll >= count)
@@ -2619,6 +2633,8 @@ uint32_t pes_controller_2p_team_selector_visible_count(uint32_t pad) {
 }
 
 const char *pes_controller_2p_team_selector_title(uint32_t pad) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_title();
   if (pad > 1)
     return "SELECT TEAM";
   if (main_menu_2p_team_selector_phase[pad] ==
@@ -2632,6 +2648,8 @@ const char *pes_controller_2p_team_selector_title(uint32_t pad) {
 
 const char *pes_controller_2p_team_selector_label(uint32_t pad,
                                                   uint32_t index) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_label(index);
   if (pad > 1)
     return "";
   if (main_menu_2p_team_selector_phase[pad] ==
@@ -2649,6 +2667,8 @@ const char *pes_controller_2p_team_selector_label(uint32_t pad,
 
 uint32_t pes_controller_2p_team_selector_badge(uint32_t pad,
                                                 uint32_t index) {
+  if (pad == 0 && competition_frontend_cup_team_picker_active())
+    return competition_frontend_cup_picker_badge(index);
   if (pad > 1)
     return 0;
   if (main_menu_2p_team_selector_phase[pad] ==
@@ -2830,6 +2850,8 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
 }
 
 int pes_controller_2p_team_selector_confirmed(uint32_t pad) {
+  if (competition_frontend_cup_team_picker_active())
+    return 0;
   return pad < 2 && main_menu_2p_team_selector_confirmed[pad] != 0;
 }
 
@@ -2838,11 +2860,16 @@ int pes_controller_2p_team_selector_team_stats(uint32_t pad,
                                                uint32_t *midfield,
                                                uint32_t *defence,
                                                uint32_t *grade_half_steps) {
-  if (pad > 1 || main_menu_2p_team_selector_phase[pad] !=
-                     MAIN_MENU_2P_TEAM_SELECTOR_TEAM)
+  const int cup_picker = competition_frontend_cup_team_picker_active();
+  if (pad > 1 || (cup_picker ? pad != 0 ||
+                                      competition_frontend_cup_picker_phase() !=
+                                          MAIN_MENU_2P_TEAM_SELECTOR_TEAM
+                                : main_menu_2p_team_selector_phase[pad] !=
+                                      MAIN_MENU_2P_TEAM_SELECTOR_TEAM))
     return 0;
   const uint32_t focused_team =
-      main_menu_2p_team_selector_focused_team(pad);
+      cup_picker ? competition_frontend_cup_picker_focused_team()
+                 : main_menu_2p_team_selector_focused_team(pad);
   if (!focused_team ||
       __atomic_load_n(&main_menu_2p_team_selector_rating_team[pad],
                       __ATOMIC_ACQUIRE) != focused_team)
@@ -10533,8 +10560,30 @@ static int native_two_player_recovery_tick(void) {
 }
 
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
+  /* A can arrive through the touch/menu bridge one frame before the raw pad
+   * sample.  Drain an action produced by that bridge before checking the
+   * native controller gate, otherwise Exhibition/2P falls through to the
+   * rebuilt main page instead of opening its selector. */
+  const uint32_t queued_action = competition_frontend_take_action();
+  if (queued_action == COMPETITION_ACTION_EXHIBITION ||
+      queued_action == COMPETITION_ACTION_TWO_PLAYER) {
+    main_menu_activate_match_mode(queued_action);
+    return;
+  }
   if (!__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE))
     return;
+
+  if (competition_frontend_active()) {
+    competition_frontend_pad_event(buttons, previous_buttons);
+    const uint32_t action = competition_frontend_take_action();
+    if (action == COMPETITION_ACTION_EXHIBITION ||
+        action == COMPETITION_ACTION_TWO_PLAYER)
+      main_menu_activate_match_mode(action);
+    if (competition_frontend_take_controller_gate_request() &&
+        competition_frontend_cup_required_controller_mask() == 3u)
+      main_menu_require_two_controller_slots(1);
+    return;
+  }
 
   // Do not let the first start-screen A fall through to tile zero when the
   // native main window is already constructed behind the launch prompt.
@@ -10638,6 +10687,8 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
 void pes_main_menu_simplify(void *window) {
   static int logged;
   main_menu_match_page = NULL;
+  /* Re-entering the native Match page is the frontend session boundary. */
+  competition_frontend_finish_close();
   // A return to the Match menu is the session boundary for both the lab and
   // Exhibition's native bridge. Clear set-piece/gauge state before disabling
   // the bridge so no trajectory or charge can leak into the next match.
@@ -10760,27 +10811,27 @@ uintptr_t pes_main_menu_selected_entry(void *window,
   return 0;
 }
 
-static void main_menu_activate_choice(uint32_t choice) {
-  if (choice == 0) {
+static void main_menu_activate_match_mode(uint32_t mode) {
+  if (mode == COMPETITION_ACTION_EXHIBITION) {
     // Exhibition now shares the two-panel selector with the local 2P flow,
     // but stages HOME then COM on one controller before entering the hub.
     __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 1,
                      __ATOMIC_RELEASE);
     main_menu_2p_team_selector_open();
+    competition_frontend_match_action_result(1);
     return;
   }
 
-  if (choice == 1) {
-    main_menu_info_open(MAIN_MENU_INFO_CREDITS);
-    return;
-  }
-
-  if (choice == 2) {
-    if (!main_menu_require_two_controller_slots(0)) {
+  if (mode == COMPETITION_ACTION_TWO_PLAYER) {
+    /* Keep the custom Match submenu as the visual owner while the native
+     * Change Grip/Order applet is open.  Passing preserve_match_ui=1 avoids
+     * reactivating the old four-tile page when the applet is cancelled. */
+    if (!main_menu_require_two_controller_slots(1)) {
       // B/back from the native applet (or closing it without a second slot)
-      // leaves the four-tile Match page focused on 2P.  Do not arm a partial
-      // session and do not fall back to the old custom/touch-only popup.
+      // leaves the Match submenu focused on 2P.  Do not arm a partial session
+      // and do not fall back to the old custom/touch-only popup.
       debugPrintf("native 2P lab: not armed; two controller slots required\n");
+      competition_frontend_match_action_result(0);
       return;
     }
     __atomic_store_n(&main_menu_2p_team_selector_exhibition_mode, 0,
@@ -10792,6 +10843,27 @@ static void main_menu_activate_choice(uint32_t choice) {
     if (!__atomic_load_n(&exhibition_away_team_id, __ATOMIC_ACQUIRE))
       __atomic_store_n(&exhibition_away_team_id, 114, __ATOMIC_RELEASE);
     main_menu_2p_team_selector_open();
+    competition_frontend_match_action_result(1);
+    return;
+  }
+}
+
+static void main_menu_activate_choice(uint32_t choice) {
+  /* The native four-tile page remains the stable entry point.  Match and
+   * Modes now open the modular competition frontend; the old native setup
+   * paths are reached only after the frontend returns an explicit action. */
+  if (choice == 0) {
+    competition_frontend_open_match_mode();
+    return;
+  }
+
+  if (choice == 1) {
+    main_menu_info_open(MAIN_MENU_INFO_CREDITS);
+    return;
+  }
+
+  if (choice == 2) {
+    competition_frontend_open_modes();
     return;
   }
 
@@ -15629,8 +15701,19 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   const uint32_t menu_confirm = __atomic_exchange_n(
       &main_menu_confirm_pending, 0, __ATOMIC_ACQ_REL);
   if (menu_confirm && pes_main_menu_controller_active() &&
-      !pes_controller_start_prompt(NULL, NULL))
-    main_menu_activate_choice(menu_confirm - 1u);
+      !pes_controller_start_prompt(NULL, NULL)) {
+    /* Controller A is also delivered through the mobile/menu tap bridge.
+     * Once the modular frontend owns the screen, the pending value still
+     * contains the native tile focus (usually Modes), not the submenu focus.
+     * Route that confirm into the frontend instead of reopening the native
+     * tile and resetting Cup/League/Master League back to Cup.  Feeding the
+     * same A edge into the frontend latch also prevents the later raw-pad
+     * pass in this frame from double-confirming it. */
+    if (competition_frontend_active())
+      competition_frontend_pad_event(1u << 1, 0);
+    else
+      main_menu_activate_choice(menu_confirm - 1u);
+  }
   main_menu_2p_team_selector_refresh_ratings();
   main_menu_2p_team_selector_process_pending();
   main_menu_2p_prematch_hub_process_pending();
@@ -15706,9 +15789,15 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
     };
     memcpy(pad + 140 + 20 * 4, right_directions,
            sizeof(right_directions));
-    pes_main_menu_pad_event(current, previous);
+    /* Competition setup is a P1-owned surface.  P2 stays available for the
+     * later Hub assignment, but cannot move the Match/Modes/Cup menus. */
+    const int p1_menu_input = pad_id == 0;
+    if (p1_menu_input)
+      pes_main_menu_pad_event(current, previous);
     pes_exhibition_search_pad_event(current, previous);
-    if (__atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
+    if ((p1_menu_input && competition_frontend_take_input_consumed()) ||
+        (competition_frontend_active() && !p1_menu_input) ||
+        __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
             MAIN_MENU_INFO_CLOSED ||
         __atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
       // Navigation was consumed by the custom overlay. Keep its buttons and

@@ -43,7 +43,7 @@ class CustomMainMenuTests(unittest.TestCase):
         self.assertIn("main_menu_portrait_tex[previous]", overlay)
         self.assertIn("main_menu_portrait_tex[current]", overlay)
         self.assertIn("220000000.0f", overlay)
-        self.assertIn('"EXHIBITION", "2 PLAYER", "SETTINGS", "CREDITS"', overlay)
+        self.assertIn('"MATCH", "MODES", "SETTINGS", "CREDITS"', overlay)
         self.assertIn("EFOOTBALL_FONT_STENCIL", overlay)
         self.assertIn("main_menu_brand_tex", overlay)
         self.assertIn("card_x + card_w - 0.022f * screen_width", overlay)
