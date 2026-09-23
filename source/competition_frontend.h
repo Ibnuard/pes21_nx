@@ -76,6 +76,7 @@ const CupTournament *competition_frontend_cup_tournament(void);
 const CompetitionEntryDraft *competition_frontend_cup_draft(void);
 int competition_frontend_cup_bracket_editing(void);
 uint32_t competition_frontend_cup_bracket_slot_focus(void);
+uint32_t competition_frontend_cup_bracket_swap_source(void);
 int competition_frontend_cup_bracket_editable(void);
 const char *competition_frontend_cup_name(void);
 const char *competition_frontend_cup_round_name(uint32_t round);

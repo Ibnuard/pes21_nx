@@ -17,6 +17,8 @@ $allowedBinaries = @(
   "data/silent.bin",
   # Generated RGBA atlas linked into the controller overlay by bin2o.
   "data/badge_atlas.bin",
+  "data/cup_hub_stadium.bin",
+  "data/cup_hub_trophy.bin",
   "data/main_menu_background.bin",
   "data/main_menu_brand.bin",
   "data/main_menu_button_a.bin",
@@ -47,6 +49,8 @@ $allowedAssetFiles = @(
   "assets/fonts/efootball/efootballstencil-regular.ttf"
 )
 $allowedLargeFiles = @(
+  "data/cup_hub_stadium.bin",
+  "data/cup_hub_trophy.bin",
   "data/pes21_player_registry.json",
   "source/efootball_font_atlas.h",
   "source/team_select_background.h"

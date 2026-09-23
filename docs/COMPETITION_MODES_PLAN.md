@@ -295,11 +295,12 @@ Untuk FootballNX Cup custom:
 - Tim harus unique.
 - Semua tim harus eligible untuk Cup.
 
-Untuk predefined Cup, jumlah tim fixed berdasarkan participant pool yang
-tersedia di katalog build. Contoh English Cup migrasi saat ini memiliki 19
-tim eligible, sehingga bagan berisi 19 tim, bukan memaksa 20 lalu menggandakan
-satu tim. Saat manifest kompetisi yang lebih lengkap tersedia, jumlah fixed
-diambil dari manifest tersebut dengan validasi roster/kit.
+Untuk predefined Cup, jumlah tim fixed berdasarkan format kompetisi. English
+Cup memakai 16 slot eliminasi tanpa bye meskipun kategori Inggris dalam
+katalog migrasi memiliki 19 klub eligible; klub di luar 16 slot awal tetap
+dapat dipilih melalui selector untuk mengganti peserta. Saat manifest
+kompetisi yang lebih lengkap tersedia, peserta awal diambil dari manifest
+tersebut dengan validasi roster/kit.
 
 #### COM Level
 
@@ -352,8 +353,10 @@ membuka kategori liga yang eligible; FootballNX Cup membuka daftar kategori.
 B mengembalikan fokus ke empat tombol Hub.
 
 X mengisi hanya slot kosong secara acak, tanpa mengganti pilihan manual.
-Y mengacak urutan tim sekaligus owner P1/P2/COM, dan helper Y baru muncul
-setelah semua slot terisi. Seed disimpan agar proses dapat direproduksi.
+Y memilih slot asal, lalu Y pada slot tujuan menukar tim sekaligus owner
+P1/P2/COM; menekan Y lagi pada slot asal membatalkan swap. Memilih tim yang
+sudah terpasang lewat A juga menukar tim kedua slot tanpa duplikasi. Tidak
+ada simulasi pertandingan selama tahap pengisian atau pertukaran bagan.
 Setelah pertandingan pertama dimulai, `Bracket` disabled dan semua assignment
 terkunci. Maksimum delapan logical player tetap dikontrol lewat dua controller
 fisik; P1 mengurus seluruh setup.
@@ -380,9 +383,11 @@ Tim yang mendapat bye hanya memakai satu slot; fixture ronde mendatang yang
 belum terisi menampilkan dua slot TBD. Untuk Cup 3–4 tim, Semi Final,
 Final, dan Champion muat dalam satu panel dengan konektor pendek. Cup lebih
 besar tetap memakai halaman bagan; L/R (SL/SR pada Joy-Con horizontal)
-mengganti halaman, dengan ikon shoulder saja di kedua pojok. Kiri/kanan
-memindahkan fokus antartombol. Match History menampilkan crest, kode tiga
-huruf, skor, dan maksimal empat hasil terakhir. Tombol berada di luar
+mengganti halaman, dengan ikon shoulder saja di kedua pojok header bagan.
+Kiri/kanan memindahkan fokus antartombol. Match Schedule menampilkan semua
+fixture pada halaman bagan aktif dan fixture lanjutan, termasuk TBA untuk
+lawan yang belum diketahui; hasil selesai memakai crest, kode tiga huruf,
+dan skor. Tombol berada di luar
 container utama dengan jarak yang jelas.
 
 Urutan tombol: `Bracket`, `Next`, `Save`, `Top to Menu`. `Bracket` hanya aktif
@@ -1002,7 +1007,7 @@ Setiap milestone harus dibuild dengan command full-loose terbaru yang sudah lolo
 - Main Menu > Match > Exhibition.
 - Main Menu > Match > 2 Player.
 - Main Menu > Modes > Cup.
-- Cup Settings > Bracket kosong > assign/random/auto-order > Next.
+- Cup Settings > Bracket kosong > assign/random/swap > Next.
 - Bracket > MatchContext > Game Plan.
 - Result > Bracket update.
 - Continue > three save slots > resume.

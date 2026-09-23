@@ -8,7 +8,9 @@
 enum {
   BUTTON_B = 1u << 0,
   BUTTON_A = 1u << 1,
+  BUTTON_Y = 1u << 2,
   BUTTON_X = 1u << 3,
+  BUTTON_UP = 1u << 10,
   BUTTON_DOWN = 1u << 11,
   BUTTON_LEFT = 1u << 12,
   BUTTON_RIGHT = 1u << 13,
@@ -48,6 +50,29 @@ int main(void) {
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
   press(BUTTON_X); /* fill only remaining slots */
   assert(competition_draft_ready(competition_frontend_cup_draft()));
+  assert(competition_frontend_cup_draft()->teams[0] == manual_team);
+  assert(competition_frontend_cup_tournament()->history_count == 0u);
+  const uint32_t other_team = competition_frontend_cup_draft()->teams[1];
+  press(BUTTON_Y); /* mark source slot */
+  assert(competition_frontend_cup_bracket_swap_source() == 0u);
+  press(BUTTON_DOWN);
+  press(BUTTON_Y); /* exchange complete team+owner entries */
+  assert(competition_frontend_cup_bracket_swap_source() == UINT32_MAX);
+  assert(competition_frontend_cup_draft()->teams[1] == manual_team);
+  assert(competition_frontend_cup_draft()->owners[1] == 1u);
+  assert(competition_frontend_cup_tournament()->history_count == 0u);
+  press(BUTTON_Y);
+  press(BUTTON_UP);
+  press(BUTTON_Y); /* restore source for the save test */
+  assert(competition_frontend_cup_draft()->teams[0] == manual_team);
+  press(BUTTON_A);
+  assert(competition_frontend_cup_team_picker_active());
+  competition_frontend_cup_team_picker_result(other_team);
+  assert(competition_frontend_cup_draft()->teams[0] == other_team);
+  assert(competition_frontend_cup_draft()->teams[1] == manual_team);
+  assert(competition_frontend_cup_draft()->owners[0] == 1u);
+  press(BUTTON_A);
+  competition_frontend_cup_team_picker_result(manual_team);
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
   press(BUTTON_B); /* return to four actions */
   assert(!competition_frontend_cup_bracket_editing());
@@ -121,15 +146,32 @@ int main(void) {
   press(BUTTON_A);
   press(BUTTON_A);
   press(BUTTON_RIGHT); /* English Cup uses its eligible league pool. */
-  assert(competition_frontend_cup_team_count() ==
-         exhibition_team_categories[0].team_count);
+  const uint32_t english_field =
+      exhibition_team_categories[0].team_count < 16u
+          ? exhibition_team_categories[0].team_count : 16u;
+  assert(competition_frontend_cup_team_count() == english_field);
   while (competition_frontend_focus() != 8u) press(BUTTON_DOWN);
   press(BUTTON_A);
-  assert(competition_frontend_cup_draft()->team_count ==
-         exhibition_team_categories[0].team_count);
+  assert(competition_frontend_cup_draft()->team_count == english_field);
+  assert(competition_frontend_cup_view_count() < 9u);
   press(BUTTON_A);
   press(BUTTON_X);
   assert(competition_draft_ready(competition_frontend_cup_draft()));
+  assert(competition_frontend_cup_tournament()->history_count == 0u);
+  assert(competition_frontend_cup_tournament()->bracket_size == 16u);
+  for (uint32_t i = 0; i < 8u; i++) {
+    const CupFixture *fixture = cup_tournament_fixture(
+        competition_frontend_cup_tournament(), 0u, i);
+    assert(fixture && fixture->home && fixture->away && !fixture->complete);
+  }
+  const uint32_t english_first = competition_frontend_cup_draft()->teams[0];
+  const uint32_t english_second = competition_frontend_cup_draft()->teams[1];
+  press(BUTTON_A);
+  assert(competition_frontend_cup_team_picker_active());
+  competition_frontend_cup_team_picker_result(english_second);
+  assert(competition_frontend_cup_draft()->teams[0] == english_second);
+  assert(competition_frontend_cup_draft()->teams[1] == english_first);
+  assert(competition_frontend_cup_tournament()->history_count == 0u);
   puts("Cup frontend flow tests passed");
   return 0;
 }

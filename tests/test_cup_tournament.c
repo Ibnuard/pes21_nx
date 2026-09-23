@@ -62,10 +62,24 @@ static void future_final_is_unresolved_not_bye(void) {
   CupTournament cup;
   assert(cup_tournament_init(&cup, ids, 3u, ids, 1u, 0x57u));
   const CupFixture *future = cup_tournament_fixture(&cup, 1u, 0u);
-  assert(future && !future->complete && !future->home && !future->away);
+  assert(future && !future->complete && !future->home &&
+         future->away == ids[1]);
   assert(cup_tournament_record(&cup, 0u, 0u, 2u, 0u));
   future = cup_tournament_fixture(&cup, 1u, 0u);
   assert(future && !future->complete && future->home && future->away);
+}
+
+static void no_eager_com_simulation_for_human_bye(void) {
+  const uint32_t ids[3] = {500u, 501u, 502u};
+  CupTournament cup;
+  assert(cup_tournament_init(&cup, ids, 3u, ids + 1u, 1u, 0x58u));
+  assert(cup.history_count == 0u && !cup.fixtures[0][0].complete);
+  uint32_t round = 0, index = 0;
+  assert(!cup_tournament_next_human(&cup, &round, &index));
+  cup_tournament_advance(&cup); /* only after the user presses Next */
+  assert(cup.history_count == 1u && cup.fixtures[0][0].simulated);
+  assert(cup_tournament_next_human(&cup, &round, &index));
+  assert(round == 1u && index == 0u);
 }
 
 int main(void) {
@@ -76,6 +90,7 @@ int main(void) {
   com_waits_for_player();
   com_waits_for_all_human_fixtures();
   future_final_is_unresolved_not_bye();
+  no_eager_com_simulation_for_human_bye();
   puts("cup tournament tests passed");
   return 0;
 }

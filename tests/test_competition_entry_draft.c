@@ -33,6 +33,15 @@ static void fill_and_shuffle(void) {
   assert(competition_draft_assign(&draft, 0u, 100u));
   assert(competition_draft_assign(&draft, 1u, 101u));
   assert(!competition_draft_assign(&draft, 2u, 100u));
+  assert(competition_draft_assign_or_swap(&draft, 0u, 101u));
+  assert(draft.teams[0] == 101u && draft.teams[1] == 100u);
+  assert(draft.owners[0] == 1u && draft.owners[1] == 2u);
+  assert(competition_draft_assign_or_swap(&draft, 0u, 100u));
+  assert(draft.teams[0] == 100u && draft.teams[1] == 101u);
+  assert(competition_draft_swap_slots(&draft, 0u, 2u));
+  assert(draft.owners[0] == 3u && draft.owners[2] == 1u);
+  assert(draft.teams[2] == 100u && draft.teams[0] == 0u);
+  assert(competition_draft_swap_slots(&draft, 0u, 2u));
   assert(!competition_draft_ready(&draft));
   assert(!competition_draft_shuffle(&draft));
   assert(competition_draft_random_fill(&draft, pool, 20u));

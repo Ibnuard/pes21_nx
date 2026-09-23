@@ -60,6 +60,7 @@ static uint32_t cup_bracket_view;
 static CompetitionEntryDraft cup_draft;
 static uint32_t cup_bracket_editing;
 static uint32_t cup_bracket_slot_focus;
+static uint32_t cup_bracket_swap_source = UINT32_MAX;
 static uint32_t cup_first_match_started;
 static uint32_t cup_slots_saving;
 static uint32_t cup_active_slot = UINT32_MAX;
@@ -91,6 +92,10 @@ static void competition_bracket_view_active(void) {
   for (uint32_t round = 0; round < cup_tournament.active_round; round++)
     cup_bracket_view +=
         (cup_tournament_fixture_count(&cup_tournament, round) + 3u) / 4u;
+  uint32_t next_round = 0, next_index = 0;
+  if (cup_tournament_next_human(&cup_tournament, &next_round, &next_index) &&
+      next_round == cup_tournament.active_round)
+    cup_bracket_view += next_index / 4u;
 }
 
 static void competition_clear_status(void) {
@@ -112,6 +117,7 @@ static void competition_reset_cup_setup(void) {
   memset(&cup_draft, 0, sizeof(cup_draft));
   cup_bracket_editing = 0;
   cup_bracket_slot_focus = 0;
+  cup_bracket_swap_source = UINT32_MAX;
   cup_first_match_started = 0;
   cup_slots_saving = 0;
   cup_active_slot = UINT32_MAX;
@@ -140,11 +146,12 @@ static int competition_cup_is_custom(void) {
 }
 
 static uint32_t competition_cup_fixed_team_count(void) {
-  /* Use the actual authored participant pool. Migration catalogs can have
-   * fewer teams than the PC reference; a hard-coded 20 would leave English
-   * Cup impossible to complete when the eligible category contains 19. */
-  return EXHIBITION_TEAM_CATEGORY_COUNT
+  /* English Cup is a 16-team knockout seeded from the eligible English
+   * category. The selector still exposes every club in that category, so a
+   * manually picked team can replace/swap into the sixteen-entry field. */
+  const uint32_t eligible = EXHIBITION_TEAM_CATEGORY_COUNT
       ? exhibition_team_categories[0].team_count : 0u;
+  return eligible < 16u ? eligible : 16u;
 }
 
 static uint32_t competition_cup_effective_team_count(void) {
@@ -354,6 +361,7 @@ static void competition_back(void) {
     case COMPETITION_FRONTEND_CUP_BRACKET:
       if (cup_bracket_editing) {
         cup_bracket_editing = 0;
+        cup_bracket_swap_source = UINT32_MAX;
         frontend_focus = CUP_HUB_ACTION_BRACKET;
         return;
       }
@@ -443,6 +451,7 @@ static void competition_open_bracket(void) {
   competition_rebuild_cup_bracket();
   cup_bracket_editing = 0;
   cup_bracket_slot_focus = 0;
+  cup_bracket_swap_source = UINT32_MAX;
   cup_first_match_started = 0;
   competition_set_state(COMPETITION_FRONTEND_CUP_BRACKET, 0);
 }
@@ -495,6 +504,7 @@ static int competition_load_cup_slot(uint32_t slot) {
   cup_active_slot = slot;
   cup_bracket_editing = 0;
   cup_bracket_slot_focus = 0;
+  cup_bracket_swap_source = UINT32_MAX;
   cup_team_picker_active = 0;
   cup_match_active = 0;
   competition_sync_human_teams();
@@ -550,6 +560,7 @@ static int competition_random_fill_cup(void) {
 
 static void competition_open_cup_team_picker(void) {
   if (cup_first_match_started || !cup_bracket_editing) return;
+  cup_bracket_swap_source = UINT32_MAX;
   cup_team_picker_active = 1;
   cup_team_picker_category = 0;
   /* Predefined cups go straight to their eligible league's team list. */
@@ -665,6 +676,7 @@ static void competition_confirm(void) {
       if (frontend_focus == CUP_HUB_ACTION_BRACKET) {
         if (cup_first_match_started) return;
         cup_bracket_editing = 1;
+        cup_bracket_swap_source = UINT32_MAX;
         competition_focus_cup_slot(0u);
         return;
       }
@@ -690,8 +702,19 @@ static void competition_confirm(void) {
       }
       if (!cup_tournament_next_human(&cup_tournament, &cup_pending_round,
                                      &cup_pending_index)) {
-        competition_set_status("NO PLAYABLE FIXTURE");
-        return;
+        /* A human entrant may have an opening-round bye. Only pressing Next
+         * may resolve the all-COM play-in round; bracket edits never do. */
+        cup_tournament_advance(&cup_tournament);
+        competition_bracket_view_active();
+        if (cup_active_slot < COMPETITION_SAVE_SLOT_COUNT)
+          competition_save_cup_slot(cup_active_slot);
+        if (!cup_tournament_next_human(&cup_tournament, &cup_pending_round,
+                                       &cup_pending_index)) {
+          competition_set_status(cup_tournament.champion
+              ? "CUP COMPLETE" : "NO PLAYABLE FIXTURE");
+          if (cup_tournament.champion) frontend_focus = CUP_HUB_ACTION_TOP;
+          return;
+        }
       }
       frontend_pending_action = COMPETITION_ACTION_CUP_FIXTURE;
       return;
@@ -1153,6 +1176,10 @@ uint32_t competition_frontend_cup_bracket_slot_focus(void) {
   return cup_bracket_slot_focus;
 }
 
+uint32_t competition_frontend_cup_bracket_swap_source(void) {
+  return cup_bracket_swap_source;
+}
+
 int competition_frontend_cup_bracket_editable(void) {
   return cup_draft.team_count && !cup_first_match_started;
 }
@@ -1260,6 +1287,7 @@ void competition_frontend_cup_handoff_result(int opened) {
   if (opened) {
     cup_first_match_started = 1;
     cup_bracket_editing = 0;
+    cup_bracket_swap_source = UINT32_MAX;
     if (cup_active_slot < COMPETITION_SAVE_SLOT_COUNT)
       competition_save_cup_slot(cup_active_slot);
     cup_match_active = 1;
@@ -1313,8 +1341,9 @@ void competition_frontend_cup_team_picker_result(uint32_t team_id) {
       cup_bracket_slot_focus >= cup_draft.team_count ||
       !competition_team_is_allowed(team_id))
     return;
-  if (!competition_draft_assign(&cup_draft, cup_bracket_slot_focus, team_id)) {
-    competition_set_status("TEAM ALREADY ASSIGNED");
+  if (!competition_draft_assign_or_swap(
+          &cup_draft, cup_bracket_slot_focus, team_id)) {
+    competition_set_status("TEAM SELECTION FAILED");
     return;
   }
   competition_rebuild_cup_bracket();
@@ -1432,17 +1461,26 @@ void competition_frontend_pad_event(uint32_t buttons,
       competition_open_cup_team_picker();
     } else if (pressed & COMPETITION_BUTTON_X) {
       if (competition_random_fill_cup()) {
+        cup_bracket_swap_source = UINT32_MAX;
         competition_focus_cup_slot(cup_bracket_slot_focus);
         competition_set_status("REMAINING TEAMS ASSIGNED");
       } else {
         competition_set_status("NOT ENOUGH ELIGIBLE TEAMS");
       }
     } else if (pressed & COMPETITION_BUTTON_Y) {
-      if (competition_draft_ready(&cup_draft) &&
-          competition_draft_shuffle(&cup_draft)) {
+      if (cup_bracket_swap_source == UINT32_MAX) {
+        cup_bracket_swap_source = cup_bracket_slot_focus;
+        competition_set_status("CHOOSE TARGET SLOT AND PRESS Y");
+      } else if (cup_bracket_swap_source == cup_bracket_slot_focus) {
+        cup_bracket_swap_source = UINT32_MAX;
+        competition_clear_status();
+      } else if (competition_draft_swap_slots(
+                     &cup_draft, cup_bracket_swap_source,
+                     cup_bracket_slot_focus)) {
+        cup_bracket_swap_source = UINT32_MAX;
         competition_rebuild_cup_bracket();
         competition_focus_cup_slot(cup_bracket_slot_focus);
-        competition_set_status("BRACKET ORDER SHUFFLED");
+        competition_set_status("BRACKET SLOTS SWAPPED");
       }
     }
     return;

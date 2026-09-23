@@ -20,6 +20,13 @@ int competition_draft_init(CompetitionEntryDraft *draft, uint32_t team_count,
                            uint32_t player_count, uint32_t seed);
 int competition_draft_assign(CompetitionEntryDraft *draft, uint32_t slot,
                              uint32_t team_id);
+/* Selecting a team already in another slot exchanges the two teams while
+ * preserving the fixed P1/P2/COM ownership labels of those slots. */
+int competition_draft_assign_or_swap(CompetitionEntryDraft *draft,
+                                     uint32_t slot, uint32_t team_id);
+/* Bracket-order swap moves team and owner together. */
+int competition_draft_swap_slots(CompetitionEntryDraft *draft,
+                                 uint32_t first, uint32_t second);
 int competition_draft_ready(const CompetitionEntryDraft *draft);
 uint32_t competition_draft_assigned_count(const CompetitionEntryDraft *draft);
 int competition_draft_random_fill(CompetitionEntryDraft *draft,

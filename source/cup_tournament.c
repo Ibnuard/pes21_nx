@@ -74,9 +74,15 @@ int cup_tournament_init(CupTournament *cup, const uint32_t *participants,
     if (!fixture->away) {
       fixture->winner = fixture->home;
       fixture->complete = 1;
+      /* A bye seeds the next round, but no COM fixture is simulated while
+       * the player is still editing or reviewing the opening bracket. */
+      CupFixture *next = &cup->fixtures[1][i / 2u];
+      if (i & 1u)
+        next->away = fixture->home;
+      else
+        next->home = fixture->home;
     }
   }
-  cup_tournament_advance(cup);
   return 1;
 }
 
