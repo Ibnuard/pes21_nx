@@ -1060,6 +1060,14 @@ Setiap milestone harus dibuild dengan command full-loose terbaru yang sudah lolo
 - frame pacing;
 - no regression pada Exhibition.
 
+Catatan regresi aset menu (2026-09-24): PNG ornamen header Cup berukuran
+2172×724, melewati batas lama 2048 pada satu sumbu walaupun jumlah pikselnya
+lebih kecil dari 2048². Kegagalan decode itu membuat seluruh batch tekstur
+menu di-decode dan di-upload lagi setiap frame, sehingga tile menu hingga Cup
+melambat dan ornamen tampil hitam. Decoder kini membatasi dimensi 4096 serta
+total piksel 2048²; upload batch dicoba sekali per GL context, dan ornamen
+tidak digambar bila upload gagal. FPS hardware tetap perlu diverifikasi.
+
 ## 13. Definition of Done
 
 ### Cup

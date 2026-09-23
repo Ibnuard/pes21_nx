@@ -54,6 +54,7 @@ static struct {
   GLuint cup_hub_stadium_tex;
   GLuint cup_hub_trophy_tex;
   GLuint cup_hub_header_ornament_tex;
+  int cup_hub_header_ornament_uploaded;
   GLuint main_menu_icons_tex;
   GLuint main_menu_brand_tex;
   GLuint main_menu_button_a_tex;
@@ -1094,8 +1095,11 @@ static int decode_png_memory(const unsigned char *bytes, uint32_t byte_count,
   image.version = PNG_IMAGE_VERSION;
   if (!png_image_begin_read_from_memory(&image, bytes, byte_count))
     return 0;
-  if (!image.width || !image.height || image.width > 2048u ||
-      image.height > 2048u) {
+  // Wide, short artwork can exceed 2048 on one axis without exceeding the
+  // old 2048x2048 pixel budget (the Cup header ornament is 2172x724).
+  if (!image.width || !image.height || image.width > 4096u ||
+      image.height > 4096u ||
+      (uint64_t)image.width * image.height > 2048u * 2048u) {
     png_image_free(&image);
     return 0;
   }
@@ -1210,8 +1214,10 @@ static void prepare_main_menu_assets(int active) {
       cup_hub_stadium_bin, cup_hub_stadium_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_hub_trophy_tex,
       cup_hub_trophy_bin, cup_hub_trophy_bin_end);
-  uploaded &= upload_main_menu_png(gl.cup_hub_header_ornament_tex,
-      cup_hub_header_ornament_bin, cup_hub_header_ornament_bin_end);
+  gl.cup_hub_header_ornament_uploaded = upload_main_menu_png(
+      gl.cup_hub_header_ornament_tex, cup_hub_header_ornament_bin,
+      cup_hub_header_ornament_bin_end);
+  uploaded &= gl.cup_hub_header_ornament_uploaded;
   uploaded &= upload_main_menu_png(gl.main_menu_button_a_tex,
       main_menu_button_a_bin, main_menu_button_a_bin_end);
   uploaded &= upload_main_menu_png(gl.main_menu_button_b_tex,
@@ -1230,8 +1236,12 @@ static void prepare_main_menu_assets(int active) {
   glPixelStorei(GL_UNPACK_ALIGNMENT, saved_unpack_alignment);
   glBindTexture(GL_TEXTURE_2D, (GLuint)saved_texture);
   glActiveTexture((GLenum)saved_active_texture);
-  if (uploaded)
-    gl.main_menu_uploaded = 1;
+  // The embedded assets do not change during this GL context. A permanently
+  // invalid optional PNG must not decode/upload every other menu texture on
+  // every frame; failed assets remain hidden until the context is recreated.
+  gl.main_menu_uploaded = 1;
+  if (!uploaded)
+    debugPrintf("[overlay] one or more main-menu PNG assets failed to load\n");
 }
 
 static int decode_uniform_thumbnail(const PesUniformPreviewPng *preview,
@@ -9284,9 +9294,11 @@ static void overlay_render(void) {
       glUniform1f(gl.loc_solid, 0.0f);
       glUniform1f(gl.loc_image, 1.0f);
       glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 0.94f);
-      glBindTexture(GL_TEXTURE_2D, gl.cup_hub_header_ornament_tex);
-      for (uint32_t i = 0; i < 4u; i++)
-        glDrawArrays(GL_TRIANGLES, cup_header_ornament_quads[i] * 6, 6);
+      if (gl.cup_hub_header_ornament_uploaded) {
+        glBindTexture(GL_TEXTURE_2D, gl.cup_hub_header_ornament_tex);
+        for (uint32_t i = 0; i < 4u; i++)
+          glDrawArrays(GL_TRIANGLES, cup_header_ornament_quads[i] * 6, 6);
+      }
       glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 0.15f);
       glBindTexture(GL_TEXTURE_2D, gl.cup_hub_trophy_tex);
       glDrawArrays(GL_TRIANGLES, cup_trophy_quad * 6, 6);
