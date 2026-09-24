@@ -45,6 +45,12 @@ int cup_tournament_init(CupTournament *cup, const uint32_t *participants,
                         uint32_t human_count, uint32_t seed);
 const CupFixture *cup_tournament_fixture(const CupTournament *cup,
                                          uint32_t round, uint32_t index);
+/* Display-only participants for Match Schedule. A finished child (including
+ * an opening bye) may be shown before its round is advanced; this never
+ * changes the actual future fixture or simulates a result. */
+void cup_tournament_schedule_teams(const CupTournament *cup,
+                                   uint32_t round, uint32_t index,
+                                   uint32_t *home, uint32_t *away);
 uint32_t cup_tournament_fixture_count(const CupTournament *cup,
                                       uint32_t round);
 int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,

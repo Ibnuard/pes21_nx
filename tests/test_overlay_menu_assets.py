@@ -16,7 +16,8 @@ class OverlayMenuAssetsTests(unittest.TestCase):
         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(png[12:16], b"IHDR")
         width, height = struct.unpack_from(">II", png, 16)
-        self.assertGreater(width, 2048)  # The old per-axis limit rejected it.
+        self.assertEqual(png[25], 6)  # RGBA: transparent header background.
+        self.assertGreaterEqual(width, 1024)
         self.assertLessEqual(max(width, height), 4096)
         self.assertLessEqual(width * height, 2048 * 2048)
         decoder = re.search(

@@ -24,6 +24,33 @@ const CupFixture *cup_tournament_fixture(const CupTournament *cup,
              ? &cup->fixtures[round][index] : NULL;
 }
 
+void cup_tournament_schedule_teams(const CupTournament *cup,
+                                   uint32_t round, uint32_t index,
+                                   uint32_t *home, uint32_t *away) {
+  if (home) *home = 0u;
+  if (away) *away = 0u;
+  const CupFixture *fixture = cup_tournament_fixture(cup, round, index);
+  if (!fixture) return;
+  uint32_t known_home = fixture->home;
+  uint32_t known_away = fixture->away;
+  if (!known_home && !known_away && round &&
+      index < cup_tournament_fixture_count(cup, round)) {
+    const CupFixture *first = cup_tournament_fixture(cup, round - 1u,
+                                                     index * 2u);
+    const CupFixture *second = cup_tournament_fixture(cup, round - 1u,
+                                                      index * 2u + 1u);
+    const uint32_t first_winner = first && first->complete ? first->winner : 0u;
+    const uint32_t second_winner = second && second->complete
+        ? second->winner : 0u;
+    /* Keep a sole known participant on the left of "VS", regardless of
+     * which child of the bracket supplied it. */
+    known_home = first_winner ? first_winner : second_winner;
+    known_away = first_winner && second_winner ? second_winner : 0u;
+  }
+  if (home) *home = known_home;
+  if (away) *away = known_away;
+}
+
 const CupFixture *cup_tournament_third_place_fixture(
     const CupTournament *cup) {
   return cup && cup->round_count

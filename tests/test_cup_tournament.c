@@ -63,9 +63,17 @@ static void future_final_is_unresolved_not_bye(void) {
   assert(cup_tournament_init(&cup, ids, 3u, ids, 1u, 0x57u));
   const CupFixture *future = cup_tournament_fixture(&cup, 1u, 0u);
   assert(future && !future->complete && !future->home && !future->away);
+  uint32_t schedule_home = 0u, schedule_away = 0u;
+  cup_tournament_schedule_teams(&cup, 1u, 0u,
+                                &schedule_home, &schedule_away);
+  assert(schedule_home == ids[1] && !schedule_away);
+  assert(!future->home && !future->away); /* preview must not advance Final */
   assert(cup_tournament_record(&cup, 0u, 0u, 2u, 0u));
   future = cup_tournament_fixture(&cup, 1u, 0u);
   assert(future && !future->complete && future->home && future->away);
+  cup_tournament_schedule_teams(&cup, 1u, 0u,
+                                &schedule_home, &schedule_away);
+  assert(schedule_home == ids[0] && schedule_away == ids[1]);
 }
 
 static void no_eager_com_simulation_for_human_bye(void) {

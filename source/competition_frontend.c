@@ -66,6 +66,7 @@ static uint32_t cup_bracket_stage;
 static uint32_t cup_bracket_page;
 static CompetitionEntryDraft cup_draft;
 static uint32_t cup_bracket_editing;
+static uint32_t cup_opening_rule_popup;
 static uint32_t cup_bracket_slot_focus;
 static uint32_t cup_bracket_swap_source = UINT32_MAX;
 static uint32_t cup_first_match_started;
@@ -81,15 +82,15 @@ enum {
 };
 
 static uint32_t competition_bracket_stage_count(void) {
-  /* The semi-final, final and champion share the final horizontal stage. */
+  /* The last match stage shows semi-final -> final; champion gets a page. */
   return cup_tournament.round_count >= 2u
-      ? cup_tournament.round_count - 1u : 0u;
+      ? cup_tournament.round_count : 0u;
 }
 
 static uint32_t competition_bracket_stage_pages(uint32_t stage) {
   const uint32_t stages = competition_bracket_stage_count();
   if (stage >= stages) return 0u;
-  if (stage + 1u == stages) return 1u;
+  if (stage + 2u >= stages) return 1u;
   const uint32_t fixtures = cup_tournament_fixture_count(&cup_tournament,
                                                           stage);
   return (fixtures + 1u) / 2u;
@@ -104,8 +105,10 @@ static uint32_t competition_bracket_view_count(void) {
 
 static void competition_bracket_view_active(void) {
   const uint32_t stages = competition_bracket_stage_count();
-  cup_bracket_stage = stages && cup_tournament.active_round < stages
-      ? cup_tournament.active_round : stages ? stages - 1u : 0u;
+  cup_bracket_stage = !stages ? 0u
+      : cup_tournament.champion ? stages - 1u
+      : cup_tournament.active_round < stages - 1u
+          ? cup_tournament.active_round : stages - 2u;
   cup_bracket_page = 0u;
   uint32_t next_round = 0, next_index = 0;
   if (cup_tournament_next_human(&cup_tournament, &next_round, &next_index) &&
@@ -133,6 +136,7 @@ static void competition_reset_cup_setup(void) {
   cup_match_result_received = 0;
   memset(&cup_draft, 0, sizeof(cup_draft));
   cup_bracket_editing = 0;
+  cup_opening_rule_popup = 0;
   cup_bracket_slot_focus = 0;
   cup_bracket_swap_source = UINT32_MAX;
   cup_first_match_started = 0;
@@ -190,12 +194,27 @@ static int competition_cup_teams_complete(void) {
   return competition_draft_ready(&cup_draft);
 }
 
+static int competition_cup_opening_has_player_match(
+    const CompetitionEntryDraft *draft) {
+  if (!draft || !draft->team_count) return 0;
+  uint32_t opening = 2u;
+  while (opening * 2u < draft->team_count) opening *= 2u;
+  for (uint32_t fixture = 0; fixture < opening; fixture++) {
+    const uint32_t home = competition_draft_fixture_slot(draft, fixture, 0u);
+    const uint32_t away = competition_draft_fixture_slot(draft, fixture, 1u);
+    if (home == UINT32_MAX || away == UINT32_MAX) continue;
+    if (draft->owners[home] || draft->owners[away]) return 1;
+  }
+  return 0;
+}
+
 static void competition_set_state(CompetitionFrontendState state,
                                   uint32_t focus) {
   frontend_state = state;
   frontend_focus = focus;
   if (state != COMPETITION_FRONTEND_CUP_BRACKET)
     cup_general_open = 0u;
+  cup_opening_rule_popup = 0u;
   frontend_pending_action = COMPETITION_ACTION_NONE;
   competition_clear_status();
 }
@@ -321,9 +340,14 @@ static uint32_t competition_general_first_row(void) {
       ? 1u : 0u;
 }
 
+static uint32_t competition_general_row(uint32_t visible_index) {
+  uint32_t row = visible_index + competition_general_first_row();
+  return row >= 3u ? row + 1u : row; /* Penalties are always ON in Cup. */
+}
+
 static void competition_adjust_general(int direction) {
   if (!direction) return;
-  const uint32_t row = cup_general_focus + competition_general_first_row();
+  const uint32_t row = competition_general_row(cup_general_focus);
   switch (row) {
     case 0:
       cup_com_level = direction > 0 ? (cup_com_level + 1u) % 7u
@@ -338,7 +362,6 @@ static void competition_adjust_general(int direction) {
                             : cup_game_time < 5u ? 5u : cup_game_time + 1u;
       break;
     case 2: cup_extra_time = !cup_extra_time; break;
-    case 3: break; /* A knockout Cup always resolves a winner. */
     case 4:
       cup_max_substitutions = direction > 0
           ? (cup_max_substitutions >= 5u ? 3u : cup_max_substitutions + 1u)
@@ -371,6 +394,10 @@ static void competition_move_focus(int direction) {
 }
 
 static void competition_back(void) {
+  if (cup_opening_rule_popup) {
+    cup_opening_rule_popup = 0u;
+    return;
+  }
   if (cup_general_open) {
     cup_general_open = 0u;
     return;
@@ -500,6 +527,7 @@ static void competition_open_bracket(void) {
   }
   competition_rebuild_cup_bracket();
   cup_bracket_editing = 0;
+  cup_opening_rule_popup = 0;
   cup_bracket_slot_focus = 0;
   cup_bracket_swap_source = UINT32_MAX;
   cup_first_match_started = 0;
@@ -563,6 +591,7 @@ static int competition_load_cup_slot(uint32_t slot) {
   cup_first_match_started = save.first_match_started;
   cup_active_slot = slot;
   cup_bracket_editing = 0;
+  cup_opening_rule_popup = 0;
   cup_bracket_slot_focus = 0;
   cup_bracket_swap_source = UINT32_MAX;
   cup_team_picker_active = 0;
@@ -764,6 +793,11 @@ static void competition_confirm(void) {
         competition_set_status("ASSIGN ALL BRACKET TEAMS FIRST");
         return;
       }
+      if (!cup_first_match_started &&
+          !competition_cup_opening_has_player_match(&cup_draft)) {
+        cup_opening_rule_popup = 1u;
+        return;
+      }
       if (!competition_frontend_cup_controllers_ready()) {
         frontend_controller_gate_request = 1;
         competition_set_status(
@@ -773,8 +807,8 @@ static void competition_confirm(void) {
       }
       if (!cup_tournament_next_human(&cup_tournament, &cup_pending_round,
                                      &cup_pending_index)) {
-        /* A human entrant may have an opening-round bye. Only pressing Next
-         * may resolve the all-COM play-in round; bracket edits never do. */
+        /* Remaining COM fixtures are resolved only after a player match;
+         * setup validation guarantees a player starts the opening round. */
         cup_tournament_advance(&cup_tournament);
         competition_bracket_view_active();
         if (cup_active_slot < COMPETITION_SAVE_SLOT_COUNT)
@@ -834,6 +868,7 @@ void competition_frontend_close(void) {
   frontend_controller_gate_request = 0;
   frontend_skip_input_tick = 0;
   frontend_buttons_latched = 0;
+  cup_opening_rule_popup = 0u;
   competition_clear_status();
 }
 
@@ -844,6 +879,7 @@ void competition_frontend_finish_close(void) {
   frontend_controller_gate_request = 0;
   frontend_skip_input_tick = 0;
   frontend_buttons_latched = 0;
+  cup_opening_rule_popup = 0u;
   competition_clear_status();
 }
 
@@ -952,6 +988,8 @@ const char *competition_frontend_item_label(uint32_t index) {
       }
       return index == cup_player_count ? "NEXT" : "";
     case COMPETITION_FRONTEND_CUP_BRACKET:
+      if (cup_tournament.champion && index != CUP_HUB_ACTION_TOP)
+        return "";
       switch (index) {
         case CUP_HUB_ACTION_BRACKET: return "BRACKET";
         case CUP_HUB_ACTION_NEXT:
@@ -1020,9 +1058,12 @@ int competition_frontend_item_enabled(uint32_t index) {
       index < COMPETITION_SAVE_SLOT_COUNT)
     return cup_slots_saving || cup_slot_valid[index] != 0;
   if (frontend_state == COMPETITION_FRONTEND_CUP_BRACKET) {
+    if (cup_tournament.champion) return index == CUP_HUB_ACTION_TOP;
     if (index == CUP_HUB_ACTION_BRACKET) return !cup_first_match_started;
     if (index == CUP_HUB_ACTION_NEXT)
-      return cup_tournament_valid && !cup_tournament.champion;
+      return cup_tournament_valid &&
+             (cup_first_match_started ||
+              competition_cup_opening_has_player_match(&cup_draft));
     return index == CUP_HUB_ACTION_GENERAL ||
            index == CUP_HUB_ACTION_SAVE || index == CUP_HUB_ACTION_TOP;
   }
@@ -1086,7 +1127,7 @@ int competition_frontend_cup_general_open(void) {
 }
 
 uint32_t competition_frontend_cup_general_count(void) {
-  return 8u - competition_general_first_row();
+  return 7u - competition_general_first_row();
 }
 
 uint32_t competition_frontend_cup_general_focus(void) {
@@ -1094,11 +1135,11 @@ uint32_t competition_frontend_cup_general_focus(void) {
 }
 
 const char *competition_frontend_cup_general_label(uint32_t index) {
-  static const char *const labels[8] = {
-      "COM LEVEL", "MATCH TIME", "OVERTIME", "PENALTIES",
-      "SUBSTITUTIONS", "INJURIES", "BALL", "VAR"};
-  index += competition_general_first_row();
-  return index < 8u ? labels[index] : "";
+  static const char *const labels[7] = {
+      "COM LEVEL", "MATCH TIME", "OVERTIME", "SUBSTITUTIONS",
+      "INJURIES", "BALL", "VAR"};
+  return index < competition_frontend_cup_general_count()
+      ? labels[index + competition_general_first_row()] : "";
 }
 
 const char *competition_frontend_cup_general_value(uint32_t index) {
@@ -1110,13 +1151,12 @@ const char *competition_frontend_cup_general_value(uint32_t index) {
       "TRIPLETTA", "UNIFORIA EURO", "WE-PES CLASSIC", "REGISTA",
       "MOMENTO", "SPECIAL BRONZE", "SPECIAL SILVER", "SPECIAL GOLD",
       "SPECIAL BLACK", "METALLIC EDITION"};
-  switch (index + competition_general_first_row()) {
+  switch (competition_general_row(index)) {
     case 0: return levels[cup_com_level <= 6u ? cup_com_level : 3u];
     case 1:
       snprintf(value, sizeof(value), "%u MIN", cup_game_time);
       return value;
     case 2: return cup_extra_time ? "ON" : "OFF";
-    case 3: return "ON";
     case 4:
       snprintf(value, sizeof(value), "%u", cup_max_substitutions);
       return value;
@@ -1276,6 +1316,10 @@ const CompetitionEntryDraft *competition_frontend_cup_draft(void) {
 
 int competition_frontend_cup_bracket_editing(void) {
   return cup_bracket_editing != 0;
+}
+
+int competition_frontend_cup_opening_rule_popup(void) {
+  return cup_opening_rule_popup != 0u;
 }
 
 uint32_t competition_frontend_cup_bracket_slot_focus(void) {
@@ -1499,6 +1543,13 @@ void competition_frontend_pad_event(uint32_t buttons,
     frontend_skip_input_tick = 0;
     return;
   }
+  if (cup_opening_rule_popup) {
+    if (pressed & (COMPETITION_BUTTON_A | COMPETITION_BUTTON_B)) {
+      cup_opening_rule_popup = 0u;
+      competition_clear_status();
+    }
+    return;
+  }
   if (frontend_state == COMPETITION_FRONTEND_CUP_TEAMS ||
       (frontend_state == COMPETITION_FRONTEND_CUP_BRACKET &&
        cup_team_picker_active)) {
@@ -1612,13 +1663,22 @@ void competition_frontend_pad_event(uint32_t buttons,
       } else if (cup_bracket_swap_source == cup_bracket_slot_focus) {
         cup_bracket_swap_source = UINT32_MAX;
         competition_clear_status();
-      } else if (competition_draft_swap_slots(
-                     &cup_draft, cup_bracket_swap_source,
-                     cup_bracket_slot_focus)) {
-        cup_bracket_swap_source = UINT32_MAX;
-        competition_rebuild_cup_bracket();
-        competition_focus_cup_slot(cup_bracket_slot_focus);
-        competition_set_status("BRACKET SLOTS SWAPPED");
+      } else {
+        CompetitionEntryDraft candidate = cup_draft;
+        if (competition_draft_swap_slots(
+                &candidate, cup_bracket_swap_source,
+                cup_bracket_slot_focus)) {
+          if (!competition_cup_opening_has_player_match(&candidate)) {
+            cup_opening_rule_popup = 1u;
+            competition_set_status("PLAYER MATCH REQUIRED IN ROUND 1");
+          } else {
+            cup_draft = candidate;
+            cup_bracket_swap_source = UINT32_MAX;
+            competition_rebuild_cup_bracket();
+            competition_focus_cup_slot(cup_bracket_slot_focus);
+            competition_set_status("BRACKET SLOTS SWAPPED");
+          }
+        }
       }
     }
     return;

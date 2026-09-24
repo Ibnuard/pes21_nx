@@ -80,6 +80,7 @@ void competition_frontend_cup_team_picker_result(uint32_t team_id);
 const CupTournament *competition_frontend_cup_tournament(void);
 const CompetitionEntryDraft *competition_frontend_cup_draft(void);
 int competition_frontend_cup_bracket_editing(void);
+int competition_frontend_cup_opening_rule_popup(void);
 uint32_t competition_frontend_cup_bracket_slot_focus(void);
 uint32_t competition_frontend_cup_bracket_swap_source(void);
 int competition_frontend_cup_bracket_editable(void);

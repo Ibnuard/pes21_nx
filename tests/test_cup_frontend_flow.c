@@ -86,7 +86,9 @@ int main(void) {
   assert(competition_frontend_focus() == 2u);
   press(BUTTON_A); /* General Setting reuses the hub settings viewport. */
   assert(competition_frontend_cup_general_open());
-  assert(competition_frontend_cup_general_count() == 8u);
+  assert(competition_frontend_cup_general_count() == 7u);
+  for (uint32_t row = 0; row < competition_frontend_cup_general_count(); row++)
+    assert(competition_frontend_cup_general_label(row)[0] != 'P');
   press(BUTTON_DOWN);
   assert(competition_frontend_cup_general_focus() == 1u);
   press(BUTTON_B);
@@ -113,7 +115,8 @@ int main(void) {
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
   assert(competition_frontend_item_enabled(1u));
 
-  /* A three-team Cup keeps semi-final, final, and champion on one view,
+  /* A three-team Cup keeps semi-final and final on one match view, with a
+   * separate Champion page;
    * freezes the bracket after the first match, and hides Next at Game Over. */
   competition_frontend_close();
   competition_frontend_finish_close();
@@ -127,13 +130,27 @@ int main(void) {
   assert(competition_frontend_cup_team_count() == 3u);
   while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
   press(BUTTON_A);
-  assert(competition_frontend_cup_view_count() == 1u);
+  assert(competition_frontend_cup_view_count() == 2u);
   press(BUTTON_A);
   press(BUTTON_X);
   const CupFixture *unplayed_final = cup_tournament_fixture(
       competition_frontend_cup_tournament(), 1u, 0u);
   assert(unplayed_final && !unplayed_final->home &&
          !unplayed_final->away && !unplayed_final->winner);
+  press(BUTTON_Y); /* P1 cannot be moved to the sole opening bye. */
+  press(BUTTON_DOWN);
+  press(BUTTON_DOWN);
+  press(BUTTON_Y);
+  assert(competition_frontend_cup_opening_rule_popup());
+  assert(competition_frontend_cup_draft()->owners[0] == 1u);
+  assert(competition_frontend_cup_draft()->owners[2] == 0u);
+  assert(competition_frontend_cup_tournament()->history_count == 0u);
+  press(BUTTON_A); /* dismiss modal, without opening the team picker */
+  assert(!competition_frontend_cup_opening_rule_popup());
+  assert(!competition_frontend_cup_team_picker_active());
+  press(BUTTON_UP);
+  press(BUTTON_UP);
+  press(BUTTON_Y); /* cancel the pending swap */
   press(BUTTON_B);
   press(BUTTON_RIGHT);
   for (uint32_t match = 0; match < 2u; match++) {
@@ -150,9 +167,17 @@ int main(void) {
     if (competition_frontend_cup_tournament()->champion) break;
   }
   assert(competition_frontend_cup_tournament()->champion);
+  assert(competition_frontend_cup_view_round() == 1u);
   assert(competition_frontend_focus() == 4u);
   assert(!competition_frontend_item_enabled(1u));
   assert(!competition_frontend_item_label(1u)[0]);
+  for (uint32_t action = 0; action < 4u; action++) {
+    assert(!competition_frontend_item_enabled(action));
+    assert(!competition_frontend_item_label(action)[0]);
+  }
+  assert(competition_frontend_item_enabled(4u));
+  press(BUTTON_LEFT);
+  assert(competition_frontend_focus() == 4u);
 
   competition_frontend_close();
   competition_frontend_finish_close();
@@ -168,9 +193,9 @@ int main(void) {
   while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
   press(BUTTON_A);
   assert(competition_frontend_cup_draft()->team_count == english_field);
-  assert(competition_frontend_cup_view_stage_count() == 3u);
+  assert(competition_frontend_cup_view_stage_count() == 4u);
   assert(competition_frontend_cup_view_page_count() == 4u);
-  assert(competition_frontend_cup_view_count() == 7u);
+  assert(competition_frontend_cup_view_count() == 8u);
   assert(competition_frontend_cup_view_first_fixture() == 0u);
   press(BUTTON_Y); /* button focus scrolls down within the same round */
   assert(competition_frontend_cup_view_round() == 0u);
@@ -185,9 +210,14 @@ int main(void) {
   assert(competition_frontend_cup_view_round() == 1u);
   assert(competition_frontend_cup_view_first_fixture() == 0u);
   assert(competition_frontend_cup_view_page_count() == 2u);
-  press(BUTTON_R); /* semi-final, final, champion share a stage */
+  press(BUTTON_R); /* semi-final and final share a match stage */
   assert(competition_frontend_cup_view_round() == 2u);
   assert(competition_frontend_cup_view_page_count() == 1u);
+  press(BUTTON_R); /* Champion has its own horizontal page. */
+  assert(competition_frontend_cup_view_round() == 3u);
+  assert(competition_frontend_cup_view_page_count() == 1u);
+  press(BUTTON_L);
+  assert(competition_frontend_cup_view_round() == 2u);
   press(BUTTON_L);
   assert(competition_frontend_cup_view_round() == 1u);
   press(BUTTON_A);
@@ -253,9 +283,11 @@ int main(void) {
   press(BUTTON_RIGHT);
   assert(competition_frontend_focus() == 2u); /* disabled Next skipped */
   press(BUTTON_A);
-  assert(competition_frontend_cup_general_count() == 7u);
+  assert(competition_frontend_cup_general_count() == 6u);
   assert(competition_frontend_cup_general_open());
   assert(competition_frontend_cup_general_label(0u)[0] == 'M');
+  for (uint32_t row = 0; row < competition_frontend_cup_general_count(); row++)
+    assert(competition_frontend_cup_general_label(row)[0] != 'P');
   press(BUTTON_B);
   press(BUTTON_LEFT); /* Next disabled, return directly to Bracket. */
   assert(competition_frontend_focus() == 0u);

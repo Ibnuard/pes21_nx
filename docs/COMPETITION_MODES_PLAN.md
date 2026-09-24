@@ -366,6 +366,9 @@ Y memilih slot asal, lalu Y pada slot tujuan menukar tim sekaligus owner
 P1/P2/COM; menekan Y lagi pada slot asal membatalkan swap. Memilih tim yang
 sudah terpasang lewat A juga menukar tim kedua slot tanpa duplikasi. Tidak
 ada simulasi pertandingan selama tahap pengisian atau pertukaran bagan.
+Pada jumlah tim ganjil, pertukaran yang membuat semua player mendapat bye
+di ronde pembuka ditolak dengan popup: minimal satu fixture pembuka harus
+melibatkan player.
 Setelah pertandingan pertama dimulai, `Bracket` disabled dan semua assignment
 terkunci. Maksimum delapan logical player tetap dikontrol lewat dua controller
 fisik; P1 mengurus seluruh setup.
@@ -389,8 +392,11 @@ Hub wajib menampilkan:
 
 Bagan memakai slot ringkas `[crest] MUN - P1/COM` dengan skor pertandingan.
 Tim yang mendapat bye hanya memakai satu slot; fixture ronde mendatang yang
-belum terisi menampilkan dua slot TBD. Untuk Cup 3–4 tim, Semi Final,
-Final, dan Champion muat dalam satu panel dengan konektor pendek. Setiap
+belum terisi menampilkan dua slot TBD. Untuk Cup 3–4 tim, Semi Final dan
+Final muat dalam satu panel dengan konektor pendek. Champion memakai halaman
+horizontal tersendiri: konektor dari kiri menuju kartu atlas tim juara dengan
+label Champion, lalu piala besar di sebelah kanan. Sebelum hasil Final ada,
+kartu juara menampilkan TBD. Setiap
 halaman vertikal menampilkan maksimal dua fixture/empat tim babak aktif,
 dengan crest dan pelat skor berukuran lebih besar. Cup 16 tim mempunyai
 empat halaman vertikal pada Round of 16 dan dua pada Quarter Final.
@@ -400,12 +406,16 @@ Ikon shoulder berada di kedua pojok header bagan dan tersembunyi saat editor
 bagan aktif; pada editor, Y tetap untuk Swap. Kiri/kanan memindahkan fokus
 antartombol. Match Schedule menampilkan maksimal empat fixture relevan pada
 halaman bagan aktif dan ronde lanjutannya, termasuk TBD untuk lawan yang
-belum diketahui; hasil selesai memakai crest, kode tiga huruf, dan skor.
+belum diketahui. Jika satu calon peserta sudah pasti dari bye atau hasil
+child fixture yang selesai, jadwal boleh menampilkannya sebagai sisi kiri
+`vs TBD` tanpa mengisi fixture ronde berikutnya sebelum advance; hasil
+selesai memakai crest, kode tiga huruf, dan skor.
 Tombol berada di luar container utama dengan jarak yang jelas.
 
 Urutan tombol: `Bracket`, `Next`, `General Setting`, `Save`, `Top to Menu`. `Bracket` hanya aktif
-sebelum match pertama. `Next` baru aktif jika seluruh tim ter-assign; setelah
-Cup selesai tombol ini hilang dan fokus otomatis pindah ke `Top to Menu`.
+sebelum match pertama. `Next` baru aktif jika seluruh tim ter-assign dan
+syarat player pada ronde pembuka terpenuhi; setelah Cup selesai hanya
+`Top to Menu` yang tampil, dengan fokus otomatis di tombol tersebut.
 `Save` membuka tiga slot persistent yang bisa dilanjutkan dari `Continue`.
 
 Helper B tetap dapat ditampilkan sebagai shortcut Back to Menu, tetapi tidak dihitung sebagai tombol konten ketiga.
@@ -463,6 +473,15 @@ halaman final ditutup melalui `Back to Cup`, lalu memperbarui fixture dan
 mensimulasikan laga COM yang tersisa. Pembacaan pemenang adu penalti native
 masih perlu diverifikasi di hardware; skor imbang belum cukup untuk menentukan
 pemenang PK secara otoritatif.
+
+Audit target mobile lokal menemukan simbol native
+`FixDemoInfo::IsEndingCupLiftCut`, `ModeInfo::IsChampionDecideMatch`, dan
+`Record::UpdateTrophy`, jadi jalur kode terkait cutscene/rekaman piala memang
+ada di library. Namun Cup custom saat ini memulai final lewat bootstrap
+`MyClub/TutorialMatch` Exhibition/2P, belum mengirim konteks native
+championship. Keberadaan aset animasi yang diperlukan dan aktivasi cutscene
+di target mobile ini belum terverifikasi; jangan menjanjikan animasi angkat
+piala sebelum audit flag mode, aset, dan uji final di runtime.
 
 Halaman result menampilkan:
 
