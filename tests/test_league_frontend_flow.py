@@ -1,4 +1,4 @@
-"""Host-side Cup menu, bracket editor, save, and match lifecycle regression."""
+"""Host-side League settings, hub, save, and fixture handoff regression."""
 
 from pathlib import Path
 import shutil
@@ -10,18 +10,18 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class CupFrontendFlowTests(unittest.TestCase):
-    def test_new_edit_save_continue_and_game_over(self):
+class LeagueFrontendFlowTests(unittest.TestCase):
+    def test_league_flow(self):
         compiler = shutil.which("gcc")
         if not compiler:
             self.skipTest("Host C compiler unavailable")
         with tempfile.TemporaryDirectory() as temp:
-            binary = Path(temp) / "cup-frontend-test.exe"
+            binary = Path(temp) / "league-frontend-test.exe"
             subprocess.run(
                 [
                     compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
                     "-I", str(ROOT / "source"),
-                    str(ROOT / "tests/test_cup_frontend_flow.c"),
+                    str(ROOT / "tests/test_league_frontend_flow.c"),
                     str(ROOT / "source/competition_frontend.c"),
                     str(ROOT / "source/competition_entry_draft.c"),
                     str(ROOT / "source/cup_tournament.c"),

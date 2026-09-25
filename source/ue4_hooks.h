@@ -431,6 +431,8 @@ typedef struct {
 PesPrematchGameplanPortraitPng *
 pes_controller_custom_prematch_gameplan_take_portrait_png(uint32_t pad,
                                                            uint32_t index);
+void pes_controller_league_request_scorer_portrait(uint32_t slot,
+                                                   uint32_t portrait_id);
 int pes_controller_menu_active(void);
 int pes_controller_gameplan_cursor_active(void);
 int pes_controller_virtual_cursor_context(void);

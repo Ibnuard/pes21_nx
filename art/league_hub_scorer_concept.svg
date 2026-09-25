@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="443" height="372" viewBox="0 0 443 372" role="img" aria-label="League Top Scorer panel concept, four ranked players with portrait spaces">
+  <defs>
+    <linearGradient id="row" x2="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e6f0ff"/></linearGradient>
+    <linearGradient id="face" x2="0" y2="1"><stop stop-color="#97b3d8"/><stop offset="1" stop-color="#4c709e"/></linearGradient>
+    <style>text{font-family:'Arial Narrow',Arial,sans-serif;font-weight:700;letter-spacing:.8px}.t{fill:#071d46}.s{fill:#527096}.w{fill:#f6fbff}</style>
+    <g id="portrait"><rect width="54" height="54" rx="8" fill="url(#face)"/><circle cx="27" cy="20" r="12" fill="#d8e8f8"/><path d="M7 50c3-13 12-19 20-19s17 6 20 19" fill="#d8e8f8"/></g>
+  </defs>
+  <rect width="443" height="372" rx="12" fill="#f6faff"/>
+  <rect x="10" y="10" width="423" height="45" rx="8" fill="#08234f"/>
+  <path d="M25 19h7l12 25h-7zM39 19h5l12 25h-5z" fill="#f1c84e"/>
+  <text x="222" y="39" class="w" font-size="20" text-anchor="middle">TOP SCORER</text>
+  <g stroke="#b5cbea" stroke-width="1.5" fill="url(#row)"><rect x="16" y="68" width="411" height="65" rx="7"/><rect x="16" y="142" width="411" height="65" rx="7"/><rect x="16" y="216" width="411" height="65" rx="7"/><rect x="16" y="290" width="411" height="65" rx="7"/></g>
+  <rect x="16" y="68" width="411" height="65" rx="7" fill="#ffea86" stroke="#d2a631" stroke-width="2"/>
+  <g class="t" font-size="19"><text x="30" y="108">1</text><text x="30" y="182">2</text><text x="30" y="256">3</text><text x="30" y="330">4</text></g>
+  <use href="#portrait" x="52" y="74"/><use href="#portrait" x="52" y="148"/><use href="#portrait" x="52" y="222"/><use href="#portrait" x="52" y="296"/>
+  <g class="t" font-size="17"><text x="116" y="99">PLAYER PORTRAIT</text><text x="116" y="173">PLAYER PORTRAIT</text><text x="116" y="247">PLAYER PORTRAIT</text><text x="116" y="321">PLAYER PORTRAIT</text></g>
+  <g class="s" font-size="13"><text x="116" y="118">MANCHESTER UTD</text><text x="116" y="192">MANCHESTER CITY</text><text x="116" y="266">LIVERPOOL</text><text x="116" y="340">EVERTON</text></g>
+  <g class="t" font-size="23" text-anchor="middle"><text x="389" y="108">8</text><text x="389" y="182">7</text><text x="389" y="256">6</text><text x="389" y="330">5</text></g>
+  <g class="s" font-size="11" text-anchor="middle"><text x="389" y="122">GOALS</text><text x="389" y="196">GOALS</text><text x="389" y="270">GOALS</text><text x="389" y="344">GOALS</text></g>
+</svg>

@@ -55,6 +55,8 @@ def test_frontend_can_open_and_seed_every_fl26_cup():
             "-I", str(ROOT / "source"),
             str(ROOT / "tests/test_fl26_cup_catalog.c"),
             str(ROOT / "source/competition_frontend.c"),
+            str(ROOT / "source/league_tournament.c"),
+            str(ROOT / "source/league_save.c"),
             str(ROOT / "source/competition_entry_draft.c"),
             str(ROOT / "source/cup_tournament.c"),
             str(ROOT / "source/cup_save.c"),

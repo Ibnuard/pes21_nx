@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="FootballNX League phase concept, with a five-team standings page and four-match schedule">
+  <defs>
+    <linearGradient id="shell" x2="0" y2="1"><stop stop-color="#eff7ff"/><stop offset="1" stop-color="#c9ddf5"/></linearGradient>
+    <linearGradient id="card" x2="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e7f1ff"/></linearGradient>
+    <linearGradient id="blue" x2="0" y2="1"><stop stop-color="#135ba2"/><stop offset="1" stop-color="#092d67"/></linearGradient>
+    <linearGradient id="gold" x2="0" y2="1"><stop stop-color="#fff397"/><stop offset="1" stop-color="#f0ba27"/></linearGradient>
+    <filter id="shade" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#001337" flood-opacity=".55"/></filter>
+    <style>text{font-family:'Arial Narrow',Arial,sans-serif;font-weight:700;letter-spacing:.8px} .t{fill:#071d46}.s{fill:#527096}.w{fill:#f6fbff}.g{fill:#f5ca46}.row{fill:url(#card);stroke:#b5cbea;stroke-width:1.5}.badge{stroke:#f7fafc;stroke-width:3}.small{font-size:16px}.tiny{font-size:13px}.mid{font-size:20px}</style>
+  </defs>
+  <image href="league_hub_stadium_v1.png" width="1280" height="720" preserveAspectRatio="xMidYMid slice"/>
+  <rect width="1280" height="720" fill="#021942" opacity=".18"/>
+  <rect x="56" y="43" width="1168" height="88" rx="19" fill="#061534" stroke="#9db7e2" stroke-width="2" filter="url(#shade)"/>
+  <path d="M76 61h11l17 26H93zM95 61h8l17 26h-8zM112 61h5l17 26h-5z" fill="#f1c74d"/>
+  <text x="640" y="93" class="w" font-size="31" text-anchor="middle">FOOTBALLNX LEAGUE</text>
+  <text x="640" y="115" class="g" font-size="12" text-anchor="middle" letter-spacing="5">GLORY BUILT WEEK BY WEEK</text>
+  <rect x="56" y="142" width="1168" height="407" rx="18" fill="url(#shell)" stroke="#e4efff" stroke-width="3" filter="url(#shade)"/>
+  <rect x="78" y="159" width="665" height="372" rx="12" fill="#f6faff"/>
+  <rect x="759" y="159" width="443" height="372" rx="12" fill="#f6faff"/>
+  <rect x="88" y="169" width="645" height="45" rx="8" fill="#08234f"/>
+  <path d="M102 178h7l12 25h-7zM116 178h5l12 25h-5z" fill="#f1c84e"/>
+  <text x="410" y="198" class="w mid" text-anchor="middle">LEAGUE TABLE</text>
+  <text x="718" y="198" class="g tiny" text-anchor="end">MATCHDAY 05</text>
+  <rect x="769" y="169" width="423" height="45" rx="8" fill="#08234f"/>
+  <path d="M784 178h7l12 25h-7zM798 178h5l12 25h-5z" fill="#f1c84e"/>
+  <text x="976" y="198" class="w mid" text-anchor="middle">MATCH SCHEDULE</text>
+  <text x="105" y="235" class="s tiny">#</text><text x="178" y="235" class="s tiny">CLUB</text>
+  <text x="507" y="235" class="s tiny">P</text><text x="551" y="235" class="s tiny">W</text><text x="593" y="235" class="s tiny">D</text><text x="635" y="235" class="s tiny">GD</text><text x="692" y="235" class="s tiny">PTS</text>
+  <rect x="89" y="243" width="643" height="49" rx="7" fill="#ffea86" stroke="#d2a631" stroke-width="2"/>
+  <rect x="89" y="296" width="643" height="49" rx="7" class="row"/>
+  <rect x="89" y="349" width="643" height="49" rx="7" class="row"/>
+  <rect x="89" y="402" width="643" height="49" rx="7" class="row"/>
+  <rect x="89" y="455" width="643" height="49" rx="7" class="row"/>
+  <path d="M127 248v251" stroke="#b8cae4" stroke-width="2"/>
+  <g class="t mid"><text x="105" y="275">1</text><text x="104" y="328">2</text><text x="104" y="381">3</text><text x="104" y="434">4</text><text x="104" y="487">5</text></g>
+  <g text-anchor="middle" class="w small"><circle class="badge" cx="155" cy="267" r="20" fill="#bb2028"/><text x="155" y="273">M</text><circle class="badge" cx="155" cy="320" r="20" fill="#0b78d0"/><text x="155" y="326">C</text><circle class="badge" cx="155" cy="373" r="20" fill="#d23736"/><text x="155" y="379">L</text><circle class="badge" cx="155" cy="426" r="20" fill="#1f5bb1"/><text x="155" y="432">E</text><circle class="badge" cx="155" cy="479" r="20" fill="#3b455b"/><text x="155" y="485">N</text></g>
+  <g class="t small"><text x="187" y="275">MANCHESTER UTD</text><text x="187" y="328">MANCHESTER CITY</text><text x="187" y="381">LIVERPOOL</text><text x="187" y="434">EVERTON</text><text x="187" y="487">NEWCASTLE</text></g>
+  <g class="t small" text-anchor="middle"><text x="509" y="275">5</text><text x="553" y="275">4</text><text x="595" y="275">1</text><text x="646" y="275">+8</text><text x="698" y="275">13</text><text x="509" y="328">5</text><text x="553" y="328">4</text><text x="595" y="328">0</text><text x="646" y="328">+6</text><text x="698" y="328">12</text><text x="509" y="381">5</text><text x="553" y="381">3</text><text x="595" y="381">2</text><text x="646" y="381">+5</text><text x="698" y="381">11</text><text x="509" y="434">5</text><text x="553" y="434">3</text><text x="595" y="434">1</text><text x="646" y="434">+3</text><text x="698" y="434">10</text><text x="509" y="487">5</text><text x="553" y="487">3</text><text x="595" y="487">0</text><text x="646" y="487">+1</text><text x="698" y="487">9</text></g>
+  <text x="410" y="522" class="s tiny" text-anchor="middle">PAGE 1 / 4 · FIVE CLUBS PER PAGE · 48PX BADGES</text>
+  <g class="t"><rect x="775" y="227" width="411" height="65" rx="7" class="row"/><rect x="775" y="301" width="411" height="65" rx="7" class="row"/><rect x="775" y="375" width="411" height="65" rx="7" class="row"/><rect x="775" y="449" width="411" height="65" rx="7" class="row"/></g>
+  <g text-anchor="middle" class="w tiny"><circle class="badge" cx="801" cy="259" r="17" fill="#bb2028"/><text x="801" y="264">M</text><circle class="badge" cx="1159" cy="259" r="17" fill="#0b78d0"/><text x="1159" y="264">C</text><circle class="badge" cx="801" cy="333" r="17" fill="#d23736"/><text x="801" y="338">L</text><circle class="badge" cx="1159" cy="333" r="17" fill="#1f5bb1"/><text x="1159" y="338">E</text><circle class="badge" cx="801" cy="407" r="17" fill="#3b455b"/><text x="801" y="412">N</text><circle class="badge" cx="1159" cy="407" r="17" fill="#663c9b"/><text x="1159" y="412">T</text><circle class="badge" cx="801" cy="481" r="17" fill="#18498c"/><text x="801" y="486">W</text><circle class="badge" cx="1159" cy="481" r="17" fill="#c64936"/><text x="1159" y="486">A</text></g>
+  <g class="t small"><text x="830" y="265">MUN</text><text x="1106" y="265">MCI</text><text x="830" y="339">LIV</text><text x="1106" y="339">EVE</text><text x="830" y="413">NEW</text><text x="1106" y="413">TOT</text><text x="830" y="487">WHU</text><text x="1106" y="487">ARS</text></g>
+  <g class="t mid" text-anchor="middle"><text x="979" y="265">VS</text><text x="979" y="339">VS</text><text x="979" y="413">VS</text><text x="979" y="487">VS</text></g>
+  <rect x="185" y="577" width="211" height="53" rx="11" fill="url(#blue)" stroke="#5ca5e9" stroke-width="3"/><rect x="416" y="577" width="211" height="53" rx="11" fill="url(#blue)" stroke="#5ca5e9" stroke-width="3"/><rect x="647" y="577" width="211" height="53" rx="11" fill="url(#gold)" stroke="#fff2a0" stroke-width="3"/><rect x="878" y="577" width="211" height="53" rx="11" fill="url(#blue)" stroke="#5ca5e9" stroke-width="3"/>
+  <g font-size="17" text-anchor="middle"><text x="290" y="609" class="w">TEAMS</text><text x="521" y="609" class="w">GENERAL SETTING</text><text x="752" y="609" class="t">NEXT</text><text x="983" y="609" class="w">SAVE</text></g>
+  <rect y="657" width="1280" height="63" fill="#071a3e" opacity=".92"/>
+  <g font-size="16"><circle cx="100" cy="687" r="13" fill="#fff"/><text x="100" y="693" text-anchor="middle" class="t">A</text><text x="123" y="693" class="w">SELECT</text><circle cx="223" cy="687" r="13" fill="#fff"/><text x="223" y="693" text-anchor="middle" class="t">B</text><text x="246" y="693" class="w">BACK</text><circle cx="986" cy="687" r="13" fill="#fff"/><text x="986" y="693" text-anchor="middle" class="t">Y</text><text x="1009" y="693" class="w">TOP SCORER</text></g>
+</svg>

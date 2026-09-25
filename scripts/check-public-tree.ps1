@@ -20,6 +20,7 @@ $allowedBinaries = @(
   "data/cup_hub_stadium.bin",
   "data/cup_hub_trophy.bin",
   "data/cup_hub_header_ornament.bin",
+  "data/league_hub_stadium.bin",
   "data/main_menu_background.bin",
   "data/main_menu_brand.bin",
   "data/main_menu_button_a.bin",
@@ -53,6 +54,7 @@ $allowedLargeFiles = @(
   "data/cup_hub_stadium.bin",
   "data/cup_hub_trophy.bin",
   "data/cup_hub_header_ornament.bin",
+  "data/league_hub_stadium.bin",
   "data/pes21_player_registry.json",
   "source/efootball_font_atlas.h",
   "source/team_select_background.h"

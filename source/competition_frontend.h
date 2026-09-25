@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "cup_tournament.h"
 #include "competition_entry_draft.h"
+#include "league_tournament.h"
 
 typedef enum {
   COMPETITION_FRONTEND_NONE = 0,
@@ -16,6 +17,10 @@ typedef enum {
   COMPETITION_FRONTEND_CUP_BRACKET,
   COMPETITION_FRONTEND_CUP_CHECKPOINT,
   COMPETITION_FRONTEND_NOTICE,
+  COMPETITION_FRONTEND_LEAGUE_LANDING,
+  COMPETITION_FRONTEND_LEAGUE_SLOTS,
+  COMPETITION_FRONTEND_LEAGUE_SETTINGS,
+  COMPETITION_FRONTEND_LEAGUE_HUB,
 } CompetitionFrontendState;
 
 enum {
@@ -24,6 +29,7 @@ enum {
   COMPETITION_ACTION_TWO_PLAYER = 2,
   COMPETITION_ACTION_CUP_TEAM_PICKER = 3,
   COMPETITION_ACTION_CUP_FIXTURE = 4,
+  COMPETITION_ACTION_LEAGUE_FIXTURE = 5,
 };
 
 void competition_frontend_open_match_mode(void);
@@ -115,6 +121,27 @@ void competition_frontend_cup_handoff_result(int opened);
 void competition_frontend_cup_match_result(uint32_t home_goals,
                                            uint32_t away_goals);
 void competition_frontend_cup_restore_after_match(void);
+
+const LeagueTournament *competition_frontend_league_tournament(void);
+const CompetitionEntryDraft *competition_frontend_league_draft(void);
+uint32_t competition_frontend_league_table_page(void);
+uint32_t competition_frontend_league_schedule_page(void);
+uint32_t competition_frontend_league_bracket_round(void);
+uint32_t competition_frontend_league_bracket_page(void);
+int competition_frontend_league_scorers_open(void);
+int competition_frontend_league_teams_editing(void);
+uint32_t competition_frontend_league_team_slot_focus(void);
+int competition_frontend_league_match_active(void);
+int competition_frontend_league_match_is_knockout(void);
+int competition_frontend_league_match_teams(uint32_t *home, uint32_t *away);
+int competition_frontend_league_team_is_human(uint32_t team);
+void competition_frontend_league_handoff_result(int opened);
+void competition_frontend_league_match_result(uint32_t home_goals,
+                                               uint32_t away_goals);
+void competition_frontend_league_match_result_with_scorers(
+    uint32_t home_goals, uint32_t away_goals,
+    const LeagueScorer *scorers, uint32_t scorer_count);
+void competition_frontend_league_restore_after_match(void);
 
 void competition_frontend_pad_event(uint32_t buttons,
                                     uint32_t previous_buttons);

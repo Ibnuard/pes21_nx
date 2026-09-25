@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="665" height="372" viewBox="0 0 665 372" role="img" aria-label="League knockout bracket concept, two quarterfinal matches leading toward semifinal">
+  <defs><linearGradient id="row" x2="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e4efff"/></linearGradient><style>text{font-family:'Arial Narrow',Arial,sans-serif;font-weight:700;letter-spacing:.8px}.t{fill:#071d46}.s{fill:#527096}.w{fill:#f6fbff}</style></defs>
+  <rect width="665" height="372" rx="12" fill="#f6faff"/>
+  <rect x="10" y="10" width="645" height="45" rx="8" fill="#08234f"/>
+  <path d="M24 19h7l12 25h-7zM38 19h5l12 25h-5z" fill="#f1c84e"/>
+  <text x="333" y="39" class="w" font-size="20" text-anchor="middle">KNOCKOUT BRACKET</text>
+  <text x="27" y="78" class="t" font-size="15">QUARTERFINAL  1 / 2</text><text x="409" y="78" class="t" font-size="15">SEMIFINAL</text>
+  <g fill="url(#row)" stroke="#4b78b8" stroke-width="2"><rect x="26" y="93" width="250" height="48" rx="5"/><rect x="26" y="149" width="250" height="48" rx="5"/><rect x="26" y="229" width="250" height="48" rx="5"/><rect x="26" y="285" width="250" height="48" rx="5"/><rect x="402" y="156" width="230" height="48" rx="5"/><rect x="402" y="212" width="230" height="48" rx="5"/></g>
+  <g fill="none" stroke="#1c57a8" stroke-width="3"><path d="M276 117h44v56h81"/><path d="M276 173h44"/><path d="M276 253h44v-56h81"/><path d="M276 309h44v-56"/></g>
+  <g text-anchor="middle" fill="#fff" font-size="14"><circle cx="57" cy="117" r="18" fill="#bb2028" stroke="#fff" stroke-width="3"/><text x="57" y="122">M</text><circle cx="57" cy="173" r="18" fill="#0b78d0" stroke="#fff" stroke-width="3"/><text x="57" y="178">C</text><circle cx="57" cy="253" r="18" fill="#d23736" stroke="#fff" stroke-width="3"/><text x="57" y="258">L</text><circle cx="57" cy="309" r="18" fill="#1f5bb1" stroke="#fff" stroke-width="3"/><text x="57" y="314">E</text></g>
+  <g class="t" font-size="16"><text x="83" y="123">MUN · P1</text><text x="83" y="179">MCI · COM</text><text x="83" y="259">LIV · COM</text><text x="83" y="315">EVE · COM</text><text x="482" y="185">TBD</text><text x="482" y="241">TBD</text></g>
+  <g class="t" font-size="16" text-anchor="middle"><text x="253" y="123">–</text><text x="253" y="179">–</text><text x="253" y="259">–</text><text x="253" y="315">–</text><text x="609" y="185">–</text><text x="609" y="241">–</text></g>
+  <text x="333" y="360" class="s" font-size="13" text-anchor="middle">TWO MATCHES PER PAGE · L / R STAGE · Y NEXT PAGE</text>
+</svg>

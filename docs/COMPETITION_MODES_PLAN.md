@@ -353,23 +353,24 @@ tim kosong tetapi setiap slot telah bertanda `P1`, `P2`, atau `COM`. Editor
 bagan adalah bagian Cup Hub, bukan halaman Select Teams terpisah. Tombol
 `Next` disabled sampai seluruh slot terisi tim unik dan valid.
 
-P1 memilih `Bracket` untuk masuk edit mode. Fokus melintasi slot pembuka dari
+P1 memilih `Teams` untuk masuk edit mode. Fokus melintasi slot pembuka dari
 atas ke bawah; A membuka selector tim satu sisi yang memakai carousel, atlas,
 dan pengelompokan Exhibition/2 Player. Selector predefined Cup langsung
 membuka kategori liga yang eligible; FootballNX Cup membuka daftar kategori.
-B mengembalikan fokus ke lima tombol Hub.
+B mengembalikan fokus ke empat tombol Hub.
 
 X mengisi hanya slot kosong babak pembuka secara acak, tanpa mengganti pilihan
 manual. Ronde lanjutan dan Champion tetap TBD sampai hasil fixture sebelumnya
 diproses; bye pembuka pun tidak mengisi slot ronde lanjutan lebih awal.
-Y memilih slot asal, lalu Y pada slot tujuan menukar tim sekaligus owner
-P1/P2/COM; menekan Y lagi pada slot asal membatalkan swap. Memilih tim yang
+Y mengaktifkan Swap dan memilih slot asal; A pada slot tujuan menukar tim
+sekaligus owner P1/P2/COM, sedangkan B membatalkan Swap tanpa keluar dari
+editor. Memilih tim yang
 sudah terpasang lewat A juga menukar tim kedua slot tanpa duplikasi. Tidak
 ada simulasi pertandingan selama tahap pengisian atau pertukaran bagan.
 Pada jumlah tim ganjil, pertukaran yang membuat semua player mendapat bye
 di ronde pembuka ditolak dengan popup: minimal satu fixture pembuka harus
 melibatkan player.
-Setelah pertandingan pertama dimulai, `Bracket` disabled dan semua assignment
+Setelah pertandingan pertama dimulai, `Teams` disabled dan semua assignment
 terkunci. Maksimum delapan logical player tetap dikontrol lewat dua controller
 fisik; P1 mengurus seluruh setup.
 
@@ -412,13 +413,15 @@ child fixture yang selesai, jadwal boleh menampilkannya sebagai sisi kiri
 selesai memakai crest, kode tiga huruf, dan skor.
 Tombol berada di luar container utama dengan jarak yang jelas.
 
-Urutan tombol: `Bracket`, `Next`, `General Setting`, `Save`, `Top to Menu`. `Bracket` hanya aktif
+Urutan tombol: `Teams`, `Next`, `General Setting`, `Save`. `Teams` hanya aktif
 sebelum match pertama. `Next` baru aktif jika seluruh tim ter-assign dan
 syarat player pada ronde pembuka terpenuhi; setelah Cup selesai hanya
-`Top to Menu` yang tampil, dengan fokus otomatis di tombol tersebut.
+`Top to Menu` yang tampil, dengan fokus otomatis di tombol tersebut. Pada
+layar selesai semua helper disembunyikan kecuali A untuk konfirmasi.
 `Save` membuka tiga slot persistent yang bisa dilanjutkan dari `Continue`.
 
-Helper B tetap dapat ditampilkan sebagai shortcut Back to Menu, tetapi tidak dihitung sebagai tombol konten ketiga.
+Selama Cup berjalan, helper B kembali ke menu dan tidak dihitung sebagai tombol
+konten kelima.
 
 `General Setting` memakai layout dan kontrol Exhibition. Nilainya dapat
 diubah dari Cup Hub lalu diteruskan ke match berikutnya; aturan turnamen

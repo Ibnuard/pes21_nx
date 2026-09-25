@@ -919,6 +919,12 @@ static _Alignas(4) uint32_t live_gameplan_returning_to_pause;
 static const void *(*pause_stats_team)(const void *, uint32_t);
 static uint32_t (*pause_stats_data)(const void *, uint32_t, uint32_t);
 static uint32_t (*pause_score_get)(const void *, uint32_t);
+static const void *(*pause_stats_player)(const void *, uint32_t, uint32_t);
+static uint32_t (*pause_player_data)(const void *, uint32_t, uint32_t);
+#define PAUSE_SCORER_MEMBERS 40u
+static _Alignas(4) uint32_t pause_player_goals[2][PAUSE_SCORER_MEMBERS];
+static _Alignas(4) uint32_t pause_player_snapshot_score[2];
+static _Alignas(8) uint64_t pause_player_goals_seen;
 static _Alignas(4) uint32_t pause_scores[2];
 static float (*pause_stats_control)(const void *, uint32_t, uint32_t);
 static _Alignas(4) uint32_t pause_stats_values[2][8];
@@ -947,6 +953,26 @@ static void *pause_record_get_stats(void *record) {
       for (uint32_t row = 1; row < 8; ++row)
         __atomic_store_n(&pause_stats_values[side][row],
             pause_stats_data(team, kinds[row], 5), __ATOMIC_RELAXED);
+    }
+    if (competition_frontend_league_match_active() &&
+        pause_stats_player && pause_player_data) {
+      const uint32_t current[2] = {
+          __atomic_load_n(&pause_scores[0], __ATOMIC_RELAXED),
+          __atomic_load_n(&pause_scores[1], __ATOMIC_RELAXED)};
+      if (current[0] != pause_player_snapshot_score[0] ||
+          current[1] != pause_player_snapshot_score[1]) {
+        for (uint32_t side = 0; side < 2u; side++) {
+          for (uint32_t member = 0; member < PAUSE_SCORER_MEMBERS; member++) {
+            const void *player = pause_stats_player(stats, side, member);
+            const uint32_t goals = player ? pause_player_data(player, 0u, 5u)
+                                          : 0u;
+            __atomic_store_n(&pause_player_goals[side][member],
+                             goals <= 99u ? goals : 0u, __ATOMIC_RELAXED);
+          }
+          pause_player_snapshot_score[side] = current[side];
+        }
+        __atomic_store_n(&pause_player_goals_seen, now, __ATOMIC_RELEASE);
+      }
     }
     __atomic_store_n(&pause_stats_seen, now, __ATOMIC_RELEASE);
     __atomic_store_n(&pause_stats_busy, 0, __ATOMIC_RELEASE);
@@ -1964,6 +1990,7 @@ static void main_menu_info_close(void);
 static void main_menu_apply_focus(uint32_t index);
 static void main_menu_activate_match_mode(uint32_t mode);
 static void main_menu_activate_cup_fixture(void);
+static void main_menu_activate_league_fixture(void);
 static void main_menu_2p_team_selector_open(void);
 static void main_menu_2p_team_selector_close(void);
 static int main_menu_start_two_player_match(void);
@@ -2838,7 +2865,8 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
     __atomic_store_n(&main_menu_2p_prematch_hub_input_pending, focus + 1,
                      __ATOMIC_RELEASE);
   } else if (pressed & (1u << 0)) {
-    if (competition_frontend_cup_match_active()) {
+    if (competition_frontend_cup_match_active() ||
+        competition_frontend_league_match_active()) {
       main_menu_2p_team_selector_close();
       return;
     }
@@ -3253,6 +3281,9 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
   live_match_single_controller = !__atomic_load_n(&native_gamepad_lab_two_player, __ATOMIC_ACQUIRE);
   __atomic_store_n(&pause_stats_seen, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_player_goals_seen, 0, __ATOMIC_RELEASE);
+  memset(pause_player_goals, 0, sizeof(pause_player_goals));
+  memset(pause_player_snapshot_score, 0, sizeof(pause_player_snapshot_score));
   // A fresh match restarts the half/full time flow from the first overview.
   __atomic_store_n(&match_result_surface, MATCH_RESULT_SURFACE_NONE,
                    __ATOMIC_RELEASE);
@@ -4519,7 +4550,8 @@ uint32_t pes_controller_2p_prematch_hub_focus(void) {
 }
 
 uint32_t pes_controller_2p_prematch_hub_button_count(void) {
-  return competition_frontend_cup_match_active() ? 4u
+  return (competition_frontend_cup_match_active() ||
+          competition_frontend_league_match_active()) ? 4u
                                                  : PES_2P_PREMATCH_HUB_BUTTON_COUNT;
 }
 
@@ -10493,7 +10525,8 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
     main_menu_2p_prematch_hub_input_armed[0] = 0;
     return;
   }
-  if (action == 5 && !competition_frontend_cup_match_active()) {
+  if (action == 5 && !competition_frontend_cup_match_active() &&
+      !competition_frontend_league_match_active()) {
     exhibition_open_match_settings(exhibition_search_window);
     exhibition_popup_focus_index = 0;
     return;
@@ -10603,6 +10636,10 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     main_menu_activate_cup_fixture();
     return;
   }
+  if (queued_action == COMPETITION_ACTION_LEAGUE_FIXTURE) {
+    main_menu_activate_league_fixture();
+    return;
+  }
   if (!__atomic_load_n(&main_menu_controller_active, __ATOMIC_ACQUIRE))
     return;
 
@@ -10614,6 +10651,8 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
       main_menu_activate_match_mode(action);
     else if (action == COMPETITION_ACTION_CUP_FIXTURE)
       main_menu_activate_cup_fixture();
+    else if (action == COMPETITION_ACTION_LEAGUE_FIXTURE)
+      main_menu_activate_league_fixture();
     if (competition_frontend_take_controller_gate_request() &&
         competition_frontend_cup_required_controller_mask() == 3u)
       main_menu_require_two_controller_slots(1);
@@ -10832,6 +10871,26 @@ void pes_main_menu_simplify(void *window) {
   // and exposed the stock Pause exit animation for several frames.
   __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
   competition_frontend_cup_restore_after_match();
+  competition_frontend_league_restore_after_match();
+}
+
+void pes_controller_league_request_scorer_portrait(uint32_t slot,
+                                                   uint32_t portrait_id) {
+  if (slot >= 4u || !portrait_id) return;
+  live_gameplan_poll_portraits();
+  for (uint32_t i = 0; i < LIVE_PORTRAIT_CACHE_CAPACITY; i++) {
+    const PesPrematchGameplanPortraitPng *cached = live_portrait_cache[i];
+    if (!cached || cached->portrait_id != portrait_id) continue;
+    const size_t size = sizeof(*cached) + cached->byte_count;
+    PesPrematchGameplanPortraitPng *copy = malloc(size);
+    if (!copy) return;
+    memcpy(copy, cached, size);
+    free((void *)__atomic_exchange_n(
+        &exhibition_gameplan_portrait_pending[0][36u + slot],
+        (uintptr_t)copy, __ATOMIC_ACQ_REL));
+    return;
+  }
+  live_gameplan_request_portrait(portrait_id);
 }
 
 uintptr_t pes_main_menu_selected_entry(void *window,
@@ -10928,6 +10987,46 @@ static void main_menu_activate_cup_fixture(void) {
   if (started)
     debugPrintf("cup: match handoff HOME=%u AWAY=%u human-versus-human=%d\n",
                 home, away, two_humans);
+}
+
+static void main_menu_activate_league_fixture(void) {
+  uint32_t home = 0, away = 0;
+  if (!competition_frontend_league_match_teams(&home, &away)) {
+    competition_frontend_league_handoff_result(0);
+    return;
+  }
+  __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_match_time,
+                   competition_frontend_cup_game_time(), __ATOMIC_RELEASE);
+  /* League phase permits draws; knockout fixtures must produce a winner. */
+  const int knockout = competition_frontend_league_match_is_knockout();
+  __atomic_store_n(&exhibition_settings_extra_time,
+                   knockout ? competition_frontend_cup_extra_time() : 0u,
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_penalties,
+                   knockout ? 1u : 0u, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_substitutions,
+                   competition_frontend_cup_max_substitutions(),
+                   __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_injuries,
+                   competition_frontend_cup_injuries(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_ball_index,
+                   competition_frontend_cup_ball_index(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_var,
+                   competition_frontend_cup_var(), __ATOMIC_RELEASE);
+  exhibition_apply_cpu_level(competition_frontend_cup_com_level(), NULL);
+  __atomic_store_n(&main_menu_2p_prematch_bootstrap_mode,
+                   MAIN_MENU_2P_PREMATCH_BOOT_HUB, __ATOMIC_RELEASE);
+  const int two_humans =
+      competition_frontend_league_team_is_human(home) &&
+      competition_frontend_league_team_is_human(away);
+  const int started = two_humans ? main_menu_start_two_player_match()
+                                 : main_menu_start_exhibition_match();
+  competition_frontend_league_handoff_result(started);
+  if (started)
+    debugPrintf("league: match handoff HOME=%u AWAY=%u knockout=%d "
+                "human-versus-human=%d\n", home, away, knockout, two_humans);
 }
 
 static void main_menu_activate_choice(uint32_t choice) {
@@ -15003,8 +15102,9 @@ static void match_result_prepare_skin(void *window) {
   }
 }
 
-static int match_result_cup_finished(void) {
-  return competition_frontend_cup_match_active() &&
+static int match_result_competition_finished(void) {
+  return (competition_frontend_cup_match_active() ||
+          competition_frontend_league_match_active()) &&
       __atomic_load_n(&match_result_page, __ATOMIC_ACQUIRE) ==
           MATCH_RESULT_PAGE_FINAL &&
       (__atomic_load_n(&match_result_final_seen, __ATOMIC_ACQUIRE) != 0 ||
@@ -15054,23 +15154,68 @@ static void *pes_cup_3d_probe_result_create(uint32_t scene_id,
 }
 #endif
 
-static void match_result_record_cup_score(void) {
-  if (!match_result_cup_finished()) return;
+static void match_result_record_league_score(uint32_t home_goals,
+                                             uint32_t away_goals) {
+      LeagueScorer scorers[2u * PAUSE_SCORER_MEMBERS] = {{0}};
+      uint32_t scorer_count = 0u;
+      uint32_t fixture_home = 0u, fixture_away = 0u;
+      if (__atomic_load_n(&pause_player_goals_seen, __ATOMIC_ACQUIRE) &&
+          competition_frontend_league_match_teams(&fixture_home,
+                                                  &fixture_away)) {
+        const uint32_t fixture_teams[2] = {fixture_home, fixture_away};
+        for (uint32_t side = 0; side < 2u; side++) {
+          if (live_gameplan_identity_team[side] != fixture_teams[side])
+            continue;
+          for (uint32_t member = 0; member < PAUSE_SCORER_MEMBERS; member++) {
+            const uint32_t goals = __atomic_load_n(
+                &pause_player_goals[side][member], __ATOMIC_RELAXED);
+            const LiveGameplanIdentity *identity =
+                &live_gameplan_identity[side][member];
+            const uint32_t portrait =
+                (uint32_t)(identity->common_player_id >> 32);
+            const uint32_t base_id =
+                league_tournament_base_id_for_portrait(portrait);
+            if (!goals || !base_id || !identity->name[0]) continue;
+            LeagueScorer *scorer = &scorers[scorer_count++];
+            scorer->base_id = base_id;
+            scorer->portrait_id = portrait;
+            scorer->team = fixture_teams[side];
+            scorer->goals = (uint16_t)goals;
+            snprintf(scorer->name, sizeof(scorer->name), "%s",
+                     identity->name);
+          }
+        }
+      }
+      competition_frontend_league_match_result_with_scorers(
+          home_goals, away_goals, scorers, scorer_count);
+#ifdef DEBUG_LOG
+      debugPrintf("league-scorers: result %u-%u tracked=%u\n",
+          home_goals, away_goals, scorer_count);
+#endif
+}
+
+static void match_result_record_competition_score(void) {
+  if (!match_result_competition_finished()) return;
   uint32_t home_goals = 0, away_goals = 0;
   if (pes_controller_pause_score(0, &home_goals) &&
       pes_controller_pause_score(1, &away_goals)) {
-    competition_frontend_cup_match_result(home_goals, away_goals);
+    if (competition_frontend_cup_match_active())
+      competition_frontend_cup_match_result(home_goals, away_goals);
+    if (competition_frontend_league_match_active())
+      match_result_record_league_score(home_goals, away_goals);
 #ifdef DEBUG_LOG
-    const CupTournament *cup = competition_frontend_cup_tournament();
-    debugPrintf("cup-3d-probe: result home=%u away=%u champion=%u "
-                "ending_calls=%u native_creates=%u result_creates=%u "
-                "demo_edges=%u\n",
-                home_goals, away_goals, cup ? cup->champion : 0u,
-                __atomic_load_n(&cup_3d_probe_ending_calls, __ATOMIC_ACQUIRE),
-                __atomic_load_n(&cup_3d_probe_create_calls, __ATOMIC_ACQUIRE),
-                __atomic_load_n(&cup_3d_probe_result_create_calls,
-                                __ATOMIC_ACQUIRE),
-                __atomic_load_n(&cup_3d_probe_demo_edges, __ATOMIC_ACQUIRE));
+    if (competition_frontend_cup_match_active()) {
+      const CupTournament *cup = competition_frontend_cup_tournament();
+      debugPrintf("cup-3d-probe: result home=%u away=%u champion=%u "
+                  "ending_calls=%u native_creates=%u result_creates=%u "
+                  "demo_edges=%u\n",
+                  home_goals, away_goals, cup ? cup->champion : 0u,
+                  __atomic_load_n(&cup_3d_probe_ending_calls, __ATOMIC_ACQUIRE),
+                  __atomic_load_n(&cup_3d_probe_create_calls, __ATOMIC_ACQUIRE),
+                  __atomic_load_n(&cup_3d_probe_result_create_calls,
+                                  __ATOMIC_ACQUIRE),
+                  __atomic_load_n(&cup_3d_probe_demo_edges, __ATOMIC_ACQUIRE));
+    }
 #endif
   }
 }
@@ -15096,7 +15241,7 @@ static void match_result_process_controller_input(void *window) {
                            context == PES_VIRTUAL_CURSOR_FULL_TIME;
     if (action != PES_PAUSE_INPUT_BACK && !final_next)
       return;
-    match_result_record_cup_score();
+    match_result_record_competition_score();
     __atomic_store_n(&match_postmatch_custom_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&match_result_exit_requested, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
@@ -15178,7 +15323,7 @@ static void match_result_process_controller_input(void *window) {
   __atomic_store_n(&virtual_cursor_context, PES_VIRTUAL_CURSOR_NONE,
                    __ATOMIC_RELEASE);
   if (chosen == MATCH_RESULT_ACTION_BACK_TO_MENU) {
-    match_result_record_cup_score();
+    match_result_record_competition_score();
     __atomic_store_n(&pause_top_menu_transition_tick, armGetSystemTick(),
                      __ATOMIC_RELEASE);
     debugPrintf("result-exit-v3: dispatch exit window=%p page=%u "
@@ -15261,7 +15406,9 @@ const char *pes_controller_match_result_card_label(uint32_t index) {
     case MATCH_RESULT_ACTION_GAME_PLAN:
       return "GAME PLAN";
     case MATCH_RESULT_ACTION_BACK_TO_MENU:
-      return match_result_cup_finished() ? "BACK TO CUP" : "TOP TO MENU";
+      return competition_frontend_cup_match_active() ? "BACK TO CUP" :
+             competition_frontend_league_match_active() ? "BACK TO LEAGUE" :
+             "TOP TO MENU";
     default:
       return "";
   }
@@ -18125,6 +18272,10 @@ void install_ue4_hooks(so_module *module) {
       "_ZNK5match6output13StatsTeamInfo8GetScoreE8HalfKind");
   pause_stats_data = (void *)so_find_addr_rx(module,
       "_ZNK5match6output13StatsTeamInfo7GetDataENS0_13StatsDataKindE8HalfKind");
+  pause_stats_player = (void *)so_find_addr_rx(module,
+      "_ZNK5match6output14StatsMatchInfo13GetPlayerInfoE8HomeAway8MemberId");
+  pause_player_data = (void *)so_find_addr_rx(module,
+      "_ZNK5match6output15StatsPlayerInfo7GetDataENS0_13StatsDataKindE8HalfKind");
   pause_stats_control = (void *)so_find_addr_rx(module,
       "_ZNK5match6output14StatsMatchInfo14GetControlRateE8HomeAway8HalfKind");
   const char *stats_symbols[2] = {

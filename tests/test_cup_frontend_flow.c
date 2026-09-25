@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "competition_frontend.h"
 #include "exhibition_team_catalog.h"
@@ -39,6 +40,8 @@ int main(void) {
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   assert(competition_frontend_cup_draft());
+  assert(competition_frontend_item_count() == 4u);
+  assert(strcmp(competition_frontend_item_label(0u), "TEAMS") == 0);
   assert(!competition_frontend_item_enabled(1u));
   assert(competition_frontend_item_enabled(0u));
 
@@ -59,14 +62,14 @@ int main(void) {
   press(BUTTON_Y); /* mark source slot */
   assert(competition_frontend_cup_bracket_swap_source() == 0u);
   press(BUTTON_DOWN);
-  press(BUTTON_Y); /* exchange complete team+owner entries */
+  press(BUTTON_A); /* place source: exchange complete team+owner entries */
   assert(competition_frontend_cup_bracket_swap_source() == UINT32_MAX);
   assert(competition_frontend_cup_draft()->teams[1] == manual_team);
   assert(competition_frontend_cup_draft()->owners[1] == 1u);
   assert(competition_frontend_cup_tournament()->history_count == 0u);
   press(BUTTON_Y);
   press(BUTTON_UP);
-  press(BUTTON_Y); /* restore source for the save test */
+  press(BUTTON_A); /* restore source for the save test */
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
   press(BUTTON_A);
   assert(competition_frontend_cup_team_picker_active());
@@ -142,7 +145,7 @@ int main(void) {
   press(BUTTON_Y); /* P1 cannot be moved to the sole opening bye. */
   press(BUTTON_DOWN);
   press(BUTTON_DOWN);
-  press(BUTTON_Y);
+  press(BUTTON_A);
   assert(competition_frontend_cup_opening_rule_popup());
   assert(competition_frontend_cup_draft()->owners[0] == 1u);
   assert(competition_frontend_cup_draft()->owners[2] == 0u);
@@ -152,8 +155,10 @@ int main(void) {
   assert(!competition_frontend_cup_team_picker_active());
   press(BUTTON_UP);
   press(BUTTON_UP);
-  press(BUTTON_Y); /* cancel the pending swap */
-  press(BUTTON_B);
+  press(BUTTON_B); /* cancel the pending swap */
+  assert(competition_frontend_cup_bracket_editing());
+  assert(competition_frontend_cup_bracket_swap_source() == UINT32_MAX);
+  press(BUTTON_B); /* leave Teams */
   press(BUTTON_RIGHT);
   for (uint32_t match = 0; match < 2u; match++) {
     press(BUTTON_A);
@@ -166,7 +171,8 @@ int main(void) {
     competition_frontend_cup_match_result(1u, 0u);
     assert(!competition_frontend_cup_take_champion_presentation());
     competition_frontend_cup_restore_after_match();
-    assert(!competition_frontend_item_enabled(0u));
+    if (!competition_frontend_cup_tournament()->champion)
+      assert(!competition_frontend_item_enabled(0u));
     if (competition_frontend_cup_tournament()->champion) {
       assert(competition_frontend_cup_take_champion_presentation());
       assert(!competition_frontend_cup_take_champion_presentation());
@@ -176,16 +182,22 @@ int main(void) {
   }
   assert(competition_frontend_cup_tournament()->champion);
   assert(competition_frontend_cup_view_round() == 1u);
-  assert(competition_frontend_focus() == 4u);
+  assert(competition_frontend_focus() == 0u);
+  assert(competition_frontend_item_count() == 1u);
   assert(!competition_frontend_item_enabled(1u));
   assert(!competition_frontend_item_label(1u)[0]);
-  for (uint32_t action = 0; action < 4u; action++) {
+  for (uint32_t action = 1u; action < 5u; action++) {
     assert(!competition_frontend_item_enabled(action));
     assert(!competition_frontend_item_label(action)[0]);
   }
-  assert(competition_frontend_item_enabled(4u));
+  assert(competition_frontend_item_enabled(0u));
+  assert(strcmp(competition_frontend_item_label(0u), "TOP TO MENU") == 0);
+  press(BUTTON_B); /* completed Cup can only be confirmed with A */
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   press(BUTTON_LEFT);
-  assert(competition_frontend_focus() == 4u);
+  assert(competition_frontend_focus() == 0u);
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_NONE);
 
   competition_frontend_close();
   competition_frontend_finish_close();
@@ -382,7 +394,7 @@ int main(void) {
   competition_frontend_cup_restore_after_match();
   assert(competition_frontend_cup_tournament()->champion);
   assert(competition_frontend_cup_view_round() == 1u);
-  assert(competition_frontend_focus() == 4u);
+  assert(competition_frontend_focus() == 0u);
   assert(competition_frontend_cup_take_champion_presentation());
   puts("Cup frontend flow tests passed");
   return 0;
