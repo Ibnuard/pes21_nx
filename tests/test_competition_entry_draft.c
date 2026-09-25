@@ -8,7 +8,7 @@ static void mapping(uint32_t teams) {
   CompetitionEntryDraft draft;
   assert(competition_draft_init(&draft, teams, 2u, 0x26u));
   uint32_t seen[COMPETITION_DRAFT_MAX_TEAMS] = {0};
-  uint32_t opening = 2u;
+  uint32_t opening = 1u;
   while (opening * 2u < teams) opening *= 2u;
   for (uint32_t fixture = 0; fixture < opening; fixture++) {
     for (uint32_t side = 0; side < 2u; side++) {
@@ -61,6 +61,7 @@ static void fill_and_shuffle(void) {
 }
 
 int main(void) {
+  mapping(2u);
   mapping(3u);
   mapping(4u);
   mapping(8u);

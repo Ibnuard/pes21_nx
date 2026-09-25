@@ -114,6 +114,7 @@ int main(void) {
   CupSaveState state;
   assert(cup_save_read(0u, &state));
   assert(state.game_time == 5u && state.injuries && state.var_enabled);
+  assert(state.cup_select == 6u); /* old custom Cup moves to final choice */
   assert(!state.home_away && !state.third_place);
   assert(state.tournament.fixtures[0][0].winner == 101u);
   assert(cup_save_write(0u, &state));
@@ -138,6 +139,64 @@ int main(void) {
             folder = Path(temp)
             program = folder / "cup-save-v1.c"
             binary = folder / "cup-save-v1.exe"
+            program.write_text(source, encoding="utf-8")
+            subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            "-I", str(ROOT / "source"), str(program),
+                            str(ROOT / "source/cup_save.c"), "-o", str(binary)],
+                           check=True)
+            subprocess.run([str(binary)], cwd=folder, check=True)
+
+    def test_version_two_selector_migrates_to_seven_cups(self):
+        compiler = shutil.which("gcc")
+        if not compiler:
+            self.skipTest("Host C compiler unavailable")
+        source = r"""
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include "cup_save.h"
+typedef struct { uint32_t magic, version, size, sequence, checksum; } Header;
+static uint32_t checksum(const void *input, size_t length) {
+  const uint8_t *bytes = (const uint8_t *)input;
+  uint32_t hash = 2166136261u;
+  for (size_t i = 0; i < length; i++) {
+    hash ^= bytes[i]; hash *= 16777619u;
+  }
+  return hash;
+}
+static void old_save(uint32_t slot, uint32_t old_selector) {
+  CupSaveState old = {0};
+  old.cup_select = old_selector;
+  Header header = {0x32584346u, 2u, sizeof(old), 1u,
+                   checksum(&old, sizeof(old))};
+  char path[64];
+  snprintf(path, sizeof(path), "SaveData/footballnx_cup_%u_a.bin", slot + 1u);
+  FILE *file = fopen(path, "wb");
+  assert(file);
+  assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header));
+  assert(fwrite(&old, 1, sizeof(old), file) == sizeof(old));
+  assert(fclose(file) == 0);
+}
+int main(void) {
+  assert(mkdir("SaveData", 0777) == 0);
+  old_save(0u, 1u); /* FA Cup */
+  old_save(1u, 3u); /* Copa del Rey */
+  old_save(2u, 9u); /* Retired Copa Chile remains a playable custom Cup */
+  CupSaveState state;
+  assert(cup_save_read(0u, &state) && state.cup_select == 0u);
+  assert(cup_save_read(1u, &state) && state.cup_select == 1u);
+  assert(cup_save_read(2u, &state) && state.cup_select == 6u);
+  assert(cup_save_write(2u, &state));
+  assert(cup_save_read(2u, &state) && state.cup_select == 6u);
+  return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            program = folder / "cup-save-v2.c"
+            binary = folder / "cup-save-v2.exe"
             program.write_text(source, encoding="utf-8")
             subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
                             "-I", str(ROOT / "source"), str(program),

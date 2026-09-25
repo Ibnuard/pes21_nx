@@ -85,6 +85,8 @@ uint32_t competition_frontend_cup_bracket_slot_focus(void);
 uint32_t competition_frontend_cup_bracket_swap_source(void);
 int competition_frontend_cup_bracket_editable(void);
 const char *competition_frontend_cup_name(void);
+uint32_t competition_frontend_cup_catalog_index(void);
+const char *competition_frontend_cup_logo_file(void);
 const char *competition_frontend_cup_round_name(uint32_t round);
 int competition_frontend_cup_next_fixture(uint32_t *round, uint32_t *index);
 int competition_frontend_cup_match_teams(uint32_t *home, uint32_t *away);
@@ -108,6 +110,7 @@ int competition_frontend_cup_third_place(void);
 int competition_frontend_cup_extra_time(void);
 int competition_frontend_cup_penalty(void);
 int competition_frontend_cup_match_active(void);
+int competition_frontend_cup_take_champion_presentation(void);
 void competition_frontend_cup_handoff_result(int opened);
 void competition_frontend_cup_match_result(uint32_t home_goals,
                                            uint32_t away_goals);

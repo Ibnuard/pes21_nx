@@ -9,7 +9,8 @@
 #endif
 
 #define CUP_SAVE_MAGIC 0x32584346u /* FCX2 */
-#define CUP_SAVE_VERSION 2u
+#define CUP_SAVE_VERSION 3u
+#define CUP_SAVE_LEGACY_VERSION 2u
 
 typedef struct {
   uint32_t magic, version, payload_size, sequence, checksum;
@@ -53,10 +54,22 @@ static uint32_t cup_save_checksum(const void *payload, size_t size) {
   return hash;
 }
 
+/* v2's expanded selector stored custom, FA, Italia, Del Rey, then Cups
+ * removed from the visible catalog; v1 used only its first entries. Keep old brackets playable by
+ * interpreting a removed preset as unrestricted FootballNX Cup. */
+static uint32_t cup_save_migrate_selector(uint32_t old_index) {
+  switch (old_index) {
+    case 1u: return 0u; /* FA Cup */
+    case 3u: return 1u; /* Copa del Rey */
+    case 2u: return 2u; /* Coppa Italia */
+    default: return 6u; /* FootballNX or retired preset */
+  }
+}
+
 static void cup_save_migrate_v1(CupSaveState *state,
                                  const CupSaveStateV1 *old) {
   memset(state, 0, sizeof(*state));
-  state->cup_select = old->cup_select;
+  state->cup_select = cup_save_migrate_selector(old->cup_select);
   state->player_count = old->player_count;
   state->team_count = old->team_count;
   state->com_level = old->com_level;
@@ -114,7 +127,8 @@ static int cup_save_read_copy(uint32_t slot, uint32_t copy,
   const int has_header = fread(&header, 1, sizeof(header), stream) ==
                          sizeof(header);
   if (!has_header || header.magic != CUP_SAVE_MAGIC ||
-      !((header.version == CUP_SAVE_VERSION &&
+      !(((header.version == CUP_SAVE_VERSION ||
+          header.version == CUP_SAVE_LEGACY_VERSION) &&
          header.payload_size == sizeof(CupSaveState)) ||
         (header.version == 1u &&
          header.payload_size == sizeof(CupSaveStateV1)))) {
@@ -136,8 +150,12 @@ static int cup_save_read_copy(uint32_t slot, uint32_t copy,
   out->sequence = header.sequence;
   if (header.version == 1u)
     cup_save_migrate_v1(&out->state, &payload.old);
-  else
+  else {
     out->state = payload.current;
+    if (header.version == CUP_SAVE_LEGACY_VERSION)
+      out->state.cup_select =
+          cup_save_migrate_selector(out->state.cup_select);
+  }
   return 1;
 }
 

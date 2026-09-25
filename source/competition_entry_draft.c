@@ -13,7 +13,7 @@ static uint32_t draft_roll(CompetitionEntryDraft *draft) {
 
 int competition_draft_init(CompetitionEntryDraft *draft, uint32_t team_count,
                            uint32_t player_count, uint32_t seed) {
-  if (!draft || team_count < 3u ||
+  if (!draft || team_count < 2u ||
       team_count > COMPETITION_DRAFT_MAX_TEAMS || !player_count ||
       player_count > COMPETITION_DRAFT_MAX_PLAYERS ||
       player_count > team_count)
@@ -129,7 +129,7 @@ int competition_draft_shuffle(CompetitionEntryDraft *draft) {
 uint32_t competition_draft_fixture_slot(const CompetitionEntryDraft *draft,
                                          uint32_t fixture, uint32_t side) {
   if (!draft || !draft->team_count || side > 1u) return UINT32_MAX;
-  uint32_t opening = 2u;
+  uint32_t opening = 1u;
   while (opening * 2u < draft->team_count) opening *= 2u;
   const uint32_t pairs = draft->team_count - opening;
   if (fixture >= opening || (side && fixture >= pairs)) return UINT32_MAX;
@@ -140,7 +140,7 @@ int competition_draft_slot_fixture(const CompetitionEntryDraft *draft,
                                     uint32_t slot, uint32_t *fixture,
                                     uint32_t *side) {
   if (!draft || slot >= draft->team_count) return 0;
-  uint32_t opening = 2u;
+  uint32_t opening = 1u;
   while (opening * 2u < draft->team_count) opening *= 2u;
   for (uint32_t i = 0; i < opening; i++) {
     for (uint32_t s = 0; s < 2u; s++) {

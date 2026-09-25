@@ -287,7 +287,7 @@ Batas awal yang direkomendasikan adalah 1 sampai 8 logical player slot, dibatasi
 
 Untuk FootballNX Cup custom:
 
-- Minimum 3 tim.
+- Minimum 2 tim (final langsung, tanpa bye).
 - Maximum v1: 32 tim.
 - Tim harus unique.
 - Semua tim harus eligible untuk Cup.
@@ -474,14 +474,134 @@ mensimulasikan laga COM yang tersisa. Pembacaan pemenang adu penalti native
 masih perlu diverifikasi di hardware; skor imbang belum cukup untuk menentukan
 pemenang PK secara otoritatif.
 
-Audit target mobile lokal menemukan simbol native
-`FixDemoInfo::IsEndingCupLiftCut`, `ModeInfo::IsChampionDecideMatch`, dan
-`Record::UpdateTrophy`, jadi jalur kode terkait cutscene/rekaman piala memang
-ada di library. Namun Cup custom saat ini memulai final lewat bootstrap
-`MyClub/TutorialMatch` Exhibition/2P, belum mengirim konteks native
-championship. Keberadaan aset animasi yang diperlukan dan aktivasi cutscene
-di target mobile ini belum terverifikasi; jangan menjanjikan animasi angkat
-piala sebelum audit flag mode, aset, dan uji final di runtime.
+Audit offline target mobile lokal (2026-09-24) membedakan simbol yang masih
+tersisa dari fitur yang benar-benar aktif. Implementasi
+`ModeInfo::IsCup`, `ModeInfo::IsKnockOutStage`,
+`ModeInfo::IsChampionDecideMatch`, dan
+`FixDemoInfo::IsEndingCupLiftCut` masing-masing hanya `mov w0, wzr; ret`,
+sehingga selalu mengembalikan false. `GoalDemo::IsWinMatchEffect` memanggil
+`IsChampionDecideMatch`, tetapi tidak akan mendapat sinyal final penentu juara
+dari implementasi mobile ini. `Record::UpdateTrophy` berisi kode nyata, namun
+itu bukan bukti bahwa adegan pengangkatan piala terpanggil. Audit indeks aset
+harus masuk ke CPK bersarang: `dt220_mobile_all.cpk` memuat skeleton/model
+`cup_*` dan `trophy_*`, sementara `dt230_mobile_all.cpk` memuat animasi
+`base_d_end_cup_*` serta `trophy_*`. Jadi sebagian aset pengangkatan piala
+memang ada di input lokal, meski kelengkapan scene, kamera, dan pemetaan
+kompetisinya belum terbukti.
+
+Audit lanjutan tanpa emulator (2026-09-25) menemukan hambatan yang lebih
+spesifik untuk adegan 3D native pada target ini: `fixdemo::DB::Init()` hanya
+`ret`, dan `FixDemoMatch::SetSceneId()` serta
+`FixDemoResult::SetSceneId()` juga tidak mengisi scene. Indeks
+`dt220_mobile_all.cpk` mempunyai 458 file `.fdc`, tetapi untuk bagian akhir
+pertandingan hanya ada cut penalti dan kamera result mobile; tidak ada cut
+Cup-lift. Animasi karakter/piala di `dt230` dengan demikian belum membentuk
+adegan lengkap yang aman dipanggil. Jangan mengubah predicate Cup menjadi
+true secara global atau memanggil `FixDemoMatch::Create` dengan ID tebak-tebakan:
+jalur itu berpotensi memuat scene kosong saat final. Aset proprietary tetap
+dibaca hanya dari input lokal untuk audit, tidak disalin ke public tree.
+
+Sebagai fallback yang dapat diuji offline, Cup Hub menandai kemenangan final
+oleh tim player satu kali lalu menganimasikan sprite piala naik dengan burst
+konfeti ringan pada halaman Champion. Presentasi ini tidak mengunggah tekstur
+ulang per frame dan tidak diputar ketika membuka completed save. Candidate NRO
+dibangun terpisah di `local-debug/cup-presentation-build/`; belum diklaim
+teruji secara visual di Switch. Jalur 3D tetap memerlukan cut/scene definition
+dan pemetaan kompetisi yang benar dari sumber yang sah sebelum diaktifkan.
+
+Cup custom juga memulai final lewat bootstrap `MyClub/TutorialMatch`
+Exhibition/2P, bukan konteks native championship. Jadi animasi angkat piala
+native tidak dapat diaktifkan hanya dengan mengubah label Cup atau menyalakan
+satu flag. Uji ini sengaja offline tanpa emulator; belum ada bukti visual.
+Jika presentasi piala diperlukan, audit pemanggil scene native lebih lanjut
+atau buat presentasi project-authored yang terpisah dari hasil pertandingan
+native. Aset proprietary hasil ekstraksi tetap lokal dan tidak boleh masuk
+public tree.
+
+Eksperimen pemain 3D asli berikutnya memakai probe read-only pada jalur
+`MatchListener::MatchEndingDemo` dan `FixDemoMatch::Create`, hanya dalam build
+`-Diagnostics`. Hook PLT memverifikasi fingerprint target v5.3.0, meneruskan
+setiap panggilan ke fungsi asli, lalu mencatat ID scene, sisi tim, dan apakah
+objek demo berhasil dibuat (ini belum membuktikan kamera atau animasi tampil).
+Log dibatasi per pertandingan Cup dan tidak
+mengubah predicate, score, save, atau scene ID. Mainkan final Cup pada Switch
+tanpa emulator dan ambil hanya baris `cup-3d-probe` dari `debug.log` lokal;
+file log lengkap serta data proprietary tetap di luar public tree. Bila
+`native_creates=0` atau `created=0`, jangan paksa cutscene. Bila objek berhasil
+dibuat, petakan asset/camera/animasi yang dipakai sebelum
+merancang aktivasi Cup-lift yang hanya berlaku pada final.
+
+Uji Switch final dua tim (2026-09-25) mencapai skor 3-0 dan juara tim player.
+Selama beberapa detik sebelum halaman `MatchStatsResult`, HUD mendeteksi
+`cinematic=1` dan `fixdemo=1`, sesuai pengamatan satu pemain berlari. Namun
+probe PLT mencatat `ending_calls=0` dan `native_creates=0`, kemudian flow mobile
+berpindah ke `MatchResult`. Audit callsite pada target lokal menunjukkan
+`MatchTop` memanggil `MatchEndingDemo` melalui PLT, dan dua pemanggil
+`FixDemoMatch::Create` juga melalui PLT; tidak ada bukti adegan Cup-lift dibuat
+pada jalur tersebut. Angka nol tetap merupakan observasi cakupan hook, bukan
+bukti semua kemungkinan panggilan internal sudah tertutup.
+
+Probe `-Diagnostics` berikutnya juga mengamati
+`FixDemoResult::Create` (scene ID, sisi, keberhasilan) serta edge native
+`fixdemo` versus `outofplay`. Keduanya read-only dan dibatasi jumlah log per
+pertandingan. Tujuannya mengidentifikasi asal animasi pemain berlari sebelum
+memutuskan titik integrasi 3D; build ini tetap **tidak** menampilkan upacara
+angkat piala. Jangan menunda menu secara buta: scene Cup, kamera, dan animasi
+piala masih harus dipetakan terlebih dahulu.
+
+Log Switch berikutnya (2026-09-25) menunjukkan `FixDemoResult::Create`
+berhasil dua kali dengan scene ID `524289` dan side `2`: pertama sebelum
+`MatchStatsHalf`, kedua sebelum `MatchStatsResult`. Tidak ada panggilan yang
+tercatat ke `MatchEndingDemo` atau `FixDemoMatch::Create`; jadi dua objek
+result tersebut belum merupakan bukti cutscene angkat piala. Log berhenti
+setelah membuka `MatchResult`, sebelum ringkasan Cup final tercatat. Shortcut
+diagnostik L1+ZR+X dicabut: permintaan tombol masuk, tetapi timer native yang
+terbaca sudah melampaui target `2400.0` dan seluruh permintaan ditolak oleh
+pengaman. Satuan/skala timer pada jalur ini belum tervalidasi, sehingga
+melompatkannya secara paksa berisiko merusak transisi babak.
+
+Audit entry 3D berikutnya menemukan jalur native yang nyata, bukan sekadar
+helper UI: state 18 pada `MatchListener::MatchTop` memanggil
+`MatchListener::MatchEndingDemo`. State machine tersebut mengambil scene ID
+dan sisi tim dari `FixDemoInfo`, kemudian memanggil
+`FixDemoMatch::Create(sceneId, side)`. State ini tidak dimasuki pada log final
+Cup di atas. Handler `RecvMessageGameEnd` juga mempunyai cabang langsung ke
+state 21 (`MatchEnd`) pada jalur akhir pertandingan generik. Memaksa state
+18 tanpa scene ID yang valid tidak setara dengan
+memunculkan adegan juara dan dapat mengganggu transisi hasil pertandingan.
+
+String `SCENE_TROPHY`, `CUTID_CUP_LIFT`, `CUT_CUP_LIFT`, dan `TROPHY_LIFT`
+memang masih ada di `libUE4.so`, begitu pula logika penugasan pemain pada
+`FixDemoMatch::MakeHumanRequestEnding`. Namun konstruktor `fixdemo::DB`
+mengawali daftar scene dengan nilai kosong dan `DB::Init()` pada target ini
+langsung `ret`. Audit TOC lokal pada seluruh 24 CPK bersarang menemukan
+file `.fdc` hanya di `dt220_mobile_all.cpk` (458 file); cut akhir pertandingan
+yang cocok hanya `end_pk_lose_02/03`, `end_pk_win_01/02`, dan
+`result_001_mobile_st000_cam`. Tidak ada definisi cut Cup-lift, sedangkan
+`dt230_mobile_all.cpk` hanya menyediakan lima animasi
+`base_d_end_cup_*.gani`. Keberadaan simbol dan animasi adalah petunjuk kode
+bersama yang tersisa, **bukan** bukti bahwa scene lengkap dapat dipicu pada
+build mobile ini. Jalur aktivasi 3D baru layak dicoba setelah ada definisi
+scene, kamera, pemetaan animasi dan piala ke pemain asli, serta verifikasi
+runtime bahwa ID scene valid; jangan mengubah predicate Cup secara global.
+
+Pemeriksaan terakhir untuk percobaan cutscene 3D (2026-09-25):
+`FixDemoMatch::Create` dan `FixDemoResult::Create` hanya mengalokasikan objek,
+mengisi ID/sisi, lalu memanggil `FixDemoManager::Init()`. Fungsi `Init()`
+mengembalikan sukses tanpa memastikan cut Cup tersedia; jadi `created != null`
+dalam log tidak cukup untuk menyimpulkan bahwa scene, kamera, atau gerak piala
+berhasil dimuat. Indeks seluruh CPK bersarang masih tidak memuat file `.fdc`
+Cup-lift. Di `dt230_mobile_all.cpk` hanya ada lima `base_d_end_cup_*.gani`
+dan lima `trophy_*.gani`; itu aset animasi terpisah, bukan definisi cut
+lengkap. `main.obb` adalah ZIP berisi PAK utama; indeks nama sekitar 35 ribu
+aset UE4 dalam PAK itu tidak mempunyai path bernama Cup, trophy, atau
+champion. Indeks APK lokal juga tidak mempunyai aset dengan nama tersebut.
+Pencarian nama tidak menutup kemungkinan aset generik, tetapi tidak memberi
+jalur pemanggilan cut Cup yang dapat diverifikasi. Tidak dibuat build yang
+memaksa state 18 atau scene ID perkiraan,
+karena tanpa definisi cut yang valid percobaan tersebut dapat memutus transisi
+hasil final. Fallback 2D yang sudah teruji tetap aktif; implementasi pemain
+asli 3D belum berhasil pada target mobile lokal ini.
 
 Halaman result menampilkan:
 
@@ -1050,7 +1170,7 @@ Setiap milestone harus dibuild dengan command full-loose terbaru yang sudah lolo
 
 ### Edge cases
 
-- 3-team Cup.
+- 2-team Cup (final langsung) dan 3-team Cup (bye).
 - Number of players greater than two.
 - Number of players equal to number of teams.
 - No human team in current fixture.
@@ -1093,7 +1213,7 @@ tidak digambar bila upload gagal. FPS hardware tetap perlu diverifikasi.
 
 - New, Continue, dan tiga slot berjalan.
 - Semua setting tervalidasi.
-- 3+ custom teams didukung.
+- 2+ custom teams didukung.
 - Player assignment terdokumentasi.
 - Bracket tidak rusak setelah load.
 - Match result kembali ke bracket.

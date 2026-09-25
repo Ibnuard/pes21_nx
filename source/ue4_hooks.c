@@ -423,6 +423,21 @@ static void (*match_result_control_wait)(void *window, int waiting);
 static uint32_t match_result_extra_time_started;
 static void (*match_result_update_original)(void *window);
 static void **match_listener_instance;
+#ifdef DEBUG_LOG
+// Read-only Cup ceremony probe. The mobile target's Cup scene database is
+// absent, so this records the real ending-demo IDs instead of forcing one.
+static void (*cup_3d_probe_ending_original)(void *listener,
+                                            const void *context);
+static void *(*cup_3d_probe_create_original)(uint32_t scene_id,
+                                              uint32_t side);
+static void *(*cup_3d_probe_result_create_original)(uint32_t scene_id,
+                                                     uint32_t side);
+static uint32_t cup_3d_probe_ending_calls;
+static uint32_t cup_3d_probe_create_calls;
+static uint32_t cup_3d_probe_result_create_calls;
+static uint32_t cup_3d_probe_demo_edges;
+static __thread uint32_t cup_3d_probe_in_ending;
+#endif
 static uint32_t (*match_ball_position_broadcast_original)(
     void *camera, const float *blend, const uint32_t *home_away,
     float *target_position, float *zoom, uint32_t active);
@@ -10900,6 +10915,15 @@ static void main_menu_activate_cup_fixture(void) {
       competition_frontend_cup_team_is_human(away);
   const int started = two_humans ? main_menu_start_two_player_match()
                                  : main_menu_start_exhibition_match();
+#ifdef DEBUG_LOG
+  if (started) {
+    __atomic_store_n(&cup_3d_probe_ending_calls, 0u, __ATOMIC_RELEASE);
+    __atomic_store_n(&cup_3d_probe_create_calls, 0u, __ATOMIC_RELEASE);
+    __atomic_store_n(&cup_3d_probe_result_create_calls, 0u,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&cup_3d_probe_demo_edges, 0u, __ATOMIC_RELEASE);
+  }
+#endif
   competition_frontend_cup_handoff_result(started);
   if (started)
     debugPrintf("cup: match handoff HOME=%u AWAY=%u human-versus-human=%d\n",
@@ -12285,6 +12309,19 @@ static uint32_t match_demo_skip_main_common(
   const int enabled_before = unit && *((const uint8_t *)unit + 24) != 0;
   const uint32_t result = original ? original(unit, input, kind) : 0;
   const int enabled_after = unit && *((const uint8_t *)unit + 24) != 0;
+#ifdef DEBUG_LOG
+  if (enabled_before != enabled_after &&
+      competition_frontend_cup_match_active()) {
+    const uint32_t edge = __atomic_add_fetch(
+        &cup_3d_probe_demo_edges, 1u, __ATOMIC_RELAXED);
+    if (edge <= 32u)
+      debugPrintf("cup-3d-probe: demo edge=%u path=%s active=%u kind=%u\n",
+                  edge,
+                  owner_slot == &match_demo_skip_owner
+                      ? "fixdemo" : "outofplay",
+                  enabled_after != 0, kind);
+  }
+#endif
   if (!enabled_before && !enabled_after) {
     if (__atomic_load_n(owner_slot, __ATOMIC_ACQUIRE) == (uintptr_t)unit) {
       uintptr_t expected = (uintptr_t)unit;
@@ -14974,12 +15011,68 @@ static int match_result_cup_finished(void) {
        match_result_current_phase() == MATCH_PHASE_END);
 }
 
+#ifdef DEBUG_LOG
+static void pes_cup_3d_probe_ending(void *listener, const void *context) {
+  const int cup_match = competition_frontend_cup_match_active();
+  const uint32_t call = cup_match ? __atomic_add_fetch(
+      &cup_3d_probe_ending_calls, 1u, __ATOMIC_RELAXED) : 0u;
+  if (call && call <= 16u)
+    debugPrintf("cup-3d-probe: ending enter call=%u\n", call);
+  if (cup_match)
+    cup_3d_probe_in_ending++;
+  cup_3d_probe_ending_original(listener, context);
+  if (cup_match)
+    cup_3d_probe_in_ending--;
+  if (call && call <= 16u)
+    debugPrintf("cup-3d-probe: ending return call=%u\n", call);
+}
+
+static void *pes_cup_3d_probe_create(uint32_t scene_id, uint32_t side) {
+  void *demo = cup_3d_probe_create_original(scene_id, side);
+  if (competition_frontend_cup_match_active()) {
+    const uint32_t call = __atomic_add_fetch(
+        &cup_3d_probe_create_calls, 1u, __ATOMIC_RELAXED);
+    if (call <= 24u)
+      debugPrintf("cup-3d-probe: native create call=%u scene=%u side=%u "
+                  "from_ending=%u created=%u\n", call, scene_id, side,
+                  cup_3d_probe_in_ending != 0u, demo != NULL);
+  }
+  return demo;
+}
+
+static void *pes_cup_3d_probe_result_create(uint32_t scene_id,
+                                            uint32_t side) {
+  void *demo = cup_3d_probe_result_create_original(scene_id, side);
+  if (competition_frontend_cup_match_active()) {
+    const uint32_t call = __atomic_add_fetch(
+        &cup_3d_probe_result_create_calls, 1u, __ATOMIC_RELAXED);
+    if (call <= 24u)
+      debugPrintf("cup-3d-probe: result create call=%u scene=%u side=%u "
+                  "created=%u\n", call, scene_id, side, demo != NULL);
+  }
+  return demo;
+}
+#endif
+
 static void match_result_record_cup_score(void) {
   if (!match_result_cup_finished()) return;
   uint32_t home_goals = 0, away_goals = 0;
   if (pes_controller_pause_score(0, &home_goals) &&
-      pes_controller_pause_score(1, &away_goals))
+      pes_controller_pause_score(1, &away_goals)) {
     competition_frontend_cup_match_result(home_goals, away_goals);
+#ifdef DEBUG_LOG
+    const CupTournament *cup = competition_frontend_cup_tournament();
+    debugPrintf("cup-3d-probe: result home=%u away=%u champion=%u "
+                "ending_calls=%u native_creates=%u result_creates=%u "
+                "demo_edges=%u\n",
+                home_goals, away_goals, cup ? cup->champion : 0u,
+                __atomic_load_n(&cup_3d_probe_ending_calls, __ATOMIC_ACQUIRE),
+                __atomic_load_n(&cup_3d_probe_create_calls, __ATOMIC_ACQUIRE),
+                __atomic_load_n(&cup_3d_probe_result_create_calls,
+                                __ATOMIC_ACQUIRE),
+                __atomic_load_n(&cup_3d_probe_demo_edges, __ATOMIC_ACQUIRE));
+#endif
+  }
 }
 
 static void match_result_process_controller_input(void *window) {
@@ -18448,6 +18541,58 @@ void install_ue4_hooks(so_module *module) {
       "_ZN10menusystem12WindowMobile20SetControlWaitMobileEb");
   hook_arm64(result_full, (uintptr_t)&pes_match_result_full_hook);
   hook_arm64(result_half, (uintptr_t)&pes_match_result_half_hook);
+
+#ifdef DEBUG_LOG
+  // Optional, read-only hardware probe for native Cup presentation. These
+  // exact PLT fingerprints belong to the supported mobile v5.3.0 library;
+  // an unknown revision simply runs without the probe. The direct symbols
+  // remain unpatched so each wrapper can forward to the original function.
+  const uintptr_t cup_ending_plt =
+      (uintptr_t)module->load_base + 0x381e6e0;
+  const uintptr_t cup_create_plt =
+      (uintptr_t)module->load_base + 0x383dba0;
+  static const uint32_t cup_ending_plt_expected[4] = {
+      0xf002e570, 0xf942e611, 0x91172210, 0xd61f0220,
+  };
+  static const uint32_t cup_create_plt_expected[4] = {
+      0x9002e510, 0xf9401611, 0x9100a210, 0xd61f0220,
+  };
+  cup_3d_probe_ending_original = (void *)so_find_addr_rx(
+      module,
+      "_ZN9game_mode13MatchListener15MatchEndingDemoEPKN5cobra4game7ContextE");
+  cup_3d_probe_create_original = (void *)so_find_addr_rx(
+      module, "_ZN12FixDemoMatch6CreateEj8HomeAway");
+  if (cup_3d_probe_ending_original && cup_3d_probe_create_original &&
+      !memcmp((const void *)cup_ending_plt, cup_ending_plt_expected,
+              sizeof(cup_ending_plt_expected)) &&
+      !memcmp((const void *)cup_create_plt, cup_create_plt_expected,
+              sizeof(cup_create_plt_expected))) {
+    hook_arm64(cup_ending_plt, (uintptr_t)&pes_cup_3d_probe_ending);
+    hook_arm64(cup_create_plt, (uintptr_t)&pes_cup_3d_probe_create);
+    debugPrintf("cup-3d-probe: native ending hooks ready (read-only)\n");
+  } else {
+    debugPrintf("cup-3d-probe: unsupported native ending signature; "
+                "hooks skipped\n");
+  }
+  const uintptr_t cup_result_create_plt =
+      (uintptr_t)module->load_base + 0x39040c0;
+  static const uint32_t cup_result_create_plt_expected[4] = {
+      0x9002e1f0, 0xf9415e11, 0x910ae210, 0xd61f0220,
+  };
+  cup_3d_probe_result_create_original = (void *)so_find_addr_rx(
+      module, "_ZN13FixDemoResult6CreateEj8HomeAway");
+  if (cup_3d_probe_result_create_original &&
+      !memcmp((const void *)cup_result_create_plt,
+              cup_result_create_plt_expected,
+              sizeof(cup_result_create_plt_expected))) {
+    hook_arm64(cup_result_create_plt,
+               (uintptr_t)&pes_cup_3d_probe_result_create);
+    debugPrintf("cup-3d-probe: native result hook ready (read-only)\n");
+  } else {
+    debugPrintf("cup-3d-probe: unsupported native result signature; "
+                "hook skipped\n");
+  }
+#endif
 
   const uintptr_t result_update_runtime = so_find_addr_rx(
       module, "_ZN4menu19MatchResultMainMenu22UpdatePreControlWindowEv");

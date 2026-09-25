@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "exhibition_team_catalog.h"
+#include "fl26_cup_catalog_generated.h"
 #include "ue4_hooks.h"
 #include "cup_tournament.h"
 #include "cup_save.h"
@@ -32,7 +33,7 @@ static uint32_t frontend_closing;
 static char frontend_status[96];
 
 static uint32_t cup_player_count = 1;
-static uint32_t cup_team_count = 8;
+static uint32_t cup_team_count = 16;
 static uint32_t cup_select = 0;
 static uint32_t cup_com_level = 3;
 static uint32_t cup_home_away;
@@ -61,6 +62,7 @@ static uint32_t cup_pending_round;
 static uint32_t cup_pending_index;
 static uint32_t cup_match_active;
 static uint32_t cup_match_result_received;
+static uint32_t cup_champion_presentation_pending;
 static uint32_t cup_match_swapped;
 static uint32_t cup_bracket_stage;
 static uint32_t cup_bracket_page;
@@ -82,9 +84,10 @@ enum {
 };
 
 static uint32_t competition_bracket_stage_count(void) {
-  /* The last match stage shows semi-final -> final; champion gets a page. */
-  return cup_tournament.round_count >= 2u
-      ? cup_tournament.round_count : 0u;
+  /* The last match stage shows semi-final -> final; champion gets a page.
+   * A two-team Cup has a single Final, so add its Champion page explicitly. */
+  return cup_tournament.round_count == 1u ? 2u
+      : cup_tournament.round_count;
 }
 
 static uint32_t competition_bracket_stage_pages(uint32_t stage) {
@@ -134,6 +137,7 @@ static void competition_reset_cup_setup(void) {
   cup_bracket_page = 0;
   cup_match_active = 0;
   cup_match_result_received = 0;
+  cup_champion_presentation_pending = 0;
   memset(&cup_draft, 0, sizeof(cup_draft));
   cup_bracket_editing = 0;
   cup_opening_rule_popup = 0;
@@ -143,7 +147,7 @@ static void competition_reset_cup_setup(void) {
   cup_slots_saving = 0;
   cup_active_slot = UINT32_MAX;
   cup_player_count = 1;
-  cup_team_count = 8;
+  cup_team_count = 16;
   cup_select = 0;
   cup_com_level = 3;
   cup_home_away = 0;
@@ -169,21 +173,21 @@ static void competition_reset_cup_setup(void) {
 }
 
 static int competition_cup_is_custom(void) {
-  return cup_select == 0;
+  return cup_select == FL26_CUP_CUSTOM_INDEX;
 }
 
-static uint32_t competition_cup_fixed_team_count(void) {
-  /* English Cup is a 16-team knockout seeded from the eligible English
-   * category. The selector still exposes every club in that category, so a
-   * manually picked team can replace/swap into the sixteen-entry field. */
-  const uint32_t eligible = EXHIBITION_TEAM_CATEGORY_COUNT
-      ? exhibition_team_categories[0].team_count : 0u;
-  return eligible < 16u ? eligible : 16u;
+static const Fl26CupCatalogEntry *competition_cup_entry(void) {
+  return &fl26_cup_catalog[cup_select < FL26_CUP_CATALOG_COUNT
+                               ? cup_select : FL26_CUP_CUSTOM_INDEX];
 }
 
 static uint32_t competition_cup_effective_team_count(void) {
-  return competition_cup_is_custom() ? cup_team_count
-                                     : competition_cup_fixed_team_count();
+  return cup_team_count;
+}
+
+static uint32_t competition_cup_default_team_count(void) {
+  if (competition_cup_is_custom()) return 8u;
+  return cup_select == 5u ? 32u : 16u;
 }
 
 static int competition_cup_setting_visible(uint32_t row) {
@@ -197,7 +201,7 @@ static int competition_cup_teams_complete(void) {
 static int competition_cup_opening_has_player_match(
     const CompetitionEntryDraft *draft) {
   if (!draft || !draft->team_count) return 0;
-  uint32_t opening = 2u;
+  uint32_t opening = 1u;
   while (opening * 2u < draft->team_count) opening *= 2u;
   for (uint32_t fixture = 0; fixture < opening; fixture++) {
     const uint32_t home = competition_draft_fixture_slot(draft, fixture, 0u);
@@ -249,16 +253,11 @@ static uint32_t competition_item_count_for_state(void) {
 static int competition_team_is_allowed(uint32_t team_id) {
   if (!exhibition_team_catalog_find(team_id))
     return 0;
-  if (cup_select == 0)
+  if (competition_cup_is_custom())
     return 1;
-  /* Predefined cups are fixed participant pools.  The first catalog category
-   * is the authored English league set used by the reference cup. */
-  const ExhibitionTeamCategory *category =
-      EXHIBITION_TEAM_CATEGORY_COUNT ? &exhibition_team_categories[0] : NULL;
-  if (!category)
-    return 0;
-  for (uint32_t index = 0; index < category->team_count; index++)
-    if (category->teams[index] == team_id)
+  const Fl26CupCatalogEntry *cup = competition_cup_entry();
+  for (uint32_t index = 0; index < cup->pool_count; index++)
+    if (cup->team_ids[index] == team_id)
       return 1;
   return 0;
 }
@@ -266,6 +265,8 @@ static int competition_team_is_allowed(uint32_t team_id) {
 static uint32_t competition_cup_picker_count(void) {
   if (cup_team_picker_phase == 1)
     return competition_cup_is_custom() ? EXHIBITION_TEAM_CATEGORY_COUNT : 1u;
+  if (cup_team_picker_phase == 2 && !competition_cup_is_custom())
+    return competition_cup_entry()->pool_count;
   if (cup_team_picker_phase == 2 &&
       cup_team_picker_category < EXHIBITION_TEAM_CATEGORY_COUNT)
     return exhibition_team_categories[cup_team_picker_category].team_count;
@@ -288,12 +289,13 @@ static void competition_adjust_setting(int direction) {
     return;
   switch (frontend_focus) {
     case 0:
-      cup_select = (cup_select + 1u) % 2u;
-      if (!competition_cup_is_custom()) {
-        cup_player_count = 1;
-        cup_team_count = competition_cup_fixed_team_count();
-        cup_team_selected[0] = 0;
-      }
+      cup_select = direction > 0
+          ? (cup_select + 1u) % FL26_CUP_CATALOG_COUNT
+          : (cup_select + FL26_CUP_CATALOG_COUNT - 1u) %
+                FL26_CUP_CATALOG_COUNT;
+      cup_player_count = 1;
+      cup_team_selected[0] = 0;
+      cup_team_count = competition_cup_default_team_count();
       break;
     case 1:
       if (direction > 0) {
@@ -309,12 +311,20 @@ static void competition_adjust_setting(int direction) {
         cup_player_count = 1;
       break;
     case 2:
-      if (!competition_cup_is_custom())
+      if (!competition_cup_is_custom() && cup_select >= 3u)
         break;
-      if (direction > 0) {
+      if (!competition_cup_is_custom()) {
+        const uint32_t maximum = competition_cup_entry()->bracket_limit;
+        if (direction > 0)
+          cup_team_count = cup_team_count >= maximum ? 8u
+              : cup_team_count == 8u ? 16u : maximum;
+        else
+          cup_team_count = cup_team_count <= 8u ? maximum
+              : cup_team_count == maximum ? 16u : 8u;
+      } else if (direction > 0) {
         if (cup_team_count < 32)
           cup_team_count++;
-      } else if (cup_team_count > 3) {
+      } else if (cup_team_count > 2) {
         cup_team_count--;
       }
       if (cup_player_count > cup_team_count)
@@ -466,7 +476,7 @@ static void competition_rebuild_cup_bracket(void) {
   cup_tournament_valid = 0;
   memset(&cup_tournament, 0, sizeof(cup_tournament));
   if (!target) return;
-  uint32_t bracket_size = 4u;
+  uint32_t bracket_size = 2u;
   while (bracket_size < target) bracket_size <<= 1u;
   const uint32_t opening = bracket_size / 2u;
   cup_tournament.team_count = target;
@@ -531,12 +541,13 @@ static void competition_open_bracket(void) {
   cup_bracket_slot_focus = 0;
   cup_bracket_swap_source = UINT32_MAX;
   cup_first_match_started = 0;
+  cup_champion_presentation_pending = 0;
   competition_set_state(COMPETITION_FRONTEND_CUP_BRACKET, 0);
 }
 
 static int competition_cup_save_valid(const CupSaveState *save) {
-  return save && save->cup_select <= 1u &&
-      save->team_count >= 3u && save->team_count <= CUP_MAX_TEAMS &&
+  return save && save->cup_select < FL26_CUP_CATALOG_COUNT &&
+      save->team_count >= 2u && save->team_count <= CUP_MAX_TEAMS &&
       save->player_count >= 1u &&
       save->player_count <= COMPETITION_MAX_PLAYER_SLOTS &&
       save->player_count <= save->team_count && save->com_level <= 6u &&
@@ -552,7 +563,7 @@ static int competition_cup_save_valid(const CupSaveState *save) {
       save->draft.team_count == save->team_count &&
       save->draft.player_count == save->player_count &&
       save->tournament.team_count == save->team_count &&
-      save->tournament.bracket_size >= 4u &&
+      save->tournament.bracket_size >= 2u &&
       save->tournament.bracket_size <= CUP_MAX_TEAMS &&
       (!save->tournament_valid || competition_draft_ready(&save->draft));
 }
@@ -596,6 +607,7 @@ static int competition_load_cup_slot(uint32_t slot) {
   cup_bracket_swap_source = UINT32_MAX;
   cup_team_picker_active = 0;
   cup_match_active = 0;
+  cup_champion_presentation_pending = 0;
   competition_sync_human_teams();
   competition_bracket_view_active();
   competition_set_state(COMPETITION_FRONTEND_CUP_BRACKET,
@@ -640,11 +652,11 @@ static int competition_random_fill_cup(void) {
     for (uint32_t i = 0; i < EXHIBITION_TEAM_CATALOG_COUNT &&
                          count < COMPETITION_DRAFT_MAX_POOL; i++)
       pool[count++] = exhibition_team_catalog[i].team_id;
-  } else if (EXHIBITION_TEAM_CATEGORY_COUNT) {
-    const ExhibitionTeamCategory *category = &exhibition_team_categories[0];
-    for (uint32_t i = 0; i < category->team_count &&
+  } else {
+    const Fl26CupCatalogEntry *cup = competition_cup_entry();
+    for (uint32_t i = 0; i < cup->pool_count &&
                          count < COMPETITION_DRAFT_MAX_POOL; i++)
-      pool[count++] = category->teams[i];
+      pool[count++] = cup->team_ids[i];
   }
   if (!competition_draft_random_fill(&cup_draft, pool, count)) return 0;
   competition_rebuild_cup_bracket();
@@ -655,7 +667,8 @@ static void competition_open_cup_team_picker(void) {
   if (cup_first_match_started || !cup_bracket_editing) return;
   cup_bracket_swap_source = UINT32_MAX;
   cup_team_picker_active = 1;
-  cup_team_picker_category = 0;
+  cup_team_picker_category = competition_cup_is_custom()
+      ? 0u : competition_cup_entry()->category_index;
   /* Predefined cups go straight to their eligible league's team list. */
   cup_team_picker_phase = competition_cup_is_custom() ? 1u : 2u;
   cup_team_picker_focus = 0;
@@ -869,6 +882,7 @@ void competition_frontend_close(void) {
   frontend_skip_input_tick = 0;
   frontend_buttons_latched = 0;
   cup_opening_rule_popup = 0u;
+  cup_champion_presentation_pending = 0u;
   competition_clear_status();
 }
 
@@ -1013,7 +1027,7 @@ const char *competition_frontend_item_value(uint32_t index) {
   if (frontend_state == COMPETITION_FRONTEND_CUP_SETTINGS) {
     switch (index) {
       case 0:
-        return cup_select ? "ENGLISH CUP" : "FOOTBALLNX CUP";
+        return competition_cup_entry()->name;
       case 1:
         snprintf(value, sizeof(value), "%u", cup_player_count);
         return value;
@@ -1234,6 +1248,11 @@ uint32_t competition_frontend_cup_picker_visible_count(void) {
 }
 
 uint32_t competition_frontend_cup_picker_focused_team(void) {
+  if (cup_team_picker_phase == 2 && !competition_cup_is_custom()) {
+    const Fl26CupCatalogEntry *cup = competition_cup_entry();
+    return cup_team_picker_focus < cup->pool_count
+        ? cup->team_ids[cup_team_picker_focus] : 0u;
+  }
   if (cup_team_picker_phase != 2 ||
       cup_team_picker_category >= EXHIBITION_TEAM_CATEGORY_COUNT)
     return 0u;
@@ -1244,6 +1263,8 @@ uint32_t competition_frontend_cup_picker_focused_team(void) {
 }
 
 const char *competition_frontend_cup_picker_title(void) {
+  if (!competition_cup_is_custom())
+    return competition_cup_entry()->name;
   return cup_team_picker_phase == 2 &&
                  cup_team_picker_category < EXHIBITION_TEAM_CATEGORY_COUNT
              ? exhibition_team_categories[cup_team_picker_category].label
@@ -1254,6 +1275,11 @@ const char *competition_frontend_cup_picker_label(uint32_t index) {
   if (cup_team_picker_phase == 1)
     return index < competition_cup_picker_count()
                ? exhibition_team_categories[index].label : "";
+  if (!competition_cup_is_custom()) {
+    const Fl26CupCatalogEntry *cup = competition_cup_entry();
+    return index < cup->pool_count
+        ? exhibition_team_catalog_name(cup->team_ids[index]) : "";
+  }
   if (cup_team_picker_category >= EXHIBITION_TEAM_CATEGORY_COUNT)
     return "";
   const ExhibitionTeamCategory *category =
@@ -1266,6 +1292,11 @@ uint32_t competition_frontend_cup_picker_badge(uint32_t index) {
   if (cup_team_picker_phase == 1)
     return index < competition_cup_picker_count()
                ? exhibition_team_categories[index].badge_slot : 0u;
+  if (!competition_cup_is_custom()) {
+    const Fl26CupCatalogEntry *cup = competition_cup_entry();
+    return index < cup->pool_count
+        ? exhibition_team_catalog_badge(cup->team_ids[index]) : 0u;
+  }
   if (cup_team_picker_category >= EXHIBITION_TEAM_CATEGORY_COUNT)
     return 0u;
   const ExhibitionTeamCategory *category =
@@ -1366,7 +1397,15 @@ uint32_t competition_frontend_cup_view_page_index(void) {
 }
 
 const char *competition_frontend_cup_name(void) {
-  return cup_select ? "ENGLISH CUP" : "FOOTBALLNX CUP";
+  return competition_cup_entry()->name;
+}
+
+uint32_t competition_frontend_cup_catalog_index(void) {
+  return cup_select;
+}
+
+const char *competition_frontend_cup_logo_file(void) {
+  return competition_cup_entry()->logo_file;
 }
 
 const char *competition_frontend_cup_round_name(uint32_t round) {
@@ -1449,6 +1488,14 @@ int competition_frontend_cup_penalty(void) {
 }
 int competition_frontend_cup_match_active(void) { return cup_match_active != 0; }
 
+int competition_frontend_cup_take_champion_presentation(void) {
+  if (frontend_state != COMPETITION_FRONTEND_CUP_BRACKET ||
+      !cup_champion_presentation_pending)
+    return 0;
+  cup_champion_presentation_pending = 0;
+  return 1;
+}
+
 void competition_frontend_cup_handoff_result(int opened) {
   if (opened) {
     cup_first_match_started = 1;
@@ -1458,6 +1505,7 @@ void competition_frontend_cup_handoff_result(int opened) {
       competition_save_cup_slot(cup_active_slot);
     cup_match_active = 1;
     cup_match_result_received = 0;
+    cup_champion_presentation_pending = 0;
     frontend_state = COMPETITION_FRONTEND_NONE;
     frontend_focus = 0;
     frontend_closing = 0;
@@ -1480,6 +1528,8 @@ void competition_frontend_cup_match_result(uint32_t home_goals,
                              cup_pending_index, home_goals, away_goals))
     return;
   cup_match_result_received = 1;
+  cup_champion_presentation_pending = cup_tournament.champion &&
+      competition_frontend_cup_team_is_human(cup_tournament.champion);
   competition_bracket_view_active();
   if (cup_active_slot < COMPETITION_SAVE_SLOT_COUNT)
     competition_save_cup_slot(cup_active_slot);

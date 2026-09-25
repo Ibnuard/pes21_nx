@@ -44,6 +44,23 @@ static void com_waits_for_player(void) {
   assert(cup.history_count == 4u);
 }
 
+static void two_team_final_has_no_bye_or_second_leg(void) {
+  const uint32_t ids[2] = {710u, 711u};
+  CupTournament cup;
+  assert(cup_tournament_init(&cup, ids, 2u, ids, 1u, 0x60u));
+  cup_tournament_set_rules(&cup, 1, 1);
+  assert(cup.bracket_size == 2u && cup.round_count == 1u);
+  assert(!cup.third_place_enabled);
+  assert(cup_tournament_fixture_count(&cup, 0u) == 1u);
+  assert(cup.fixtures[0][0].home == ids[0]);
+  assert(cup.fixtures[0][0].away == ids[1]);
+  assert(!cup.fixtures[0][0].complete);
+  assert(cup_tournament_record(&cup, 0u, 0u, 2u, 0u));
+  assert(cup.champion == ids[0]);
+  assert(cup.history_count == 1u);
+  assert(!cup.fixtures[0][0].first_leg_complete);
+}
+
 static void com_waits_for_all_human_fixtures(void) {
   uint32_t ids[8];
   for (uint32_t i = 0; i < 8u; i++) ids[i] = 300u + i;
@@ -119,10 +136,12 @@ static void home_away_and_bronze_before_final(void) {
 }
 
 int main(void) {
+  run_size(2u);
   run_size(3u);
   run_size(7u);
   run_size(20u);
   run_size(32u);
+  two_team_final_has_no_bye_or_second_leg();
   com_waits_for_player();
   com_waits_for_all_human_fixtures();
   future_final_is_unresolved_not_bye();

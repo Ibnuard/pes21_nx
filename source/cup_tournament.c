@@ -95,7 +95,7 @@ static void cup_complete(CupTournament *cup, uint32_t round, uint32_t index,
 int cup_tournament_init(CupTournament *cup, const uint32_t *participants,
                         uint32_t team_count, const uint32_t *human_teams,
                         uint32_t human_count, uint32_t seed) {
-  if (!cup || !participants || !human_teams || team_count < 3u ||
+  if (!cup || !participants || !human_teams || team_count < 2u ||
       team_count > CUP_MAX_TEAMS || human_count > 8u || !human_count)
     return 0;
   memset(cup, 0, sizeof(*cup));
@@ -104,7 +104,7 @@ int cup_tournament_init(CupTournament *cup, const uint32_t *participants,
   cup->human_count = human_count;
   memcpy(cup->human_teams, human_teams,
          human_count * sizeof(cup->human_teams[0]));
-  cup->bracket_size = 4u;
+  cup->bracket_size = 2u;
   while (cup->bracket_size < team_count)
     cup->bracket_size <<= 1u;
   for (uint32_t n = cup->bracket_size; n > 1u; n >>= 1u)

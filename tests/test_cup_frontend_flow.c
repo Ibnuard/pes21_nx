@@ -33,6 +33,7 @@ int main(void) {
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_LANDING);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SETTINGS);
+  press(BUTTON_LEFT); /* wrap from FA Cup to FootballNX Cup */
   for (uint32_t row = 0; row < 5u; row++) press(BUTTON_DOWN);
   assert(competition_frontend_focus() == 5u);
   press(BUTTON_A);
@@ -124,6 +125,7 @@ int main(void) {
   competition_frontend_pad_event(0u, 0u);
   press(BUTTON_A);
   press(BUTTON_A);
+  press(BUTTON_LEFT); /* FootballNX custom Cup */
   press(BUTTON_DOWN);
   press(BUTTON_DOWN);
   for (uint32_t i = 0; i < 5u; i++) press(BUTTON_LEFT);
@@ -162,9 +164,15 @@ int main(void) {
     assert(home && away);
     competition_frontend_cup_handoff_result(1);
     competition_frontend_cup_match_result(1u, 0u);
+    assert(!competition_frontend_cup_take_champion_presentation());
     competition_frontend_cup_restore_after_match();
     assert(!competition_frontend_item_enabled(0u));
-    if (competition_frontend_cup_tournament()->champion) break;
+    if (competition_frontend_cup_tournament()->champion) {
+      assert(competition_frontend_cup_take_champion_presentation());
+      assert(!competition_frontend_cup_take_champion_presentation());
+      break;
+    }
+    assert(!competition_frontend_cup_take_champion_presentation());
   }
   assert(competition_frontend_cup_tournament()->champion);
   assert(competition_frontend_cup_view_round() == 1u);
@@ -185,7 +193,7 @@ int main(void) {
   competition_frontend_pad_event(0u, 0u);
   press(BUTTON_A);
   press(BUTTON_A);
-  press(BUTTON_RIGHT); /* English Cup uses its eligible league pool. */
+  /* FA Cup is the first predefined choice and uses its eligible pool. */
   const uint32_t english_field =
       exhibition_team_categories[0].team_count < 16u
           ? exhibition_team_categories[0].team_count : 16u;
@@ -259,6 +267,7 @@ int main(void) {
   competition_frontend_pad_event(0u, 0u);
   press(BUTTON_A);
   press(BUTTON_A);
+  press(BUTTON_LEFT); /* FootballNX custom Cup */
   press(BUTTON_DOWN);
   press(BUTTON_DOWN);
   for (uint32_t i = 0; i < 4u; i++) press(BUTTON_LEFT); /* 8 -> 4 teams */
@@ -299,7 +308,7 @@ int main(void) {
   press(BUTTON_RIGHT);
   press(BUTTON_RIGHT);
   assert(competition_frontend_focus() == 3u);
-  press(BUTTON_A); /* persist new Cup and General rules in version 2 */
+  press(BUTTON_A); /* persist new Cup and General rules in version 3 */
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   competition_frontend_close();
@@ -314,6 +323,67 @@ int main(void) {
   assert(competition_frontend_cup_home_away());
   assert(competition_frontend_cup_third_place());
   assert(competition_frontend_cup_tournament()->third_place_enabled);
+
+  /* Two-team custom Cup is a playable Final, not a four-slot bye bracket.
+   * The Champion page and save/continue path must both accept one round. */
+  competition_frontend_close();
+  competition_frontend_finish_close();
+  competition_frontend_open_modes();
+  competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);
+  press(BUTTON_A);
+  press(BUTTON_LEFT); /* FootballNX custom Cup */
+  press(BUTTON_DOWN);
+  press(BUTTON_DOWN);
+  for (uint32_t i = 0; i < 6u; i++) press(BUTTON_LEFT);
+  assert(competition_frontend_cup_team_count() == 2u);
+  press(BUTTON_LEFT);
+  assert(competition_frontend_cup_team_count() == 2u);
+  while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
+  press(BUTTON_A);
+  assert(competition_frontend_cup_view_stage_count() == 2u);
+  assert(competition_frontend_cup_view_count() == 2u);
+  assert(competition_frontend_cup_view_round() == 0u);
+  assert(competition_frontend_cup_tournament()->round_count == 1u);
+  assert(competition_frontend_cup_tournament()->bracket_size == 2u);
+  press(BUTTON_A); /* edit Final entrants */
+  press(BUTTON_X);
+  assert(competition_draft_ready(competition_frontend_cup_draft()));
+  const CupFixture *quick_final = cup_tournament_fixture(
+      competition_frontend_cup_tournament(), 0u, 0u);
+  assert(quick_final && quick_final->home && quick_final->away);
+  assert(!quick_final->complete && !quick_final->winner);
+  press(BUTTON_B);
+  press(BUTTON_RIGHT);
+  press(BUTTON_RIGHT);
+  press(BUTTON_RIGHT); /* save two-team bracket */
+  assert(competition_frontend_focus() == 3u);
+  press(BUTTON_A);
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  competition_frontend_close();
+  competition_frontend_finish_close();
+  competition_frontend_open_modes();
+  competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);
+  press(BUTTON_DOWN);
+  press(BUTTON_A);
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  assert(competition_frontend_cup_tournament()->round_count == 1u);
+  assert(competition_frontend_cup_team_count() == 2u);
+  press(BUTTON_RIGHT);
+  assert(competition_frontend_focus() == 1u);
+  press(BUTTON_A);
+  assert(competition_frontend_take_action() ==
+         COMPETITION_ACTION_CUP_FIXTURE);
+  competition_frontend_cup_handoff_result(1);
+  competition_frontend_cup_match_result(2u, 0u);
+  competition_frontend_cup_restore_after_match();
+  assert(competition_frontend_cup_tournament()->champion);
+  assert(competition_frontend_cup_view_round() == 1u);
+  assert(competition_frontend_focus() == 4u);
+  assert(competition_frontend_cup_take_champion_presentation());
   puts("Cup frontend flow tests passed");
   return 0;
 }
