@@ -105,6 +105,9 @@ class GameplanEditorTests(unittest.TestCase):
             "typedef float GLfloat;\nstatic int screen_width=1280, screen_height=720;\n"
             '#include "efootball_font_atlas.h"',
             *[function(overlay, name) for name in (
+                "efootball_raster_level", "efootball_raster_height",
+                "efootball_raster_width", "efootball_raster_advances",
+                "measure_efootball_line_mode", "emit_efootball_line_mode",
                 "measure_efootball_line", "emit_efootball_line",
                 "emit_efootball_name_line", "gameplan_name_focus_seconds")],
             "static uint32_t kickoff_loading_armed, main_menu_2p_transition_kind, main_menu_2p_transition_active;\n"

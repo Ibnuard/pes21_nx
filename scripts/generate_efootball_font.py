@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate full-size and small-size eFootball font atlas rows."""
+"""Generate size-matched, supersampled eFootball font atlas rows."""
 
 from pathlib import Path
 
@@ -16,79 +16,61 @@ FONT_PATHS = (
 )
 OUTPUT_PATH = ROOT / "source" / "efootball_font_atlas.h"
 GLYPHS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-+:&./'"
-SCALE = 1
-CELL_W = 40 * SCALE
-CELL_H = 48 * SCALE
-FONT_SIZE = 40 * SCALE
-SIDE_MARGIN = 1 * SCALE
-SMALL_CELL_W = 20 * SCALE
-SMALL_CELL_H = 24 * SCALE
-SMALL_FONT_SIZE = 20 * SCALE
-SMALL_SIDE_MARGIN = 1 * SCALE
+CELL_W = 40
+CELL_H = 48
+SUPERSAMPLE = 4
+# The rows are grouped by font weight at each raster size. Keeping small
+# copies near their display size avoids a 3:1 GL_LINEAR minification of text.
+RASTERS = (
+    ("", 40, 48),
+    ("SMALL", 20, 24),
+    ("TINY", 15, 18),
+    ("MEDIUM", 30, 36),
+)
 
 
 def main() -> None:
-    fonts = tuple(ImageFont.truetype(str(path), FONT_SIZE) for path in FONT_PATHS)
-    small_fonts = tuple(
-        ImageFont.truetype(str(path), SMALL_FONT_SIZE) for path in FONT_PATHS
+    atlas = Image.new(
+        "L", (CELL_W * len(GLYPHS), CELL_H * len(FONT_PATHS) * len(RASTERS)), 0
     )
-    atlas = Image.new("L", (CELL_W * len(GLYPHS), CELL_H * len(fonts) * 2), 0)
-    draw = ImageDraw.Draw(atlas)
-    advances: list[list[int]] = []
-    small_advances: list[list[int]] = []
-
-    for weight, font in enumerate(fonts):
-        _, reference_top, _, reference_bottom = draw.textbbox((0, 0), "Ag", font=font)
-        baseline_y = (
-            weight * CELL_H
-            + (CELL_H - (reference_bottom - reference_top)) // 2
-            - reference_top
-        )
-        weight_advances: list[int] = []
-        for index, glyph in enumerate(GLYPHS):
-            left, _, _, _ = draw.textbbox((0, 0), glyph, font=font)
-            x = index * CELL_W + SIDE_MARGIN - left
-            draw.text((x, baseline_y), glyph, fill=255, font=font)
-            weight_advances.append(max(1, min(255, round(font.getlength(glyph)))))
-        advances.append(weight_advances)
-
-    # Small UI copy used to sample the 40x48 glyphs at roughly one third of
-    # their source size. Rasterize a second, hinted 20x24 set instead so the
-    # Switch only performs a modest reduction. Each small glyph occupies the
-    # upper-left 20x24 area of a normal 40x48 atlas column, leaving generous
-    # transparent padding between columns and rows.
-    for weight, font in enumerate(small_fonts):
-        row_y = (len(fonts) + weight) * CELL_H
-        _, reference_top, _, reference_bottom = draw.textbbox(
-            (0, 0), "Ag", font=font
-        )
-        baseline_y = (
-            row_y
-            + (SMALL_CELL_H - (reference_bottom - reference_top)) // 2
-            - reference_top
-        )
-        weight_advances = []
-        for index, glyph in enumerate(GLYPHS):
-            left, _, _, _ = draw.textbbox((0, 0), glyph, font=font)
-            x = index * CELL_W + SMALL_SIDE_MARGIN - left
-            draw.text((x, baseline_y), glyph, fill=255, font=font)
-            weight_advances.append(
-                max(1, min(255, round(font.getlength(glyph))))
-            )
-        small_advances.append(weight_advances)
+    advances: list[list[list[int]]] = []
+    for level, (_, width, height) in enumerate(RASTERS):
+        level_advances: list[list[int]] = []
+        for weight, path in enumerate(FONT_PATHS):
+            font = ImageFont.truetype(str(path), width * SUPERSAMPLE)
+            reference = Image.new("L", (1, 1))
+            reference_draw = ImageDraw.Draw(reference)
+            _, top, _, bottom = reference_draw.textbbox((0, 0), "Ag", font=font)
+            baseline = (height * SUPERSAMPLE - (bottom - top)) // 2 - top
+            weight_advances: list[int] = []
+            for index, glyph in enumerate(GLYPHS):
+                tile = Image.new(
+                    "L", (width * SUPERSAMPLE, height * SUPERSAMPLE), 0
+                )
+                draw = ImageDraw.Draw(tile)
+                left, _, _, _ = draw.textbbox((0, 0), glyph, font=font)
+                draw.text(
+                    (SUPERSAMPLE - left, baseline), glyph, fill=255, font=font
+                )
+                atlas.paste(
+                    tile.resize((width, height), Image.Resampling.LANCZOS),
+                    (index * CELL_W, (level * len(FONT_PATHS) + weight) * CELL_H),
+                )
+                weight_advances.append(
+                    max(1, min(255, round(font.getlength(glyph) / SUPERSAMPLE)))
+                )
+            level_advances.append(weight_advances)
+        advances.append(level_advances)
 
     pixels = list(atlas.getdata())
     rows = []
     for offset in range(0, len(pixels), 24):
         rows.append("  " + ", ".join(str(value) for value in pixels[offset:offset + 24]))
-    advance_rows = [
-        "  {" + ", ".join(str(value) for value in values) + "}"
-        for values in advances
-    ]
-    small_advance_rows = [
-        "  {" + ", ".join(str(value) for value in values) + "}"
-        for values in small_advances
-    ]
+    def advance_rows(level: int) -> str:
+        return ",\n".join(
+            "  {" + ", ".join(str(value) for value in values) + "}"
+            for values in advances[level]
+        )
 
     output = f'''/* Auto-generated by scripts/generate_efootball_font.py. */
 
@@ -99,28 +81,43 @@ def main() -> None:
 
 #define EFOOTBALL_FONT_CELL_W {CELL_W}
 #define EFOOTBALL_FONT_CELL_H {CELL_H}
-#define EFOOTBALL_FONT_SMALL_CELL_W {SMALL_CELL_W}
-#define EFOOTBALL_FONT_SMALL_CELL_H {SMALL_CELL_H}
+#define EFOOTBALL_FONT_SMALL_CELL_W {RASTERS[1][1]}
+#define EFOOTBALL_FONT_SMALL_CELL_H {RASTERS[1][2]}
+#define EFOOTBALL_FONT_TINY_CELL_W {RASTERS[2][1]}
+#define EFOOTBALL_FONT_TINY_CELL_H {RASTERS[2][2]}
+#define EFOOTBALL_FONT_MEDIUM_CELL_W {RASTERS[3][1]}
+#define EFOOTBALL_FONT_MEDIUM_CELL_H {RASTERS[3][2]}
 #define EFOOTBALL_FONT_GLYPHS "{GLYPHS}"
 #define EFOOTBALL_FONT_COUNT ((int)(sizeof(EFOOTBALL_FONT_GLYPHS) - 1))
 #define EFOOTBALL_FONT_COLS EFOOTBALL_FONT_COUNT
 #define EFOOTBALL_FONT_WEIGHTS 4
+#define EFOOTBALL_FONT_RASTER_LEVELS {len(RASTERS)}
 #define EFOOTBALL_FONT_LIGHT 0
 #define EFOOTBALL_FONT_REGULAR 1
 #define EFOOTBALL_FONT_BOLD 2
 #define EFOOTBALL_FONT_STENCIL 3
 #define EFOOTBALL_FONT_ATLAS_W (EFOOTBALL_FONT_CELL_W * EFOOTBALL_FONT_COLS)
-#define EFOOTBALL_FONT_ATLAS_ROWS (EFOOTBALL_FONT_WEIGHTS * 2)
+#define EFOOTBALL_FONT_ATLAS_ROWS (EFOOTBALL_FONT_WEIGHTS * EFOOTBALL_FONT_RASTER_LEVELS)
 #define EFOOTBALL_FONT_ATLAS_H (EFOOTBALL_FONT_CELL_H * EFOOTBALL_FONT_ATLAS_ROWS)
 
 static const uint8_t
     efootball_font_advance[EFOOTBALL_FONT_WEIGHTS][EFOOTBALL_FONT_COUNT] = {{
-{',\n'.join(advance_rows)}
+{advance_rows(0)}
 }};
 
 static const uint8_t
     efootball_font_small_advance[EFOOTBALL_FONT_WEIGHTS][EFOOTBALL_FONT_COUNT] = {{
-{',\n'.join(small_advance_rows)}
+{advance_rows(1)}
+}};
+
+static const uint8_t
+    efootball_font_tiny_advance[EFOOTBALL_FONT_WEIGHTS][EFOOTBALL_FONT_COUNT] = {{
+{advance_rows(2)}
+}};
+
+static const uint8_t
+    efootball_font_medium_advance[EFOOTBALL_FONT_WEIGHTS][EFOOTBALL_FONT_COUNT] = {{
+{advance_rows(3)}
 }};
 
 static const uint8_t

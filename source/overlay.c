@@ -273,7 +273,10 @@ static void atlas_ready(void) {
                efootball_font_atlas_alpha);
   glGenerateMipmap(GL_TEXTURE_2D);
   glBindTexture(GL_TEXTURE_2D, gl.badge_tex);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  // Club crests are drawn at roughly one third of their 128px atlas cell.
+  // Use the generated mip levels instead of shrinking only the base image.
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -291,7 +294,8 @@ static void atlas_ready(void) {
                team_rating_star_luminance);
   glGenerateMipmap(GL_TEXTURE_2D);
   glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -308,6 +312,11 @@ static void atlas_ready(void) {
 static int emit_line_advance(const char *text, int len, float x, float y,
                              float gw, float gh, float advance,
                              GLfloat *verts) {
+  const int level = gh <= 18.0f ? 2 : (gh <= 28.0f ? 1 : 0);
+  const float source_w = level == 2 ? FONT_TINY_CELL_W :
+                         level == 1 ? FONT_SMALL_CELL_W : FONT_CELL_W;
+  const float source_h = level == 2 ? FONT_TINY_CELL_H :
+                         level == 1 ? FONT_SMALL_CELL_H : FONT_CELL_H;
   int quads = 0;
   for (int j = 0; j < len; j++) {
     const char c = text[j];
@@ -320,13 +329,13 @@ static int emit_line_advance(const char *text, int len, float x, float y,
         ((float)((idx % FONT_COLS) * FONT_CELL_W) + 0.5f) /
         (float)FONT_ATLAS_W;
     const float v0 =
-        ((float)((idx / FONT_COLS) * FONT_CELL_H) + 0.5f) /
+        ((float)((idx / FONT_COLS + level) * FONT_CELL_H) + 0.5f) /
         (float)FONT_ATLAS_H;
     const float u1 =
-        ((float)(((idx % FONT_COLS) + 1) * FONT_CELL_W) - 0.5f) /
+        ((float)((idx % FONT_COLS) * FONT_CELL_W) + source_w - 0.5f) /
         (float)FONT_ATLAS_W;
     const float v1 =
-        ((float)(((idx / FONT_COLS) + 1) * FONT_CELL_H) - 0.5f) /
+        ((float)((idx / FONT_COLS + level) * FONT_CELL_H) + source_h - 0.5f) /
         (float)FONT_ATLAS_H;
     const float gx = x + j * advance;
     const float x0 = gx * 2.0f / (float)screen_width - 1.0f;
@@ -348,15 +357,42 @@ static int emit_line(const char *text, int len, float x, float y,
   return emit_line_advance(text, len, x, y, gw, gh, gw, verts);
 }
 
+static uint32_t efootball_raster_level(float gh, int full_resolution) {
+  if (full_resolution || gh > 35.0f) return 0u;
+  if (gh <= 17.0f) return 2u;
+  if (gh <= 23.0f) return 1u;
+  return 3u;
+}
+
+static float efootball_raster_height(uint32_t level) {
+  if (level == 1u) return (float)EFOOTBALL_FONT_SMALL_CELL_H;
+  if (level == 2u) return (float)EFOOTBALL_FONT_TINY_CELL_H;
+  if (level == 3u) return (float)EFOOTBALL_FONT_MEDIUM_CELL_H;
+  return (float)EFOOTBALL_FONT_CELL_H;
+}
+
+static float efootball_raster_width(uint32_t level) {
+  if (level == 1u) return (float)EFOOTBALL_FONT_SMALL_CELL_W;
+  if (level == 2u) return (float)EFOOTBALL_FONT_TINY_CELL_W;
+  if (level == 3u) return (float)EFOOTBALL_FONT_MEDIUM_CELL_W;
+  return (float)EFOOTBALL_FONT_CELL_W;
+}
+
+static const uint8_t *efootball_raster_advances(uint32_t level,
+                                                 uint32_t weight) {
+  if (level == 1u) return efootball_font_small_advance[weight];
+  if (level == 2u) return efootball_font_tiny_advance[weight];
+  if (level == 3u) return efootball_font_medium_advance[weight];
+  return efootball_font_advance[weight];
+}
+
 static float measure_efootball_line_mode(const char *text, int len, float gh,
                                          uint32_t weight, int full_resolution) {
   if (weight >= EFOOTBALL_FONT_WEIGHTS)
     weight = EFOOTBALL_FONT_REGULAR;
-  const int small = !full_resolution && gh <= 21.0f;
-  const uint8_t *advances = small ? efootball_font_small_advance[weight]
-                                  : efootball_font_advance[weight];
-  const float source_height = small ? (float)EFOOTBALL_FONT_SMALL_CELL_H
-                                    : (float)EFOOTBALL_FONT_CELL_H;
+  const uint32_t level = efootball_raster_level(gh, full_resolution);
+  const uint8_t *advances = efootball_raster_advances(level, weight);
+  const float source_height = efootball_raster_height(level);
   float width = 0.0f;
   for (int index = 0; index < len; index++) {
     if (text[index] == ' ') {
@@ -382,16 +418,13 @@ static int emit_efootball_line_mode(const char *text, int len,
                                     GLfloat *verts) {
   if (weight >= EFOOTBALL_FONT_WEIGHTS)
     weight = EFOOTBALL_FONT_REGULAR;
-  const int small = !full_resolution && gh <= 21.0f;
-  const float source_width = small ? (float)EFOOTBALL_FONT_SMALL_CELL_W
-                                   : (float)EFOOTBALL_FONT_CELL_W;
-  const float source_height = small ? (float)EFOOTBALL_FONT_SMALL_CELL_H
-                                    : (float)EFOOTBALL_FONT_CELL_H;
-  const uint8_t *advances = small ? efootball_font_small_advance[weight]
-                                  : efootball_font_advance[weight];
-  const uint32_t atlas_row = weight + (small ? EFOOTBALL_FONT_WEIGHTS : 0u);
+  const uint32_t level = efootball_raster_level(gh, full_resolution);
+  const float source_width = efootball_raster_width(level);
+  const float source_height = efootball_raster_height(level);
+  const uint8_t *advances = efootball_raster_advances(level, weight);
+  const uint32_t atlas_row = weight + level * EFOOTBALL_FONT_WEIGHTS;
   const float gw = gh * source_width / source_height;
-  const float draw_y = small ? floorf(y + 0.5f) : y;
+  const float draw_y = level == 1u || level == 2u ? floorf(y + 0.5f) : y;
   float pen_x = x;
   int quads = 0;
   for (int index = 0; index < len; index++) {
@@ -415,7 +448,8 @@ static int emit_efootball_line_mode(const char *text, int len,
     const float v1 =
         ((float)(atlas_row * EFOOTBALL_FONT_CELL_H) + source_height - 0.5f) /
         (float)EFOOTBALL_FONT_ATLAS_H;
-    const float draw_x = small ? floorf(pen_x + 0.5f) : pen_x;
+    const float draw_x = level == 1u || level == 2u
+                             ? floorf(pen_x + 0.5f) : pen_x;
     const float px0 = draw_x * 2.0f / (float)screen_width - 1.0f;
     const float px1 = (draw_x + gw) * 2.0f / (float)screen_width - 1.0f;
     const float py0 = 1.0f - draw_y * 2.0f / (float)screen_height;
@@ -1434,7 +1468,12 @@ static void prepare_gameplan_portraits(int active) {
           glGenTextures(1, &gl.player_portrait_texture[slot]);
         if (gl.player_portrait_texture[slot]) {
           glBindTexture(GL_TEXTURE_2D, gl.player_portrait_texture[slot]);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+          // These portraits are also used at small size in Top Scorer and
+          // Gameplan. Generate mips when the source is large enough to be
+          // downscaled; keep tiny source images on the base level.
+          const int use_mipmaps = width >= 96 && height >= 96;
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                          use_mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
                           GL_CLAMP_TO_EDGE);
@@ -1442,6 +1481,8 @@ static void prepare_gameplan_portraits(int active) {
                           GL_CLAMP_TO_EDGE);
           glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
                        GL_UNSIGNED_BYTE, pixels);
+          if (use_mipmaps)
+            glGenerateMipmap(GL_TEXTURE_2D);
           gl.player_portrait_id[slot] = portrait->portrait_id;
           gl.player_portrait_stamp[slot] = ++gl.player_portrait_clock;
         }
@@ -1499,12 +1540,16 @@ static void prepare_uniform_thumbnail_preview(int active) {
         glGenTextures(1, &gl.native_uniform_texture[side]);
       if (gl.native_uniform_texture[side]) {
         glBindTexture(GL_TEXTURE_2D, gl.native_uniform_texture[side]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        const int use_mipmaps = width >= 96 && height >= 96;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                        use_mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
                      GL_UNSIGNED_BYTE, pixels);
+        if (use_mipmaps)
+          glGenerateMipmap(GL_TEXTURE_2D);
         gl.native_uniform_width = width;
         gl.native_uniform_height = height;
         gl.native_uniform_valid_mask |= 1u << side;
@@ -1632,14 +1677,14 @@ static void league_emit_text(const char *line, float x, float y, float max_w,
   if (!line || !line[0] || max_w <= 0.0f) return;
   const int len = (int)strlen(line);
   float gh = glyph_h;
-  float width = measure_efootball_line_mode(line, len, gh, weight, 1);
+  float width = measure_efootball_line_mode(line, len, gh, weight, 0);
   while (width > max_w && gh > glyph_h * 0.76f) {
     gh *= 0.92f;
-    width = measure_efootball_line_mode(line, len, gh, weight, 1);
+    width = measure_efootball_line_mode(line, len, gh, weight, 0);
   }
   if (alignment == 1) x -= width * 0.5f;
   else if (alignment == 2) x -= width;
-  *quads += emit_efootball_line_mode(line, len, x, y, gh, weight, 1,
+  *quads += emit_efootball_line_mode(line, len, x, y, gh, weight, 0,
                                      verts + *quads * 24);
 }
 
@@ -2236,7 +2281,7 @@ static void league_hub_emit(LeagueHubRender *ui, GLfloat *verts, int *quads) {
         ui->helper_y - helper_text_h * 0.5f,
         0.190f * sw, helper_text_h, verts, quads);
     helper_x = label_x + measure_efootball_line_mode(labels[i],
-        (int)strlen(labels[i]), helper_text_h, EFOOTBALL_FONT_BOLD, 1) +
+        (int)strlen(labels[i]), helper_text_h, EFOOTBALL_FONT_BOLD, 0) +
         0.021f * sw;
   }
   ui->helper_count = *quads - ui->helper_first;
@@ -7227,7 +7272,9 @@ static void overlay_render(void) {
                                 : pause_settings_popup
                                     ? pes_controller_pause_settings_count()
                                     : pes_controller_custom_match_settings_count();
-    const uint32_t max_visible = 5u;
+    // The logo leaves room for four full-height settings rows. Cup has a
+    // fifth row, so keep the normal tile size and scroll to it on focus.
+    const uint32_t max_visible = cup_settings_popup ? 4u : 5u;
     const uint32_t visible_count = item_count < max_visible ? item_count : max_visible;
     const uint32_t focus = cup_settings_popup
                                ? competition_frontend_cup_setting_focus()
@@ -7254,13 +7301,11 @@ static void overlay_render(void) {
     const float row_w = panel_w - 0.080f * (float)screen_width;
     const float row_y0 = panel_y + header_h +
         (cup_settings_popup ? 0.247f : 0.030f) * (float)screen_height;
-    const float row_h = (cup_settings_popup ? 0.063f : 0.082f) *
-        (float)screen_height;
-    const float row_step = (cup_settings_popup ? 0.075f : 0.108f) *
+    const float row_h = 0.082f * (float)screen_height;
+    const float row_step = (cup_settings_popup ? 0.102f : 0.108f) *
         (float)screen_height;
     const float value_w = 0.205f * (float)screen_width;
-    const float value_h = (cup_settings_popup ? 0.047f : 0.058f) *
-        (float)screen_height;
+    const float value_h = 0.058f * (float)screen_height;
     const float value_x = panel_x + panel_w - 0.070f * (float)screen_width - value_w;
     const float button_gh = helper_text_gh;
     const float key_r = (pause_settings_popup ? 0.0225f : 0.021f) * screen_height;

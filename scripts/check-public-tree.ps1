@@ -57,6 +57,7 @@ $allowedLargeFiles = @(
   "data/league_hub_stadium.bin",
   "data/pes21_player_registry.json",
   "source/efootball_font_atlas.h",
+  "source/font_atlas.h",
   "source/team_select_background.h"
 )
 $allowedLargePrefixes = @("art/")

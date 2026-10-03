@@ -19,8 +19,8 @@ STROKE_WIDTH = 2
 
 def main() -> None:
     font = ImageFont.truetype(str(FONT_PATH), FONT_SIZE)
-    atlas = Image.new("L", (CELL_W * len(GLYPHS), CELL_H), 0)
-    draw = ImageDraw.Draw(atlas)
+    full_row = Image.new("L", (CELL_W * len(GLYPHS), CELL_H), 0)
+    draw = ImageDraw.Draw(full_row)
     # Use one shared baseline for every glyph. Centering each glyph vertically
     # made lowercase text uneven and placed dots in the middle of URLs.
     _, reference_top, _, reference_bottom = draw.textbbox(
@@ -41,6 +41,18 @@ def main() -> None:
             stroke_width=STROKE_WIDTH, stroke_fill=255
         )
 
+    atlas = Image.new("L", (CELL_W * len(GLYPHS), CELL_H * 3), 0)
+    atlas.paste(full_row, (0, 0))
+    for level, width, height in ((1, 16, 24), (2, 12, 18)):
+        for index in range(len(GLYPHS)):
+            glyph = full_row.crop(
+                (index * CELL_W, 0, (index + 1) * CELL_W, CELL_H)
+            )
+            atlas.paste(
+                glyph.resize((width, height), Image.Resampling.LANCZOS),
+                (index * CELL_W, level * CELL_H),
+            )
+
     pixels = list(atlas.getdata())
     rows = []
     for offset in range(0, len(pixels), 24):
@@ -55,11 +67,15 @@ def main() -> None:
 
 #define FONT_CELL_W {CELL_W}
 #define FONT_CELL_H {CELL_H}
+#define FONT_SMALL_CELL_W 16
+#define FONT_SMALL_CELL_H 24
+#define FONT_TINY_CELL_W 12
+#define FONT_TINY_CELL_H 18
 #define FONT_GLYPHS "{GLYPHS}"
 #define FONT_COUNT ((int)(sizeof(FONT_GLYPHS) - 1))
 #define FONT_COLS FONT_COUNT
 #define FONT_ATLAS_W (FONT_CELL_W * FONT_COLS)
-#define FONT_ATLAS_H FONT_CELL_H
+#define FONT_ATLAS_H (FONT_CELL_H * 3)
 
 static const uint8_t font_atlas_alpha[FONT_ATLAS_W * FONT_ATLAS_H] = {{
 {',\n'.join(rows)}

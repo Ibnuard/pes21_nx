@@ -233,10 +233,9 @@ static void test_profiles(void) {
   }
 }
 static void assert_glyph_geometry(const GLfloat *v, int count, float height, int clipped) {
-  const float source_w = height <= 21.0f ? EFOOTBALL_FONT_SMALL_CELL_W
-                                         : EFOOTBALL_FONT_CELL_W;
-  const float source_h = height <= 21.0f ? EFOOTBALL_FONT_SMALL_CELL_H
-                                         : EFOOTBALL_FONT_CELL_H;
+  const uint32_t level = efootball_raster_level(height, 0);
+  const float source_w = efootball_raster_width(level);
+  const float source_h = efootball_raster_height(level);
   const float expected_slope = ((source_w - 1.0f) / EFOOTBALL_FONT_ATLAS_W) /
       (height * source_w / source_h * 2.0f / screen_width);
   for (int i = 0; i < count; i++) {
@@ -255,6 +254,10 @@ static void assert_glyph_geometry(const GLfloat *v, int count, float height, int
   }
 }
 static void test_names(void) {
+  assert(efootball_raster_level(14.0f, 0) == 2u);
+  assert(efootball_raster_level(20.0f, 0) == 1u);
+  assert(efootball_raster_level(28.0f, 0) == 3u);
+  assert(efootball_raster_level(42.0f, 0) == 0u);
   const char *name = "Gianluigi Donnarumma";
   GLfloat start[2048], moving[2048];
   int n = emit_efootball_name_line("Messi", 5, 200, 100, 80, 15, 0, 0, 0, start);

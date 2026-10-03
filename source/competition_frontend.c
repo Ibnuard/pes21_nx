@@ -959,7 +959,7 @@ static void competition_focus_cup_slot(uint32_t slot) {
   }
 }
 
-static void competition_move_cup_action(int direction) {
+static void competition_move_hub_action(int direction) {
   const uint32_t count = competition_item_count_for_state();
   for (uint32_t attempt = 0; attempt < count; attempt++) {
     const uint32_t next = direction > 0
@@ -2332,7 +2332,7 @@ void competition_frontend_pad_event(uint32_t buttons,
       if (competition_random_fill_cup()) {
         cup_bracket_swap_source = UINT32_MAX;
         competition_focus_cup_slot(cup_bracket_slot_focus);
-        competition_set_status("REMAINING TEAMS ASSIGNED");
+        competition_clear_status();
       } else {
         competition_set_status("NOT ENOUGH ELIGIBLE TEAMS");
       }
@@ -2365,8 +2365,10 @@ void competition_frontend_pad_event(uint32_t buttons,
       cup_team_picker_focus = 0u;
       cup_team_picker_scroll = 0u;
     } else if (pressed & COMPETITION_BUTTON_X) {
-      competition_set_status(competition_random_fill_league()
-          ? "REMAINING TEAMS ASSIGNED" : "NOT ENOUGH ELIGIBLE TEAMS");
+      if (competition_random_fill_league())
+        competition_clear_status();
+      else
+        competition_set_status("NOT ENOUGH ELIGIBLE TEAMS");
     } else if (pressed & COMPETITION_BUTTON_Y) {
       league_scorers_open = !league_scorers_open;
     }
@@ -2393,9 +2395,9 @@ void competition_frontend_pad_event(uint32_t buttons,
     } else if ((pressed & COMPETITION_BUTTON_Y) && pages > 1u) {
       cup_bracket_page = (cup_bracket_page + 1u) % pages;
     } else if (pressed & COMPETITION_BUTTON_LEFT)
-      competition_move_cup_action(-1);
+      competition_move_hub_action(-1);
     else if (pressed & COMPETITION_BUTTON_RIGHT)
-      competition_move_cup_action(1);
+      competition_move_hub_action(1);
     else if (pressed & COMPETITION_BUTTON_A)
       competition_confirm();
     return;
@@ -2442,9 +2444,9 @@ void competition_frontend_pad_event(uint32_t buttons,
               &league_tournament.knockout, league_bracket_round))
         league_bracket_page++;
     } else if (pressed & COMPETITION_BUTTON_LEFT) {
-      frontend_focus = (frontend_focus + 3u) % 4u;
+      competition_move_hub_action(-1);
     } else if (pressed & COMPETITION_BUTTON_RIGHT) {
-      frontend_focus = (frontend_focus + 1u) % 4u;
+      competition_move_hub_action(1);
     } else if (pressed & COMPETITION_BUTTON_A) {
       competition_confirm();
     }

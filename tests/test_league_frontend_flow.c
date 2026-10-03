@@ -46,9 +46,18 @@ int main(void) {
   assert(strcmp(competition_frontend_item_label(2u), "NEXT") == 0);
   assert(strcmp(competition_frontend_item_label(3u), "SAVE") == 0);
   assert(!competition_frontend_item_enabled(2u));
+  press(BUTTON_RIGHT);
+  assert(competition_frontend_focus() == 1u);
+  press(BUTTON_RIGHT); /* Skip disabled Next. */
+  assert(competition_frontend_focus() == 3u);
+  press(BUTTON_LEFT); /* Reverse navigation skips it as well. */
+  assert(competition_frontend_focus() == 1u);
+  press(BUTTON_LEFT);
+  assert(competition_frontend_focus() == 0u);
   press(BUTTON_A); /* Teams editor. */
   assert(competition_frontend_league_teams_editing());
   press(BUTTON_X); /* Assign all missing teams. */
+  assert(strcmp(competition_frontend_status(), "") == 0);
   assert(competition_draft_ready(competition_frontend_league_draft()));
   assert(competition_frontend_league_tournament()->matchday_count == 1u);
   press(BUTTON_B);

@@ -55,6 +55,7 @@ int main(void) {
   assert(!competition_frontend_cup_team_picker_active());
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
   press(BUTTON_X); /* fill only remaining slots */
+  assert(strcmp(competition_frontend_status(), "") == 0);
   assert(competition_draft_ready(competition_frontend_cup_draft()));
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
   assert(competition_frontend_cup_tournament()->history_count == 0u);
