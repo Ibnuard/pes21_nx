@@ -5,6 +5,8 @@ param(
   [long]$ExpectedPatchObbSize = 0,
   [string]$BadgeAtlas = "",
   [string]$MigrationTeamInclude = "",
+  [string]$MigrationRosterInclude = "",
+  [string]$LeagueScorerInclude = "",
   [switch]$DisablePesdbAuthoritativeOvr,
   [switch]$PlayerMigrationCanary,
   [switch]$LooseCpkFull,
@@ -30,6 +32,8 @@ $oldLooseCpkFull = $env:PES21_NX_LOOSE_CPK_FULL
 $oldExpectedPatchObbSize = $env:PES21_NX_EXPECTED_PATCH_OBB_SIZE
 $oldBadgeAtlas = $env:PES21_NX_BADGE_ATLAS
 $oldMigrationTeamInclude = $env:PES21_NX_MIGRATION_TEAM_INCLUDE
+$oldMigrationRosterInclude = $env:PES21_NX_MIGRATION_ROSTER_INCLUDE
+$oldLeagueScorerInclude = $env:PES21_NX_LEAGUE_SCORER_INCLUDE
 
 function Resolve-ProjectInput([string]$Value) {
   $candidate = if ([IO.Path]::IsPathRooted($Value)) {
@@ -62,10 +66,16 @@ try {
   $env:PES21_NX_MIGRATION_TEAM_INCLUDE = if ($MigrationTeamInclude) {
     Resolve-ProjectInput $MigrationTeamInclude
   } else { "" }
+  $env:PES21_NX_MIGRATION_ROSTER_INCLUDE = if ($MigrationRosterInclude) {
+    Resolve-ProjectInput $MigrationRosterInclude
+  } else { "" }
+  $env:PES21_NX_LEAGUE_SCORER_INCLUDE = if ($LeagueScorerInclude) {
+    Resolve-ProjectInput $LeagueScorerInclude
+  } else { "" }
   $env:WSLENV = if ($oldWslEnv) {
-    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p"
+    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p"
   } else {
-    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p"
+    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p"
   }
 
   $buildScript = @'
@@ -103,6 +113,12 @@ if [[ -n "${PES21_NX_BADGE_ATLAS:-}" ]]; then
 fi
 if [[ -n "${PES21_NX_MIGRATION_TEAM_INCLUDE:-}" ]]; then
   cp "$PES21_NX_MIGRATION_TEAM_INCLUDE" source/exhibition_teams_migration_generated.inc
+fi
+if [[ -n "${PES21_NX_MIGRATION_ROSTER_INCLUDE:-}" ]]; then
+  cp "$PES21_NX_MIGRATION_ROSTER_INCLUDE" source/exhibition_rosters_migration_canary_generated.inc
+fi
+if [[ -n "${PES21_NX_LEAGUE_SCORER_INCLUDE:-}" ]]; then
+  cp "$PES21_NX_LEAGUE_SCORER_INCLUDE" source/league_scorer_pool_generated.inc
 fi
 
 export DEVKITPRO=/opt/devkitpro
@@ -231,5 +247,15 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
     Remove-Item Env:PES21_NX_MIGRATION_TEAM_INCLUDE -ErrorAction SilentlyContinue
   } else {
     $env:PES21_NX_MIGRATION_TEAM_INCLUDE = $oldMigrationTeamInclude
+  }
+  if ($null -eq $oldMigrationRosterInclude) {
+    Remove-Item Env:PES21_NX_MIGRATION_ROSTER_INCLUDE -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_MIGRATION_ROSTER_INCLUDE = $oldMigrationRosterInclude
+  }
+  if ($null -eq $oldLeagueScorerInclude) {
+    Remove-Item Env:PES21_NX_LEAGUE_SCORER_INCLUDE -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_LEAGUE_SCORER_INCLUDE = $oldLeagueScorerInclude
   }
 }
