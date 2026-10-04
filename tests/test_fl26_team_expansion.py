@@ -150,12 +150,15 @@ def test_bundesliga_indonesia_stage_has_unique_teams_and_badges() -> None:
     )
     ids = [row["team_id"] for row in staged["teams"]]
     badges = [row["badge_slot"] for row in staged["teams"]]
-    assert len(ids) == len(set(ids)) == 459
+    expected = (({row["team_id"] for row in catalog["teams"]} - {1164}) |
+                {5750, *bundesliga})
+    assert len(ids) == len(set(ids)) == len(expected)
+    assert set(ids) == expected
     assert len(badges) == len(set(badges))
     assert 5750 in ids and 1164 not in ids
     german = next(row for row in staged["categories"]
                   if row["key"] == "german_teams")
     assert german["label"] == "BUNDESLIGA"
     assert german["team_ids"] == bundesliga
-    assert 126 not in next(row for row in staged["categories"]
-                           if row["key"] == "other_europe")["team_ids"]
+    assert not any(row["key"] == "other_europe"
+                   for row in staged["categories"])

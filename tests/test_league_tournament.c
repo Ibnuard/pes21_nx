@@ -78,6 +78,21 @@ static void check_full_progression(void) {
   assert(league.knockout.champion == 101u);
 }
 
+static void check_standings_champion_without_knockout(void) {
+  const uint32_t teams[4] = {101u, 102u, 103u, 104u};
+  assert(league_tournament_init(&league, teams, 4u, teams, 1u, 0, 29u));
+  league_tournament_set_system(&league, LEAGUE_SYSTEM_STANDINGS);
+  assert(league.reserved[0] == LEAGUE_SYSTEM_STANDINGS);
+  for (uint32_t i = 0; i < 4u; i++)
+    league.standings[i].points = (uint16_t)(12u - i * 3u);
+  league.active_matchday = league.matchday_count;
+  league_tournament_advance(&league);
+  assert(league.phase == LEAGUE_PHASE_COMPLETE);
+  assert(league.knockout.champion == 101u);
+  assert(league.knockout.round_count == 0u);
+  assert(!league_tournament_next_human(&league, NULL, NULL, NULL));
+}
+
 static void check_knockout_seeding(void) {
   const uint32_t teams[8] = {101u, 102u, 103u, 104u,
                               105u, 106u, 107u, 108u};
@@ -158,6 +173,7 @@ int main(void) {
   assert(league_tournament_qualifier_count(7u) == 4u);
   assert(league_tournament_qualifier_count(8u) == 8u);
   check_full_progression();
+  check_standings_champion_without_knockout();
   check_knockout_seeding();
   check_simulated_opening_locks_teams();
   check_simulated_knockout_scorers();

@@ -311,6 +311,13 @@ static void league_begin_knockout(LeagueTournament *league) {
     league->phase = LEAGUE_PHASE_COMPLETE;
 }
 
+void league_tournament_set_system(LeagueTournament *league,
+                                  LeagueSystem system) {
+  if (!league || league->first_match_started) return;
+  league->reserved[0] = system == LEAGUE_SYSTEM_STANDINGS
+      ? LEAGUE_SYSTEM_STANDINGS : LEAGUE_SYSTEM_KNOCKOUT;
+}
+
 int league_tournament_next_human(const LeagueTournament *league,
                                   uint32_t *fixture_index,
                                   uint32_t *knockout_round,
@@ -369,8 +376,16 @@ void league_tournament_advance(LeagueTournament *league) {
     league->active_matchday++;
   }
   if (league->phase == LEAGUE_PHASE_TABLE &&
-      league->active_matchday == league->matchday_count)
-    league_begin_knockout(league);
+      league->active_matchday == league->matchday_count) {
+    if (league->reserved[0] == LEAGUE_SYSTEM_STANDINGS) {
+      uint8_t ranked[LEAGUE_MAX_TEAMS] = {0};
+      league_tournament_ranked_slots(league, ranked);
+      league->knockout.champion = league->standings[ranked[0]].team;
+      league->phase = LEAGUE_PHASE_COMPLETE;
+    } else {
+      league_begin_knockout(league);
+    }
+  }
 }
 
 int league_tournament_record(LeagueTournament *league,

@@ -110,6 +110,21 @@ static void (*exhibition_match_set_stadium_init)(void *,const TmpdbStadiumInitPa
 static uint32_t exhibition_cpu_level_value=6, exhibition_settings_time_zone=1;
 static uint32_t exhibition_settings_match_time=10, exhibition_settings_extra_time=1;
 static uint32_t exhibition_settings_penalties=1, exhibition_settings_hub_mode=1;
+static uint32_t exhibition_settings_season, exhibition_settings_weather;
+static uint32_t exhibition_settings_turf_length, exhibition_settings_pitch_condition;
+static uint32_t exhibition_settings_substitutions, exhibition_settings_injuries;
+static uint32_t exhibition_settings_ball_index, exhibition_settings_var;
+static void (*exhibition_match_set_weather)(void*,uint32_t);
+static void (*exhibition_match_set_season)(void*,uint32_t);
+static void (*exhibition_match_set_turf_length)(void*,uint32_t);
+static void (*exhibition_match_set_pitch_condition)(void*,uint32_t);
+static void (*exhibition_match_set_max_substitutions)(void*,uint8_t);
+static void (*exhibition_match_set_max_extra_substitutions)(void*,uint8_t);
+static void (*exhibition_match_set_injury)(void*,const uint8_t*);
+static void (*exhibition_match_set_ball_id)(void*,uint16_t);
+static void *(*exhibition_tmpdb_manager_get_instance)(void);
+static void *(*exhibition_commonwork_get_competition)(void*,uint16_t);
+static void (*exhibition_competition_set_var)(void*,uint32_t);
 static void *exhibition_settings_match;
 static uint32_t native_match[5], debug_level;
 static void *exhibition_get_tmpdb_match(void) {return native_match;}
@@ -151,17 +166,44 @@ int main(void) {
     assert(native_match[3]==1 && native_match[4]==1 && debug_level==6);
     uint32_t actual; memcpy(&actual,(char*)&renderer_init+4,4); assert(actual==1);
     for(int i=0;i<sizeof(renderer_init);i++)
-      if(i<4 || i>=8) assert(((unsigned char*)&renderer_init)[i]==0xab);
+      if((i<4 || i>=16) && (i<0x78 || i>=0x80))
+        assert(((unsigned char*)&renderer_init)[i]==0xab);
     exhibition_settings_time_zone=0; exhibition_apply_match_settings(0);
     memcpy(&actual,(char*)&renderer_init+4,4); assert(actual==0);
     exhibition_settings_time_zone=1;
   }
+  // Opening non-hub settings must not re-import the stock Day bootstrap.
+  exhibition_settings_hub_mode=0;
+  exhibition_settings_time_zone=1;
+  native_match[1]=0;
+  assert(exhibition_refresh_match_settings());
+  assert(exhibition_settings_time_zone==1);
+  exhibition_apply_match_settings(0);
+  assert(native_match[1]==1);
+  // Day remains available when the player deliberately selects it.
+  exhibition_settings_time_zone=0;
+  native_match[1]=1;
+  assert(exhibition_refresh_match_settings());
+  assert(exhibition_settings_time_zone==0);
+  exhibition_apply_match_settings(0);
+  assert(native_match[1]==0);
 }
 ''')
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
         self.assertIn('&exhibition_session_active', setup)
         self.assertIn('&exhibition_match_settings_armed, 1u', setup)
         self.assertNotIn('exhibition_get_test_match_cpu_level()', function(SOURCE, 'exhibition_open_cpu_level'))
+
+    def test_all_custom_match_entries_seed_night_and_version_is_shared(self):
+        self.assertIn('exhibition_settings_time_zone = 1u;', SOURCE)
+        for entry in ('main_menu_2p_team_selector_open',
+                      'main_menu_activate_cup_fixture',
+                      'main_menu_activate_league_fixture'):
+            self.assertIn('&exhibition_settings_time_zone, 1u',
+                          function(SOURCE, entry))
+        makefile = (ROOT / 'Makefile').read_text(encoding='utf-8')
+        self.assertIn('APP_VERSION\t:=\t2.0.1-preview', makefile)
+        self.assertIn('"Version: " PES_NX_VERSION', SOURCE)
 
     def test_shadow_budget_uses_native_setter_not_render_target_rewrites(self):
         tick = function(SOURCE, 'stadium_shadow_budget_tick')

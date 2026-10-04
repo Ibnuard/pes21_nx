@@ -1111,7 +1111,9 @@ static _Alignas(4) uint32_t exhibition_team_picker_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_popup_open;
 static _Alignas(4) uint32_t exhibition_settings_popup_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_value = 2;
-static _Alignas(4) uint32_t exhibition_settings_time_zone;
+// The native TutorialMatch bootstrap starts in Day. Our custom match flows
+// default to Night; a player can still choose Day in Stadium settings.
+static _Alignas(4) uint32_t exhibition_settings_time_zone = 1u;
 #ifdef PERF_TRACE
 static _Alignas(4) uint32_t stadium_perf_match_id;
 static _Alignas(4) uint32_t stadium_perf_camera_type;
@@ -2266,6 +2268,7 @@ static void main_menu_2p_team_selector_open(void) {
   main_menu_2p_uniform_preview_clear_pending();
   exhibition_discard_pre_strategy_squad_snapshot();
   exhibition_gameplan_reset();
+  __atomic_store_n(&exhibition_settings_time_zone, 1u, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_prematch_hub_page,
                    MAIN_MENU_2P_PREMATCH_PAGE_MAIN, __ATOMIC_RELEASE);
@@ -3343,14 +3346,15 @@ static int exhibition_refresh_match_settings(void) {
     return 1;
   }
 
-  uint32_t time_zone = exhibition_match_get_time_zone
-                           ? exhibition_match_get_time_zone(match)
-                           : 0;
+  // Do not import the native bootstrap's Day value over our Night default or
+  // a deliberate Day choice made in the custom Stadium page.
+  uint32_t time_zone = __atomic_load_n(&exhibition_settings_time_zone,
+                                       __ATOMIC_ACQUIRE);
   uint32_t match_time = exhibition_match_get_match_time
                             ? exhibition_match_get_match_time(match)
                             : 10;
   if (time_zone > 1)
-    time_zone = 0;
+    time_zone = 1;
   if (match_time != 3 && (match_time < 5 || match_time > 10))
     match_time = 10;
 
@@ -10951,6 +10955,7 @@ static void main_menu_activate_cup_fixture(void) {
   }
   __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_time_zone, 1u, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_match_time,
                    competition_frontend_cup_game_time(), __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_extra_time,
@@ -10997,6 +11002,7 @@ static void main_menu_activate_league_fixture(void) {
   }
   __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_time_zone, 1u, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_match_time,
                    competition_frontend_cup_game_time(), __ATOMIC_RELEASE);
   /* League phase permits draws; knockout fixtures must produce a winner. */

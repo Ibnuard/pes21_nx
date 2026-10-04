@@ -3,7 +3,7 @@
   "source": "SP Football Life 2026 local Competition.bin, CompetitionEntry.bin and dt15_x64.cpk",
   "competition_sha256": "06295e20fe3e7be95c5b2f5ac128e95077ddf702786fce69169d39a53b8c1024",
   "entry_sha256": "06d19b5b8783ee1ba5e2ed1fcd3088d725bf58d974ca1f944bb43f16e9da13ef",
-  "catalog_content_id": "7a005ff68745aff1",
+  "catalog_content_id": "338dbda5176d8865",
   "cups": [
     {
       "competition_id": 15,
@@ -147,7 +147,7 @@
       "league_competition_id": 0,
       "name": "AFC CUP",
       "category_key": "national_asia_oceania",
-      "category_index": 32,
+      "category_index": 26,
       "bracket_limit": 16,
       "team_ids": [
         52,
@@ -174,7 +174,7 @@
       "league_competition_id": 0,
       "name": "UEFA EURO",
       "category_key": "national_europe",
-      "category_index": 28,
+      "category_index": 22,
       "bracket_limit": 16,
       "team_ids": [
         23,
@@ -234,7 +234,6 @@
         18,
         16,
         17,
-        59,
         3,
         31,
         15,

@@ -40,7 +40,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET		:=	pes21_nx
 APP_TITLE	:=	FootballNX 26
 APP_AUTHOR	:=	Androswitch Project
-APP_VERSION	:=	2.0.0
+APP_VERSION	:=	2.0.1-preview
 # Shared FNX Ronaldo artwork for local and CI builds.
 ICON		:=	icon.jpg
 BUILD		:=	build

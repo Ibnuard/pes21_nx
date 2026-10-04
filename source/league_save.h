@@ -15,6 +15,8 @@ typedef struct {
   uint32_t tournament_valid;
   CompetitionEntryDraft draft;
   LeagueTournament tournament;
+  /* Appended in v3 so v1/v2 save payloads retain their original layout. */
+  uint32_t league_competition_id, league_system;
 } LeagueSaveState;
 
 int league_save_read(uint32_t slot, LeagueSaveState *state);

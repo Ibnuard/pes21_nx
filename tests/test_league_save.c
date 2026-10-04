@@ -48,6 +48,26 @@ int main(void) {
   assert(loaded.tournament.scorer_count == 1u);
   assert(loaded.tournament.scorers[0].base_id == 42u);
   assert(loaded.tournament.scorers[0].goals == 3u);
+  const size_t v2_size = offsetof(LeagueSaveState, league_competition_id);
+  const TestHeader v2_header = {0x314c5846u, 2u, (uint32_t)v2_size, 100u,
+                                checksum(&loaded, v2_size)};
+  stream = fopen("SaveData/footballnx_league_1_a.bin", "wb");
+  assert(stream);
+  assert(fwrite(&v2_header, 1, sizeof(v2_header), stream) == sizeof(v2_header));
+  assert(fwrite(&loaded, 1, v2_size, stream) == v2_size);
+  assert(fclose(stream) == 0);
+  memset(&loaded, 0, sizeof(loaded));
+  assert(league_save_read(0u, &loaded));
+  assert(loaded.tournament.scorers[0].base_id == 42u);
+  assert(loaded.league_competition_id == 0u);
+  assert(loaded.league_system == 0u);
+  loaded.league_competition_id = 9u;
+  loaded.league_system = LEAGUE_SYSTEM_STANDINGS;
+  assert(league_save_write(0u, &loaded));
+  memset(&loaded, 0, sizeof(loaded));
+  assert(league_save_read(0u, &loaded));
+  assert(loaded.league_competition_id == 9u);
+  assert(loaded.league_system == LEAGUE_SYSTEM_STANDINGS);
   puts("league save migration tests passed");
   return 0;
 }

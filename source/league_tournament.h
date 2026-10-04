@@ -16,6 +16,11 @@ typedef enum {
   LEAGUE_PHASE_COMPLETE = 2,
 } LeaguePhase;
 
+typedef enum {
+  LEAGUE_SYSTEM_KNOCKOUT = 0,
+  LEAGUE_SYSTEM_STANDINGS = 1,
+} LeagueSystem;
+
 typedef struct {
   uint32_t home, away;
   uint8_t home_goals, away_goals, complete, simulated;
@@ -43,7 +48,7 @@ typedef struct {
   LeagueStanding standings[LEAGUE_MAX_TEAMS];
   uint8_t phase;
   uint8_t first_match_started;
-  uint8_t reserved[2];
+  uint8_t reserved[2]; /* reserved[0]: LeagueSystem; old saves default to knockout */
   CupTournament knockout;
   uint32_t scorer_count;
   LeagueScorer scorers[LEAGUE_MAX_SCORERS];
@@ -54,6 +59,8 @@ int league_tournament_init(LeagueTournament *league,
                            const uint32_t *teams, uint32_t team_count,
                            const uint32_t *human_teams, uint32_t human_count,
                            int home_away, uint32_t seed);
+void league_tournament_set_system(LeagueTournament *league,
+                                  LeagueSystem system);
 const LeagueFixture *league_tournament_matchday_fixture(
     const LeagueTournament *league, uint32_t matchday, uint32_t offset);
 int league_tournament_next_human(const LeagueTournament *league,

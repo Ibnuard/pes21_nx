@@ -13,6 +13,7 @@ import struct
 from pathlib import Path
 
 from build_fl26_cup_catalog import competition_members, decoded_member, index_cpk
+from cleanse_playable_categories import RETIRED
 from pesdb import parse_pes21_assignments, parse_player_ids, parse_team_records
 from prepare_loose_cpk import verify as verify_loose
 
@@ -21,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def check(candidate: Path, selector_dir: Path, slot_plan: dict,
-          portrait_report: dict) -> dict:
+          portrait_report: dict, nro_path: Path | None = None,
+          curated_dir: Path | None = None) -> dict:
     catalog = json.loads((selector_dir / "exhibition_team_catalog_migration.json")
                          .read_text(encoding="utf-8"))
     rows = catalog["teams"]
@@ -88,7 +90,7 @@ def check(candidate: Path, selector_dir: Path, slot_plan: dict,
     if missing_portraits:
         raise ValueError(f"native portraits missing: {missing_portraits[:10]}")
 
-    nro = (candidate / "pes21_nx.nro").read_bytes()
+    nro = (nro_path or candidate / "pes21_nx.nro").read_bytes()
     atlas = (selector_dir / "badge_atlas.bin").read_bytes()
     probe_offset = len(atlas) // 3
     found = nro.find(atlas[probe_offset:probe_offset + 65536])
@@ -115,6 +117,41 @@ def check(candidate: Path, selector_dir: Path, slot_plan: dict,
             or loose["build_id"].encode("ascii") not in nro
             or roster_probe not in nro or scorer_probe not in nro):
         raise ValueError("NRO does not contain the matching selector atlas/labels")
+    curated_summary = {}
+    if curated_dir:
+        curated = json.loads((curated_dir / "exhibition_team_catalog_migration.json")
+                             .read_text(encoding="utf-8"))
+        current = {int(row["team_id"]): row for row in curated["teams"]}
+        original = {int(row["team_id"]): row for row in rows}
+        if (len(current) != 394 or len(curated["categories"]) != 27 or
+                not set(current) < set(original) or
+                RETIRED.intersection(row["key"] for row in curated["categories"])):
+            raise ValueError("curated selector did not remove exactly the retired sections")
+        for team_id, team in current.items():
+            base = original[team_id]
+            if (team["badge_slot"] != base["badge_slot"] or
+                    team["physical_team_id"] != base["physical_team_id"]):
+                raise ValueError(f"curated selector remapped team {team_id}")
+        include = (curated_dir / "exhibition_teams_migration_generated.inc")
+        include_header = include.read_text(encoding="utf-8")[:240]
+        if f"Paired loose CPK build ID: {loose['build_id']}" not in include_header:
+            raise ValueError("curated selector has a different parent CPK ID")
+        for label in ("BELGIAN LEAGUE", "SWISS LEAGUE", "OTHER EUROPE",
+                      "BRAZIL SERIE B", "COLOMBIAN LEAGUE", "J2 LEAGUE"):
+            if label.encode("ascii") in nro:
+                raise ValueError(f"removed category is still in NRO: {label}")
+        leagues = json.loads((curated_dir / "fl26_league_catalog.json")
+                              .read_text(encoding="utf-8"))
+        if (leagues["catalog_content_id"] != curated["content_id"] or
+                {22, 23, 128, 137, 69}.intersection(
+                    row["competition_id"] for row in leagues["leagues"]) or
+                not any(row["competition_id"] == 39 and len(row["team_ids"]) == 18
+                        for row in leagues["leagues"])):
+            raise ValueError("curated League Type pool does not match selector")
+        curated_summary = {"curated_selector_teams": len(current),
+                           "curated_categories": len(curated["categories"]),
+                           "curated_league_presets": len(leagues["leagues"]) - 1,
+                           "retired_sections_absent_from_nro": True}
     return {
         "schema_version": 1,
         "status": "structural_pass_hardware_pending",
@@ -130,6 +167,7 @@ def check(candidate: Path, selector_dir: Path, slot_plan: dict,
         "roster_and_build_id_embedded": True,
         "league_scorer_pool_embedded": True,
         "loose_build_id": loose["build_id"],
+        **curated_summary,
         "pending": "Switch hardware gameplan, match, visuals and save/load",
     }
 
@@ -144,6 +182,12 @@ def main() -> None:
                         default=ROOT / "local-debug/fl26-bundesliga-native-slot-plan.json")
     parser.add_argument("--portraits", type=Path,
                         default=ROOT / "local-debug/fl26-bundesliga-portraits-v2/report.json")
+    parser.add_argument("--nro", type=Path,
+                        help="separately built NRO paired with candidate LooseCpk")
+    parser.add_argument("--curated-selector", type=Path,
+                        help="curated local selector and League manifest used for this NRO")
+    parser.add_argument("--report-output", type=Path,
+                        help="write validation report outside the CPK candidate")
     args = parser.parse_args()
     candidate = args.candidate.resolve()
     if (ROOT / "local-debug").resolve() not in candidate.parents:
@@ -152,8 +196,10 @@ def main() -> None:
         candidate, args.selector.resolve(),
         json.loads(args.slots.read_text(encoding="utf-8")),
         json.loads(args.portraits.read_text(encoding="utf-8")),
+        args.nro.resolve() if args.nro else None,
+        args.curated_selector.resolve() if args.curated_selector else None,
     )
-    (candidate / "structural-validation.json").write_text(
+    (args.report_output or candidate / "structural-validation.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, sort_keys=True))
 

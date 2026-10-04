@@ -102,6 +102,9 @@ int main(void) {
   assert(competition_frontend_focus() == 3u);
   press(BUTTON_A); /* Save */
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SLOTS);
+  assert(strcmp(competition_frontend_slot_competition(0u),
+                "NO SAVE DATA") == 0);
+  assert(strcmp(competition_frontend_slot_progress(0u), "") == 0);
   press(BUTTON_A); /* Slot 1 */
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
@@ -372,6 +375,10 @@ int main(void) {
   press(BUTTON_RIGHT); /* save two-team bracket */
   assert(competition_frontend_focus() == 3u);
   press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SLOTS);
+  assert(strcmp(competition_frontend_slot_competition(1u),
+                "NO SAVE DATA") == 0);
+  assert(strcmp(competition_frontend_slot_progress(1u), "") == 0);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   competition_frontend_close();
@@ -381,6 +388,10 @@ int main(void) {
   press(BUTTON_A);
   press(BUTTON_DOWN);
   press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SLOTS);
+  assert(strcmp(competition_frontend_slot_competition(0u),
+                "FOOTBALLNX CUP") == 0);
+  assert(strcmp(competition_frontend_slot_progress(0u), "FINAL") == 0);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   assert(competition_frontend_cup_tournament()->round_count == 1u);

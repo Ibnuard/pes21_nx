@@ -41,6 +41,9 @@ int main(void) {
         self.run_c(r'''
 static uint32_t main_menu_2p_prematch_hub_page_focus,main_menu_2p_prematch_stadium_index;
 static uint32_t main_menu_2p_prematch_hub_page,exhibition_settings_time_zone;
+static uint32_t exhibition_settings_weather,exhibition_settings_season;
+static uint32_t exhibition_settings_turf_length,exhibition_settings_pitch_condition;
+static void *exhibition_settings_match;
 static unsigned char main_menu_2p_prematch_hub_input_armed[2];
 #define MAIN_MENU_2P_PREMATCH_PAGE_MAIN 0
 static void *exhibition_get_tmpdb_match(void) {return (void*)1;}
@@ -52,15 +55,13 @@ static void (*exhibition_match_set_time_zone)(void*,uint32_t)=write_time;
               'static void event(uint32_t pressed) {\n'+body+r'''
 int main(void) {
   for(unsigned n=0;n<10;n++) {
-    event(1u<<10); assert(main_menu_2p_prematch_hub_page_focus==1);
+    main_menu_2p_prematch_hub_page_focus=1;
     event(1u<<1); assert(!pes_controller_stadium_is_day() && written_time==1);
-    event(1u<<11); assert(main_menu_2p_prematch_hub_page_focus==0);
-    event(1u<<10); event(1u<<13);
+    event(1u<<13);
     assert(pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled());
-    event(1u<<11); assert(main_menu_2p_prematch_hub_page_focus==0);
   }
   main_menu_2p_prematch_hub_page_focus=2; event(1u<<1);
-  assert(main_menu_2p_prematch_hub_page_focus==1 && !pes_controller_roof_shadow_enabled());
+  assert(exhibition_settings_weather==1 && !pes_controller_roof_shadow_enabled());
 }
 ''')
         setup=function(SOURCE,'pes_exhibition_match_setup_data_entry')

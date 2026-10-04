@@ -16,14 +16,14 @@ static const uint32_t fl26_cup_pool_1[] = {357u, 258u, 4308u, 361u, 108u, 194u, 
 static const uint32_t fl26_cup_pool_2[] = {234u, 186u, 4220u, 235u, 124u, 336u, 120u, 122u, 4237u, 119u, 121u, 4914u, 327u, 125u, 328u, 240u, 1919u, 1600u, 333u, 190u, 320u, 4230u, 4234u, 323u, 123u, 4241u, 4225u, 2517u, 4229u};
 static const uint32_t fl26_cup_pool_3[] = {52u, 57u, 53u, 1184u, 55u, 1010u, 1141u, 1032u, 1026u, 1012u, 1022u, 56u, 1013u, 1011u, 1015u, 1031u};
 static const uint32_t fl26_cup_pool_4[] = {23u, 7u, 11u, 29u, 30u, 13u, 15u, 1174u, 22u, 26u, 1550u, 9u, 14u, 10u, 3u, 1165u, 21u, 5u, 12u, 6u, 24u, 8u, 19u, 31u};
-static const uint32_t fl26_cup_pool_5[] = {5u, 6u, 7u, 8u, 9u, 10u, 12u, 14u, 34u, 32u, 44u, 45u, 49u, 50u, 52u, 56u, 1051u, 1128u, 1175u, 18u, 16u, 17u, 59u, 3u, 31u, 15u, 2u, 1u, 19u, 4u, 1176u, 30u, 13u, 21u, 20u, 22u, 11u, 23u, 24u, 1550u, 26u, 27u, 1551u, 1180u, 1174u, 1165u, 1168u, 29u, 28u, 1181u, 1171u, 1164u, 33u, 1040u, 38u, 1067u, 1044u, 1059u, 35u, 1058u, 36u, 1083u, 37u, 39u, 40u, 41u, 43u, 42u, 1113u, 1129u, 51u, 46u, 48u, 47u, 1184u, 54u, 1012u, 53u, 55u, 1015u, 1010u, 1011u, 1013u, 1026u, 1032u, 1022u, 1031u, 57u, 1141u};
+static const uint32_t fl26_cup_pool_5[] = {5u, 6u, 7u, 8u, 9u, 10u, 12u, 14u, 34u, 32u, 44u, 45u, 49u, 50u, 52u, 56u, 1051u, 1128u, 1175u, 18u, 16u, 17u, 3u, 31u, 15u, 2u, 1u, 19u, 4u, 1176u, 30u, 13u, 21u, 20u, 22u, 11u, 23u, 24u, 1550u, 26u, 27u, 1551u, 1180u, 1174u, 1165u, 1168u, 29u, 28u, 1181u, 1171u, 1164u, 33u, 1040u, 38u, 1067u, 1044u, 1059u, 35u, 1058u, 36u, 1083u, 37u, 39u, 40u, 41u, 43u, 42u, 1113u, 1129u, 51u, 46u, 48u, 47u, 1184u, 54u, 1012u, 53u, 55u, 1015u, 1010u, 1011u, 1013u, 1026u, 1032u, 1022u, 1031u, 57u, 1141u};
 static const Fl26CupCatalogEntry fl26_cup_catalog[] = {
   {15u, 0u, 32u, "FA CUP", "emb_0015_l.png", fl26_cup_pool_0, 39u},
   {17u, 2u, 32u, "COPA DEL REY", "emb_0017_w_l.png", fl26_cup_pool_1, 36u},
   {16u, 6u, 24u, "COPPA ITALIA", "emb_0016_l.png", fl26_cup_pool_2, 29u},
-  {35u, 32u, 16u, "AFC CUP", "cup-afc.png", fl26_cup_pool_3, 16u},
-  {33u, 28u, 16u, "UEFA EURO", "cup-euro.png", fl26_cup_pool_4, 24u},
-  {27u, 255u, 32u, "WORLD CUP", "cup-world.png", fl26_cup_pool_5, 89u},
+  {35u, 26u, 16u, "AFC CUP", "cup-afc.png", fl26_cup_pool_3, 16u},
+  {33u, 22u, 16u, "UEFA EURO", "cup-euro.png", fl26_cup_pool_4, 24u},
+  {27u, 255u, 32u, "WORLD CUP", "cup-world.png", fl26_cup_pool_5, 88u},
   {0u, 255u, 32u, "FOOTBALLNX CUP", 0, 0, 0u},
 };
 #define FL26_CUP_CUSTOM_INDEX 6u

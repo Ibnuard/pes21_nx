@@ -47,6 +47,8 @@ const char *competition_frontend_title(void);
 const char *competition_frontend_subtitle(void);
 const char *competition_frontend_item_label(uint32_t index);
 const char *competition_frontend_item_value(uint32_t index);
+const char *competition_frontend_slot_competition(uint32_t index);
+const char *competition_frontend_slot_progress(uint32_t index);
 int competition_frontend_item_enabled(uint32_t index);
 const char *competition_frontend_status(void);
 
@@ -123,6 +125,9 @@ void competition_frontend_cup_match_result(uint32_t home_goals,
 void competition_frontend_cup_restore_after_match(void);
 
 const LeagueTournament *competition_frontend_league_tournament(void);
+const char *competition_frontend_league_name(void);
+uint32_t competition_frontend_league_catalog_index(void);
+const char *competition_frontend_league_logo_file(void);
 const CompetitionEntryDraft *competition_frontend_league_draft(void);
 uint32_t competition_frontend_league_table_page(void);
 uint32_t competition_frontend_league_schedule_page(void);

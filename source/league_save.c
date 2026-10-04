@@ -10,7 +10,7 @@
 #endif
 
 #define LEAGUE_SAVE_MAGIC 0x314c5846u /* FXL1 */
-#define LEAGUE_SAVE_VERSION 2u
+#define LEAGUE_SAVE_VERSION 3u
 
 typedef struct {
   uint32_t magic, version, payload_size, sequence, checksum;
@@ -45,13 +45,15 @@ static int league_save_read_copy(uint32_t slot, uint32_t copy,
   LeagueSaveHeader header;
   const size_t old_size = offsetof(LeagueSaveState, tournament) +
       offsetof(LeagueTournament, scorer_count);
+  const size_t v2_size = offsetof(LeagueSaveState, league_competition_id);
   const int read_header = fread(&header, 1, sizeof(header), stream) ==
       sizeof(header);
   const size_t payload_size = read_header && header.version == 1u
-      ? old_size : sizeof(LeagueSaveState);
+      ? old_size : read_header && header.version == 2u
+          ? v2_size : sizeof(LeagueSaveState);
   const int valid_header = read_header &&
       header.magic == LEAGUE_SAVE_MAGIC &&
-      (header.version == 1u || header.version == LEAGUE_SAVE_VERSION) &&
+      (header.version >= 1u && header.version <= LEAGUE_SAVE_VERSION) &&
       header.payload_size == payload_size;
   if (!valid_header) {
     fclose(stream);

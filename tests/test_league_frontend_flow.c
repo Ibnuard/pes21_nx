@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "competition_frontend.h"
+#include "league_save.h"
 
 enum {
   BUTTON_B = 1u << 0,
@@ -31,12 +32,16 @@ int main(void) {
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_LANDING);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_SETTINGS);
+  press(BUTTON_LEFT); /* FootballNX is the custom, unrestricted preset. */
+  assert(strcmp(competition_frontend_item_value(0u), "FOOTBALLNX LEAGUE") == 0);
   press(BUTTON_DOWN);
   press(BUTTON_DOWN);
   for (uint32_t i = 0; i < 20u; i++) press(BUTTON_LEFT);
   assert(strcmp(competition_frontend_item_value(2u), "2") == 0);
   press(BUTTON_DOWN);
   assert(strcmp(competition_frontend_item_value(3u), "OFF") == 0);
+  press(BUTTON_DOWN);
+  assert(strcmp(competition_frontend_item_value(4u), "KNOCKOUT STAGES") == 0);
   press(BUTTON_DOWN);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
@@ -76,9 +81,16 @@ int main(void) {
   press(BUTTON_RIGHT);
   press(BUTTON_A); /* Save slot 1. */
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_SLOTS);
+  assert(strcmp(competition_frontend_slot_competition(0u),
+                "NO SAVE DATA") == 0);
+  assert(strcmp(competition_frontend_slot_progress(0u), "") == 0);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
   assert(competition_frontend_league_draft()->team_count == 2u);
+  static LeagueSaveState retired_preset_save;
+  assert(league_save_read(0u, &retired_preset_save));
+  retired_preset_save.league_competition_id = 22u;
+  assert(league_save_write(0u, &retired_preset_save));
 
   competition_frontend_close();
   competition_frontend_finish_close();
@@ -90,8 +102,13 @@ int main(void) {
   press(BUTTON_A); /* Continue from save slot 1. */
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_SLOTS);
   assert(competition_frontend_item_enabled(0u));
+  assert(strcmp(competition_frontend_slot_competition(0u),
+                "ARGENTINA LEAGUE") == 0);
+  assert(strcmp(competition_frontend_slot_progress(0u),
+                "MATCHDAY 1/1") == 0);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
+  assert(strcmp(competition_frontend_league_name(), "FOOTBALLNX LEAGUE") == 0);
   assert(competition_draft_ready(competition_frontend_league_draft()));
   assert(competition_frontend_league_tournament()->matchday_count == 1u);
   assert(competition_frontend_focus() == 2u);
@@ -133,12 +150,14 @@ int main(void) {
   press(BUTTON_A);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_SETTINGS);
+  press(BUTTON_LEFT);
   press(BUTTON_DOWN);
   press(BUTTON_DOWN);
   for (uint32_t i = 0; i < 20u; i++) press(BUTTON_LEFT);
   press(BUTTON_DOWN);
   press(BUTTON_RIGHT); /* Home & Away ON: reversed return leg. */
   assert(strcmp(competition_frontend_item_value(3u), "ON") == 0);
+  press(BUTTON_DOWN);
   press(BUTTON_DOWN);
   press(BUTTON_A);
   press(BUTTON_A);
@@ -156,7 +175,34 @@ int main(void) {
   press(BUTTON_DOWN);
   press(BUTTON_A);
   press(BUTTON_A);
-  for (uint32_t i = 0; i < 4u; i++) press(BUTTON_DOWN);
+  assert(strcmp(competition_frontend_item_value(0u), "PREMIER LEAGUE") == 0);
+  assert(strcmp(competition_frontend_item_value(4u), "BY STANDING") == 0);
+  press(BUTTON_DOWN);
+  press(BUTTON_DOWN);
+  char fixed_team_count[16];
+  strcpy(fixed_team_count, competition_frontend_item_value(2u));
+  press(BUTTON_LEFT);
+  press(BUTTON_RIGHT);
+  press(BUTTON_A);
+  assert(strcmp(competition_frontend_item_value(2u), fixed_team_count) == 0);
+  for (uint32_t i = 0; i < 3u; i++) press(BUTTON_DOWN);
+  press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
+  press(BUTTON_A);
+  assert(competition_frontend_league_teams_editing());
+  press(BUTTON_A);
+  assert(competition_frontend_cup_picker_focused_team() != 0u);
+  press(BUTTON_B);
+
+  competition_frontend_close();
+  competition_frontend_finish_close();
+  competition_frontend_open_modes();
+  competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_DOWN);
+  press(BUTTON_A);
+  press(BUTTON_A);
+  press(BUTTON_LEFT); /* Preserve the 16-team custom-league regression. */
+  for (uint32_t i = 0; i < 5u; i++) press(BUTTON_DOWN);
   press(BUTTON_A); /* Default 16-team season has 8 fixtures per day. */
   press(BUTTON_A);
   press(BUTTON_X);

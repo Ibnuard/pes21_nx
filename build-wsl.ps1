@@ -3,10 +3,13 @@ param(
   [int]$Jobs = 0,
   [string]$OutputDirectory = "",
   [long]$ExpectedPatchObbSize = 0,
+  [string]$LooseManifest = "",
   [string]$BadgeAtlas = "",
   [string]$MigrationTeamInclude = "",
   [string]$MigrationRosterInclude = "",
   [string]$LeagueScorerInclude = "",
+  [string]$CupCatalogHeader = "",
+  [string]$LeagueCatalogHeader = "",
   [switch]$DisablePesdbAuthoritativeOvr,
   [switch]$PlayerMigrationCanary,
   [switch]$LooseCpkFull,
@@ -34,6 +37,8 @@ $oldBadgeAtlas = $env:PES21_NX_BADGE_ATLAS
 $oldMigrationTeamInclude = $env:PES21_NX_MIGRATION_TEAM_INCLUDE
 $oldMigrationRosterInclude = $env:PES21_NX_MIGRATION_ROSTER_INCLUDE
 $oldLeagueScorerInclude = $env:PES21_NX_LEAGUE_SCORER_INCLUDE
+$oldCupCatalogHeader = $env:PES21_NX_CUP_CATALOG_HEADER
+$oldLeagueCatalogHeader = $env:PES21_NX_LEAGUE_CATALOG_HEADER
 
 function Resolve-ProjectInput([string]$Value) {
   $candidate = if ([IO.Path]::IsPathRooted($Value)) {
@@ -49,6 +54,44 @@ try {
     [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
   } else {
     $projectRoot
+  }
+  $manifestPath = if ($LooseManifest) {
+    Resolve-ProjectInput $LooseManifest
+  } else {
+    $candidate = Join-Path $buildOutputRoot "LooseCpk/manifest.txt"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidate } else { "" }
+  }
+  if ($manifestPath) {
+    $manifestHeader = Get-Content -LiteralPath $manifestPath -TotalCount 1
+    if ($manifestHeader -notmatch '^PESNX_LOOSE_CPK_V2 ([0-9a-f]{16}) ([0-9]+) [0-9a-f]{64}$') {
+      throw "Full-loose manifest header is invalid: $manifestPath"
+    }
+    $manifestBuildId = $Matches[1]
+    $manifestObbSize = [long]$Matches[2]
+    if (-not $PlayerMigrationCanary -or -not $LooseCpkFull -or
+        $ExpectedPatchObbSize -ne $manifestObbSize) {
+      throw "Full-loose build requires -PlayerMigrationCanary -LooseCpkFull -ExpectedPatchObbSize $manifestObbSize"
+    }
+    if (-not $MigrationRosterInclude -or -not $MigrationTeamInclude -or -not $BadgeAtlas) {
+      throw "Full-loose build requires the paired roster include, team include, and badge atlas"
+    }
+    $rosterPath = Resolve-ProjectInput $MigrationRosterInclude
+    $rosterHeader = Get-Content -LiteralPath $rosterPath -TotalCount 8 | Out-String
+    if (-not $rosterHeader.Contains("#define PES21_PLAYER_MIGRATION_BUILD_ID `"$manifestBuildId`"")) {
+      throw "Migration roster build ID differs from LooseCpk manifest: $manifestBuildId"
+    }
+    $teamPath = Resolve-ProjectInput $MigrationTeamInclude
+    $teamHeader = Get-Content -LiteralPath $teamPath -TotalCount 4 | Out-String
+    if (-not ($teamHeader.Contains("Catalog content ID: $manifestBuildId") -or
+              $teamHeader.Contains("Paired loose CPK build ID: $manifestBuildId"))) {
+      throw "Migration selector is not paired with LooseCpk manifest: $manifestBuildId"
+    }
+    $candidateObb = Join-Path (Split-Path -Parent (Split-Path -Parent $manifestPath)) "patch.305030001.jp.nyan2021.pesam.obb"
+    if ((Test-Path -LiteralPath $candidateObb -PathType Leaf) -and
+        (Get-Item -LiteralPath $candidateObb).Length -ne $manifestObbSize) {
+      throw "Candidate dummy OBB size differs from LooseCpk manifest"
+    }
+    Write-Host "Full-loose pair preflight: manifest/selector/roster ID $manifestBuildId; dummy OBB $manifestObbSize bytes"
   }
   New-Item -ItemType Directory -Path $buildOutputRoot -Force | Out-Null
   $env:PES21_NX_PROJECT_ROOT = $projectRoot
@@ -72,10 +115,16 @@ try {
   $env:PES21_NX_LEAGUE_SCORER_INCLUDE = if ($LeagueScorerInclude) {
     Resolve-ProjectInput $LeagueScorerInclude
   } else { "" }
+  $env:PES21_NX_CUP_CATALOG_HEADER = if ($CupCatalogHeader) {
+    Resolve-ProjectInput $CupCatalogHeader
+  } else { "" }
+  $env:PES21_NX_LEAGUE_CATALOG_HEADER = if ($LeagueCatalogHeader) {
+    Resolve-ProjectInput $LeagueCatalogHeader
+  } else { "" }
   $env:WSLENV = if ($oldWslEnv) {
-    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p"
+    "$oldWslEnv`:PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p`:PES21_NX_CUP_CATALOG_HEADER/p`:PES21_NX_LEAGUE_CATALOG_HEADER/p"
   } else {
-    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p"
+    "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p`:PES21_NX_CUP_CATALOG_HEADER/p`:PES21_NX_LEAGUE_CATALOG_HEADER/p"
   }
 
   $buildScript = @'
@@ -119,6 +168,12 @@ if [[ -n "${PES21_NX_MIGRATION_ROSTER_INCLUDE:-}" ]]; then
 fi
 if [[ -n "${PES21_NX_LEAGUE_SCORER_INCLUDE:-}" ]]; then
   cp "$PES21_NX_LEAGUE_SCORER_INCLUDE" source/league_scorer_pool_generated.inc
+fi
+if [[ -n "${PES21_NX_CUP_CATALOG_HEADER:-}" ]]; then
+  cp "$PES21_NX_CUP_CATALOG_HEADER" source/fl26_cup_catalog_generated.h
+fi
+if [[ -n "${PES21_NX_LEAGUE_CATALOG_HEADER:-}" ]]; then
+  cp "$PES21_NX_LEAGUE_CATALOG_HEADER" source/fl26_league_catalog_generated.h
 fi
 
 export DEVKITPRO=/opt/devkitpro
@@ -257,5 +312,15 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
     Remove-Item Env:PES21_NX_LEAGUE_SCORER_INCLUDE -ErrorAction SilentlyContinue
   } else {
     $env:PES21_NX_LEAGUE_SCORER_INCLUDE = $oldLeagueScorerInclude
+  }
+  if ($null -eq $oldCupCatalogHeader) {
+    Remove-Item Env:PES21_NX_CUP_CATALOG_HEADER -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_CUP_CATALOG_HEADER = $oldCupCatalogHeader
+  }
+  if ($null -eq $oldLeagueCatalogHeader) {
+    Remove-Item Env:PES21_NX_LEAGUE_CATALOG_HEADER -ErrorAction SilentlyContinue
+  } else {
+    $env:PES21_NX_LEAGUE_CATALOG_HEADER = $oldLeagueCatalogHeader
   }
 }
