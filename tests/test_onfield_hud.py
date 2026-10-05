@@ -525,6 +525,7 @@ class OnfieldAssetAndAbiTests(unittest.TestCase):
     def test_switch_sprites_are_bundled_byte_identical(self):
         from PIL import Image
         assets = dict(x='X_Button.png', y='Y_Button.png', l='L_Button.png',
+                      r='R_Button.png',
                       zl='ZL_Button.png', zr='ZR_Button.png', sl='SL_Button.png',
                       sr='SR_Button.png', ls='LeftStick_Default_CORE.png',
                       rs='RightStick_Default_CORE.png',
@@ -537,7 +538,7 @@ class OnfieldAssetAndAbiTests(unittest.TestCase):
             bundled = ROOT / 'data' / f'switch_button_{key}.bin'
             self.assertEqual(original.read_bytes(), bundled.read_bytes(), key)
             with Image.open(bundled) as png:
-                self.assertEqual(png.size, (32, 32))
+                self.assertEqual(png.size, (80, 80))
                 self.assertIn('A', png.getbands())
         self.assertIn('!data/switch_button_*.bin', (ROOT / '.gitignore').read_text())
 

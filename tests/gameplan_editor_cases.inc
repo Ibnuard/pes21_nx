@@ -375,6 +375,20 @@ static void test_loading(void) {
   assert(main_menu_2p_transition_active == 1 && main_menu_2p_transition_kind == 1);
   assert(!kickoff_loading_armed);
 }
+static void test_condition_toggle_is_per_side(void) {
+  assert(!exhibition_gameplan_sides[0].condition_mode);
+  assert(!exhibition_gameplan_sides[1].condition_mode);
+  pes_controller_custom_prematch_gameplan_input(0, PES_PAUSE_INPUT_CONDITION);
+  exhibition_gameplan_process_pending();
+  assert(exhibition_gameplan_sides[0].condition_mode == 1u);
+  assert(!exhibition_gameplan_sides[1].condition_mode);
+  pes_controller_custom_prematch_gameplan_input(0, PES_PAUSE_INPUT_CONDITION);
+  exhibition_gameplan_process_pending();
+  assert(!exhibition_gameplan_sides[0].condition_mode);
+  pes_controller_custom_prematch_gameplan_input(1, PES_PAUSE_INPUT_CONDITION);
+  exhibition_gameplan_process_pending();
+  assert(exhibition_gameplan_sides[1].condition_mode == 1u);
+}
 int main(int argc, char **argv) {
   assert(argc == 2); setup();
   if (!strcmp(argv[1], "tap")) test_tap();
@@ -389,6 +403,7 @@ int main(int argc, char **argv) {
   else if (!strcmp(argv[1], "zones")) test_zones();
   else if (!strcmp(argv[1], "popup")) test_popup();
   else if (!strcmp(argv[1], "loading")) test_loading();
+  else if (!strcmp(argv[1], "condition")) test_condition_toggle_is_per_side();
   else return 1;
   return 0;
 }

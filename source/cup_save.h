@@ -25,6 +25,8 @@ typedef struct {
   uint32_t first_match_started;
   CompetitionEntryDraft draft;
   CupTournament tournament;
+  /* v4 append: 5 = random, 2 = normal. */
+  uint32_t player_condition;
 } CupSaveState;
 
 /* Each slot has two alternating checksummed copies. An interrupted write

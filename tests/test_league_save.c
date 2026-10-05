@@ -39,6 +39,7 @@ int main(void) {
   assert(loaded.team_count == 3u);
   assert(loaded.tournament.standings[0].team == 100u);
   assert(loaded.tournament.scorer_count == 0u);
+  assert(loaded.player_condition == 5u);
   loaded.tournament.scorer_count = 1u;
   loaded.tournament.scorers[0].base_id = 42u;
   loaded.tournament.scorers[0].goals = 3u;
@@ -61,6 +62,7 @@ int main(void) {
   assert(loaded.tournament.scorers[0].base_id == 42u);
   assert(loaded.league_competition_id == 0u);
   assert(loaded.league_system == 0u);
+  assert(loaded.player_condition == 5u);
   loaded.league_competition_id = 9u;
   loaded.league_system = LEAGUE_SYSTEM_STANDINGS;
   assert(league_save_write(0u, &loaded));

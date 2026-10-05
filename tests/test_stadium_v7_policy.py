@@ -114,12 +114,14 @@ static uint32_t exhibition_settings_season, exhibition_settings_weather;
 static uint32_t exhibition_settings_turf_length, exhibition_settings_pitch_condition;
 static uint32_t exhibition_settings_substitutions, exhibition_settings_injuries;
 static uint32_t exhibition_settings_ball_index, exhibition_settings_var;
+static uint32_t exhibition_settings_player_condition=5;
 static void (*exhibition_match_set_weather)(void*,uint32_t);
 static void (*exhibition_match_set_season)(void*,uint32_t);
 static void (*exhibition_match_set_turf_length)(void*,uint32_t);
 static void (*exhibition_match_set_pitch_condition)(void*,uint32_t);
 static void (*exhibition_match_set_max_substitutions)(void*,uint8_t);
 static void (*exhibition_match_set_max_extra_substitutions)(void*,uint8_t);
+static void (*exhibition_match_set_condition_setting)(void*,uint32_t,uint32_t);
 static void (*exhibition_match_set_injury)(void*,const uint8_t*);
 static void (*exhibition_match_set_ball_id)(void*,uint16_t);
 static void *(*exhibition_tmpdb_manager_get_instance)(void);
@@ -151,6 +153,28 @@ static uint32_t (*exhibition_match_get_time_zone)(const void*)=get1;
 static uint32_t (*exhibition_match_get_match_time)(const void*)=get2;
 static uint32_t (*exhibition_match_is_ex)(const void*)=get3;
 static uint32_t (*exhibition_match_is_pk)(const void*)=get4;
+static uint32_t requested_leg, applied_leg, applied_first[2];
+static uint32_t applied_away_goal=1, applied_ex_away_goal=1;
+static uint8_t requested_first[2];
+static uint32_t competition_frontend_match_leg(uint8_t *home,uint8_t *away) {
+  *home=requested_first[0]; *away=requested_first[1]; return requested_leg;
+}
+static void set_leg(void *match,const uint32_t *leg) {
+  assert(match==native_match); applied_leg=*leg;
+}
+static void set_first(void *match,uint32_t side,uint8_t score) {
+  assert(match==native_match && side<2); applied_first[side]=score;
+}
+static void (*exhibition_match_set_leg_type)(void*,const uint32_t*)=set_leg;
+static void (*exhibition_match_set_first_leg_score)(void*,uint32_t,uint8_t)=set_first;
+static void set_away_goal(void *match,uint32_t enabled) {
+  assert(match==native_match); applied_away_goal=enabled;
+}
+static void set_ex_away_goal(void *match,uint32_t enabled) {
+  assert(match==native_match); applied_ex_away_goal=enabled;
+}
+static void (*exhibition_match_set_away_goal)(void*,uint32_t)=set_away_goal;
+static void (*exhibition_match_set_ex_away_goal)(void*,uint32_t)=set_ex_away_goal;
 ''' + function(SOURCE, 'exhibition_apply_cpu_level') +
                    function(SOURCE, 'exhibition_apply_match_settings') +
                    function(SOURCE, 'exhibition_refresh_match_settings') + r'''
@@ -164,6 +188,8 @@ int main(void) {
     assert(exhibition_cpu_level_value==6 && exhibition_settings_time_zone==1);
     assert(native_match[0]==6 && native_match[1]==1 && native_match[2]==10);
     assert(native_match[3]==1 && native_match[4]==1 && debug_level==6);
+    assert(applied_leg==2 && !applied_first[0] && !applied_first[1]);
+    assert(!applied_away_goal && !applied_ex_away_goal);
     uint32_t actual; memcpy(&actual,(char*)&renderer_init+4,4); assert(actual==1);
     for(int i=0;i<sizeof(renderer_init);i++)
       if((i<4 || i>=16) && (i<0x78 || i>=0x80))
@@ -187,6 +213,12 @@ int main(void) {
   assert(exhibition_settings_time_zone==0);
   exhibition_apply_match_settings(0);
   assert(native_match[1]==0);
+  requested_leg=2; requested_first[0]=3; requested_first[1]=1;
+  exhibition_apply_match_settings(0);
+  assert(applied_leg==1 && applied_first[0]==3 && applied_first[1]==1);
+  requested_leg=1;
+  exhibition_apply_match_settings(0);
+  assert(applied_leg==0);
 }
 ''')
         setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')

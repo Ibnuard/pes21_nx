@@ -76,7 +76,7 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
   if (action == PES_PAUSE_INPUT_DECIDE)
     exhibition_gameplan_sides[side].page = PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE;
 }
-static void prematch_gameplan_process_auto(uint32_t side, uint32_t action) {
+static void prematch_gameplan_process_preset(uint32_t side, uint32_t action) {
   (void)side; (void)action;
 }
 static void prematch_gameplan_process_positions(uint32_t side, uint32_t action) {

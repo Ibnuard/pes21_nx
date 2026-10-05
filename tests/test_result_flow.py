@@ -15,9 +15,14 @@ PRELUDE = r"""
 static uint32_t match_result_final_seen, exhibition_settings_extra_time;
 static uint32_t exhibition_settings_penalties, match_result_extra_time_started;
 static uint32_t match_result_half_menu_seen;
-static uint32_t home, away, stub_phase;
+static uint32_t home, away, stub_phase, stub_leg;
+static uint8_t first_home, first_away;
 static int pes_controller_pause_score(uint32_t side, uint32_t *out) {
   *out = side ? away : home; return 1;
+}
+static uint32_t competition_frontend_match_leg(uint8_t *out_home,
+                                               uint8_t *out_away) {
+  *out_home = first_home; *out_away = first_away; return stub_leg;
 }
 static uint32_t match_result_current_phase(void) { return stub_phase; }
 """
@@ -124,6 +129,28 @@ int main(void) {
         assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==1);
         assert(a[0]==MATCH_RESULT_ACTION_BACK_TO_MENU);
       }
+  return 0;
+}
+"""
+        build_and_run(self.compiler, harness(self.hooks, body))
+
+    def test_second_leg_fallback_uses_aggregate_not_leg_score(self):
+        body = r"""
+int main(void) {
+  uint32_t a[4];
+  stub_phase = MATCH_PHASE_INVALID;
+  stub_leg = 2;
+  first_home = 3; first_away = 1;
+  home = 1; away = 1;
+  exhibition_settings_extra_time = 1;
+  exhibition_settings_penalties = 1;
+  assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==1);
+  assert(a[0]==MATCH_RESULT_ACTION_BACK_TO_MENU);
+  first_home = 1; first_away = 2;
+  assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==1);
+  first_home = 1; first_away = 1;
+  assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==3);
+  assert(a[1]==MATCH_RESULT_ACTION_OVERTIME);
   return 0;
 }
 """

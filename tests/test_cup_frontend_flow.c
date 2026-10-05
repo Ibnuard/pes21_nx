@@ -91,9 +91,9 @@ int main(void) {
   assert(competition_frontend_focus() == 2u);
   press(BUTTON_A); /* General Setting reuses the hub settings viewport. */
   assert(competition_frontend_cup_general_open());
-  assert(competition_frontend_cup_general_count() == 7u);
+  assert(competition_frontend_cup_general_count() == 8u);
   for (uint32_t row = 0; row < competition_frontend_cup_general_count(); row++)
-    assert(competition_frontend_cup_general_label(row)[0] != 'P');
+    assert(strcmp(competition_frontend_cup_general_label(row), "PENALTIES") != 0);
   press(BUTTON_DOWN);
   assert(competition_frontend_cup_general_focus() == 1u);
   press(BUTTON_B);
@@ -308,11 +308,11 @@ int main(void) {
   press(BUTTON_RIGHT);
   assert(competition_frontend_focus() == 2u); /* disabled Next skipped */
   press(BUTTON_A);
-  assert(competition_frontend_cup_general_count() == 6u);
+  assert(competition_frontend_cup_general_count() == 7u);
   assert(competition_frontend_cup_general_open());
   assert(competition_frontend_cup_general_label(0u)[0] == 'M');
   for (uint32_t row = 0; row < competition_frontend_cup_general_count(); row++)
-    assert(competition_frontend_cup_general_label(row)[0] != 'P');
+    assert(strcmp(competition_frontend_cup_general_label(row), "PENALTIES") != 0);
   press(BUTTON_B);
   press(BUTTON_LEFT); /* Next disabled, return directly to Bracket. */
   assert(competition_frontend_focus() == 0u);

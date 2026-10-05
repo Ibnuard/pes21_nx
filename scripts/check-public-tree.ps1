@@ -32,6 +32,7 @@ $allowedBinaries = @(
   "data/main_menu_portrait_settings.bin",
   "data/switch_button_down.bin",
   "data/switch_button_l.bin",
+  "data/switch_button_r.bin",
   "data/switch_button_left.bin",
   "data/switch_button_ls.bin",
   "data/switch_button_right.bin",

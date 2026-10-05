@@ -9,6 +9,7 @@
 #include "config.h"
 #include "competition_frontend.h"
 #include "exhibition_team_catalog.h"
+#include "gameplan_preset.h"
 #include "experimental_inter_miami.h"
 #include "match_visual_policy.h"
 #include "error.h"
@@ -315,6 +316,14 @@ static uint32_t (*exhibition_match_is_ex)(const void *match);
 static void (*exhibition_match_set_ex)(void *match, uint32_t enabled);
 static uint32_t (*exhibition_match_is_pk)(const void *match);
 static void (*exhibition_match_set_pk)(void *match, uint32_t enabled);
+static void (*exhibition_match_set_leg_type)(void *match,
+                                            const uint32_t *leg_type);
+static void (*exhibition_match_set_first_leg_score)(void *match,
+                                                     uint32_t home_away,
+                                                     uint8_t goals);
+static void (*exhibition_match_set_away_goal)(void *match, uint32_t enabled);
+static void (*exhibition_match_set_ex_away_goal)(void *match,
+                                                 uint32_t enabled);
 static void (*exhibition_match_set_weather)(void *match, uint32_t weather);
 static void (*exhibition_match_set_season)(void *match, uint32_t season);
 static void (*exhibition_match_set_turf_length)(void *match, uint32_t turf_length);
@@ -323,11 +332,25 @@ static void (*exhibition_match_set_ball_id)(void *match, uint16_t ball_id);
 static void (*exhibition_match_set_injury)(void *match, const uint8_t *injury);
 static void (*exhibition_match_set_max_substitutions)(void *match, uint8_t max_subs);
 static void (*exhibition_match_set_max_extra_substitutions)(void *match, uint8_t max_extra);
+static void (*exhibition_match_set_condition_setting)(void *match,
+                                                       uint32_t home_away,
+                                                       uint32_t setting);
+static void (*exhibition_setup_random_condition)(const uint32_t *team_id,
+                                                 uint32_t setting,
+                                                 uint32_t boosted,
+                                                 uint32_t force_normal);
 static void (*exhibition_competition_set_var)(void *competition, uint32_t var_enabled);
 static void *(*exhibition_commonwork_get_competition)(void *common_work, uint16_t id);
 static void (*match_pause_pad_event_back)(void *window);
 static void (*matchplan_squad_load)(void);
 static void (*matchplan_squad_save)(void);
+static uint32_t (*matchplan_common_get_member_id)(const void *common,
+                                                  uint32_t order_no);
+static uint32_t (*matchplan_common_get_player_num)(const void *common);
+static void (*matchplan_common_set_member_id)(void *common,
+                                               uint32_t order, uint32_t member);
+static void (*matchplan_common_set_match_order)(void *common);
+static uint32_t (*exhibition_common_get_crypt_key)(void);
 static void *(*match_squad_data_copy_assign)(void *destination,
                                              const void *source);
 static void *(*match_squad_data_get_tmpdb_player)(void *squad_data,
@@ -396,8 +419,6 @@ static float (*match_squad_data_calc_chemistry)(
 static void (*match_squad_data_copy_construct)(void *destination,
                                                 const void *source);
 static void (*match_squad_data_destruct)(void *squad_data);
-static void (*match_auto_set_squad)(void *squad_data, uint32_t select_kind,
-                                     uint32_t tactics, uint32_t preserve);
 static TmpdbMatchPlanSettingsValue (*match_squad_data_get_settings)(
     const void *squad_data);
 static void (*match_squad_data_set_settings)(
@@ -1031,6 +1052,7 @@ typedef struct {
   uint8_t preferred_foot;
   uint8_t starting;
   uint8_t role;
+  uint8_t condition;
   uint8_t pitch_x;
   uint8_t pitch_y;
 } PrematchGameplanPlayer;
@@ -1060,12 +1082,12 @@ typedef struct {
   uint32_t auto_offside;
   uint32_t team_power;
   uint32_t team_spirit;
-  uint32_t auto_focus;
-  uint32_t auto_preview_valid;
-  uint32_t auto_power_before;
-  uint32_t auto_power_after;
-  uint32_t auto_spirit_before;
-  uint32_t auto_spirit_after;
+  uint32_t preset_step;
+  uint32_t preset_action;
+  uint32_t preset_focus;
+  uint8_t preset_exists[GAMEPLAN_PRESET_SLOTS];
+  char preset_status[48];
+  uint32_t condition_mode;
   uint32_t position_focus;
   uint32_t position_picker_open;
   uint32_t position_picker_focus;
@@ -1126,6 +1148,11 @@ static _Alignas(4) uint32_t exhibition_settings_substitutions = 5u;
 static _Alignas(4) uint32_t exhibition_settings_injuries = 1u;
 static _Alignas(4) uint32_t exhibition_settings_ball_index;
 static _Alignas(4) uint32_t exhibition_settings_var = 1u;
+// Native ConditionSettingType: 2 = NORMAL for everyone; 5 = RANDOM.
+static _Alignas(4) uint32_t exhibition_settings_player_condition = 5u;
+static uint32_t exhibition_condition_team_ids[2];
+static uint32_t exhibition_condition_applied_mode;
+static uint32_t exhibition_condition_initialized;
 static _Alignas(4) uint32_t exhibition_settings_weather;
 static _Alignas(4) uint32_t exhibition_settings_season;
 static _Alignas(4) uint32_t exhibition_settings_turf_length = 1u;
@@ -1981,6 +2008,7 @@ static void exhibition_set_matchmaking_visible(void *window,
 static uint64_t exhibition_search_focus_now_ms(void);
 static void exhibition_select_team(uint32_t side, uint32_t team_id);
 static void exhibition_adjust_match_setting(int direction);
+static void exhibition_refresh_match_conditions(void);
 static uint32_t exhibition_match_settings_first_index(void);
 static uint64_t main_menu_focus_now_ms(void);
 static void pes_exhibition_strategy_footer(void *window,
@@ -3044,6 +3072,25 @@ static void exhibition_apply_match_settings(void *match) {
     exhibition_match_set_ex(match, extra_time);
   if (exhibition_match_set_pk)
     exhibition_match_set_pk(match, penalties);
+  /* The native flow already understands first/second leg aggregate scores.
+   * 0 = first, 1 = second, 2 = no two-leg tie (as in IsFirst/SecondLeg).
+   * Preserve the real match score: never spoof the scoreboard to force ET. */
+  uint8_t first_home = 0, first_away = 0;
+  const uint32_t active_leg = competition_frontend_match_leg(
+      &first_home, &first_away);
+  const uint32_t native_leg = active_leg ? active_leg - 1u : 2u;
+  if (exhibition_match_set_leg_type)
+    exhibition_match_set_leg_type(match, &native_leg);
+  if (exhibition_match_set_first_leg_score) {
+    exhibition_match_set_first_leg_score(match, 0u, first_home);
+    exhibition_match_set_first_leg_score(match, 1u, first_away);
+  }
+  // The mobile match has separate regular/extra-time away-goal flags. A
+  // level aggregate goes to ET/PK regardless of which side scored away.
+  if (exhibition_match_set_away_goal)
+    exhibition_match_set_away_goal(match, 0u);
+  if (exhibition_match_set_ex_away_goal)
+    exhibition_match_set_ex_away_goal(match, 0u);
   if (exhibition_match_set_max_substitutions) {
     const uint32_t subs = __atomic_load_n(&exhibition_settings_substitutions, __ATOMIC_ACQUIRE);
     exhibition_match_set_max_substitutions(match, (uint8_t)subs);
@@ -3051,6 +3098,12 @@ static void exhibition_apply_match_settings(void *match) {
   if (exhibition_match_set_max_extra_substitutions) {
     const uint8_t extra_sub = extra_time ? 1u : 0u;
     exhibition_match_set_max_extra_substitutions(match, extra_sub);
+  }
+  if (exhibition_match_set_condition_setting) {
+    const uint32_t condition = __atomic_load_n(
+        &exhibition_settings_player_condition, __ATOMIC_ACQUIRE);
+    exhibition_match_set_condition_setting(match, 0u, condition);
+    exhibition_match_set_condition_setting(match, 1u, condition);
   }
   if (exhibition_match_set_injury) {
     const uint8_t inj = __atomic_load_n(&exhibition_settings_injuries, __ATOMIC_ACQUIRE) ? 1u : 0u;
@@ -3181,6 +3234,155 @@ static uint32_t exhibition_restore_pre_strategy_squad_snapshot(void) {
   return restored;
 }
 
+// SaveSquadDataToMatchPlanData does not copy the OrderNo -> MemberId map.
+// The native matchPlan Data layout places CommonDataInfo for each side at
+// +0x14 with a 0x218 stride (verified against that save helper's ABI).
+static void *exhibition_matchplan_common_side(uint32_t side) {
+  if (side > 1u || !exhibition_matchplan_get_instance ||
+      !__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
+    return NULL;
+  void *plan = exhibition_matchplan_get_instance();
+  return plan ? (unsigned char *)plan + 0x14u + side * 0x218u : NULL;
+}
+
+// SquadData registers only 18 member keys, even when its player vector contains
+// 40 players. Replacing a starter with an unregistered reserve reuses the old
+// MemberId, so copying just OrderNo -> MemberId leaves the old actor on the pitch.
+// Commit the complete per-side roster permutation BEFORE MatchSetup imports its
+// player parameters. Never run this path for live substitutions/reservations.
+static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
+  if (side > 1u || !squad || live_gameplan_window ||
+      !exhibition_squad_data_get_player_count ||
+      !exhibition_squad_data_get_player_by_index ||
+      !match_squad_data_get_member_id || !match_squad_data_get_order_no ||
+      !match_tmpdb_match_get_player || !exhibition_tmpdb_match_get_team ||
+      !exhibition_common_get_crypt_key || !matchplan_common_get_player_num ||
+      !matchplan_common_set_member_id || !matchplan_common_set_match_order)
+    return 0;
+  void *common = exhibition_matchplan_common_side(side);
+  void *match = exhibition_get_tmpdb_match();
+  if (!common || !match)
+    return 0;
+  unsigned char *team = exhibition_tmpdb_match_get_team(match, &side);
+  const uint32_t count = exhibition_squad_data_get_player_count(squad);
+  uint32_t team_flags = 0;
+  if (team) memcpy(&team_flags, team + 0x3a6u, sizeof(team_flags));
+  if (!team || count < 11u || count > 40u ||
+      matchplan_common_get_player_num(common) != count ||
+      ((team_flags >> 9) & 0x7fu) != count) {
+    debugPrintf("prematch-lineup-v3: count mismatch side=%u squad=%u "
+                "plan=%u team=%u\n", side, count,
+                matchplan_common_get_player_num(common), (team_flags >> 9) & 0x7fu);
+    return 0;
+  }
+
+  // ABI audited for the supported v5.3.0 runtime: Match::PlayerData is an
+  // inline 0x380-byte value (Player, metadata, base and increased parameters),
+  // with no owning pointers. Move the WHOLE value, including condition and
+  // appearance; copying names/IDs or only Player would leave mixed identities.
+  // AdditionalData's 16-byte PlayerDataInfo owns only flags and a Player pointer.
+  unsigned char *records[40];
+  uint32_t ids[40], source[40], wanted[18], orders[18];
+  const uint32_t registered = count < 18u ? count : 18u;
+  unsigned char *infos = (unsigned char *)exhibition_matchplan_get_instance() +
+                         0x500u + side * 0x340u;
+  for (uint32_t i = 0; i < count; ++i) {
+    records[i] = (unsigned char *)match_tmpdb_match_get_player(match, &side, &i);
+    if (records[i] != (unsigned char *)match + 0x1248u +
+                          side * 0x8c00u + i * 0x380u)
+      return 0;
+    uint64_t player_id = 0, team_player_id = 0;
+    const void *info_player = NULL;
+    memcpy(&player_id, records[i] + 44u, sizeof(player_id));
+    memcpy(&team_player_id, team + 0x110u + i * 8u, sizeof(team_player_id));
+    memcpy(&info_player, infos + i * 16u + 8u, sizeof(info_player));
+    ids[i] = (uint32_t)(player_id >> 32);
+    if (!ids[i] || ids[i] != (uint32_t)(team_player_id >> 32) ||
+        info_player != records[i]) {
+      debugPrintf("prematch-lineup-v3: invalid source side=%u member=%u "
+                  "match=%u team=%u info=%p expected=%p\n", side, i, ids[i],
+                  (uint32_t)(team_player_id >> 32), info_player, records[i]);
+      return 0;
+    }
+    for (uint32_t j = 0; j < i; ++j)
+      if (ids[j] == ids[i]) return 0;
+    source[i] = i;
+  }
+
+  uint32_t members_seen = 0, orders_seen = 0;
+  const uint32_t crypt_key = exhibition_common_get_crypt_key();
+  for (uint32_t i = 0; i < count; ++i) {
+    const void *key = exhibition_squad_data_get_player_by_index(squad, &i);
+    if (!key) return 0;
+    const uint32_t member = match_squad_data_get_member_id(squad, key);
+    const uint32_t order = match_squad_data_get_order_no(squad, key);
+    if (member == 0xffu && order == 0xffu) continue; // Unregistered reserve.
+    if (member >= registered || order >= registered ||
+        (members_seen & (1u << member)) || (orders_seen & (1u << order)))
+      return 0;
+    uint32_t unique = 0;
+    memcpy(&unique, (const unsigned char *)key + 4u, sizeof(unique));
+    unique ^= crypt_key;
+    uint32_t found = count;
+    for (uint32_t j = 0; j < count; ++j)
+      if (ids[j] == unique) found = j;
+    if (found == count) {
+      debugPrintf("prematch-lineup-v3: missing player side=%u member=%u "
+                  "unique=%u\n", side, member, unique);
+      return 0; // Never fall back to another side or player.
+    }
+    wanted[member] = found;
+    orders[order] = member;
+    members_seen |= 1u << member;
+    orders_seen |= 1u << order;
+  }
+  const uint32_t complete = (1u << registered) - 1u;
+  if (members_seen != complete || orders_seen != complete) return 0;
+  for (uint32_t member = 0; member < registered; ++member) {
+    uint32_t from = member;
+    while (from < count && source[from] != wanted[member]) ++from;
+    if (from == count) return 0;
+    const uint32_t displaced = source[member];
+    source[member] = source[from];
+    source[from] = displaced;
+  }
+  uint32_t moved = 0;
+  for (uint32_t i = 0; i < count; ++i) moved += source[i] != i;
+  if (moved) {
+    struct MemberCopy {
+      unsigned char record[0x380], info[16], team_id[8], shirt[2];
+    };
+    struct MemberCopy *saved = malloc(count * sizeof(*saved));
+    if (!saved) return 0;
+    // Complete validation and staging before the first write; preserve the
+    // displaced reserves too, with no duplicates and no CommonWork mutation.
+    for (uint32_t i = 0; i < count; ++i) {
+      memcpy(saved[i].record, records[i], sizeof(saved[i].record));
+      memcpy(saved[i].info, infos + i * 16u, sizeof(saved[i].info));
+      memcpy(saved[i].team_id, team + 0x110u + i * 8u, 8u);
+      memcpy(saved[i].shirt, team + 0x25cu + i * 2u, 2u);
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+      const struct MemberCopy *entry = &saved[source[i]];
+      memcpy(records[i], entry->record, sizeof(entry->record));
+      memcpy(infos + i * 16u, entry->info, sizeof(entry->info));
+      memcpy(infos + i * 16u + 8u, &records[i], sizeof(records[i]));
+      memcpy(team + 0x110u + i * 8u, entry->team_id, 8u);
+      memcpy(team + 0x25cu + i * 2u, entry->shirt, 2u);
+    }
+    free(saved);
+  }
+  for (uint32_t order = 0; order < count; ++order)
+    matchplan_common_set_member_id(common, order,
+        order < registered ? orders[order] : order);
+  matchplan_common_set_match_order(common);
+  if (moved)
+    debugPrintf("prematch-lineup-v3: side=%u roster=%u moved=%u "
+                "registered=%u committed before kickoff\n",
+                side, count, moved, registered);
+  return 1;
+}
+
 // The native save helper commits only SquadEdit::GetMySide(). Our split
 // screen edits HOME and AWAY independently, so select and save each requested
 // side before publishing the complete match plan back to tmpdb::Match.
@@ -3200,6 +3402,12 @@ static void exhibition_save_matchplan_sides(uint32_t side_mask) {
   for (uint32_t side = 0; side < 2; side++) {
     if (!(side_mask & (1u << side)))
       continue;
+    if (!live_gameplan_window && exhibition_squad_edit_get_squad_data &&
+        !exhibition_sync_prematch_lineup(side,
+            exhibition_squad_edit_get_squad_data(squad_edit, side))) {
+      debugPrintf("prematch-lineup-v3: refused unsynchronized save side=%u\n", side);
+      continue;
+    }
     exhibition_squad_edit_set_my_side(squad_edit, &side);
     matchplan_squad_save();
   }
@@ -3450,6 +3658,13 @@ static void exhibition_adjust_match_setting(int direction) {
   } else if (focus == 7) {
     value = !__atomic_load_n(&exhibition_settings_var, __ATOMIC_ACQUIRE);
     __atomic_store_n(&exhibition_settings_var, value, __ATOMIC_RELEASE);
+  } else if (focus == 8) {
+    value = __atomic_load_n(&exhibition_settings_player_condition,
+                            __ATOMIC_ACQUIRE) == 2u ? 5u : 2u;
+    __atomic_store_n(&exhibition_settings_player_condition, value,
+                     __ATOMIC_RELEASE);
+    exhibition_apply_match_settings(match);
+    exhibition_refresh_match_conditions();
   } else {
     return;
   }
@@ -4499,6 +4714,7 @@ static void main_menu_2p_prematch_hub_cache_lineups(void) {
 
   for (uint32_t side = 0; side < 2; side++) {
     uint32_t count = 0;
+    const void *common = exhibition_matchplan_common_side(side);
     const void *registry = match_global_registry_get_instance
                                ? match_global_registry_get_instance()
                                : NULL;
@@ -4509,7 +4725,9 @@ static void main_menu_2p_prematch_hub_cache_lineups(void) {
     for (uint32_t member = 0;
          member < MAIN_MENU_2P_PREMATCH_LINEUP_COUNT; member++) {
       uint32_t member_id = member;
-      if (order_info && match_order_info_get_member_id)
+      if (common && matchplan_common_get_member_id)
+        member_id = matchplan_common_get_member_id(common, member);
+      else if (order_info && match_order_info_get_member_id)
         member_id = match_order_info_get_member_id(order_info, member);
       if (member_id == UINT32_MAX || member_id == 0xffu || member_id >= 40u)
         continue;
@@ -4808,8 +5026,6 @@ static uint32_t exhibition_install_master_roster(
   return valid;
 }
 
-static uint32_t (*exhibition_common_get_crypt_key)(void);
-
 static uint32_t exhibition_refresh_squad_side_player_stats(
     unsigned char *squad_edit, void *common_work, uint32_t side) {
   const uint32_t raw_team = __atomic_load_n(
@@ -4964,6 +5180,72 @@ static uint32_t exhibition_refresh_squad_player_stats(void) {
   return updated;
 }
 
+static void exhibition_prepare_team_conditions(uint32_t home_team_id,
+                                               uint32_t away_team_id) {
+  if (!home_team_id || !away_team_id || !exhibition_setup_random_condition)
+    return;
+  const uint32_t mode = __atomic_load_n(
+      &exhibition_settings_player_condition, __ATOMIC_ACQUIRE) == 2u ? 2u : 5u;
+  if (exhibition_condition_initialized &&
+      exhibition_condition_team_ids[0] == home_team_id &&
+      exhibition_condition_team_ids[1] == away_team_id &&
+      exhibition_condition_applied_mode == mode)
+    return;
+  exhibition_setup_random_condition(&home_team_id, mode, 0u, 0u);
+  if (away_team_id != home_team_id)
+    exhibition_setup_random_condition(&away_team_id, mode, 0u, 0u);
+  exhibition_condition_team_ids[0] = home_team_id;
+  exhibition_condition_team_ids[1] = away_team_id;
+  exhibition_condition_applied_mode = mode;
+  exhibition_condition_initialized = 1u;
+}
+
+// A General Setting change after the hub was created must also reach the
+// already-copied Match players and SquadEdit copies without rebuilding the
+// teams (which would discard the player's pre-game lineup edits).
+static void exhibition_refresh_match_conditions(void) {
+  const uint32_t home_team_id = exhibition_native_team_id(__atomic_load_n(
+      &exhibition_home_team_id, __ATOMIC_ACQUIRE));
+  const uint32_t away_team_id = exhibition_native_team_id(__atomic_load_n(
+      &exhibition_away_team_id, __ATOMIC_ACQUIRE));
+  if (!home_team_id || !away_team_id)
+    return;
+  exhibition_condition_initialized = 0u;
+  exhibition_prepare_team_conditions(home_team_id, away_team_id);
+  void *match = exhibition_get_tmpdb_match();
+  void *manager = exhibition_tmpdb_manager_get_instance
+                      ? exhibition_tmpdb_manager_get_instance() : NULL;
+  void *common_work = NULL;
+  if (manager)
+    memcpy(&common_work, (unsigned char *)manager + 64, sizeof(common_work));
+  if (!match || !common_work || !match_tmpdb_match_get_player ||
+      !exhibition_commonwork_update_player)
+    return;
+  for (uint32_t side = 0; side < 2u; ++side) {
+    for (uint32_t member = 0; member < 40u; ++member) {
+      unsigned char *player = (unsigned char *)match_tmpdb_match_get_player(
+          match, &side, &member);
+      uint64_t player_id = 0u;
+      if (!player)
+        continue;
+      memcpy(&player_id, player + 44, sizeof(player_id));
+      if (!player_id)
+        continue;
+      const unsigned char *master = (const unsigned char *)
+          exhibition_commonwork_update_player(common_work, player_id);
+      uint64_t master_id = 0u;
+      if (master)
+        memcpy(&master_id, master + 44, sizeof(master_id));
+      if (master_id != player_id)
+        continue;
+      player[247] = (player[247] & ~7u) | (master[247] & 7u);
+    }
+  }
+  if (__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE))
+    exhibition_refresh_squad_player_stats();
+  exhibition_apply_match_settings(match);
+}
+
 static void live_gameplan_capture_identity(void) {
   // Replace the map for every match, even if capture fails. A new fixture must
   // never inherit the previous fixture's players (including same-club rematches).
@@ -5097,6 +5379,14 @@ static int exhibition_refresh_selected_tmpdb(void) {
   if (!home_roster || !away_roster || !exhibition_set_team)
     return 0;
 
+  // A late native Hub refresh also runs after returning from child pages.
+  // Team selection invalidates plan_ready explicitly; a display refresh must
+  // not re-import the original team over the user's committed starting XI.
+  if (__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE)) {
+    exhibition_save_matchplan_sides(3u);
+    return 1;
+  }
+
   const uint32_t home_team_id = exhibition_native_team_id(home_raw);
   const uint32_t away_team_id = exhibition_native_team_id(away_raw);
   void *manager = exhibition_tmpdb_manager_get_instance
@@ -5114,6 +5404,7 @@ static int exhibition_refresh_selected_tmpdb(void) {
   if (home_count < 11 || away_count < 11)
     return 0;
 
+  exhibition_prepare_team_conditions(home_team_id, away_team_id);
   exhibition_set_team(&home_team_id, 0, 0);
   exhibition_set_team(&away_team_id, 1, 0);
 
@@ -6318,7 +6609,7 @@ uint32_t pes_controller_custom_match_settings_count(void) {
 
 const char *pes_controller_custom_match_settings_label(uint32_t index) {
   static const char *const labels[] = {
-      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES", "SUBSTITUTIONS", "INJURIES", "BALL", "VAR"};
+      "TIME", "MATCH TIME", "OVERTIME", "PENALTIES", "SUBSTITUTIONS", "INJURIES", "BALL", "VAR", "PLAYER CONDITION"};
   const uint32_t native_index =
       index + exhibition_match_settings_first_index();
   if (native_index == 0 && exhibition_match_settings_cpu_level_visible())
@@ -6378,6 +6669,9 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
   }
   if (index == 7)
     return __atomic_load_n(&exhibition_settings_var, __ATOMIC_ACQUIRE) ? "ON" : "OFF";
+  if (index == 8)
+    return __atomic_load_n(&exhibition_settings_player_condition,
+                            __ATOMIC_ACQUIRE) == 2u ? "NORMAL" : "RANDOM";
   return "";
 }
 
@@ -7415,6 +7709,12 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
     if (role > 12)
       role = 13;
     entry->role = (uint8_t)role;
+    /* Native PlayerDataInfo::GetCondition reads the low three bits of the
+     * tmpdb Player byte at +247. NodeRectIconCondition maps 4..0 to the
+     * five up/right/down arrows; unexpected values stay neutral. */
+    entry->condition = player ?
+        ((const uint8_t *)player)[247] & 7u : 2u;
+    if (entry->condition > 4u) entry->condition = 2u;
     if (player && exhibition_get_player_overall) {
       uint32_t overall_position = role <= 12 ? role : 13;
       entry->overall =
@@ -7475,7 +7775,6 @@ static void prematch_gameplan_refresh_side(uint32_t side) {
                           : 0;
   state->team_spirit =
       prematch_gameplan_team_spirit(squad_data, state->tactics);
-  state->auto_preview_valid = 0;
   prematch_gameplan_build_formation_label(state);
   prematch_gameplan_detect_preset(state);
   prematch_gameplan_load_portraits(side);
@@ -7564,6 +7863,47 @@ static void prematch_gameplan_save_and_refresh(uint32_t side) {
     return;
   exhibition_save_matchplan_sides(1u << side);
   prematch_gameplan_refresh_side(side);
+}
+
+// A failed validation must not leave a UI-only substitution behind. SquadData
+// has owning vectors, so use its native deep-copy lifecycle for rollback.
+static int prematch_gameplan_replace_player(
+    uint32_t side, void *squad_data, const void *field_player_id,
+    const void *bench_player_id) {
+  if (side > 1u || live_gameplan_window || !squad_data ||
+      !field_player_id || !bench_player_id ||
+      !match_squad_data_get_order_no || !match_squad_data_get_member_id ||
+      !match_swap_member_info_construct || !match_replace_squad_player ||
+      !match_squad_data_copy_construct || !match_squad_data_copy_assign ||
+      !match_squad_data_destruct)
+    return 0;
+  const uint32_t field_order = match_squad_data_get_order_no(squad_data, field_player_id);
+  const uint32_t bench_order = match_squad_data_get_order_no(squad_data, bench_player_id);
+  const uint32_t field_member = match_squad_data_get_member_id(squad_data, field_player_id);
+  const uint32_t bench_member = match_squad_data_get_member_id(squad_data, bench_player_id);
+  if (field_order >= 18u || field_member >= 18u ||
+      !((bench_order < 18u && bench_member < 18u) ||
+        (bench_order == 0xffu && bench_member == 0xffu)) ||
+      field_order == bench_order || field_member == bench_member)
+    return 0;
+  _Alignas(8) unsigned char before[EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES] = {0};
+  _Alignas(8) unsigned char field_info[24] = {0}, bench_info[24] = {0};
+  match_squad_data_copy_construct(before, squad_data);
+  match_swap_member_info_construct(field_info, field_order, field_member, field_player_id);
+  match_swap_member_info_construct(bench_info, bench_order, bench_member, bench_player_id);
+  match_replace_squad_player(squad_data, field_info, bench_info);
+  const int committed =
+      match_squad_data_get_order_no(squad_data, field_player_id) == bench_order &&
+      match_squad_data_get_order_no(squad_data, bench_player_id) == field_order &&
+      exhibition_sync_prematch_lineup(side, squad_data);
+  if (!committed) {
+    match_squad_data_copy_assign(squad_data, before);
+    debugPrintf("prematch-lineup-v3: replacement rolled back side=%u "
+                "field=%u/%u bench=%u/%u\n", side, field_order, field_member,
+                bench_order, bench_member);
+  }
+  match_squad_data_destruct(before);
+  return committed;
 }
 
 static void prematch_gameplan_store_formation(void *squad, uint32_t tactics,
@@ -7824,22 +8164,10 @@ static void prematch_gameplan_swap(uint32_t side) {
       !match_swap_member_info_construct || !match_replace_squad_player)
     return;
 
-  _Alignas(8) unsigned char field_info[24] = {0};
-  _Alignas(8) unsigned char bench_info[24] = {0};
   char field_name[sizeof(field->name)];
   char bench_name[sizeof(bench->name)];
   memcpy(field_name, field->name, sizeof(field_name));
   memcpy(bench_name, bench->name, sizeof(bench_name));
-  match_swap_member_info_construct(
-      field_info,
-      match_squad_data_get_order_no(state->squad_data, field->player_id),
-      match_squad_data_get_member_id(state->squad_data, field->player_id),
-      field->player_id);
-  match_swap_member_info_construct(
-      bench_info,
-      match_squad_data_get_order_no(state->squad_data, bench->player_id),
-      match_squad_data_get_member_id(state->squad_data, bench->player_id),
-      bench->player_id);
   if (live_gameplan_window) {
     // Native in-match drag uses reservation, not immediate roster replacement.
     // CanReserved / SetMemberChangeReserved enforce the game's substitution rules.
@@ -7849,7 +8177,9 @@ static void prematch_gameplan_swap(uint32_t side) {
     if (!reserved)
       return;
   } else {
-    match_replace_squad_player(state->squad_data, field_info, bench_info);
+    if (!prematch_gameplan_replace_player(side, state->squad_data,
+                                          field->player_id, bench->player_id))
+      return;
   }
   state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
   state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
@@ -8003,40 +8333,113 @@ static void prematch_gameplan_toggle_formation_setting(uint32_t side,
   prematch_gameplan_save_and_refresh(side);
 }
 
-static void prematch_gameplan_prepare_auto_preview(uint32_t side) {
-  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
-  state->auto_focus = 1;
-  state->auto_preview_valid = 0;
-  state->auto_power_before = state->team_power;
-  state->auto_spirit_before = state->team_spirit;
-  state->auto_power_after = state->team_power;
-  state->auto_spirit_after = state->team_spirit;
-  if (!state->squad_data || !match_squad_data_copy_construct ||
-      !match_squad_data_destruct || !match_auto_set_squad ||
-      !match_squad_data_get_team_power ||
-      !match_squad_data_calc_chemistry)
-    return;
-
-  _Alignas(16) unsigned char preview[2048];
-  memset(preview, 0, sizeof(preview));
-  match_squad_data_copy_construct(preview, state->squad_data);
-  match_auto_set_squad(preview, 3, state->tactics, 0);
-  state->auto_power_after = match_squad_data_get_team_power(preview);
-  state->auto_spirit_after =
-      prematch_gameplan_team_spirit(preview, state->tactics);
-  match_squad_data_destruct(preview);
-  state->auto_preview_valid = 1;
+static uint32_t prematch_gameplan_team_id(uint32_t side) {
+  return __atomic_load_n(side ? &exhibition_away_team_id
+                              : &exhibition_home_team_id, __ATOMIC_ACQUIRE);
 }
 
-static void prematch_gameplan_apply_auto_lineup(uint32_t side) {
+static void prematch_gameplan_refresh_preset_slots(uint32_t side) {
   PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
-  if (!state->auto_preview_valid || !state->squad_data ||
-      !match_auto_set_squad)
-    return;
-  match_auto_set_squad(state->squad_data, 3, state->tactics, 0);
+  const uint32_t team = prematch_gameplan_team_id(side);
+  GameplanPreset preset;
+  for (uint32_t slot = 0; slot < GAMEPLAN_PRESET_SLOTS; ++slot)
+    state->preset_exists[slot] =
+        gameplan_preset_read(team, slot, &preset) != 0;
+}
+
+static int prematch_gameplan_save_preset(uint32_t side, uint32_t slot) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (live_gameplan_window || !state->squad_data ||
+      !match_squad_data_get_formation || !match_squad_data_get_settings ||
+      state->player_count < 11u) return 0;
+  GameplanPreset preset = {0};
+  preset.team_id = prematch_gameplan_team_id(side);
+  preset.player_count = state->player_count;
+  preset.tactics = state->tactics & 1u;
+  uint32_t reserve_order = state->player_count < 18u ? state->player_count : 18u;
+  for (uint32_t i = 0; i < state->player_count; ++i) {
+    memcpy(preset.players[i].player_id, state->players[i].player_id,
+           sizeof(preset.players[i].player_id));
+    // Native unregistered reserves all report 0xff; use distinct file-only
+    // orders after the registered 18 without inventing native MemberIds.
+    preset.players[i].order_no = (uint8_t)(state->players[i].order_no == 0xffu
+        ? reserve_order++ : state->players[i].order_no);
+  }
+  for (uint32_t tactic = 0; tactic < 2u; ++tactic) {
+    const TmpdbFormationValue formation = match_squad_data_get_formation(
+        state->squad_data, tactic);
+    memcpy(preset.formation[tactic], &formation, sizeof(formation));
+  }
+  const TmpdbMatchPlanSettingsValue settings =
+      match_squad_data_get_settings(state->squad_data);
+  memcpy(preset.settings, &settings, sizeof(settings));
+  return gameplan_preset_write(preset.team_id, slot, &preset);
+}
+
+static int prematch_gameplan_load_preset(uint32_t side, uint32_t slot) {
+  PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (live_gameplan_window || !state->squad_data ||
+      !match_swap_member_info_construct || !match_replace_squad_player ||
+      !match_squad_data_get_order_no || !match_squad_data_get_member_id ||
+      !match_squad_data_set_formation || !match_formation_copy_assign ||
+      !match_squad_data_set_settings || !match_squad_data_set_tactics)
+    return 0;
+  GameplanPreset preset;
+  if (!gameplan_preset_read(prematch_gameplan_team_id(side), slot, &preset) ||
+      preset.player_count != state->player_count) return 0;
+  /* Validate the entire roster before touching the native squad. A removed
+   * or migrated player leaves the currently selected plan intact. */
+  for (uint32_t i = 0; i < preset.player_count; ++i) {
+    int found = 0;
+    for (uint32_t j = 0; j < state->player_count; ++j)
+      if (memcmp(preset.players[i].player_id, state->players[j].player_id,
+                 sizeof(preset.players[i].player_id)) == 0) {
+        found = 1;
+        break;
+      }
+    if (!found) return 0;
+  }
+  const uint32_t registered = preset.player_count < 18u ? preset.player_count : 18u;
+  for (uint32_t order = 0; order < registered; ++order) {
+    const GameplanPresetPlayer *wanted = NULL;
+    PrematchGameplanPlayer *current = NULL, *target = NULL;
+    for (uint32_t i = 0; i < preset.player_count; ++i)
+      if (preset.players[i].order_no == order) wanted = &preset.players[i];
+    for (uint32_t i = 0; i < state->player_count; ++i) {
+      PrematchGameplanPlayer *player = &state->players[i];
+      if (player->order_no == order) current = player;
+      if (wanted && memcmp(player->player_id, wanted->player_id,
+                            sizeof(player->player_id)) == 0) target = player;
+    }
+    if (!wanted || !current || !target) return 0;
+    if (current == target) continue;
+    if (!prematch_gameplan_replace_player(
+            side, state->squad_data, current->player_id, target->player_id)) {
+      debugPrintf("native 2P Game Plan: preset order commit failed side=%u "
+                  "order=%u target=%u\n", side, order, target->order_no);
+      return 0;
+    }
+    prematch_gameplan_refresh_side(side);
+  }
+  for (uint32_t tactic = 0; tactic < 2u; ++tactic) {
+    TmpdbFormationValue formation;
+    memcpy(&formation, preset.formation[tactic], sizeof(formation));
+    prematch_gameplan_store_formation(state->squad_data, tactic, &formation);
+    if (match_formation_get_role &&
+        match_squad_data_set_player_role_position)
+      for (uint32_t i = 0; i < state->player_count; ++i)
+        if (state->players[i].order_no < 11u)
+          match_squad_data_set_player_role_position(state->squad_data,
+              match_formation_get_role(&formation,
+                  state->players[i].order_no, 0),
+              state->players[i].member_id, &tactic);
+  }
+  TmpdbMatchPlanSettingsValue settings;
+  memcpy(&settings, preset.settings, sizeof(settings));
+  match_squad_data_set_settings(state->squad_data, &settings);
+  match_squad_data_set_tactics(state->squad_data, preset.tactics);
   prematch_gameplan_save_and_refresh(side);
-  debugPrintf("native 2P Game Plan: auto lineup side=%u power=%u spirit=%u\n",
-              side, state->team_power, state->team_spirit);
+  return 1;
 }
 
 static int exhibition_gameplan_prepare_matchplan(void) {
@@ -8175,6 +8578,7 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
     // Strategy only reloads the local HOME side on some Exhibition builds.
     exhibition_save_matchplan_sides(3u);
     exhibition_publish_prepared_matchplan();
+    main_menu_2p_prematch_hub_cache_lineups();
     __atomic_store_n(&exhibition_gameplan_custom_active, 0,
                      __ATOMIC_RELEASE);
     main_menu_2p_prematch_hub_input_armed[0] = 0;
@@ -8194,10 +8598,14 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
       state->page = PES_PREMATCH_GAMEPLAN_PAGE_FORMATION;
       state->formation_focus = 0;
     } else if (state->root_focus == 2) {
-      // Bulk pre-match auto-selection can bypass live substitution reservations.
-      if (live_gameplan_window) return;
-      state->page = PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP;
-      prematch_gameplan_prepare_auto_preview(side);
+      if (live_gameplan_window)
+        return; // Native live substitutions cannot be replaced by a preset.
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_PRESET;
+      state->preset_step = 0u;
+      state->preset_action = 0u;
+      state->preset_focus = 0u;
+      state->preset_status[0] = '\0';
+      prematch_gameplan_refresh_preset_slots(side);
     } else {
       state->page = PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS;
       state->position_focus = 0;
@@ -8351,20 +8759,50 @@ static void prematch_gameplan_process_formation(uint32_t side,
   }
 }
 
-static void prematch_gameplan_process_auto(uint32_t side,
-                                            uint32_t action) {
+static void prematch_gameplan_process_preset(uint32_t side,
+                                              uint32_t action) {
   PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
   if (action == PES_PAUSE_INPUT_BACK) {
-    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+    if (state->preset_step) {
+      state->preset_step = 0u;
+      state->preset_focus = state->preset_action;
+      state->preset_status[0] = '\0';
+    } else {
+      state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+    }
   } else if (action == PES_PAUSE_INPUT_LEFT ||
              action == PES_PAUSE_INPUT_RIGHT ||
              action == PES_PAUSE_INPUT_UP ||
              action == PES_PAUSE_INPUT_DOWN) {
-    state->auto_focus ^= 1u;
+    const uint32_t count = state->preset_step ? GAMEPLAN_PRESET_SLOTS : 2u;
+    const int previous = action == PES_PAUSE_INPUT_LEFT ||
+                         action == PES_PAUSE_INPUT_UP;
+    state->preset_focus = previous
+        ? (state->preset_focus + count - 1u) % count
+        : (state->preset_focus + 1u) % count;
   } else if (action == PES_PAUSE_INPUT_DECIDE) {
-    if (state->auto_focus && state->auto_preview_valid)
-      prematch_gameplan_apply_auto_lineup(side);
-    state->page = PES_PREMATCH_GAMEPLAN_PAGE_ROOT;
+    if (!state->preset_step) {
+      state->preset_action = state->preset_focus;
+      state->preset_focus = 0u;
+      state->preset_step = 1u;
+      state->preset_status[0] = '\0';
+    } else if (live_gameplan_window) {
+      snprintf(state->preset_status, sizeof(state->preset_status),
+               "PRESETS AVAILABLE BEFORE KICKOFF");
+    } else {
+      const uint32_t slot = state->preset_focus;
+      const int success = state->preset_action == 0u
+          ? prematch_gameplan_save_preset(side, slot)
+          : prematch_gameplan_load_preset(side, slot);
+      snprintf(state->preset_status, sizeof(state->preset_status),
+               success ? (state->preset_action == 0u
+                              ? "PRESET %u SAVED" : "PRESET %u LOADED")
+                       : (state->preset_action == 0u
+                              ? "PRESET %u SAVE FAILED"
+                              : "PRESET %u EMPTY OR ROSTER CHANGED"),
+               slot + 1u);
+      prematch_gameplan_refresh_preset_slots(side);
+    }
   }
 }
 
@@ -8435,6 +8873,9 @@ static void exhibition_gameplan_process_pending(void) {
     if (!connected) {
       prematch_gameplan_finish_drag(side);
       continue;
+    } else if (action == PES_PAUSE_INPUT_CONDITION) {
+      state->condition_mode ^= 1u;
+      continue;
     } else if (page_substitute && state->substitute_area ==
                               PES_PREMATCH_GAMEPLAN_AREA_FIELD) {
       // Field A belongs entirely to the gesture. The normal DECIDE press is
@@ -8499,8 +8940,8 @@ static void exhibition_gameplan_process_pending(void) {
       prematch_gameplan_process_substitute(side, action);
     else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_FORMATION)
       prematch_gameplan_process_formation(side, action);
-    else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP)
-      prematch_gameplan_process_auto(side, action);
+    else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_PRESET)
+      prematch_gameplan_process_preset(side, action);
     else if (state->page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS)
       prematch_gameplan_process_positions(side, action);
   }
@@ -8548,6 +8989,17 @@ const char *pes_controller_custom_prematch_gameplan_player_role(
   const PrematchGameplanPlayer *player =
       prematch_gameplan_public_player(pad, starting, index);
   return player ? prematch_gameplan_role_label(player->role) : "";
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_player_condition(
+    uint32_t pad, uint32_t starting, uint32_t index) {
+  const PrematchGameplanPlayer *player =
+      prematch_gameplan_public_player(pad, starting, index);
+  return player ? player->condition : 2u;
+}
+
+int pes_controller_custom_prematch_gameplan_condition_mode(uint32_t pad) {
+  return pad < 2 && exhibition_gameplan_sides[pad].condition_mode != 0;
 }
 
 uint32_t pes_controller_custom_prematch_gameplan_player_overall(
@@ -8680,29 +9132,26 @@ uint32_t pes_controller_custom_prematch_gameplan_team_spirit(uint32_t pad) {
   return pad < 2 ? exhibition_gameplan_sides[pad].team_spirit : 0;
 }
 
-int pes_controller_custom_prematch_gameplan_auto_preview_valid(
-    uint32_t pad) {
-  return pad < 2 && exhibition_gameplan_sides[pad].auto_preview_valid;
+uint32_t pes_controller_custom_prematch_gameplan_preset_step(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].preset_step : 0u;
 }
 
-uint32_t pes_controller_custom_prematch_gameplan_auto_focus(uint32_t pad) {
-  return pad < 2 ? exhibition_gameplan_sides[pad].auto_focus : 0;
+uint32_t pes_controller_custom_prematch_gameplan_preset_focus(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].preset_focus : 0u;
 }
 
-uint32_t pes_controller_custom_prematch_gameplan_auto_power(
-    uint32_t pad, uint32_t after) {
-  if (pad > 1)
-    return 0;
-  return after ? exhibition_gameplan_sides[pad].auto_power_after
-               : exhibition_gameplan_sides[pad].auto_power_before;
+uint32_t pes_controller_custom_prematch_gameplan_preset_action(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].preset_action : 0u;
 }
 
-uint32_t pes_controller_custom_prematch_gameplan_auto_spirit(
-    uint32_t pad, uint32_t after) {
-  if (pad > 1)
-    return 0;
-  return after ? exhibition_gameplan_sides[pad].auto_spirit_after
-               : exhibition_gameplan_sides[pad].auto_spirit_before;
+int pes_controller_custom_prematch_gameplan_preset_exists(uint32_t pad,
+                                                          uint32_t slot) {
+  return pad < 2 && slot < GAMEPLAN_PRESET_SLOTS &&
+      exhibition_gameplan_sides[pad].preset_exists[slot] != 0;
+}
+
+const char *pes_controller_custom_prematch_gameplan_preset_status(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].preset_status : "";
 }
 
 uint32_t pes_controller_custom_prematch_gameplan_position_focus(
@@ -9280,15 +9729,15 @@ int pes_controller_menu_physical_tap(float normalized_x,
   if (!__atomic_load_n(&exhibition_settings_popup_open, __ATOMIC_ACQUIRE))
     return 0;
 
-  const int hub_mode =
-      __atomic_load_n(&exhibition_settings_hub_mode, __ATOMIC_ACQUIRE) != 0;
   const uint32_t settings_count =
       pes_controller_custom_match_settings_count();
-  const float settings_row_y =
-      hub_mode ? PES_HUB_MATCH_SETTINGS_ROW_Y : PES_MATCH_SETTINGS_ROW_Y;
-  const float settings_row_step = hub_mode
-                                      ? PES_HUB_MATCH_SETTINGS_ROW_STEP
-                                      : PES_MATCH_SETTINGS_ROW_STEP;
+  const uint32_t visible_count = settings_count < 5u ? settings_count : 5u;
+  const uint32_t focus = pes_controller_custom_match_settings_focus();
+  const uint32_t start_index = focus >= visible_count
+      ? focus - visible_count + 1u : 0u;
+  // Match the shared five-row General Settings viewport in overlay.c.
+  const float settings_row_y = 0.225f;
+  const float settings_row_step = 0.108f;
   if (normalized_y >= 0.81f && normalized_y <= 0.91f) {
     if (normalized_x >= 0.55f && normalized_x <= 0.80f)
       pes_controller_menu_back_pressed();
@@ -9299,15 +9748,15 @@ int pes_controller_menu_physical_tap(float normalized_x,
   if (normalized_x >= 0.18f && normalized_x <= 0.82f &&
       normalized_y >= settings_row_y &&
       normalized_y < settings_row_y +
-                          settings_row_step * settings_count) {
+                          settings_row_step * visible_count) {
     int index = (int)floorf((normalized_y - settings_row_y) /
                             settings_row_step);
     if (index < 0)
       index = 0;
-    if (index >= (int)settings_count)
-      index = (int)settings_count - 1;
+    if (index >= (int)visible_count)
+      index = (int)visible_count - 1;
     exhibition_popup_focus_index =
-        (uint32_t)index + exhibition_match_settings_first_index();
+        start_index + (uint32_t)index + exhibition_match_settings_first_index();
     exhibition_popup_focus_direction = 0;
     pes_controller_menu_tap(normalized_x, normalized_y);
   }
@@ -9885,28 +10334,11 @@ static void main_menu_2p_native_uniform_open(void) {
     return;
   }
 
-  // PrepareData derives texture paths from SquadEdit, not only Match::UniId.
-  // Rebuild the same Match -> matchPlan -> SquadEdit bridge used by Strategy
-  // before constructing the hidden native renderer.
-  const int refreshed_tmpdb = exhibition_refresh_selected_tmpdb();
+  // PrepareData needs SquadEdit, but reopening Kits must never reinstall the
+  // default roster over an edited lineup. Bootstrap once, then reuse the plan.
+  if (!exhibition_gameplan_prepare_matchplan())
+    return;
   exhibition_apply_selected_uniforms(NULL);
-  void *plan_data = exhibition_matchplan_get_instance
-                        ? exhibition_matchplan_get_instance()
-                        : NULL;
-  int loaded_squad = 0;
-  if (plan_data && exhibition_matchplan_setup_tmpdb) {
-    const uint32_t preview_mode = 2;
-    memcpy((unsigned char *)plan_data + 8, &preview_mode,
-           sizeof(preview_mode));
-    exhibition_matchplan_setup_tmpdb(plan_data);
-    native_lab_assign_matchplan_pads(plan_data);
-    // SetupDataFromTmpdbMatch may restore the stock UniformIds in Match.
-    exhibition_apply_selected_uniforms(NULL);
-    if (matchplan_squad_load) {
-      matchplan_squad_load();
-      loaded_squad = 1;
-    }
-  }
 
   unsigned char child_name[24];
   const uint8_t modal = 0;
@@ -9944,8 +10376,7 @@ static void main_menu_2p_native_uniform_open(void) {
                    __ATOMIC_RELEASE);
   exhibition_task_add_unit(exhibition_search_window, window);
   debugPrintf("native 2P prematch: queued native Kits PNG renderer child=%p "
-              "tmpdb=%d squad=%d\n",
-              window, refreshed_tmpdb, loaded_squad);
+              "using prepared lineup\n", window);
 }
 
 static void main_menu_2p_native_uniform_close(void) {
@@ -10372,6 +10803,7 @@ static int main_menu_start_two_player_match(void) {
       __atomic_load_n(&main_menu_2p_prematch_bootstrap_mode,
                       __ATOMIC_ACQUIRE) == MAIN_MENU_2P_PREMATCH_BOOT_HUB;
   exhibition_discard_pre_strategy_squad_snapshot();
+  exhibition_condition_initialized = 0u;
   native_pad_lab_reset();
   __atomic_store_n(&main_menu_2p_transition_active, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_transition_kind,
@@ -10410,6 +10842,7 @@ static int main_menu_start_exhibition_match(void) {
     return 0;
 
   exhibition_discard_pre_strategy_squad_snapshot();
+  exhibition_condition_initialized = 0u;
   native_pad_lab_reset();
   __atomic_store_n(&main_menu_2p_transition_active, 1, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_transition_kind,
@@ -10971,6 +11404,8 @@ static void main_menu_activate_cup_fixture(void) {
                    competition_frontend_cup_ball_index(), __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_var,
                    competition_frontend_cup_var(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_player_condition,
+                   competition_frontend_cup_player_condition(), __ATOMIC_RELEASE);
   exhibition_apply_cpu_level(competition_frontend_cup_com_level(), NULL);
   __atomic_store_n(&main_menu_2p_prematch_bootstrap_mode,
                    MAIN_MENU_2P_PREMATCH_BOOT_HUB, __ATOMIC_RELEASE);
@@ -11008,10 +11443,11 @@ static void main_menu_activate_league_fixture(void) {
   /* League phase permits draws; knockout fixtures must produce a winner. */
   const int knockout = competition_frontend_league_match_is_knockout();
   __atomic_store_n(&exhibition_settings_extra_time,
-                   knockout ? competition_frontend_cup_extra_time() : 0u,
+                   knockout ? competition_frontend_league_extra_time() : 0u,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_penalties,
-                   knockout ? 1u : 0u, __ATOMIC_RELEASE);
+                   knockout ? competition_frontend_league_penalty() : 0u,
+                   __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_substitutions,
                    competition_frontend_cup_max_substitutions(),
                    __ATOMIC_RELEASE);
@@ -11021,6 +11457,8 @@ static void main_menu_activate_league_fixture(void) {
                    competition_frontend_cup_ball_index(), __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_var,
                    competition_frontend_cup_var(), __ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_player_condition,
+                   competition_frontend_cup_player_condition(), __ATOMIC_RELEASE);
   exhibition_apply_cpu_level(competition_frontend_cup_com_level(), NULL);
   __atomic_store_n(&main_menu_2p_prematch_bootstrap_mode,
                    MAIN_MENU_2P_PREMATCH_BOOT_HUB, __ATOMIC_RELEASE);
@@ -11394,6 +11832,8 @@ uintptr_t pes_exhibition_strategy_main_entry(void *strategy_flow) {
         // tmpdb exactly as MyClubFlowMatchMenu's constructor normally does.
         // This populates the badge, coach, formation and tmpdb Player objects
         // consumed by MyClubSquadEdit, not merely matchPlan's local team copy.
+        if (home_count >= 11u && away_count >= 11u)
+          exhibition_prepare_team_conditions(home_team_id, away_team_id);
         exhibition_set_team(&home_team_id, 0, 0);
         exhibition_set_team(&away_team_id, 1, 0);
 
@@ -14993,7 +15433,10 @@ static uint32_t match_result_action_list(uint32_t surface, uint32_t *actions) {
   uint32_t home = 0, away = 0;
   const int scores =
       pes_controller_pause_score(0, &home) && pes_controller_pause_score(1, &away);
-  const int drawn = !scores || home == away;
+  uint8_t first_home = 0, first_away = 0;
+  const uint32_t leg = competition_frontend_match_leg(&first_home, &first_away);
+  const int drawn = !scores ||
+      (leg == 2u ? home + first_home == away + first_away : home == away);
   const int extra_time =
       __atomic_load_n(&exhibition_settings_extra_time, __ATOMIC_ACQUIRE) != 0;
   const int penalties =
@@ -17586,6 +18029,14 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(module, "_ZNK5tmpdb5Match4IsPkEv");
   exhibition_match_set_pk =
       (void *)so_find_addr_rx(module, "_ZN5tmpdb5Match5SetPkEb");
+  exhibition_match_set_leg_type = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match10SetLegTypeERKN6common7LegTypeE");
+  exhibition_match_set_first_leg_score = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match14Set1stLegScoreE8HomeAwayh");
+  exhibition_match_set_away_goal = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match11SetAwayGoalEb");
+  exhibition_match_set_ex_away_goal = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match13SetExAwayGoalEb");
   exhibition_match_set_weather = (void *)so_find_addr_rx(
       module, "_ZN5tmpdb5Match10SetWeatherEN6common11WeatherTypeE");
   exhibition_match_set_season = (void *)so_find_addr_rx(
@@ -17602,6 +18053,10 @@ void install_ue4_hooks(so_module *module) {
       module, "_ZN5tmpdb5Match19SetMaxSubstitutionsEh");
   exhibition_match_set_max_extra_substitutions = (void *)so_find_addr_rx(
       module, "_ZN5tmpdb5Match24SetMaxExtraSubstitutionsEh");
+  exhibition_match_set_condition_setting = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb5Match19SetConditionSettingE8HomeAwayNS0_20ConditionSettingTypeE");
+  exhibition_setup_random_condition = (void *)so_find_addr_rx(
+      module, "_ZN5tmpdb4util18SetupRandomCondionEN6common6TeamIdENS_5Match20ConditionSettingTypeEbb");
   exhibition_competition_set_var = (void *)so_find_addr_rx(
       module, "_ZN5tmpdb11Competition6SetVarEb");
   exhibition_commonwork_get_competition = (void *)so_find_addr_rx(
@@ -18403,6 +18858,14 @@ void install_ue4_hooks(so_module *module) {
   matchplan_squad_save =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan16SquadEditUtility28SaveSquadDataToMatchPlanDataEv");
+  matchplan_common_get_member_id = (void *)so_find_addr_rx(
+      module, "_ZNK9matchPlan14CommonDataInfo11GetMemberIdE7OrderNo");
+  matchplan_common_get_player_num = (void *)so_find_addr_rx(
+      module, "_ZNK9matchPlan14CommonDataInfo12GetPlayerNumEv");
+  matchplan_common_set_member_id = (void *)so_find_addr_rx(
+      module, "_ZN9matchPlan14CommonDataInfo11SetMemberIdE7OrderNo8MemberId");
+  matchplan_common_set_match_order = (void *)so_find_addr_rx(
+      module, "_ZN9matchPlan14CommonDataInfo19SetMatchPlayerOrderEv");
   match_squad_data_copy_assign =
       (void *)so_find_addr_rx(module, "_ZN5tmpdb9SquadDataaSERKS0_");
   match_squad_data_get_tmpdb_player =
@@ -18492,9 +18955,6 @@ void install_ue4_hooks(so_module *module) {
           "_ZN5tmpdb9SquadDataC2ERKS0_");
   match_squad_data_destruct =
       (void *)so_find_addr_rx(module, "_ZN5tmpdb9SquadDataD2Ev");
-  match_auto_set_squad =
-      (void *)so_find_addr_rx(module,
-          "_ZN10onlinemode22UtilityMyClubSquadEdit7AutoSetERN5tmpdb9SquadDataENS1_4util7autoset10SelectKindENS1_5Coach11TacticsKindEb");
   match_squad_data_get_settings =
       (void *)so_find_addr_rx(module,
           "_ZNK5tmpdb9SquadData20GetMatchPlanSettingsEv");

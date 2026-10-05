@@ -263,9 +263,9 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('match_squad_data_set_captain(', self.hooks)
         self.assertIn('match_squad_data_set_piece_taker(', self.hooks)
         self.assertIn('match_squad_data_set_attacker(', self.hooks)
-        self.assertIn('_Alignas(16) unsigned char preview[2048];',
-                      self.hooks)
-        self.assertIn('match_auto_set_squad(preview, 3, state->tactics, 0);',
+        self.assertIn('prematch_gameplan_save_preset(', self.hooks)
+        self.assertIn('prematch_gameplan_load_preset(', self.hooks)
+        self.assertIn('match_replace_squad_player(state->squad_data, first_info, second_info)',
                       self.hooks)
 
     def test_custom_prematch_gameplan_is_split_screen_and_dual_input(self):
@@ -280,7 +280,7 @@ class NativeGamepadLabTests(unittest.TestCase):
             overlay, re.S).group(1)
         self.assertIn('const float half_x[2]', page)
         self.assertIn(
-            '"SUBSTITUTE", "FORMATION", "AUTO LINE UP", "POSITIONS"',
+            '"SUBSTITUTE", "FORMATION", "PRESET", "POSITIONS"',
             page)
         self.assertIn('prematch_gameplan_modal_first_quad[side]', page)
         self.assertIn('prematch_gameplan_focus_outline_first_quad[side]', page)
@@ -333,8 +333,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('prematch_gameplan_picker_metric_first', draw)
         self.assertIn('prematch_gameplan_field_role_first', draw)
         self.assertIn('gameplan_role_colors[role_band]', draw)
-        self.assertIn('prematch_gameplan_auto_gain_first', draw)
-        self.assertIn('"%s  %u  ->  "', page)
+        self.assertIn('prematch_gameplan_condition_first_quad', draw)
+        self.assertIn('"PRESET %u  -  %s"', page)
         self.assertRegex(
             self.hooks,
             r'if \(native_position_count \* 2u < state->field_count\)\s+'

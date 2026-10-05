@@ -18,6 +18,7 @@ BUTTONS = {
     "x": "X_Button",
     "y": "Y_Button",
     "l": "L_Button",
+    "r": "R_Button",
     "zl": "ZL_Button",
     "zr": "ZR_Button",
     "sl": "SL_Button",

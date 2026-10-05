@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #define SWITCH_BUTTON_ASSETS(X) \
-  X(x, "X") X(y, "Y") X(l, "L") X(zl, "ZL") X(zr, "ZR") \
+  X(x, "X") X(y, "Y") X(l, "L") X(r, "R") X(zl, "ZL") X(zr, "ZR") \
   X(sl, "SL") X(sr, "SR") X(ls, "LS") X(rs, "RS") X(right, ">") \
   X(up, "UP") X(down, "DOWN") X(left, "LEFT")
 #define SWITCH_DECLARE(name, key) \

@@ -304,6 +304,9 @@ static void league_begin_knockout(LeagueTournament *league) {
   if (!cup_tournament_init(&league->knockout, participants, qualified,
                            qualified_humans, human_count,
                            league->seed ^ 0x4c454147u)) return;
+  /* League home/away also governs knockout ties, not just table fixtures.
+   * The final stays single-leg through cup_tournament's round rule. */
+  cup_tournament_set_rules(&league->knockout, league->home_away, 0);
   league->phase = LEAGUE_PHASE_KNOCKOUT;
   cup_tournament_advance(&league->knockout);
   league_credit_knockout_simulations(league, 0u);

@@ -55,6 +55,7 @@ int main(void) {
             self.skipTest("Host C compiler unavailable")
         source = r"""
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -152,6 +153,7 @@ int main(void) {
             self.skipTest("Host C compiler unavailable")
         source = r"""
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -169,14 +171,15 @@ static uint32_t checksum(const void *input, size_t length) {
 static void old_save(uint32_t slot, uint32_t old_selector) {
   CupSaveState old = {0};
   old.cup_select = old_selector;
-  Header header = {0x32584346u, 2u, sizeof(old), 1u,
-                   checksum(&old, sizeof(old))};
+  const size_t old_size = offsetof(CupSaveState, player_condition);
+  Header header = {0x32584346u, 2u, old_size, 1u,
+                   checksum(&old, old_size)};
   char path[64];
   snprintf(path, sizeof(path), "SaveData/footballnx_cup_%u_a.bin", slot + 1u);
   FILE *file = fopen(path, "wb");
   assert(file);
   assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header));
-  assert(fwrite(&old, 1, sizeof(old), file) == sizeof(old));
+  assert(fwrite(&old, 1, old_size, file) == old_size);
   assert(fclose(file) == 0);
 }
 int main(void) {
@@ -186,6 +189,7 @@ int main(void) {
   old_save(2u, 9u); /* Retired Copa Chile remains a playable custom Cup */
   CupSaveState state;
   assert(cup_save_read(0u, &state) && state.cup_select == 0u);
+  assert(state.player_condition == 5u);
   assert(cup_save_read(1u, &state) && state.cup_select == 1u);
   assert(cup_save_read(2u, &state) && state.cup_select == 6u);
   assert(cup_save_write(2u, &state));

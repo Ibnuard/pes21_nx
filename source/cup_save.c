@@ -1,6 +1,7 @@
 #include "cup_save.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -9,7 +10,7 @@
 #endif
 
 #define CUP_SAVE_MAGIC 0x32584346u /* FCX2 */
-#define CUP_SAVE_VERSION 3u
+#define CUP_SAVE_VERSION 4u
 #define CUP_SAVE_LEGACY_VERSION 2u
 
 typedef struct {
@@ -84,6 +85,7 @@ static void cup_save_migrate_v1(CupSaveState *state,
   state->max_substitutions = old->max_substitutions;
   state->injuries = 1u;
   state->var_enabled = 1u;
+  state->player_condition = 5u;
   state->tournament_valid = old->tournament_valid;
   state->first_match_started = old->first_match_started;
   state->draft = old->draft;
@@ -126,12 +128,14 @@ static int cup_save_read_copy(uint32_t slot, uint32_t copy,
   CupSaveHeader header;
   const int has_header = fread(&header, 1, sizeof(header), stream) ==
                          sizeof(header);
+  const size_t previous_size = offsetof(CupSaveState, player_condition);
+  const size_t payload_size = has_header && header.version == 1u
+      ? sizeof(CupSaveStateV1)
+      : has_header && header.version <= 3u
+          ? previous_size : sizeof(CupSaveState);
   if (!has_header || header.magic != CUP_SAVE_MAGIC ||
-      !(((header.version == CUP_SAVE_VERSION ||
-          header.version == CUP_SAVE_LEGACY_VERSION) &&
-         header.payload_size == sizeof(CupSaveState)) ||
-        (header.version == 1u &&
-         header.payload_size == sizeof(CupSaveStateV1)))) {
+      header.version < 1u || header.version > CUP_SAVE_VERSION ||
+      header.payload_size != payload_size) {
     fclose(stream);
     return 0;
   }
@@ -152,6 +156,8 @@ static int cup_save_read_copy(uint32_t slot, uint32_t copy,
     cup_save_migrate_v1(&out->state, &payload.old);
   else {
     out->state = payload.current;
+    if (header.version <= 3u)
+      out->state.player_condition = 5u;
     if (header.version == CUP_SAVE_LEGACY_VERSION)
       out->state.cup_select =
           cup_save_migrate_selector(out->state.cup_select);

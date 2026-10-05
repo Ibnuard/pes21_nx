@@ -31,6 +31,7 @@ class LiveIdentityTests(unittest.TestCase):
 #define PREMATCH_GAMEPLAN_MAX_PLAYERS 40u
 #define LIVE_PORTRAIT_CACHE_CAPACITY 80u
 static uint32_t (*match_hud_uniform_number)(const void *, const uint32_t *);
+static uint32_t (*match_hud_resolve_shirt_number)(uint32_t, uint32_t);
 typedef struct { unsigned char bytes[52]; char name[48]; } Player;
 typedef struct { uint32_t member; Player parameter[2]; uint32_t stamina, eligible; } Member;
 typedef struct { uint32_t count, formation, reservations; Member members[40]; } Squad;

@@ -96,12 +96,13 @@ static void check_standings_champion_without_knockout(void) {
 static void check_knockout_seeding(void) {
   const uint32_t teams[8] = {101u, 102u, 103u, 104u,
                               105u, 106u, 107u, 108u};
-  assert(league_tournament_init(&league, teams, 8u, teams, 1u, 0, 13u));
+  assert(league_tournament_init(&league, teams, 8u, teams, 1u, 1, 13u));
   for (uint32_t i = 0; i < 8u; i++)
     league.standings[i].points = (uint16_t)(8u - i);
   league.active_matchday = league.matchday_count;
   league_tournament_advance(&league);
   assert(league.phase == LEAGUE_PHASE_KNOCKOUT);
+  assert(league.knockout.home_away);
   static const uint32_t seeded[8] = {101u, 108u, 104u, 105u,
                                       102u, 107u, 103u, 106u};
   for (uint32_t i = 0; i < 4u; i++) {
@@ -111,6 +112,13 @@ static void check_knockout_seeding(void) {
     assert(fixture->home == seeded[2u * i]);
     assert(fixture->away == seeded[2u * i + 1u]);
   }
+  assert(league_tournament_record(&league, 0u, 0u, 0u, 3u, 1u));
+  assert(league.knockout.fixtures[0][0].first_leg_complete);
+  assert(!league.knockout.fixtures[0][0].complete);
+  assert(league_tournament_record(&league, 0u, 0u, 0u, 1u, 1u));
+  assert(league.knockout.fixtures[0][0].home_goals == 4u);
+  assert(league.knockout.fixtures[0][0].away_goals == 2u);
+  assert(league.knockout.fixtures[0][0].winner == seeded[0]);
 }
 
 static void check_simulated_opening_locks_teams(void) {

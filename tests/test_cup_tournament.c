@@ -135,6 +135,21 @@ static void home_away_and_bronze_before_final(void) {
   assert(cup.history_index[2] == CUP_THIRD_PLACE_INDEX);
 }
 
+static void second_leg_resolves_by_aggregate_without_away_goals(void) {
+  const uint32_t ids[4] = {801u, 802u, 803u, 804u};
+  CupTournament cup;
+  assert(cup_tournament_init(&cup, ids, 4u, ids, 1u, 0x80u));
+  cup_tournament_set_rules(&cup, 1, 0);
+  assert(cup_tournament_record(&cup, 0u, 0u, 3u, 1u));
+  assert(cup.fixtures[0][0].first_leg_complete);
+  assert(!cup.fixtures[0][0].complete);
+  assert(cup_tournament_record(&cup, 0u, 0u, 1u, 1u));
+  assert(cup.fixtures[0][0].complete);
+  assert(cup.fixtures[0][0].home_goals == 4u);
+  assert(cup.fixtures[0][0].away_goals == 2u);
+  assert(cup.fixtures[0][0].winner == ids[0]);
+}
+
 int main(void) {
   run_size(2u);
   run_size(3u);
@@ -147,6 +162,7 @@ int main(void) {
   future_final_is_unresolved_not_bye();
   no_eager_com_simulation_for_human_bye();
   home_away_and_bronze_before_final();
+  second_leg_resolves_by_aggregate_without_away_goals();
   puts("cup tournament tests passed");
   return 0;
 }

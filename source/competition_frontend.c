@@ -46,6 +46,7 @@ static uint32_t cup_max_substitutions = 5;
 static uint32_t cup_injuries = 1;
 static uint32_t cup_ball_index;
 static uint32_t cup_var = 1;
+static uint32_t cup_player_condition = 5;
 static uint32_t cup_general_open;
 static uint32_t cup_general_focus;
 static uint32_t cup_team_catalog_index[COMPETITION_MAX_PLAYER_SLOTS];
@@ -188,6 +189,7 @@ static void competition_reset_cup_setup(void) {
   cup_injuries = 1;
   cup_ball_index = 0;
   cup_var = 1;
+  cup_player_condition = 5;
   cup_general_open = 0;
   cup_general_focus = 0;
   cup_team_picker_active = 0;
@@ -240,6 +242,7 @@ static void competition_reset_league_setup(void) {
   cup_injuries = 1u;
   cup_ball_index = 0u;
   cup_var = 1u;
+  cup_player_condition = 5u;
   competition_clear_status();
 }
 
@@ -538,6 +541,7 @@ static void competition_adjust_general(int direction) {
                                      : (cup_ball_index + 9u) % 10u;
       break;
     case 7: cup_var = !cup_var; break;
+    case 8: cup_player_condition = cup_player_condition == 2u ? 5u : 2u; break;
   }
 }
 
@@ -803,6 +807,7 @@ static int competition_load_cup_slot(uint32_t slot) {
   cup_injuries = save.injuries;
   cup_ball_index = save.ball_index;
   cup_var = save.var_enabled;
+  cup_player_condition = save.player_condition;
   cup_draft = save.draft;
   cup_tournament = save.tournament;
   cup_tournament_valid = save.tournament_valid;
@@ -839,6 +844,7 @@ static int competition_save_cup_slot(uint32_t slot) {
   save.injuries = cup_injuries;
   save.ball_index = cup_ball_index;
   save.var_enabled = cup_var;
+  save.player_condition = cup_player_condition;
   save.tournament_valid = cup_tournament_valid;
   save.first_match_started = cup_first_match_started;
   save.draft = cup_draft;
@@ -1042,6 +1048,7 @@ static int competition_save_league_slot(uint32_t slot) {
   save.injuries = cup_injuries;
   save.ball_index = cup_ball_index;
   save.var_enabled = cup_var;
+  save.player_condition = cup_player_condition;
   save.tournament_valid = league_tournament_valid;
   save.draft = league_draft;
   save.tournament = league_tournament;
@@ -1075,6 +1082,7 @@ static int competition_load_league_slot(uint32_t slot) {
   cup_injuries = save.injuries;
   cup_ball_index = save.ball_index;
   cup_var = save.var_enabled;
+  cup_player_condition = save.player_condition;
   league_tournament_valid = save.tournament_valid;
   league_draft = save.draft;
   league_tournament = save.tournament;
@@ -1759,7 +1767,7 @@ int competition_frontend_cup_general_open(void) {
 }
 
 uint32_t competition_frontend_cup_general_count(void) {
-  return 7u - competition_general_first_row();
+  return 8u - competition_general_first_row();
 }
 
 uint32_t competition_frontend_cup_general_focus(void) {
@@ -1767,9 +1775,9 @@ uint32_t competition_frontend_cup_general_focus(void) {
 }
 
 const char *competition_frontend_cup_general_label(uint32_t index) {
-  static const char *const labels[7] = {
+  static const char *const labels[8] = {
       "COM LEVEL", "MATCH TIME", "OVERTIME", "SUBSTITUTIONS",
-      "INJURIES", "BALL", "VAR"};
+      "INJURIES", "BALL", "VAR", "PLAYER CONDITION"};
   return index < competition_frontend_cup_general_count()
       ? labels[index + competition_general_first_row()] : "";
 }
@@ -1795,6 +1803,7 @@ const char *competition_frontend_cup_general_value(uint32_t index) {
     case 5: return cup_injuries ? "ON" : "OFF";
     case 6: return balls[cup_ball_index % 10u];
     case 7: return cup_var ? "ON" : "OFF";
+    case 8: return cup_player_condition == 2u ? "NORMAL" : "RANDOM";
     default: return "";
   }
 }
@@ -2093,6 +2102,9 @@ uint32_t competition_frontend_cup_max_substitutions(void) {
 uint32_t competition_frontend_cup_injuries(void) { return cup_injuries; }
 uint32_t competition_frontend_cup_ball_index(void) { return cup_ball_index; }
 uint32_t competition_frontend_cup_var(void) { return cup_var; }
+uint32_t competition_frontend_cup_player_condition(void) {
+  return cup_player_condition == 2u ? 2u : 5u;
+}
 int competition_frontend_cup_home_away(void) { return cup_home_away != 0; }
 int competition_frontend_cup_third_place(void) { return cup_third_place != 0; }
 static int competition_cup_first_leg_pending(void) {
@@ -2108,6 +2120,52 @@ int competition_frontend_cup_extra_time(void) {
 }
 int competition_frontend_cup_penalty(void) {
   return !competition_cup_first_leg_pending();
+}
+uint32_t competition_frontend_match_leg(uint8_t *first_home,
+                                         uint8_t *first_away) {
+  if (first_home) *first_home = 0;
+  if (first_away) *first_away = 0;
+  const CupTournament *bracket = NULL;
+  const CupFixture *fixture = NULL;
+  uint32_t round = 0, swapped = 0;
+  if ((cup_match_active ||
+       frontend_state == COMPETITION_FRONTEND_CUP_BRACKET) &&
+      cup_tournament_valid) {
+    bracket = &cup_tournament;
+    round = cup_pending_round;
+    swapped = cup_match_swapped;
+    fixture = cup_tournament_fixture(bracket, round, cup_pending_index);
+  } else if ((league_match_active ||
+              frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB) &&
+             league_tournament_valid &&
+             league_tournament.phase == LEAGUE_PHASE_KNOCKOUT) {
+    bracket = &league_tournament.knockout;
+    round = league_pending_round;
+    swapped = league_match_swapped;
+    fixture = cup_tournament_fixture(bracket, round, league_pending_index);
+  }
+  if (!bracket || !fixture || !bracket->home_away ||
+      round + 1u >= bracket->round_count || fixture->complete ||
+      !fixture->home || !fixture->away)
+    return 0;
+  if (!fixture->first_leg_complete) return 1;
+  if (first_home) *first_home = swapped ? fixture->first_leg_away_goals
+                                       : fixture->first_leg_home_goals;
+  if (first_away) *first_away = swapped ? fixture->first_leg_home_goals
+                                       : fixture->first_leg_away_goals;
+  return 2;
+}
+int competition_frontend_league_extra_time(void) {
+  if (league_tournament.phase != LEAGUE_PHASE_KNOCKOUT) return 0;
+  const CupFixture *fixture = cup_tournament_fixture(
+      &league_tournament.knockout, league_pending_round, league_pending_index);
+  return fixture && (!league_tournament.knockout.home_away ||
+                     league_pending_round + 1u >=
+                         league_tournament.knockout.round_count ||
+                     fixture->first_leg_complete);
+}
+int competition_frontend_league_penalty(void) {
+  return competition_frontend_league_extra_time();
 }
 int competition_frontend_cup_match_active(void) { return cup_match_active != 0; }
 

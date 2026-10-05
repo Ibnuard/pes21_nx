@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LiveReadyTests(unittest.TestCase):
-    def test_independent_ready_single_player_and_auto_lock(self):
+    def test_independent_ready_single_player_and_live_preset_lock(self):
         compiler = shutil.which('gcc')
         if not compiler:
             self.skipTest('gcc unavailable')
@@ -27,11 +27,12 @@ class LiveReadyTests(unittest.TestCase):
 #define PREMATCH_GAMEPLAN_NO_SELECTION UINT32_MAX
 typedef struct { uint32_t waiting, root_focus, page, substitute_area,
  selected_area, selected_index, formation_focus, position_focus,
- position_picker_open; } PrematchGameplanSide;
+ position_picker_open, preset_step, preset_action, preset_focus;
+ char preset_status[80]; } PrematchGameplanSide;
 static PrematchGameplanSide exhibition_gameplan_sides[2];
 static void *live_gameplan_window;
 static uint32_t exhibition_gameplan_custom_active, main_menu_2p_prematch_hub_input_armed[2];
-static uint32_t saved, footer_calls, single_player, auto_calls, published;
+static uint32_t saved, footer_calls, single_player, preset_refreshes, published;
 static uint64_t pause_editor_transition_tick;
 static uint32_t live_gameplan_returning_to_pause;
 static uint64_t armGetSystemTick(void) { return 12345; }
@@ -40,7 +41,8 @@ static void live_gameplan_lock_substitutions(uint32_t side, int commit) {}
 static int pes_controller_exhibition_single_controller_mode(void) {return single_player;}
 static void exhibition_save_matchplan_sides(uint32_t mask) {saved = mask;}
 static void exhibition_publish_prepared_matchplan(void) {published++;}
-static void prematch_gameplan_prepare_auto_preview(uint32_t side) {auto_calls++;}
+static void main_menu_2p_prematch_hub_cache_lineups(void) {}
+static void prematch_gameplan_refresh_preset_slots(uint32_t side) {preset_refreshes++;}
 static void footer(void *w, uint32_t key) {
  assert(w == (void *)1); assert(key == 1);
  assert(pause_editor_transition_tick == 12345);
@@ -67,7 +69,7 @@ int main(void) {
  live_gameplan_window = (void *)1; single_player = 1;
  exhibition_gameplan_sides[0].root_focus = 2;
  prematch_gameplan_process_root(0, PES_PAUSE_INPUT_DECIDE);
- assert(!auto_calls && exhibition_gameplan_sides[0].page == 0);
+ assert(!preset_refreshes && exhibition_gameplan_sides[0].page == 0);
  prematch_gameplan_process_root(0, PES_PAUSE_INPUT_BACK);
  assert(footer_calls == 2 && saved == 1 && !published);
  return 0;

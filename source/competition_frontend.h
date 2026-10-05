@@ -113,10 +113,17 @@ uint32_t competition_frontend_cup_max_substitutions(void);
 uint32_t competition_frontend_cup_injuries(void);
 uint32_t competition_frontend_cup_ball_index(void);
 uint32_t competition_frontend_cup_var(void);
+uint32_t competition_frontend_cup_player_condition(void);
 int competition_frontend_cup_home_away(void);
 int competition_frontend_cup_third_place(void);
 int competition_frontend_cup_extra_time(void);
 int competition_frontend_cup_penalty(void);
+/* Returns 1 or 2 for a two-leg knockout match, 0 for a single match.
+ * First-leg scores are ordered as the native match HOME/AWAY teams. */
+uint32_t competition_frontend_match_leg(uint8_t *first_home,
+                                         uint8_t *first_away);
+int competition_frontend_league_extra_time(void);
+int competition_frontend_league_penalty(void);
 int competition_frontend_cup_match_active(void);
 int competition_frontend_cup_take_champion_presentation(void);
 void competition_frontend_cup_handoff_result(int opened);

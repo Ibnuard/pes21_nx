@@ -10,7 +10,7 @@
 #endif
 
 #define LEAGUE_SAVE_MAGIC 0x314c5846u /* FXL1 */
-#define LEAGUE_SAVE_VERSION 3u
+#define LEAGUE_SAVE_VERSION 4u
 
 typedef struct {
   uint32_t magic, version, payload_size, sequence, checksum;
@@ -46,11 +46,13 @@ static int league_save_read_copy(uint32_t slot, uint32_t copy,
   const size_t old_size = offsetof(LeagueSaveState, tournament) +
       offsetof(LeagueTournament, scorer_count);
   const size_t v2_size = offsetof(LeagueSaveState, league_competition_id);
+  const size_t v3_size = offsetof(LeagueSaveState, player_condition);
   const int read_header = fread(&header, 1, sizeof(header), stream) ==
       sizeof(header);
   const size_t payload_size = read_header && header.version == 1u
       ? old_size : read_header && header.version == 2u
-          ? v2_size : sizeof(LeagueSaveState);
+          ? v2_size : read_header && header.version == 3u
+              ? v3_size : sizeof(LeagueSaveState);
   const int valid_header = read_header &&
       header.magic == LEAGUE_SAVE_MAGIC &&
       (header.version >= 1u && header.version <= LEAGUE_SAVE_VERSION) &&
@@ -65,6 +67,8 @@ static int league_save_read_copy(uint32_t slot, uint32_t copy,
   const int closed = fclose(stream) == 0;
   if (!read || !end || !closed || header.checksum !=
       league_save_checksum(&out->state, payload_size)) return 0;
+  if (header.version <= 3u)
+    out->state.player_condition = 5u;
   out->sequence = header.sequence;
   return 1;
 }

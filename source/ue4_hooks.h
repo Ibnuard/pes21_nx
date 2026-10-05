@@ -119,6 +119,7 @@ typedef struct {
 #define PES_PAUSE_INPUT_LEFT 5u
 #define PES_PAUSE_INPUT_RIGHT 6u
 #define PES_PAUSE_INPUT_ROLE 7u
+#define PES_PAUSE_INPUT_CONDITION 8u
 
 void install_ue4_hooks(so_module *module);
 uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
@@ -327,7 +328,7 @@ uint32_t pes_controller_match_result_handoff(void);
 #define PES_PREMATCH_GAMEPLAN_PAGE_ROOT 0u
 #define PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE 1u
 #define PES_PREMATCH_GAMEPLAN_PAGE_FORMATION 2u
-#define PES_PREMATCH_GAMEPLAN_PAGE_AUTO_LINEUP 3u
+#define PES_PREMATCH_GAMEPLAN_PAGE_PRESET 3u
 #define PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS 4u
 #define PES_PREMATCH_GAMEPLAN_ACTION_COUNT 4u
 #define PES_PREMATCH_FORMATION_ROW_COUNT 4u
@@ -362,6 +363,9 @@ const char *pes_controller_custom_prematch_gameplan_player_name(
     uint32_t pad, uint32_t starting, uint32_t index);
 const char *pes_controller_custom_prematch_gameplan_player_role(
     uint32_t pad, uint32_t starting, uint32_t index);
+uint32_t pes_controller_custom_prematch_gameplan_player_condition(
+    uint32_t pad, uint32_t starting, uint32_t index);
+int pes_controller_custom_prematch_gameplan_condition_mode(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_player_overall(
     uint32_t pad, uint32_t starting, uint32_t index);
 uint32_t pes_controller_custom_prematch_gameplan_player_portrait_id(
@@ -389,13 +393,12 @@ const char *pes_controller_custom_prematch_gameplan_formation_label(
     uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_team_power(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_team_spirit(uint32_t pad);
-int pes_controller_custom_prematch_gameplan_auto_preview_valid(
-    uint32_t pad);
-uint32_t pes_controller_custom_prematch_gameplan_auto_focus(uint32_t pad);
-uint32_t pes_controller_custom_prematch_gameplan_auto_power(
-    uint32_t pad, uint32_t after);
-uint32_t pes_controller_custom_prematch_gameplan_auto_spirit(
-    uint32_t pad, uint32_t after);
+uint32_t pes_controller_custom_prematch_gameplan_preset_step(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_preset_focus(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_preset_action(uint32_t pad);
+int pes_controller_custom_prematch_gameplan_preset_exists(uint32_t pad,
+                                                          uint32_t slot);
+const char *pes_controller_custom_prematch_gameplan_preset_status(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_position_focus(
     uint32_t pad);
 const char *pes_controller_custom_prematch_gameplan_position_label(
@@ -554,7 +557,7 @@ uint32_t pes_controller_custom_cpu_popup_value(void);
 uint32_t pes_controller_custom_cpu_popup_count(void);
 const char *pes_controller_custom_cpu_popup_label(uint32_t index);
 int pes_controller_custom_match_settings_active(void);
-#define PES_MATCH_SETTINGS_COUNT 8u
+#define PES_MATCH_SETTINGS_COUNT 9u
 #define PES_MATCH_SETTINGS_ROW_Y 0.165f
 #define PES_MATCH_SETTINGS_ROW_STEP 0.075f
 // The prematch hub has a taller header than the native settings popup.

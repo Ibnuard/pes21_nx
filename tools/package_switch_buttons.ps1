@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskButtons = @{
-  x = 'X_Button.png'; y = 'Y_Button.png'; l = 'L_Button.png'
+  x = 'X_Button.png'; y = 'Y_Button.png'; l = 'L_Button.png'; r = 'R_Button.png'
   zl = 'ZL_Button.png'; zr = 'ZR_Button.png'
   sl = 'SL_Button.png'; sr = 'SR_Button.png'
   ls = 'LeftStick_Default_CORE.png'; rs = 'RightStick_Default_CORE.png'

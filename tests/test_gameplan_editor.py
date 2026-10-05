@@ -52,7 +52,8 @@ class GameplanEditorTests(unittest.TestCase):
         )
         source = "\n".join([
             "#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n"
-            "#include <string.h>\n#include <math.h>\n#include <assert.h>",
+            "#include <string.h>\n#include <math.h>\n#include <assert.h>\n"
+            '#include "gameplan_preset.h"',
             definitions,
             *[struct(hooks, name) for name in (
                 "TmpdbFormationValue", "TmpdbMatchPlanSettingsValue",
@@ -165,6 +166,9 @@ class GameplanEditorTests(unittest.TestCase):
 
     def test_loading_reveal_is_one_shot_and_preserves_other_transitions(self):
         self.run_case("loading")
+
+    def test_condition_toggle_is_per_side(self):
+        self.run_case("condition")
 
 
 if __name__ == "__main__":

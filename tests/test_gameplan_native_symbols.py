@@ -13,6 +13,9 @@ EDITOR_BINDINGS = (
     "match_squad_data_set_player_role_position",
     "match_formation_set_position",
     "match_formation_set_role",
+    "matchplan_common_get_player_num",
+    "matchplan_common_set_member_id",
+    "matchplan_common_set_match_order",
 )
 
 

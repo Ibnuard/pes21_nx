@@ -2693,6 +2693,9 @@ void android_input_poll(void) {
         else if (pressed & HidNpadButton_Y)
           pes_controller_custom_prematch_gameplan_input(
               pad, PES_PAUSE_INPUT_ROLE);
+        else if (pressed & (HidNpadButton_R | HidNpadButton_AnySR))
+          pes_controller_custom_prematch_gameplan_input(
+              pad, PES_PAUSE_INPUT_CONDITION);
         else if (pressed & HidNpadButton_A)
           pes_controller_custom_prematch_gameplan_input(
               pad, PES_PAUSE_INPUT_DECIDE);
