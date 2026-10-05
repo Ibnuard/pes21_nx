@@ -13,12 +13,13 @@ import argparse
 import hashlib
 import io
 import json
+import re
 import shutil
 import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -43,7 +44,6 @@ from build_real_madrid_mobile_kit_canary import (
     source_indexes,
     winning_member,
 )
-from generate_exhibition_team_catalog import render_team_include
 from package_native_club_license import enable_real_kits
 from pes21_player_migration import content_id
 from prepare_loose_cpk import clone_full, update, verify
@@ -266,54 +266,76 @@ def replace_badge_cell(atlas: Image.Image, slot: int, badge: Image.Image) -> Non
     atlas.alpha_composite(badge, (x, y))
 
 
+def brand_selector(
+    catalog: dict[str, Any], atlas: Image.Image, branding: dict[str, Any],
+    load_logo: Callable[[str], bytes],
+) -> tuple[dict[str, Any], Image.Image, list[dict[str, Any]]]:
+    """Brand surviving category cells without replacing teams or club crests."""
+    branded = json.loads(json.dumps(catalog))
+    categories = {str(row["key"]): row for row in branded["categories"]}
+    team_slots = {int(row["badge_slot"]) for row in branded["teams"]}
+    category_slots = [int(row["badge_slot"]) for row in branded["categories"]]
+    if len(set(category_slots)) != len(category_slots) or team_slots & set(category_slots):
+        raise ValueError("category badge slots overlap each other or a team")
+    result = atlas.copy()
+    rows = []
+    for key, spec in branding.items():
+        # Cleansing intentionally removes categories. Branding must never
+        # recreate those categories or fail merely because they are retired.
+        if key not in categories:
+            continue
+        category = categories[key]
+        member = str(spec["member"])
+        payload = load_logo(member)
+        before = str(category["label"])
+        category["label"] = str(spec["label"])
+        category["football_life_brand_member"] = member
+        slot = int(category["badge_slot"])
+        replace_badge_cell(result, slot, fit_badge(payload))
+        rows.append(dict(key=key, before=before, after=category["label"],
+                         badge_slot=slot, source_member=member,
+                         source_sha256=sha256_bytes(payload)))
+    branded.pop("content_id", None)
+    branded["content_id"] = content_id(branded)
+    return branded, result, rows
+
+
 def build_league_branding(
     output: Path,
     catalog: dict[str, Any],
     branding: dict[str, Any],
     league_index: dict[str, Any],
+    *, atlas_path: Path | None = None, paired_build_id: str | None = None,
 ) -> dict[str, Any]:
-    branded = json.loads(json.dumps(catalog))
-    categories = {str(row["key"]): row for row in branded["categories"]}
-    atlas_payload = (ROOT / "data/badge_atlas.bin").read_bytes()
+    if paired_build_id and not re.fullmatch(r"[0-9a-f]{16}", paired_build_id):
+        raise ValueError("invalid paired loose CPK build ID")
+    atlas_path = atlas_path or ROOT / "data/badge_atlas.bin"
+    atlas_payload = atlas_path.read_bytes()
     if len(atlas_payload) % (ATLAS_WIDTH * 4):
         raise ValueError("base badge atlas has an invalid raw RGBA length")
     atlas_height = len(atlas_payload) // (ATLAS_WIDTH * 4)
     atlas = Image.frombytes("RGBA", (ATLAS_WIDTH, atlas_height), atlas_payload)
-    rows = []
+    logo_payloads = {}
+
+    def load_logo(member: str) -> bytes:
+        payload = read_indexed(league_index, member)
+        logo_payloads[member] = payload
+        return payload
+
+    branded, atlas, rows = brand_selector(catalog, atlas, branding, load_logo)
     logo_dir = output / "league-branding/categories"
     logo_dir.mkdir(parents=True, exist_ok=True)
-    for key, spec in branding.items():
-        if key not in categories:
-            raise KeyError(f"unknown selector category: {key}")
-        member = str(spec["member"])
-        payload = read_indexed(league_index, member)
-        logo_path = logo_dir / f"{key}.png"
-        logo_path.write_bytes(payload)
-        category = categories[key]
-        old_label = str(category["label"])
-        category["label"] = str(spec["label"])
-        category["football_life_brand_member"] = member
-        slot = int(category["badge_slot"])
-        replace_badge_cell(atlas, slot, fit_badge(payload))
-        rows.append(
-            {
-                "key": key,
-                "before": old_label,
-                "after": category["label"],
-                "badge_slot": slot,
-                "source_member": member,
-                "source_sha256": sha256_bytes(payload),
-                "logo_path": str(logo_path),
-            }
-        )
-    branded.pop("content_id", None)
-    branded["content_id"] = content_id(branded)
+    for row in rows:
+        logo_path = logo_dir / f"{row['key']}.png"
+        logo_path.write_bytes(logo_payloads[row["source_member"]])
+        row["logo_path"] = str(logo_path)
     catalog_path = output / "league-branding/exhibition_team_catalog.json"
     catalog_path.write_text(
         json.dumps(branded, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     include_path = output / "league-branding/exhibition_teams_migration_generated.inc"
-    include_path.write_text(render_team_include(branded), encoding="utf-8")
+    from cleanse_playable_categories import render_curated_include
+    include_path.write_text(render_curated_include(branded, paired_build_id), encoding="utf-8")
     atlas_path = output / "league-branding/badge_atlas.bin"
     atlas_path.write_bytes(atlas.tobytes())
     header_path = output / "league-branding/badge_atlas.h"
@@ -342,6 +364,8 @@ def build_league_branding(
         "badge_atlas": str(atlas_path),
         "badge_atlas_header": str(header_path),
         "badge_atlas_sha256": sha256_file(atlas_path),
+        "input_badge_atlas_sha256": sha256_bytes(atlas_payload),
+        "paired_build_id": paired_build_id,
         "contact_sheet": str(contact_path),
         "rows": rows,
     }
@@ -708,7 +732,8 @@ def refresh_branding(args: argparse.Namespace) -> dict[str, Any]:
     league_archive = football_life_root / config["football_life_league_archive"]
     league_index = index_cpk(league_archive, "football_life_dt15", 0)
     result = build_league_branding(
-        output, catalog, config["league_branding"], league_index
+        output, catalog, config["league_branding"], league_index,
+        atlas_path=args.badge_atlas, paired_build_id=args.paired_build_id,
     )
     report_path = output / "full-kit-migration-report.json"
     if report_path.is_file():
@@ -750,6 +775,9 @@ def main() -> None:
     parser.add_argument("--loose-base", type=Path, default=DEFAULT_LOOSE_BASE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--preview-workers", type=int, default=8)
+    parser.add_argument("--badge-atlas", type=Path,
+                        help="current candidate atlas for --refresh-branding; keeps new/updated team crests")
+    parser.add_argument("--paired-build-id", help="existing loose CPK ID for --refresh-branding")
     parser.add_argument("--finalize", action="store_true")
     parser.add_argument("--refresh-branding", action="store_true")
     args = parser.parse_args()

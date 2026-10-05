@@ -14,7 +14,8 @@ from pathlib import Path
 
 from build_fl26_cup_catalog import competition_members, decoded_member, index_cpk
 from cleanse_playable_categories import RETIRED
-from pesdb import parse_pes21_assignments, parse_player_ids, parse_team_records
+from native_lineup import validate_formation_phases
+from pesdb import parse_pes21_assignments, parse_player_ids, parse_team_records, split_records
 from prepare_loose_cpk import verify as verify_loose
 
 
@@ -51,6 +52,9 @@ def check(candidate: Path, selector_dir: Path, slot_plan: dict,
     teams = parse_team_records(database("Team.bin"), "pes21")
     assignments = parse_pes21_assignments(database("PlayerAssignment.bin"))
     players = parse_player_ids(database("Player.bin"), "pes21")
+    native_players = {struct.unpack_from("<I", r, 8)[0]: r for r in
+                      split_records(database("Player.bin"), 312, "native players")}
+    tactics, formations = database("Tactics.bin"), database("TacticsFormation.bin")
     competitions = competition_members(database("CompetitionEntry.bin"))
     if teams[1164].name.casefold() != "indonesia" or len(assignments[1164]) != 26:
         raise ValueError("Indonesia did not fully replace the native Israel team")
@@ -64,6 +68,8 @@ def check(candidate: Path, selector_dir: Path, slot_plan: dict,
     if any(row.player_id not in players for rows in assignments.values()
            for row in rows):
         raise ValueError("a native assignment references a missing player")
+    lineup_checks = {team_id: validate_formation_phases(tactics, formations, team_id,
+        [row.player_id for row in assignments[team_id][:11]], native_players) for team_id in physical}
 
     for physical_id in [*physical, 1164]:
         for kind in ("1st", "2nd", "GK1st"):
@@ -159,6 +165,7 @@ def check(candidate: Path, selector_dir: Path, slot_plan: dict,
         "bundesliga_teams": len(physical),
         "bundesliga_roster_min": min(rosters.values()),
         "bundesliga_roster_max": max(rosters.values()),
+        "bundesliga_lineup_role_checks": lineup_checks,
         "indonesia_players": len(assignments[1164]),
         "native_players": len(players),
         "fl26_portraits": len(portrait_ids),

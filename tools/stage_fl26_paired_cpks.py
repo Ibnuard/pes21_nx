@@ -11,6 +11,7 @@ import argparse
 import io
 import json
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -19,12 +20,32 @@ from PIL import Image
 
 from add_cpk_members_canary import rebuild as add_cpk_members
 from build_fl26_cup_catalog import decoded_member, index_cpk
-from pes21_player_migration import repack_migration_cpks
+from pes21_player_migration import repack_migration_cpks, encode_pes21_wesys, table_raw
+from pesdb import PES21_TEAM_RECORD_SIZE, split_records
 from prepare_loose_cpk import clone_full, update, verify
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FLAG_PREFIX = "common/render/symbol/flag/"
+
+
+def merge_team_overlay(base: bytes, staged: bytes, physical_ids: set[int]) -> bytes:
+    """Overlay only migrated team identities onto the current licensed base.
+
+    The staged table may have been generated from an older PESDB snapshot.
+    Replacing it wholesale used to reset unrelated real-kit flags (Palmeiras
+    included), even though their FL26 descriptors and textures survived.
+    """
+    before = split_records(base, PES21_TEAM_RECORD_SIZE, "base Team.bin")
+    after = split_records(staged, PES21_TEAM_RECORD_SIZE, "staged Team.bin")
+    ids = [struct.unpack_from("<I", row, 8)[0] for row in before]
+    replacements = {struct.unpack_from("<I", row, 8)[0]: row for row in after}
+    if len(set(ids)) != len(ids) or len(replacements) != len(after):
+        raise ValueError("duplicate native team ID")
+    if set(ids) != set(replacements) or not physical_ids <= set(ids):
+        raise ValueError("native team overlay ID set differs from base")
+    return b"".join(replacements[team_id] if team_id in physical_ids else row
+                    for team_id, row in zip(ids, before))
 
 
 def resized_png(raw: bytes, width: int) -> bytes:
@@ -140,6 +161,17 @@ def main() -> None:
                        "CompetitionEntry.bin", "TacticsFormation.bin"}
     if not required_tables.issubset({Path(key).name for key in table_files}):
         raise ValueError("required mobile PESDB tables are absent from dt200")
+    team_member = "common/etc/pesdb/Team.bin"
+    dt200_index, dt200_offset = index_cpk(dt200_base)
+    merged_team = merge_team_overlay(
+        decoded_member(dt200_base, dt200_index, dt200_offset, team_member),
+        table_raw(table_files[team_member]),
+        {int(row["physical_team_id"]) for row in slots["team_slots"]} | {1164},
+    )
+    merged_path = output / "tables/Team.bin"
+    merged_path.parent.mkdir(parents=True)
+    merged_path.write_bytes(encode_pes21_wesys(merged_team))
+    table_files[team_member] = merged_path
     portraits = [{"native_player_id": int(row["native_player_id"])}
                  for row in portrait_report["portraits"]]
     dt200, dt241, packed = repack_migration_cpks(
@@ -168,6 +200,7 @@ def main() -> None:
         "players_imported": native_report["players_imported"],
         "portraits": portrait_report["count"],
         "kits": 19,
+        "unrelated_team_rows_preserved_from_kit_base": True,
         "cpk": packed,
         "auxiliary_tables_not_present_in_dt200": sorted(
             path.name for path in (args.native / "tables").iterdir()

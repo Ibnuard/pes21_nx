@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "aliases": [
+    [53, "KOREA REPUBLIC", "South Korea"],
+    [111, "LA CORUNA AB", "Deportivo La Coruña"],
+    [147, "URAWA REDS", "Urawa Red Diamonds"],
+    [264, "SANTANDER VB", "Racing Santander"],
+    [1012, "KOREA DPR", "North Korea"],
+    [1329, "STADE BRESTOIS 29", "Stade Brestois"],
+    [1804, "VITORIA SC", "Vitória Sport Clube"],
+    [2616, "MIRANDA DE EBRO RN", "CD Mirandés"],
+    [4225, "REGGIO EMILIA G", "AC Reggiana 1919"],
+    [5046, "CORDOBA AB", "Club Atlético Talleres"],
+    [5225, "SILKEBORG RH", "Silkeborg IF"],
+    [5226, "HADERSLEV HB", "Sønderjyske Fodbold"],
+    [5235, "VEJLE RH", "Vejle Boldklub"]
+  ]
+}

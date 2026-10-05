@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Stage a supplied team crest in a paired local NRO/LooseCpk candidate.
 
-Only the selected badge cell and existing native crest members are changed.
+Only the selected badge cell and native crest aliases are changed. Missing
+real/fake variants must be added: switching to licensed kits selects ``_r``.
 The supplied image and all proprietary CPK output stay under local-debug.
 """
 
@@ -18,7 +19,10 @@ from pathlib import Path
 
 from PIL import Image
 
+from add_cpk_members_canary import rebuild as add_cpk_members
+from build_barca_real_madrid_mobile_kit_canary import validate_cpk
 from build_fl26_cup_catalog import index_cpk
+from build_madrid_preserve_order import restore_order
 from build_full_mobile_kit_migration import (
     ATLAS_WIDTH,
     BADGE_CELL,
@@ -39,6 +43,59 @@ def native_png(image: Image.Image, size: int) -> bytes:
     stream = io.BytesIO()
     resized.save(stream, format="PNG", optimize=True)
     return stream.getvalue()
+
+
+def native_crest_plan(index: dict, physical: int) -> dict[str, int]:
+    """Complete both licensing paths, retaining existing emblemLc aliases."""
+    if not 0 < physical <= 999999:
+        raise ValueError("invalid native team ID")
+    result = {}
+    for suffix, size in (("", 128), ("_l", 256), ("_s", 64)):
+        for form in ("f", "r"):
+            result[f"{FLAG_PREFIX}e_{physical:06d}_{form}{suffix}.png"] = size
+            for contrast in ("b", "w"):
+                member = f"{FLAG_PREFIX}e_{physical:06d}_{form}_{contrast}{suffix}.png"
+                if member in index:
+                    result[member] = size
+        for form in ("b", "w"):
+            member = f"common/render/symbol/emblemLc/emb_{physical:04d}_{form}{suffix}.png"
+            if member in index:
+                result[member] = size
+    if not set(result) & set(index):
+        raise ValueError(f"no existing native crest identity for team {physical}")
+    return result
+
+
+def pack_native_crests(source: Path, payloads: dict[str, bytes], output: Path):
+    """Replace/add approved crests without reordering existing CPK entries."""
+    output.mkdir(parents=True, exist_ok=False)
+    index, _ = index_cpk(source)
+    paths = {}
+    for number, (member, payload) in enumerate(sorted(payloads.items())):
+        path = output / f"crest-{number:03d}.png"
+        path.write_bytes(payload)
+        paths[member] = path.resolve()
+    replacements = {name: str(path) for name, path in paths.items() if name in index}
+    additions = {name: path for name, path in paths.items() if name not in index}
+    replaced = output / "replaced.cpk"
+    manifest = output / "replacements.json"
+    manifest.write_text(json.dumps(replacements, indent=2) + "\n", encoding="utf-8")
+    subprocess.run([sys.executable, str(ROOT / "tools/repack_cpk_members.py"),
+                    str(source), str(replaced), "--replace-manifest", str(manifest)],
+                   check=True, stdout=subprocess.DEVNULL)
+    final = output / "dt240_mobile_all.cpk"
+    if additions:
+        intermediate = output / "added.cpk"
+        add_cpk_members(replaced, intermediate, additions)
+        restore_order(intermediate, final, [*index, *sorted(additions)])
+        intermediate.unlink()  # Only this tool's disposable intermediate.
+    else:
+        shutil.copyfile(replaced, final)
+    replaced.unlink()
+    actions = {name: "replace" if name in index else "add" for name in payloads}
+    report = validate_cpk(source, final, actions, payloads)
+    report["added_members"] = sorted(additions)
+    return final, report
 
 
 def team(catalog: dict, team_id: int) -> dict:
@@ -89,35 +146,14 @@ def stage(image_path: Path, candidate: Path, selector: Path,
 
     native_source = candidate / "LooseCpk/dt240_mobile_all.cpk"
     native_index, _ = index_cpk(native_source)
-    members = {}
-    for form in ("f", "r"):
-        for suffix, size in (("", 128), ("_l", 256), ("_s", 64)):
-            member = f"{FLAG_PREFIX}e_{physical:06d}_{form}{suffix}.png"
-            if member in native_index:
-                if int(native_index[member]["FileSize"]) != int(
-                        native_index[member]["ExtractSize"]):
-                    raise ValueError(f"compressed native crest: {member}")
-                members[member] = size
-    if not members or not any(f"e_{physical:06d}_f" in name for name in members):
-        raise ValueError(f"native crest for team {team_id}/{physical} missing")
+    members = native_crest_plan(native_index, physical)
 
     output.mkdir(parents=True)
     shutil.copy2(image_path, output / "supplied-crest.png")
     clone_full(candidate, output, build_id)
-    replacements = {}
-    for size in sorted(set(members.values())):
-        path = output / f"crest-{size}.png"
-        path.write_bytes(native_png(image, size))
-        for member, member_size in members.items():
-            if member_size == size:
-                replacements[member] = str(path.resolve())
-    manifest_path = output / "native-crest-replacements.json"
-    manifest_path.write_text(json.dumps(replacements, indent=2) + "\n",
-                             encoding="utf-8")
-    native_output = output / "dt240-crest-patched.cpk"
-    subprocess.run([sys.executable, str(ROOT / "tools/repack_cpk_members.py"),
-                    str(native_source), str(native_output),
-                    "--replace-manifest", str(manifest_path)], check=True)
+    payloads = {member: native_png(image, size) for member, size in members.items()}
+    native_output, native_report = pack_native_crests(
+        native_source, payloads, output / "native-crests")
     update(output, "dt240_mobile_all.cpk", native_output)
     native_output.unlink()
 
@@ -155,6 +191,7 @@ def stage(image_path: Path, candidate: Path, selector: Path,
         "status": "paired_crest_staged_hardware_pending",
         "team_id": team_id, "physical_team_id": physical,
         "badge_slot": slot, "native_members": sorted(members),
+        "native_cpk": native_report,
         "base_build_id": old_id, "build_id": build_id,
         "image_sha256": hashlib.sha256(logo).hexdigest(),
         "loose_build_id": verify_loose(output)["build_id"],

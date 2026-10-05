@@ -19,6 +19,7 @@ from build_fl26_cup_catalog import decoded_member, index_cpk
 from build_full_mobile_kit_migration import (
     ATLAS_WIDTH,
     BADGE_CELL,
+    brand_selector,
     fit_badge,
     replace_badge_cell,
     write_badge_header,
@@ -165,6 +166,12 @@ def main() -> None:
             raise FileNotFoundError(f"FL26 crest missing: {member}")
         crest = decoded_member(symbols_path, symbol_index, symbol_base, member)
         replace_badge_cell(atlas, int(row["badge_slot"]), fit_badge(crest))
+    branding = json.loads((ROOT / "data/full_mobile_kit_migration.json").read_text(
+        encoding="utf-8"))["league_branding"]
+    catalog, atlas, branded_categories = brand_selector(
+        catalog, atlas, branding,
+        lambda member: decoded_member(symbols_path, symbol_index, symbol_base, member),
+    )
     output.mkdir(parents=True)
     (output / "exhibition_team_catalog_migration.json").write_text(
         json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -179,6 +186,7 @@ def main() -> None:
         "selector_teams": len(catalog["teams"]),
         "indonesia_replaces_israel": True,
         "catalog_content_id": catalog["content_id"],
+        "fl26_branded_categories": [row["key"] for row in branded_categories],
         "pending": ["native tables", "club/national tactics", "kits", "native crests",
                     "FL26 portraits", "matching NRO", "hardware validation"],
     }

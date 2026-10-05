@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import os
 import shutil
 import struct
 import subprocess
@@ -178,7 +179,8 @@ static int32_t sound_cri_bind_cpk_original(void *b,void *s,const char *p,void *w
 int main(int argc,char **argv) {
  char error[256]; int expected=atoi(argv[1]), require_full=atoi(argv[2]);
  assert(!pes_loose_cpk_path("/Expansion/dt200_mobile_all.cpk"));
- int result=pes_loose_cpk_init("81f096d278e1225b",require_full,error,sizeof(error));
+ const char *build_id=argc>3 ? argv[3] : "81f096d278e1225b";
+ int result=pes_loose_cpk_init(build_id,require_full,error,sizeof(error));
  if(result!=expected) { fprintf(stderr,"result=%d expected=%d %s",result,expected,error); return 1; }
  uint32_t id=0;
  pes_runtime_cri_bind_cpk((void*)1,(void*)2,"/Expansion/dt200_mobile_all.cpk",(void*)3,77,&id);
@@ -252,3 +254,19 @@ int main(int argc,char **argv) {
             (root/'LooseCpk/manifest.txt').write_text(text.replace(
                 'dt540_mobile_all.cpk 5 ', 'dt540_mobile_all.cpk 6 '))
             run(-1)
+
+    def test_optional_real_candidate_uses_matching_nro_and_manifest(self):
+        folder = os.environ.get('PESNX_LOOSE_CANDIDATE')
+        if not folder:
+            self.skipTest('set PESNX_LOOSE_CANDIDATE to an ignored full package with NRO/ELF')
+        from package_loose_update import verify_nro
+        root = Path(folder).resolve()
+        manifest = verify(root)
+        self.assertEqual(manifest['version'], 2)
+        verify_nro(root, manifest['build_id'])
+        wrong_id = '0' * 16 if manifest['build_id'] != '0' * 16 else 'f' * 16
+        for result, full, build_id in ((2, 1, manifest['build_id']),
+                                      (-1, 0, manifest['build_id']),
+                                      (-1, 1, wrong_id)):
+            subprocess.run([str(self.exe), str(result), str(full), build_id],
+                           cwd=root, check=True, capture_output=True)

@@ -411,6 +411,7 @@ def _choose_balanced_xi_with_score(
     players: list[tuple[int, int, int] | tuple[int, int, int, tuple[int, ...]]],
     roles: list[int],
     preferred_ids: list[int] | None = None,
+    *, require_familiarity: bool = False,
 ) -> tuple[list[int], list[int], tuple[int, int, int, int, int]]:
     """Fill formation slots by position/familiarity, then break ties by OVR."""
     if len(roles) != 11:
@@ -422,7 +423,10 @@ def _choose_balanced_xi_with_score(
         by_id = {player[0]: index for index, player in enumerate(players)}
         for slot, preferred in enumerate(preferred_ids):
             index = by_id.get(preferred)
-            if index is not None and role_fit_score(roles[slot], players[index][2]) is not None:
+            fit = (role_fit_score(roles[slot], players[index][2],
+                    players[index][3] if len(players[index]) == 4 else None)
+                   if index is not None else None)
+            if fit is not None and (not require_familiarity or fit[0] or fit[1]):
                 if index in pinned.values():
                     raise ValueError("preferred XI duplicates a player")
                 pinned[slot] = index
@@ -447,7 +451,7 @@ def _choose_balanced_xi_with_score(
                 if roster_index in pinned.values() and pinned.get(role_index) != roster_index:
                     continue
                 fit = role_fit_score(role, position, familiarity)
-                if fit is None:
+                if fit is None or (require_familiarity and not (fit[0] or fit[1])):
                     continue
                 next_score = (
                     score[0] + fit[0],

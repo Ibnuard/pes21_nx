@@ -93,6 +93,56 @@ For other teams, audit their requested variants rather than guessing filenames.
 The current name manifest covers 39 existing native clubs; Sunderland 396 still
 needs coordinated team/roster/slot integration. Do not claim all 40 slots exist.
 
+### Native presentation follow-up (2026-10-05)
+
+Restoring real-kit flags alone is insufficient: a formerly unlicensed club may
+have only `_f` PNGs. The native presentation then requests an absent `_r` crest
+even though the custom atlas and converted kits look correct. Its native name
+also comes from `Team.bin`, independently of the selector. The reported example
+was Middlesbrough/Palmeiras, still showing `MIDDLESBROUGH RW`/`BARRA FUNDA V`.
+
+`tools/audit_native_club_presentation.py` checks every playable logical/native
+mapping, native English name, short codes, PNG dimensions, alpha content, and
+complete real-crest families. Both `_r` and the paired `_r_b`/`_r_w` families
+are supported; an unused missing `_f` is not reported as a defect.
+
+`tools/stage_native_club_presentation.py --all-verified` stages a detached
+candidate from the current, explicitly selected full-loose baseline. Identity
+requires the mapped team plus a matching name/fingerprint; reviewed alternate
+names are in `data/native_club_identity_aliases.json`. A matching numeric ID
+alone is never enough. Teams absent from FL26 or with different identities are
+held without changing their records, crests, or selector cells. The custom
+Palmeiras crest is hash-pinned in `data/native_club_presentation_overrides.json`.
+
+The staged candidate `local-debug/native-club-presentation-2026-10-05-v1`
+uses build ID `e861c583ec78e9ae`. All 394 playable teams were audited: 41
+licensed-crest gaps before staging, zero after staging; 376 identity-verified
+teams synchronized, 18 retained. The remaining ten selector/native name
+differences belong to held teams, not silently approved replacements.
+
+Checkpoint acceptance: the user reported this build "so far aman" and requested
+a commit/push checkpoint. This records a successful user smoke test, not an
+exhaustive 394-team match certification. The accepted NRO SHA-256 is
+`ed351ede57275f4a54922b09c94750bcf4e029665a20f77f52902c01b3066ae6`.
+The copy-only package remains at
+`local-debug/FootballNX-Native-TeamFix-COPY-TO-pes21_nx`; game payloads stay
+ignored and are not part of the source checkpoint. No promotion to `dist` or
+build-profile change is implied by this checkpoint.
+
+Only approved English-name/short-code fields in `Team.bin`, team crest PNGs
+in dt240, selected team atlas cells, and selector display names may change.
+Player records, assignments, tactics, native IDs, kit flags, kit descriptors,
+textures, previews, league branding and the curated team/category lists must
+remain unchanged. Original CPK TOC order/IDs are preserved; additions are
+appended with `Sorted=0`. The shared supplied-crest staging tool now completes
+missing `_f`/`_r` aliases too, avoiding the same regression on later kit updates.
+
+Rebuild a matching NRO from the staged selector/atlas/roster inputs, run the
+optional binary checks using `PESNX_NATIVE_PRESENTATION_CANDIDATE`, then package
+with `tools/package_loose_update.py`. Keep audit/build files outside the copy-only
+payload. Never mix a newer manifest with an older NRO. Automated package checks
+do not replace a Switch intro, goal, pause, restart and kit regression test.
+
 ## Scope limits
 
 This checkpoint is not a complete EF10 face transfer. Portraits and 3D faces are

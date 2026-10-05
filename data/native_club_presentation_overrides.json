@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "teams": [
+    {
+      "team_id": 137,
+      "physical_team_id": 137,
+      "expected_native_names": ["BARRA FUNDA V", "PALMEIRAS"],
+      "expected_selector_names": ["SE PALMEIRAS", "PALMEIRAS"],
+      "expected_fl26_name": "SE Palmeiras",
+      "official_name": "PALMEIRAS",
+      "short_code": "PAL",
+      "crest_source": "current_native",
+      "crest_sha256": "3308d0dcdb711699ba8a6fa99df1e77b078ea572fa693554630f2a94db8fbf5c",
+      "update_selector_badge": false
+    },
+    {
+      "team_id": 205,
+      "physical_team_id": 205,
+      "expected_native_names": ["MIDDLESBROUGH RW", "MIDDLESBROUGH"],
+      "expected_selector_names": ["MIDDLESBROUGH RW", "MIDDLESBROUGH"],
+      "expected_fl26_name": "Middlesbrough FC",
+      "official_name": "MIDDLESBROUGH",
+      "short_code": "MID",
+      "crest_source": "fl26",
+      "update_selector_badge": true
+    }
+  ]
+}

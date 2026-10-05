@@ -233,3 +233,116 @@ portrait/face/commentary ownership, and kit migration report into the ignored
 registries remain under `data/master/`; complete CSV exports stay under
 `local-debug/master-exports/`. See `docs/MASTER_DATA_CATALOG.md` for the schema,
 counts, provenance, and example queries.
+
+## Curated-team eFootballDB transfer updates
+
+This is a separate, explicitly authorized roster-update workflow. It does not
+change the formation-only contract of `import_team_tactics.py` above. Always
+use the **current curated selector**, not the historical 443-team master or a
+459-team pre-cleanup roster include, to define the playable scope.
+
+1. `tools/sync_efootballdb_rosters.py collect` attempts every playable team
+   before any transfer is planned. Raw public API responses are frozen under
+   ignored `local-inputs/`, with URL, UTC fetch time, checksum, and catalog hash.
+   A timeout or authentication error is not treated as an empty roster.
+2. `plan` joins BaseIds to the latest identity registry and native CPK, checking
+   the old master DB for identity consistency. `profiles` can supplement new
+   or ambiguous card observations with frozen canonical BaseId profiles; run
+   `plan` again with that profile collection. All reconciliation is offline.
+3. A verified existing player keeps its native ID, player-record bytes, stats,
+   portrait, face, and commentary. A uniquely verified FL26 identity gains an
+   EF BaseId alias without creating a second person. Club and national-team
+   memberships reference the same canonical identity. Names alone and reused
+   numeric IDs are not sufficient evidence. Tombstones reserve their slots
+   and require native as well as web fingerprint verification before reactivation.
+4. New verified identities may be imported only with the approved asset
+   policy: neutral portrait, generic native appearance, no donor face or
+   commentary. Native IDs avoid current and historical IDs and asset owners;
+   physical rows must be unreferenced by both current and historical tables.
+   Only proven PES21 fields are converted. API enum offsets are checked
+   against the locked local source before conversion; no OVR is fabricated.
+5. Unavailable/invalid or identity-ambiguous teams retain their local data.
+   `--allow-retained-outgoing` separately authorizes verified departures from
+   such clubs. It keeps at least 18 players and a goalkeeper, retains the native
+   formation, pins surviving starters, and fills gaps from the remaining
+   roster. Transfers that would violate these conditions are held together
+   with their dependent destination updates. Unresolved identities are never
+   applied just to make a team pass.
+   When a local XI is known to be incorrectly ordered, staging may explicitly
+   use `--repair-lineup-category german_teams`: all local slots in that category
+   are re-solved with strict primary/full/partial position familiarity instead
+   of pinning the old starters. Exact web XIs remain unchanged. The repair
+   validates every tactic/phase and does not change membership or player data.
+6. `tools/stage_efootballdb_update.py` verifies the input hashes and recomputes
+   the plan before writing a **new detached candidate**. It rebuilds Player,
+   InstallVersionPlayer, PlayerDeleteList, PlayerAssignment, and
+   TacticsFormation together. Player count stays 43,074; unchanged identities
+   and unrelated rosters remain byte-identical. Both independent native
+   rebuilds must match. Updated teams receive the exact web XI and primary
+   formation across the existing native tactic phases.
+
+Example (paths name locally supplied inputs, not repository fixtures):
+
+```powershell
+python tools/sync_efootballdb_rosters.py collect `
+  --catalog local-inputs/current-selector/catalog.json `
+  --output local-inputs/efootballdb-updates/snapshot
+python tools/sync_efootballdb_rosters.py plan `
+  --collection local-inputs/efootballdb-updates/snapshot `
+  --registry local-inputs/current-identities/identity-state.json `
+  --master-db local-inputs/master-data/pes21_master.db `
+  --source-db local-inputs/pes21-player-migration/eF26_v551/source-db.json `
+  --native-cpk local-debug/current-paired/LooseCpk/dt200_mobile_all.cpk `
+  --profiles local-inputs/efootballdb-updates/profiles `
+  --keep-unavailable --keep-identity-teams --allow-retained-outgoing `
+  --output local-debug/web-transfer-plan
+python tools/stage_efootballdb_update.py `
+  --plan local-debug/web-transfer-plan/transfer-plan.json `
+  --historical-tables local-inputs/current-identities/original-tables `
+  --face-inventory local-inputs/current-identities/face-ids.json `
+  --ratings-include local-debug/current-paired/selector/exhibition_rosters_migration_canary_generated.inc `
+  --package-base local-debug/current-paired `
+  --output local-debug/web-transfer-candidate
+```
+
+For the first web update, `--registry` can instead use the latest EF registry
+plus `--fl26-slots` for its FL26 native allocations. Future updates must use
+the candidate's **`identity-state.json` and matching native CPK** together;
+never restart from the old registry and allocate the imported players again.
+
+The candidate includes a transactional `roster-master.db` with canonical
+identities, aliases, club/national memberships, starting XI, formation slots,
+new-player stats and transfer events. This roster catalog is deliberately
+separate from the old wide master database; staging does not overwrite that
+database, the active runtime, or saves. After accepting a candidate, retain its
+identity state, database and provenance under ignored `local-inputs/` before
+cleaning disposable build output. Do not promote raw responses or game data
+into the public repository.
+
+Packaging replaces only dt200 (database) and dt241 (new neutral portraits),
+verifies all other loose CPKs unchanged, and emits matching roster/scorer/team
+includes. Build a matching NRO with those includes, the existing curated badge
+atlas, and cup/league catalog headers. A new manifest must never be paired with
+an old NRO. On the same source runtime, copy the NRO, dt200, dt241 and finally
+`LooseCpk/manifest.txt`; remove only its stale `verified-v2.txt` cache before
+boot. A different installed baseline needs the complete matched package.
+
+Back up saves, then test with new Cup/League sessions. Existing tournament saves
+and team presets may contain the previous squad and scorer IDs; their migration
+is not part of this data update. Hardware acceptance must cover selector,
+Game Plan, pre-match substitutions, real on-field identities, portraits,
+club/national overlap and repeated matches. A successful offline build does
+not constitute Switch sign-off.
+
+```powershell
+python -m pytest tests/test_sync_efootballdb_rosters.py tests/test_stage_efootballdb_update.py -q
+$env:PESNX_WEB_CANDIDATE = 'local-debug/web-transfer-candidate'
+python -m pytest tests/test_efootballdb_local_candidate.py -q
+Remove-Item Env:PESNX_WEB_CANDIDATE
+```
+
+The optional integration checks re-plan the same frozen snapshot from the
+candidate and require zero new imports, zero repeated transfers and stable
+native IDs. They also compare exact web starters/formation phases, SQLite
+integrity and all new portrait placeholders. Without ignored local inputs,
+these tests skip rather than downloading or restoring proprietary fixtures.

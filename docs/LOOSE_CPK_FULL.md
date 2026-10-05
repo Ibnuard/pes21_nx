@@ -84,6 +84,48 @@ game, copies the CPK first, then the manifest. NRO updates remain necessary
 when code, compiled team catalogs, generated rosters, or migration build IDs
 change. Loose CPK packaging does not remove that compatibility contract.
 
+### Copy-only candidate folder
+
+Keep the build/audit candidate separate from the directory handed to a tester.
+Generate a fresh payload-only folder with an explicit installed baseline:
+
+```powershell
+python tools/package_loose_update.py `
+  --candidate PATH_TO_VERIFIED_CANDIDATE `
+  --baseline PATH_TO_VERIFIED_INSTALLED_BASELINE `
+  --output local-debug/copy-ready-pes21_nx
+```
+
+Repeat `--baseline` to support multiple known baselines; the output includes
+the union of changed CPKs. It always includes the paired NRO and manifest,
+and includes the tiny dummy OBB only if it changed. The tool SHA-verifies
+every source package and copied file, checks the compiled migration-ID symbol
+in the candidate ELF, and matches all three ELF load segments against the
+NRO (excluding the first 128 bytes filled by `elf2nro`). It requires
+`pyelftools` from `tools/native-audit-requirements.txt`. The ELF is needed for
+verification but is never copied into the payload.
+
+Only install files are published, and existing output folders are refused.
+The JSON report goes to stdout, not inside the copy-only folder. Copy its
+contents into the existing `sdmc:/switch/pes21_nx/` directory, merging
+`LooseCpk/` and replacing files, with the game closed. Keep the existing
+unchanged CPKs and saves; copy the manifest last. A delta is valid only for
+the listed baselines, not for arbitrary older releases.
+
+`Invalid manifest header/build ID` is reported before OBB/CPK checks. It can
+mean a mismatched NRO/manifest, the wrong full-mode build, or a malformed
+header (including a BOM). Recopy the matching NRO and original manifest;
+do not hand-edit the ID or bypass validation. Removing `verified-v2.txt`
+cannot fix this header error because the runtime ignores that legacy cache.
+
+An optional read-only integration test runs the actual native C validator
+against a local full candidate, after checking its NRO/ELF and hashes:
+
+```powershell
+$env:PESNX_LOOSE_CANDIDATE = 'PATH_TO_VERIFIED_CANDIDATE'
+python -m pytest tests/test_loose_cpk.py tests/test_package_loose_update.py -q
+```
+
 ## Hardware validation
 
 - First boot reaches the game without reading all CPK payloads and reports

@@ -4,7 +4,14 @@ This catalog is the stable lookup layer for player, team, competition,
 formation, asset, and kit work. It is generated; do not hand-edit its CSV
 registries or local SQLite database.
 
-## Active snapshot
+## Original full-migration snapshot
+
+The counts below describe the original full migration, not the later curated
+selector. For web transfer updates, take playable scope from the current
+catalog and use the detached `roster-master.db` / `identity-state.json` pair
+described in [PES21PLAYERMIGRATION.md](PES21PLAYERMIGRATION.md#curated-team-efootballdb-transfer-updates).
+The old wide master remains a read-only identity/stats reference until an
+updated candidate is explicitly accepted.
 
 - Source: `eF26_v551`
 - Migration build: `1852ec648d2ebd75`

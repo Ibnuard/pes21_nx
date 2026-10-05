@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from plan_fl26_native_slots import choose_team_slots  # noqa: E402
 from stage_fl26_bundesliga_indonesia_selector import (  # noqa: E402
     stage_catalog as stage_bundesliga_catalog,
 )
+from stage_fl26_paired_cpks import merge_team_overlay
 
 
 def test_indonesia_stage_preserves_selector_and_badge_invariants() -> None:
@@ -162,3 +164,33 @@ def test_bundesliga_indonesia_stage_has_unique_teams_and_badges() -> None:
     assert german["team_ids"] == bundesliga
     assert not any(row["key"] == "other_europe"
                    for row in staged["categories"])
+
+
+def team_record(team_id, flag, name):
+    raw = bytearray(1532)
+    struct.pack_into("<I", raw, 8, team_id)
+    raw[84] = flag
+    raw[100:100 + len(name)] = name
+    return bytes(raw)
+
+
+def test_pairing_preserves_palmeiras_kit_flag_and_all_unrelated_team_bytes():
+    # A stale native stage has an unlicensed Palmeiras row. Only the explicit
+    # Bundesliga/Indonesia slots should replace the already licensed kit base.
+    licensed = team_record(137, 15, b"PALMEIRAS")
+    base = licensed + team_record(1164, 4, b"OLD NATION")
+    indonesia = team_record(1164, 15, b"INDONESIA")
+    staged = team_record(137, 0, b"STALE NAME") + indonesia
+    merged = merge_team_overlay(base, staged, {1164})
+    assert merged == licensed + indonesia
+    assert merge_team_overlay(merged, staged, {1164}) == merged
+
+
+def test_pairing_rejects_duplicate_missing_or_unexpected_team_ids():
+    a, b = team_record(137, 15, b"A"), team_record(1164, 15, b"B")
+    with pytest.raises(ValueError, match="duplicate"):
+        merge_team_overlay(a + b, b + b, {1164})
+    with pytest.raises(ValueError, match="ID set"):
+        merge_team_overlay(a + b, a, {1164})
+    with pytest.raises(ValueError, match="ID set"):
+        merge_team_overlay(a + b, a + b, {99999})

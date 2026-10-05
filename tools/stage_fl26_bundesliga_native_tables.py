@@ -17,6 +17,7 @@ import struct
 from pathlib import Path
 
 from build_fl26_cup_catalog import decoded_member, index_cpk
+from native_lineup import balanced_roster_order, validate_formation_phases
 from pes21_player_migration import (
     load_tactic_roles,
     patch_canary_tables,
@@ -153,12 +154,25 @@ def patch_football_tables(
     previous_count = len(assigned)
     next_id = max(row[0] for row in assigned) + 1
     per_team = {}
+    roles, _ = load_tactic_roles(output / "Tactics.bin", output / "TacticsFormation.bin", teams)
+    tactics = table_raw(output / "Tactics.bin")
+    formations = table_raw(output / "TacticsFormation.bin")
+    lineup_checks = {}
     for logical_id in identity_plan["bundesliga_team_ids"]:
         physical_id = teams[int(logical_id)]
         roster = [row for row in pc_assignments[int(logical_id)]
                   if int(row.player_id) in roster_native]
         if not 18 <= len(roster) <= 40:
             raise ValueError(f"Bundesliga club {logical_id} has {len(roster)} players")
+        # FL26's membership order groups keepers/defenders together. It is not
+        # an appointment order. Match the complete XI to the retained native
+        # formation instead of turning the first eleven members into starters.
+        order = balanced_roster_order([roster_native[r.player_id] for r in roster],
+                                     roles[physical_id], native_players)
+        roster = [roster[i] for i in order]
+        lineup_checks[int(logical_id)] = validate_formation_phases(
+            tactics, formations, physical_id,
+            [roster_native[r.player_id] for r in roster[:11]], native_players)
         per_team[int(logical_id)] = len(roster)
         for order, row in enumerate(roster):
             assigned.append((next_id, roster_native[int(row.player_id)], physical_id,
@@ -204,6 +218,7 @@ def patch_football_tables(
         "assignments_added": len(assigned) - previous_count,
         "held_identity_review_ids": slot_plan["held_identity_review_ids"],
         "held_missing_portrait_ids": slot_plan["held_missing_portrait_ids"],
+        "lineup_role_checks": lineup_checks,
         "pending": ["FL26 kits/crests", "dt241 portraits", "paired CPK/NRO",
                     "native tactics review", "hardware validation"],
     }
@@ -267,7 +282,7 @@ def main() -> None:
     report["ef_base_table_player_rows"] = base_report["player_rows"]
     report["ef_base_table_assignments"] = base_report["assignments_inserted"]
     report["ef_base_lineup_teams"] = len(ordered)
-    report["lineup_policy"] = "source_assignment_order; native_roles_preserved"
+    report["lineup_policy"] = "position_familiarity_balanced_XI; stable_bench; native_roles_preserved"
     (output / "native-table-report.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(output), "status": report["status"],

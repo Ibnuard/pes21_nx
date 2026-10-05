@@ -116,3 +116,59 @@ category as MLS would be inaccurate.
    match/gameplan, kit previews, portraits, and save/load.
 3. Promote only a hardware-passed paired CPK/NRO candidate, never a selector or
    isolated team-table stage. Keep extracted game payloads ignored and local.
+
+## Bundesliga default-XI correction (2026-10-05)
+
+The earlier importer used raw FL26 membership order as the native starting
+order while retaining the physical slot's formation. Membership order is not
+FL26's actual selected XI: several keepers and defenders appeared first. The
+runtime deliberately sets Coach appointment order to the generated roster
+indices, so this data error became a real on-field role error, not just a label.
+The first web-transfer candidate corrected two Bundesliga teams from valid
+web tactics, but the other sixteen retained incompatible local starters. Its
+outgoing-transfer refill pinned surviving starters and therefore preserved
+most incompatible outfield assignments.
+
+`native_lineup.py` now selects the entire local XI without pinning that raw
+order. Primary positions and native full/partial familiarity are allowed;
+keeper/outfield crossings and unfamiliar neighboring roles are forbidden.
+All eleven slots must be filled or staging fails. Selection is deterministic,
+the remaining bench keeps source order, and identities, memberships, shirts,
+stats, portraits and assets do not change. In a mixed roster with incomplete
+OVR coverage, source order breaks equal-fit ties rather than fabricated ratings.
+
+The original FL26 staging path now uses this selector and validates every
+encoded slot in both native tactics and all three phases. The paired verifier
+performs the same role checks; asset/ID coverage alone is no longer sufficient.
+For an existing web-transfer plan, explicitly opt into the authorized category:
+
+```powershell
+python tools/stage_efootballdb_update.py <existing-input-arguments> --repair-lineup-category german_teams --output local-debug/new-bundesliga-candidate
+```
+
+The repair leaves exact valid web XIs in place and rebalances only retained
+local teams within the category. Teams outside that category retain the
+existing update policy. `stage-report.json` records the scope and all per-phase
+role checks. The candidate's SQLite starting orders and generated NRO roster
+must agree with its native CPK. This is a default-lineup correction, not an
+import of current real-world Bundesliga tactical shapes and not a migration
+of old tournament saves or user presets. Validate new Exhibition/Cup/League
+sessions and pre-game substitutions on Switch before release.
+
+## Selector/kit preservation correction (2026-10-05)
+
+The user confirmed the default-XI candidate boots, then reported generic
+league branding and Palmeiras kits. An independent comparison found that
+the selector had lost 18 active FL26 category logos/16 licensed names, while
+the original Bundesliga pairing had reset the kit byte of 110 currently
+playable teams. Palmeiras differed from its licensed native team row at only
+byte 84 (15 became 0); its descriptors, six textures and two previews remained
+identical. The same strict identity/asset checks passed for all 110 teams.
+
+The scoped restoration tool and regression tests are documented in
+[Full mobile kit migration](FULL_MOBILE_KIT_MIGRATION.md). The pairing tool now
+uses the current kit package as the owner of unrelated native team rows, and
+the selector stage reapplies the shared FL26 branding policy. Existing
+transfers, repaired lineups, team pools, and the replacement Palmeiras crest
+remain untouched. Rebuild and deliver a matched NRO/dt200/manifest set; do not
+revert the database or restore an old full atlas as a shortcut.

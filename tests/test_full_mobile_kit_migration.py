@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from build_full_mobile_kit_migration import (  # noqa: E402
     BADGE_CELL,
     ATLAS_WIDTH,
+    brand_selector,
     audit_teams,
     fit_badge,
     replace_badge_cell,
@@ -112,3 +113,44 @@ def test_audit_uses_logical_source_but_keeps_physical_target() -> None:
     ]
     assert preserved[0]["team_id"] == 9999
     assert preserved[0]["reason"] == "missing_or_partial_football_life_kit_set"
+
+
+def test_branding_preserves_current_club_crests_rosters_and_cleansed_categories():
+    catalog = {
+        "content_id": "old", "counts": {"selector_teams": 2},
+        "teams": [{"team_id": 137, "badge_slot": 0}, {"team_id": 5750, "badge_slot": 1}],
+        "categories": [{"key": "spanish_league", "label": "SPANISH LEAGUE",
+                        "badge_slot": 2, "team_ids": [137, 5750]},
+                       {"key": "national_asia_oceania", "label": "ASIA",
+                        "badge_slot": 3, "team_ids": []}],
+    }
+    before = json.loads(json.dumps(catalog))
+    atlas = Image.new("RGBA", (ATLAS_WIDTH, BADGE_CELL), (20, 30, 40, 255))
+    logo = io.BytesIO()
+    Image.new("RGBA", (32, 32), (0, 255, 0, 255)).save(logo, format="PNG")
+    def load(member):
+        assert member == "spain.png"  # Retired logos must not even be requested.
+        return logo.getvalue()
+    specs = {"spanish_league": {"label": "LALIGA EA SPORTS", "member": "spain.png"},
+             "belgian_league": {"label": "JUPILER PRO LEAGUE", "member": "retired.png"}}
+    branded, result, rows = brand_selector(catalog, atlas, specs, load)
+    assert catalog == before
+    assert branded["teams"] == before["teams"] and branded["counts"] == before["counts"]
+    assert [row["key"] for row in branded["categories"]] == [row["key"] for row in before["categories"]]
+    assert branded["categories"][0]["label"] == "LALIGA EA SPORTS"
+    assert branded["categories"][0]["team_ids"] == [137, 5750]
+    for slot in range(32):
+        bounds = (slot * BADGE_CELL, 0, (slot + 1) * BADGE_CELL, BADGE_CELL)
+        if slot != 2:
+            assert result.crop(bounds).tobytes() == atlas.crop(bounds).tobytes()
+    assert [r["key"] for r in rows] == ["spanish_league"]
+    repeated, repeat_atlas, _ = brand_selector(branded, result, specs, load)
+    assert repeated == branded and repeat_atlas.tobytes() == result.tobytes()
+
+
+def test_branding_rejects_category_team_slot_collision():
+    import pytest
+    catalog = {"teams": [{"badge_slot": 2}],
+               "categories": [{"key": "spanish_league", "label": "SPANISH LEAGUE", "badge_slot": 2}]}
+    with pytest.raises(ValueError, match="overlap"):
+        brand_selector(catalog, Image.new("RGBA", (ATLAS_WIDTH, BADGE_CELL)), {}, lambda _: b'')

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def render(catalog: dict, assignments: dict, player_positions: dict[int, int],
-           registry: dict, slot_plan: dict) -> tuple[str, dict]:
+           registry: dict, slot_plan: dict, *, expected_teams: int = 459) -> tuple[str, dict]:
     owners: dict[int, tuple[int, int, str]] = {}
     for row in registry["players"]:
         if row.get("status") != "active":
@@ -43,8 +43,8 @@ def render(catalog: dict, assignments: dict, player_positions: dict[int, int],
                           ascii_name(row["name"]) or "PLAYER")
 
     rows = sorted(catalog["teams"], key=lambda row: int(row["team_id"]))
-    if len(rows) != 459:
-        raise ValueError("paired selector must contain 459 teams")
+    if expected_teams < 1 or len(rows) != expected_teams or len({int(row["team_id"]) for row in rows}) != expected_teams:
+        raise ValueError(f"paired selector must contain {expected_teams} unique teams")
     lines = [
         "// Local paired FL26 League scorer pool; generated from native rosters.",
         "// eFootball BaseId or 0x80000000 | FL26 PC ID; never a donor ID.",

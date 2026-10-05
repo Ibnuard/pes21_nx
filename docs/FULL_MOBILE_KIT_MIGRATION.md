@@ -63,3 +63,50 @@ The final local report is
 It contains team-level provenance, preserved teams and missing assets, CPK
 member counts and hashes, preview sheets, selector branding provenance, and a
 hardware validation checklist.
+
+## Preserving branding and kits across roster migrations
+
+Two regressions were identified after the Bundesliga/Indonesia stage:
+
+- Its selector started from the generic catalog/atlas instead of reapplying
+  the FL26 branding policy. The shared `brand_selector` helper now brands only
+  surviving categories, preserves every team and badge slot, and never
+  reintroduces retired selector categories. The Bundesliga staging tool uses
+  this helper before publishing its selector.
+- The pairing tool replaced all of `Team.bin` with a table generated from an
+  older database. This reset unrelated kit-selection bytes even though the
+  converted descriptors/textures were still present. Pairing now merges only
+  the explicitly migrated Bundesliga/Indonesia team rows into the licensed
+  kit base, preserving all other rows byte-for-byte.
+
+For an already affected package, `tools/restore_fl26_presentation.py` stages
+a new paired candidate. It restores only active teams whose logical/native
+mapping and entire native team record (except byte 84) match the licensed
+reference. All three mobile descriptors, six converted textures, and both
+home/away preview sets must match the audited FL26 package and asset hashes.
+Unproven teams are reported as held; they never inherit a donor kit. No player,
+assignment, tactic, crest, or texture data is replaced.
+
+```powershell
+python tools/restore_fl26_presentation.py `
+  --base PATH_TO_CURRENT_FULL_CANDIDATE `
+  --catalog PATH_TO_CURRENT_SELECTOR_CATALOG `
+  --atlas PATH_TO_CURRENT_BADGE_ATLAS `
+  --reference local-debug/full-mobile-kit-migration-v1 `
+  --all-verified-kits `
+  --output local-debug/new-fl26-presentation-candidate
+```
+
+`--team 137` can narrow restoration to Palmeiras. The output assigns a new
+paired build ID and contains a roster include whose arrays are unchanged;
+only its build-ID markers differ. Build its NRO with the generated
+`league-branding/badge_atlas.bin`, matching team include, and the new
+`selector/exhibition_rosters_migration_canary_generated.inc`. Keep the existing
+Cup/League pools and scorer data. Then use `package_loose_update.py` to deliver
+only changed install files, never the build/audit directory. Runtime kits still
+need a Switch check; byte-level checks do not prove on-device rendering.
+
+For branding alone, `--refresh-branding --badge-atlas CURRENT_ATLAS
+--paired-build-id CURRENT_LOOSE_ID` on `build_full_mobile_kit_migration.py`
+preserves the latest team crests (including Palmeiras and Indonesia). Never
+revert to the archived generic atlas after adding or updating club crests.
