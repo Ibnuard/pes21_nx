@@ -21,6 +21,7 @@ typedef enum {
   COMPETITION_FRONTEND_LEAGUE_SLOTS,
   COMPETITION_FRONTEND_LEAGUE_SETTINGS,
   COMPETITION_FRONTEND_LEAGUE_HUB,
+  COMPETITION_FRONTEND_MASTER_LEAGUE,
 } CompetitionFrontendState;
 
 enum {
@@ -30,6 +31,7 @@ enum {
   COMPETITION_ACTION_CUP_TEAM_PICKER = 3,
   COMPETITION_ACTION_CUP_FIXTURE = 4,
   COMPETITION_ACTION_LEAGUE_FIXTURE = 5,
+  COMPETITION_ACTION_MANAGER_NAME = 6,
 };
 
 void competition_frontend_open_match_mode(void);
@@ -37,6 +39,7 @@ void competition_frontend_match_action_result(int opened);
 void competition_frontend_open_modes(void);
 void competition_frontend_close(void);
 void competition_frontend_finish_close(void);
+void competition_frontend_manager_name_result(const char *text);
 
 int competition_frontend_active(void);
 int competition_frontend_closing(void);

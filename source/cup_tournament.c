@@ -164,7 +164,7 @@ int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,
   return 0;
 }
 
-int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
+int cup_tournament_record_deferred(CupTournament *cup, uint32_t round, uint32_t index,
                           uint32_t home_goals, uint32_t away_goals) {
   if (!cup || round != cup->active_round)
     return 0;
@@ -184,7 +184,33 @@ int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
     away_goals += fixture->first_leg_away_goals;
   }
   cup_complete(cup, round, index, home_goals, away_goals, 0);
-  cup_tournament_advance(cup);
+  return 1;
+}
+
+int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
+                          uint32_t home_goals, uint32_t away_goals) {
+  if (!cup_tournament_record_deferred(cup, round, index, home_goals, away_goals))
+    return 0;
+  /* Preserve the original early return after leg 1, including COM fixtures. */
+  if (cup->fixtures[round][index].complete) cup_tournament_advance(cup);
+  return 1;
+}
+
+int cup_tournament_commit_round(CupTournament *cup) {
+  if (!cup || cup->champion || cup->active_round >= cup->round_count ||
+      cup->third_place_enabled) return 0;
+  const uint32_t round = cup->active_round;
+  for (uint32_t i = 0; i < cup_tournament_fixture_count(cup, round); i++)
+    if (!cup->fixtures[round][i].complete) return 0;
+  if (round + 1u == cup->round_count) {
+    cup->champion = cup->fixtures[round][0].winner;
+  } else {
+    for (uint32_t i = 0; i < cup_tournament_fixture_count(cup, round + 1u); i++) {
+      cup->fixtures[round + 1u][i].home = cup->fixtures[round][2u * i].winner;
+      cup->fixtures[round + 1u][i].away = cup->fixtures[round][2u * i + 1u].winner;
+    }
+    cup->active_round++;
+  }
   return 1;
 }
 

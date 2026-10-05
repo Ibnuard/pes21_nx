@@ -263,6 +263,37 @@ static int league_better(const LeagueStanding *first,
   return first->team < second->team;
 }
 
+int league_tournament_record_table_fixture(LeagueTournament *league,
+    uint32_t index, uint32_t home_goals, uint32_t away_goals, int simulated) {
+  if (!league || league->phase != LEAGUE_PHASE_TABLE ||
+      league->active_matchday >= league->matchday_count ||
+      home_goals > 99u || away_goals > 99u) return 0;
+  const uint32_t first = league->matchday_first[league->active_matchday];
+  const uint32_t count = league->matchday_fixture_count[league->active_matchday];
+  if (index < first || index >= first + count ||
+      league->fixtures[index].complete) return 0;
+  league_apply_result(league, &league->fixtures[index], home_goals, away_goals,
+                       simulated);
+  return 1;
+}
+
+int league_tournament_commit_matchday(LeagueTournament *league) {
+  if (!league || league->phase != LEAGUE_PHASE_TABLE ||
+      league->reserved[0] != LEAGUE_SYSTEM_STANDINGS ||
+      league->active_matchday >= league->matchday_count) return 0;
+  const uint32_t first = league->matchday_first[league->active_matchday];
+  const uint32_t count = league->matchday_fixture_count[league->active_matchday];
+  for (uint32_t i = 0; i < count; i++)
+    if (!league->fixtures[first + i].complete) return 0;
+  if (++league->active_matchday == league->matchday_count) {
+    uint8_t order[LEAGUE_MAX_TEAMS];
+    league_tournament_ranked_slots(league, order);
+    league->knockout.champion = league->standings[order[0]].team;
+    league->phase = LEAGUE_PHASE_COMPLETE;
+  }
+  return 1;
+}
+
 void league_tournament_ranked_slots(const LeagueTournament *league,
                                      uint8_t slots[LEAGUE_MAX_TEAMS]) {
   if (!league || !slots) return;

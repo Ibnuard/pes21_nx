@@ -28,6 +28,9 @@ class LeagueFrontendFlowTests(unittest.TestCase):
                     str(ROOT / "source/cup_save.c"),
                     str(ROOT / "source/league_tournament.c"),
                     str(ROOT / "source/league_save.c"),
+                    *[str(ROOT / "source" / name) for name in (
+                        "master_league.c", "master_league_save.c", "master_league_frontend.c",
+                        "master_league_catalog.c", "gameplan_preset.c")],
                     "-o", str(binary),
                 ],
                 check=True,

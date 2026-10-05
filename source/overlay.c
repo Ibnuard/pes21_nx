@@ -24,6 +24,8 @@
 #include "competition_frontend.h"
 #include "cup_hub_assets.h"
 #include "league_hub_assets.h"
+#include "master_league_assets.h"
+#include "master_league_frontend.h"
 #include "exhibition_team_catalog.h"
 #include "fl26_cup_catalog_generated.h"
 #include "fl26_league_catalog_generated.h"
@@ -56,6 +58,7 @@ static struct {
   GLuint main_menu_background_tex;
   GLuint cup_hub_stadium_tex;
   GLuint league_hub_stadium_tex;
+  GLuint master_league_pearl_tex, master_league_cards_tex;
   GLuint cup_hub_trophy_tex;
   GLuint cup_logo_tex[FL26_CUP_CATALOG_COUNT];
   uint8_t cup_logo_attempted[FL26_CUP_CATALOG_COUNT];
@@ -84,6 +87,7 @@ static struct {
   GLint loc_image_curve;
   GLint loc_circle, loc_circle_feather;
   GLint loc_round_rect, loc_round_size, loc_round_radius, loc_round_feather;
+  GLint loc_round_image, loc_round_uv;
   GLint loc_cursor, loc_cursor_border;
   OverlayBindSamplerProc bind_sampler;
   int native_uniform_width;
@@ -121,6 +125,8 @@ static const char fshader_src[] =
   "uniform vec2 uRoundSize;\n"
   "uniform float uRoundRadius;\n"
   "uniform float uRoundFeather;\n"
+  "uniform float uRoundImage;\n"
+  "uniform vec4 uRoundUV;\n"
   "uniform float uCursor;\n"
   "uniform float uCursorBorder;\n"
   "varying vec2 vUV;\n"
@@ -154,12 +160,16 @@ static const char fshader_src[] =
   "  } else if (uRoundRect > 0.5) {\n"
   "    vec2 halfSize = uRoundSize * 0.5;\n"
   "    float radius = min(uRoundRadius, min(halfSize.x, halfSize.y));\n"
-  "    vec2 p = (vUV - vec2(0.5)) * uRoundSize;\n"
+  "    vec2 localUV = vUV;\n"
+  "    if (uRoundImage > 0.5) localUV = (vUV - uRoundUV.xy) / uRoundUV.zw;\n"
+  "    vec2 p = (localUV - vec2(0.5)) * uRoundSize;\n"
   "    vec2 q = abs(p) - halfSize + vec2(radius);\n"
   "    float sd = length(max(q, vec2(0.0))) +\n"
   "               min(max(q.x, q.y), 0.0) - radius;\n"
   "    float a = 1.0 - smoothstep(-uRoundFeather, uRoundFeather, sd);\n"
-  "    gl_FragColor = vec4(uColor.rgb, uColor.a * a);\n"
+  "    if (uRoundImage > 0.5)\n"
+  "      gl_FragColor = vec4(sampled.rgb, sampled.a * uColor.a * a);\n"
+  "    else gl_FragColor = vec4(uColor.rgb, uColor.a * a);\n"
   "  } else if (uCircle > 0.5) {\n"
   "    float d = length(vUV - vec2(0.5));\n"
   "    float a = 1.0 - smoothstep(0.5 - uCircleFeather, 0.5, d);\n"
@@ -220,6 +230,8 @@ static int gl_init(void) {
   gl.loc_round_rect = glGetUniformLocation(gl.prog, "uRoundRect");
   gl.loc_round_size = glGetUniformLocation(gl.prog, "uRoundSize");
   gl.loc_round_radius = glGetUniformLocation(gl.prog, "uRoundRadius");
+  gl.loc_round_image = glGetUniformLocation(gl.prog, "uRoundImage");
+  gl.loc_round_uv = glGetUniformLocation(gl.prog, "uRoundUV");
   gl.loc_round_feather = glGetUniformLocation(gl.prog, "uRoundFeather");
   gl.loc_cursor = glGetUniformLocation(gl.prog, "uCursor");
   gl.loc_cursor_border = glGetUniformLocation(gl.prog, "uCursorBorder");
@@ -231,6 +243,8 @@ static int gl_init(void) {
   glGenTextures(1, &gl.main_menu_background_tex);
   glGenTextures(1, &gl.cup_hub_stadium_tex);
   glGenTextures(1, &gl.league_hub_stadium_tex);
+  glGenTextures(1, &gl.master_league_pearl_tex);
+  glGenTextures(1, &gl.master_league_cards_tex);
   glGenTextures(1, &gl.cup_hub_trophy_tex);
   glGenTextures(FL26_CUP_CATALOG_COUNT, gl.cup_logo_tex);
   glGenTextures(FL26_LEAGUE_CATALOG_COUNT, gl.league_logo_tex);
@@ -1301,6 +1315,10 @@ static void prepare_main_menu_assets(int active) {
       cup_hub_stadium_bin, cup_hub_stadium_bin_end);
   uploaded &= upload_main_menu_png(gl.league_hub_stadium_tex,
       league_hub_stadium_bin, league_hub_stadium_bin_end);
+  uploaded &= upload_main_menu_png(gl.master_league_pearl_tex,
+      master_league_pearl_v2_bin, master_league_pearl_v2_bin_end);
+  uploaded &= upload_main_menu_png(gl.master_league_cards_tex,
+      master_league_cards_v2_bin, master_league_cards_v2_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_hub_trophy_tex,
       cup_hub_trophy_bin, cup_hub_trophy_bin_end);
   gl.cup_hub_header_ornament_uploaded = upload_main_menu_png(
@@ -1687,6 +1705,8 @@ static int emit_round_rect_quad(float x, float y, float width, float height,
 }
 
 static void use_rounded_rect(const RoundedRectStyle *style) {
+  /* Image masking is opt-in per draw; all existing solid UI stays unchanged. */
+  glUniform1f(gl.loc_round_image, 0.0f);
   if (!style || style->width <= 0.0f || style->height <= 0.0f) {
     glUniform1f(gl.loc_round_rect, 0.0f);
     return;
@@ -2570,6 +2590,8 @@ static void league_hub_draw(const LeagueHubRender *ui, uint32_t focus) {
   glUniform1f(gl.loc_solid, 1.0f);
 }
 
+#include "master_league_overlay.inc"
+
 // The source mask is supersampled and downscaled offline. Drawing it as one
 // linearly filtered quad gives the small Switch UI stars clean edges; u_limit
 // also lets a half-star crop both geometry and UVs without a hard center seam.
@@ -3310,7 +3332,8 @@ static void overlay_render(void) {
   prepare_uniform_thumbnail_preview(custom_hub_kits_page);
   prepare_gameplan_portraits(custom_gameplan || stamina_bar_count ||
       (custom_competition &&
-       competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB));
+       (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB ||
+        competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE)));
   // A/B helper glyphs share the main-menu button textures. GoalDemo can be the
   // first custom surface in a session, so include it in the upload gate rather
   // than binding two generated-but-empty texture names.
@@ -3472,6 +3495,7 @@ static void overlay_render(void) {
   int main_menu_helper_first_quad = 0, main_menu_helper_quads = 0;
   int competition_background_quad = 0;
   LeagueHubRender league_hub_ui = {0};
+  MasterLeagueRender master_league_ui = {0};
   int competition_brand_quad = 0;
   int competition_portrait_quad = 0;
   int competition_departing_card_quads[4] = {0};
@@ -5381,7 +5405,20 @@ static void overlay_render(void) {
       quads += line_quads;
     }
   } else if (custom_competition) {
-    if (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
+    if (competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
+      master_league_emit(&master_league_ui, verts, &quads);
+      const MlView *view=&master_league_ui.view;
+      if(master_league_ui.shoulders) {
+        ADD_SWITCH_HELPER("L", .066f*screen_width, master_league_ui.shoulder_y*screen_height, .035f*screen_height);
+        ADD_SWITCH_HELPER("R", .934f*screen_width, master_league_ui.shoulder_y*screen_height, .035f*screen_height);
+      }
+      for(uint32_t i=0;i<view->count;i++)
+        if(view->rows[i].portrait && !gameplan_portrait_texture(view->rows[i].portrait))
+          pes_controller_league_request_scorer_portrait(i,view->rows[i].portrait);
+      for(uint32_t i=0;i<view->helper_count;i++)
+        ADD_SWITCH_HELPER(view->helper_key[i], master_league_ui.helper_centers[i]*screen_width,
+            .958f*screen_height,.030f*screen_height);
+    } else if (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
       league_hub_emit(&league_hub_ui, verts, &quads);
       if (league_hub_ui.shoulder_count == 2u) {
         ADD_SWITCH_HELPER("SL", league_hub_ui.shoulder_centers[0],
@@ -10770,7 +10807,9 @@ static void overlay_render(void) {
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (custom_competition) {
-    if (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
+    if (competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
+      master_league_draw(&master_league_ui);
+    } else if (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
       league_hub_draw(&league_hub_ui, competition_display_focus);
     } else {
     const int competition_settings_page =

@@ -10,6 +10,7 @@
 #include "cup_tournament.h"
 #include "cup_save.h"
 #include "league_save.h"
+#include "master_league_frontend.h"
 
 #define COMPETITION_MAX_PLAYER_SLOTS 8u
 #define COMPETITION_SAVE_SLOT_COUNT 3u
@@ -1159,7 +1160,8 @@ static void competition_confirm(void) {
         competition_scan_league_saves();
         competition_set_state(COMPETITION_FRONTEND_LEAGUE_LANDING, 0u);
       } else {
-        competition_set_status("MASTER LEAGUE COMING SOON");
+        ml_frontend_open();
+        competition_set_state(COMPETITION_FRONTEND_MASTER_LEAGUE, 0u);
       }
       return;
     case COMPETITION_FRONTEND_LEAGUE_LANDING:
@@ -2094,15 +2096,22 @@ int competition_frontend_cup_match_teams(uint32_t *home, uint32_t *away) {
   return 1;
 }
 
-uint32_t competition_frontend_cup_game_time(void) { return cup_game_time; }
-uint32_t competition_frontend_cup_com_level(void) { return cup_com_level; }
-uint32_t competition_frontend_cup_max_substitutions(void) {
-  return cup_max_substitutions;
+uint32_t competition_frontend_cup_game_time(void) {
+  return ml_frontend_match_active() ? ml_frontend_career()->settings.match_minutes : cup_game_time;
 }
-uint32_t competition_frontend_cup_injuries(void) { return cup_injuries; }
+uint32_t competition_frontend_cup_com_level(void) {
+  return ml_frontend_match_active() ? ml_frontend_career()->settings.difficulty : cup_com_level;
+}
+uint32_t competition_frontend_cup_max_substitutions(void) {
+  return ml_frontend_match_active() ? ml_frontend_career()->settings.max_substitutions : cup_max_substitutions;
+}
+uint32_t competition_frontend_cup_injuries(void) {
+  return ml_frontend_match_active() ? ml_frontend_career()->settings.injuries : cup_injuries;
+}
 uint32_t competition_frontend_cup_ball_index(void) { return cup_ball_index; }
 uint32_t competition_frontend_cup_var(void) { return cup_var; }
 uint32_t competition_frontend_cup_player_condition(void) {
+  if (ml_frontend_match_active()) return ml_frontend_career()->settings.condition;
   return cup_player_condition == 2u ? 2u : 5u;
 }
 int competition_frontend_cup_home_away(void) { return cup_home_away != 0; }
@@ -2125,6 +2134,7 @@ uint32_t competition_frontend_match_leg(uint8_t *first_home,
                                          uint8_t *first_away) {
   if (first_home) *first_home = 0;
   if (first_away) *first_away = 0;
+  if (ml_frontend_match_active()) return 0u; /* Career domestic cups are single-leg. */
   const CupTournament *bracket = NULL;
   const CupFixture *fixture = NULL;
   uint32_t round = 0, swapped = 0;
@@ -2156,6 +2166,7 @@ uint32_t competition_frontend_match_leg(uint8_t *first_home,
   return 2;
 }
 int competition_frontend_league_extra_time(void) {
+  if (ml_frontend_match_active()) return ml_frontend_match_is_cup();
   if (league_tournament.phase != LEAGUE_PHASE_KNOCKOUT) return 0;
   const CupFixture *fixture = cup_tournament_fixture(
       &league_tournament.knockout, league_pending_round, league_pending_index);
@@ -2269,6 +2280,7 @@ uint32_t competition_frontend_league_team_slot_focus(void) {
 }
 
 int competition_frontend_league_team_is_human(uint32_t team) {
+  if (ml_frontend_match_active()) return ml_frontend_career()->settings.club == team;
   for (uint32_t i = 0; i < league_draft.team_count; i++)
     if (league_draft.teams[i] == team)
       return league_draft.owners[i] != 0u;
@@ -2284,6 +2296,7 @@ static uint32_t competition_league_human_slot(uint32_t team) {
 
 int competition_frontend_league_match_teams(uint32_t *home,
                                              uint32_t *away) {
+  if (ml_frontend_match_active()) return ml_frontend_match_teams(home, away);
   if (!league_tournament_valid ||
       league_tournament.phase == LEAGUE_PHASE_COMPLETE) return 0;
   uint32_t fixture_home = 0u, fixture_away = 0u;
@@ -2311,14 +2324,24 @@ int competition_frontend_league_match_teams(uint32_t *home,
 }
 
 int competition_frontend_league_match_active(void) {
-  return league_match_active != 0u;
+  return ml_frontend_match_active() || league_match_active != 0u;
 }
 
 int competition_frontend_league_match_is_knockout(void) {
+  if (ml_frontend_match_active()) return ml_frontend_match_is_cup();
   return league_tournament.phase == LEAGUE_PHASE_KNOCKOUT;
 }
 
 void competition_frontend_league_handoff_result(int opened) {
+  if (ml_frontend_match_active()) {
+    ml_frontend_handoff_result(opened);
+    if (opened) {
+      frontend_state = COMPETITION_FRONTEND_NONE;
+      frontend_focus = frontend_closing = frontend_buttons_latched = 0u;
+      competition_clear_status();
+    }
+    return;
+  }
   if (!opened) {
     competition_set_status("MATCH HUB UNAVAILABLE - TRY NEXT AGAIN");
     return;
@@ -2339,6 +2362,10 @@ void competition_frontend_league_handoff_result(int opened) {
 void competition_frontend_league_match_result_with_scorers(
     uint32_t home_goals, uint32_t away_goals,
     const LeagueScorer *scorers, uint32_t scorer_count) {
+  if (ml_frontend_match_active()) {
+    ml_frontend_result(home_goals, away_goals, scorers, scorer_count);
+    return;
+  }
   if (!league_match_active || league_match_result_received) return;
   if (league_match_swapped) {
     const uint32_t tmp = home_goals;
@@ -2374,6 +2401,11 @@ void competition_frontend_league_match_result(uint32_t home_goals,
 }
 
 void competition_frontend_league_restore_after_match(void) {
+  if (ml_frontend_restore()) {
+    competition_set_state(COMPETITION_FRONTEND_MASTER_LEAGUE, 0u);
+    frontend_skip_input_tick = 1u;
+    return;
+  }
   if (!league_match_active) return;
   league_match_active = 0u;
   competition_set_state(COMPETITION_FRONTEND_LEAGUE_HUB,
@@ -2416,6 +2448,11 @@ void competition_frontend_cup_team_picker_result(uint32_t team_id) {
   competition_clear_status();
 }
 
+void competition_frontend_manager_name_result(const char *text) {
+  ml_frontend_name_result(text);
+  frontend_skip_input_tick = 1u;
+}
+
 void competition_frontend_pad_event(uint32_t buttons,
                                     uint32_t previous_buttons) {
   if (!competition_frontend_active())
@@ -2439,6 +2476,16 @@ void competition_frontend_pad_event(uint32_t buttons,
                  COMPETITION_BUTTON_L | COMPETITION_BUTTON_R);
   if (frontend_skip_input_tick) {
     frontend_skip_input_tick = 0;
+    return;
+  }
+  if (frontend_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
+    ml_frontend_pad(pressed);
+    switch (ml_frontend_take_action()) {
+      case ML_ACTION_MATCH: frontend_pending_action = COMPETITION_ACTION_LEAGUE_FIXTURE; break;
+      case ML_ACTION_NAME_INPUT: frontend_pending_action = COMPETITION_ACTION_MANAGER_NAME; break;
+      case ML_ACTION_EXIT: competition_frontend_close(); break;
+      default: break;
+    }
     return;
   }
   if (cup_opening_rule_popup) {

@@ -58,6 +58,10 @@ int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,
 int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
                           uint32_t home_goals, uint32_t away_goals);
 void cup_tournament_advance(CupTournament *cup);
+/* One-round calendar API: no implicit COM results or future-round progress. */
+int cup_tournament_record_deferred(CupTournament *cup, uint32_t round,
+    uint32_t index, uint32_t home_goals, uint32_t away_goals);
+int cup_tournament_commit_round(CupTournament *cup);
 const CupFixture *cup_tournament_third_place_fixture(
     const CupTournament *cup);
 void cup_tournament_set_rules(CupTournament *cup, int home_away,

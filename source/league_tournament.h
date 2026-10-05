@@ -73,6 +73,10 @@ int league_tournament_record(LeagueTournament *league,
                               uint32_t knockout_index,
                               uint32_t home_goals, uint32_t away_goals);
 void league_tournament_advance(LeagueTournament *league);
+/* Career calendar owns simulation and time. These never simulate or skip days. */
+int league_tournament_record_table_fixture(LeagueTournament *league,
+    uint32_t index, uint32_t home_goals, uint32_t away_goals, int simulated);
+int league_tournament_commit_matchday(LeagueTournament *league);
 /* Returns team slots in standing order, up to team_count. */
 void league_tournament_ranked_slots(const LeagueTournament *league,
                                      uint8_t slots[LEAGUE_MAX_TEAMS]);

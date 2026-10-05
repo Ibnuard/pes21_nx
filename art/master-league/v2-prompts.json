@@ -1,0 +1,16 @@
+{
+  "mode": "built-in image_gen (no CLI/API fallback)",
+  "use_case": "stylized-concept",
+  "assets": [
+    {
+      "path": "art/master-league/pearl-football-v2.png",
+      "embedded": "data/master_league_pearl_v2.bin",
+      "prompt": "Use case: stylized-concept.\nAsset type: production background texture for a 1280x720 football career game UI, landscape 16:9.\nPrimary request: create a light pearl grey and ice-blue football-themed embossed background, similar in mood to a modern Japanese football game's clean light menus.\nComposition: very low-contrast flat seamless-feeling field, subtle large abstract football crest outlines, thin football pitch arcs and rounded chevron ribbon details. Keep the central 90 percent almost uniform pale grey so foreground white panels and dark royal-blue typography are clearly legible. Slightly stronger faint ice-blue pattern around edges.\nMaterials: elegant matte paper and embossed sports graphics, no grain or blurry photograph.\nConstraints: background only, no UI panels, no buttons, no lettering, no numbers, no actual team crests, no brands, no watermark, no people. Crisp detailed raster art. Target 2048x1152."
+    },
+    {
+      "path": "art/master-league/card-sprites-v2.png",
+      "embedded": "data/master_league_cards_v2.bin",
+      "prompt": "Use case: stylized-concept.\nAsset type: a single production decorative sprite atlas for a football management game. Exactly four equal rectangular artwork regions in a 2 by 2 grid, overall landscape 2048x1024, no gutters or borders. Each region 1024x512.\nPrimary request: polished richly textured sports broadcast card artwork for a clean modern football game UI, with the refinement of premium league-card banners.\nTop left quadrant: rich royal blue, sculpted flowing satin ribbon and extremely subtle football crest-like abstract contour graphics. Text safe dark blue empty area on the left half, interesting luminous folds on right. Suitable for a header and match card.\nTop right quadrant: rich crimson red flowing woven football shirt fabric with diagonal sculpted folds and soft stadium floodlight glints at the far right, left half clear dark red for overlaid text. No actual shirt insignias.\nBottom left quadrant: deep turquoise and navy sports tactical-board atmosphere, delicate goal box and field arcs concentrated on right third, luminous cyan fine edges, left half quiet and dark.\nBottom right quadrant: polished football-manager office photograph, cool blue stadium windows and warm daylight, desk and blank notebook concentrated on right half, left half navy and uncluttered for text.\nConstraints: four edge-to-edge artwork regions with mathematically straight boundaries at the exact midpoints, no titles or captions or typography of any kind, no logos, no players, no interface controls, no badges, no rounded corners, no frames or shadows outside the artwork. Art will be sampled as four independent sprites; keep important details away from shared borders. Sharp high quality."
+    }
+  ]
+}

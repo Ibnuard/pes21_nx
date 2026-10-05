@@ -10,6 +10,7 @@ param(
   [string]$LeagueScorerInclude = "",
   [string]$CupCatalogHeader = "",
   [string]$LeagueCatalogHeader = "",
+  [string]$MasterLeagueCatalog = "",
   [switch]$DisablePesdbAuthoritativeOvr,
   [switch]$PlayerMigrationCanary,
   [switch]$LooseCpkFull,
@@ -39,6 +40,7 @@ $oldMigrationRosterInclude = $env:PES21_NX_MIGRATION_ROSTER_INCLUDE
 $oldLeagueScorerInclude = $env:PES21_NX_LEAGUE_SCORER_INCLUDE
 $oldCupCatalogHeader = $env:PES21_NX_CUP_CATALOG_HEADER
 $oldLeagueCatalogHeader = $env:PES21_NX_LEAGUE_CATALOG_HEADER
+$oldMasterLeagueCatalog = $env:PES21_NX_MASTER_LEAGUE_CATALOG
 
 function Resolve-ProjectInput([string]$Value) {
   $candidate = if ([IO.Path]::IsPathRooted($Value)) {
@@ -94,6 +96,12 @@ try {
     Write-Host "Full-loose pair preflight: manifest/selector/roster ID $manifestBuildId; dummy OBB $manifestObbSize bytes"
   }
   New-Item -ItemType Directory -Path $buildOutputRoot -Force | Out-Null
+  if ($MasterLeagueCatalog) {
+    $careerHeader = Get-Content -LiteralPath (Resolve-ProjectInput $MasterLeagueCatalog) -TotalCount 4 | Out-String
+    if (-not $manifestPath -or -not $careerHeader.Contains("#define ML_CATALOG_PAIR_ID `"$manifestBuildId`"")) {
+      throw "Master League catalog requires its exact paired full-loose manifest"
+    }
+  }
   $env:PES21_NX_PROJECT_ROOT = $projectRoot
   $env:PES21_NX_DIAGNOSTICS = if ($Diagnostics) { "1" } else { "0" }
   $env:PES21_NX_PERF_TRACE = if ($PerfTrace) { "1" } else { "0" }
@@ -126,6 +134,9 @@ try {
   } else {
     "PES21_NX_PROJECT_ROOT/p`:PES21_NX_DIAGNOSTICS`:PES21_NX_PERF_TRACE`:PES21_NX_BUILD_JOBS`:PES21_NX_BUILD_OUTPUT_ROOT/p`:PES21_NX_PESDB_AUTHORITATIVE_OVR`:PES21_NX_PLAYER_MIGRATION_CANARY`:PES21_NX_LOOSE_CPK_FULL`:PES21_NX_EXPECTED_PATCH_OBB_SIZE`:PES21_NX_BADGE_ATLAS/p`:PES21_NX_MIGRATION_TEAM_INCLUDE/p`:PES21_NX_MIGRATION_ROSTER_INCLUDE/p`:PES21_NX_LEAGUE_SCORER_INCLUDE/p`:PES21_NX_CUP_CATALOG_HEADER/p`:PES21_NX_LEAGUE_CATALOG_HEADER/p"
   }
+
+  $env:PES21_NX_MASTER_LEAGUE_CATALOG = if ($MasterLeagueCatalog) { Resolve-ProjectInput $MasterLeagueCatalog } else { "" }
+  $env:WSLENV += ":PES21_NX_MASTER_LEAGUE_CATALOG/p"
 
   $buildScript = @'
 set -euo pipefail
@@ -174,6 +185,9 @@ if [[ -n "${PES21_NX_CUP_CATALOG_HEADER:-}" ]]; then
 fi
 if [[ -n "${PES21_NX_LEAGUE_CATALOG_HEADER:-}" ]]; then
   cp "$PES21_NX_LEAGUE_CATALOG_HEADER" source/fl26_league_catalog_generated.h
+fi
+if [[ -n "${PES21_NX_MASTER_LEAGUE_CATALOG:-}" ]]; then
+  cp "$PES21_NX_MASTER_LEAGUE_CATALOG" source/master_league_catalog_generated.inc
 fi
 
 export DEVKITPRO=/opt/devkitpro
@@ -243,6 +257,7 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
       Select-Object FullName, Length, LastWriteTime
   }
 } finally {
+  $env:PES21_NX_MASTER_LEAGUE_CATALOG = $oldMasterLeagueCatalog
   if ($null -eq $oldProjectRoot) {
     Remove-Item Env:PES21_NX_PROJECT_ROOT -ErrorAction SilentlyContinue
   } else {
