@@ -57,6 +57,14 @@ static void office_ui_tests(void) {
   press(A);ml_frontend_name_result("Office Test");press(DOWN);press(A);press(A);
   press(DOWN);press(A);press(DOWN);press(A);assert(view().page==ML_PAGE_HUB);
   const MasterLeague *c=ml_frontend_career();assert(c && ml_window_open(c));
+  /* Empty international offers return to the actual entry menu and focus. */
+  office_go(3u,2u);press(DOWN);press(DOWN);press(A);
+  assert(view().page==ML_PAGE_NATIONAL && !view().count);
+  press(B);assert(view().page==ML_PAGE_COMPETITIONS && view().selected==2u);
+  press(A);press(B);assert(view().page==ML_PAGE_COMPETITIONS && view().selected==2u);
+  office_go(2u,3u);press(DOWN);press(DOWN);press(A);press(B);
+  assert(view().page==ML_PAGE_MANAGER_OFFICE && view().selected==2u);
+  press(B);
   press(1u<<3);assert(view().toast_serial && !strcmp(view().toast,"Career saved") && !view().status[0]);
   office_go(2u,1u);
   const uint32_t own_player=ml_find_club(c,c->settings.club)->players[0];
@@ -187,15 +195,33 @@ static void world_ui_tests(void) {
   press(A);assert(!view().drawer.count);press(B);press(DOWN);
   const uint32_t team=c->world.national_offers[1].team;
   press(A);press(A);assert(c->world.national_team==team && view().count==5u && c->settings.club==club && c->player_count==players);
+  press(B);assert(view().page==ML_PAGE_MANAGER_OFFICE && view().selected==2u);
+  office_go(3u,2u);press(DOWN);press(DOWN);press(A);
+  assert(view().page==ML_PAGE_NATIONAL && view().count==5u);
+  press(DOWN);press(DOWN);press(DOWN);press(DOWN);press(A);press(B);
+  assert(view().page==ML_PAGE_NATIONAL && view().selected==4u);
+  press(B);assert(view().page==ML_PAGE_COMPETITIONS && view().selected==2u);
+  office_go(2u,3u);press(DOWN);press(DOWN);press(A);
   press(DOWN);press(DOWN);press(DOWN);press(DOWN);press(A);assert(view().page==ML_PAGE_NATIONAL_OFFERS);
   assert(strstr(view().rows[0].detail,"DECLINED") && strstr(view().rows[1].detail,"ACCEPTED"));press(B);
-  press(DOWN);press(A);assert(view().page==ML_PAGE_QUALIFIERS && view().table_count==4u);
+  assert(view().page==ML_PAGE_NATIONAL && view().selected==4u);
+  press(UP);press(UP);press(UP);press(A);assert(view().page==ML_PAGE_QUALIFIERS && view().table_count==4u);
   press(B);press(DOWN);press(DOWN);press(A);assert(view().page==ML_PAGE_CUP && view().bracket_count);
+  int continental_simulated=0;
   while(ml_next_event(c,&e) && !ml_event_is_national(e.kind)) {
-    if(ml_event_is_match(e.kind) && e.home && e.away)
+    if(e.kind==ML_EVENT_CONTINENTAL && e.home && e.away) {
+      office_go(0u,0u);press(DOWN);press(A);assert(view().modal.open);press(A);
+      assert(view().page==ML_PAGE_HUB && view().feed_index==1u);
+      const CupFixture *f=&c->world.continental.fixtures[e.round][e.index];
+      assert(view().story.result_kind==ML_EVENT_CONTINENTAL && view().story.result_day==e.day);
+      assert(view().story.home_goals==f->home_goals && view().story.away_goals==f->away_goals);
+      assert(strstr(view().story.competition,"UEFA") && view().story.result[0]);
+      continental_simulated=1;
+    }else if(ml_event_is_match(e.kind) && e.home && e.away)
       assert(ml_record_event(c,&e,e.home==club ? 3u : 0u,e.away==club ? 3u : 0u,NULL,0u,0));
     else assert(ml_simulate_event(c,&e));
   }
+  assert(continental_simulated);
   assert(e.kind==ML_EVENT_FRIENDLY);
   office_go(0u,0u);
   assert(view().badge==exhibition_team_catalog_badge(team) && strstr(view().caption,exhibition_team_catalog_name(team)));
@@ -210,6 +236,39 @@ static void world_ui_tests(void) {
   ml_frontend_result(2u,0u,NULL,0u);assert(c->day>old_day && c->settings.club==club);
   const uint32_t new_day=c->day;ml_frontend_result(2u,0u,NULL,0u);assert(c->day==new_day);
   assert(ml_frontend_restore() && view().page==ML_PAGE_ADVANCE);finish_advance();
+  assert(view().feed_index==1u && view().story.result_kind==ML_EVENT_FRIENDLY);
+  assert(view().story.result_team==team && view().story.home_goals==2u && !view().story.away_goals);
+  assert(!strcmp(view().story.result,"WIN") && view().story.history_count==3u);
+  /* Rotation and repeated projections never mutate the career or RNG. */
+  static MasterLeague frozen;frozen=*c;
+  for(uint32_t i=0;i<40u;i++)(void)view();
+  assert(!memcmp(c,&frozen,sizeof(frozen)) && view().feed_index==1u);
+  for(uint32_t i=0;i<10u;i++){ui_clock+=500u;ml_frontend_tick(ui_clock);}
+  assert(view().feed_index==2u && view().feed_progress==0.f && !memcmp(c,&frozen,sizeof(frozen)));
+  office_go(0u,1u);assert(view().page==ML_PAGE_NEWS && view().feed_index==2u);
+  for(uint32_t i=0;i<14u;i++){ui_clock+=500u;ml_frontend_tick(ui_clock);}
+  assert(view().feed_index==2u);press(B);
+  for(uint32_t story=0;story<4u;story++) {
+    const uint32_t previous=view().feed_index;
+    for(uint32_t i=0;i<10u;i++){ui_clock+=500u;ml_frontend_tick(ui_clock);}
+    assert(view().feed_index==(previous+1u)%4u && !memcmp(c,&frozen,sizeof(frozen)));
+  }
+  uint32_t seen=1u<<ML_EVENT_FRIENDLY;
+  /* Real record/advance paths for every remaining club and national category. */
+  while(ml_next_event(c,&e) && e.kind!=ML_EVENT_SEASON_END) {
+    if(ml_event_is_match(e.kind) && e.home && e.away) {
+      const uint32_t managed=ml_event_manager_team(c,e.kind);
+      assert(ml_record_event(c,&e,e.home==managed ? 3u : 1u,e.away==managed ? 3u : 1u,NULL,0u,0));
+      office_go(0u,1u);press(B);
+      assert(view().feed_index==1u && view().story.result_kind==e.kind && view().story.result_day==e.day);
+      assert(!strcmp(view().story.result,"WIN") && view().story.result_team==managed);
+      assert(view().story.home_goals==(e.home==managed ? 3u : 1u));
+      assert(view().story.away_goals==(e.away==managed ? 3u : 1u));
+      seen|=1u<<e.kind;
+    }else assert(ml_simulate_event(c,&e));
+  }
+  assert((seen&((1u<<ML_EVENT_LEAGUE)|(1u<<ML_EVENT_CUP)|(1u<<ML_EVENT_QUALIFIER)|(1u<<ML_EVENT_REGIONAL)|(1u<<ML_EVENT_WORLD_CUP)))==
+      ((1u<<ML_EVENT_LEAGUE)|(1u<<ML_EVENT_CUP)|(1u<<ML_EVENT_QUALIFIER)|(1u<<ML_EVENT_REGIONAL)|(1u<<ML_EVENT_WORLD_CUP)));
   assert(ml_valid(c));
   puts("world UI: national appointment, native roster delegation, result isolation and toast OK");
 }
@@ -361,6 +420,7 @@ int main(void) {
   press(B);assert(ml_frontend_take_action()==ML_ACTION_EXIT);
   ml_frontend_open();press(DOWN);press(A);press(A);
   assert(view().page==ML_PAGE_HUB && ml_frontend_career()->league.active_matchday==day);
+  assert(view().feed_index==1u && view().story.has_result && view().story.result_kind==ML_EVENT_LEAGUE);
   assert(career->options.currency==1u && career->options.transfer_difficulty==2u && career->options.skip_first_window);
   /* The managed club is always native HOME even for an away cup fixture. */
   MlEvent next;int decided=0;
@@ -376,7 +436,9 @@ int main(void) {
       ml_frontend_penalty_result(5u,4u);
       ml_frontend_result(1u,1u,NULL,0u);
       assert(career->cup.fixtures[next.round][next.index].winner==career->settings.club);
-      assert(ml_frontend_restore());finish_advance();decided=1;break;
+      assert(ml_frontend_restore());finish_advance();
+      assert(view().story.result_kind==ML_EVENT_CUP && !strcmp(view().story.result,"WIN ON PENS"));
+      assert(view().story.home_goals==1u && view().story.away_goals==1u);decided=1;break;
     }
     if(next.kind>=ML_EVENT_WINDOW)press(A);
     else {press(DOWN);press(A);assert(view().modal.open && view().page==ML_PAGE_NEXT);press(A);}

@@ -3,6 +3,13 @@
 #include "master_league.h"
 
 enum { ML_ACTION_NONE, ML_ACTION_MATCH, ML_ACTION_NAME_INPUT, ML_ACTION_EXIT };
+/* One-based cells in the reusable generated 4x4 header atlas; zero is none. */
+typedef enum {
+  ML_HEADER_NONE,ML_HEADER_CALENDAR,ML_HEADER_RANKING,ML_HEADER_SAVE,ML_HEADER_SQUAD,
+  ML_HEADER_TACTICS,ML_HEADER_TRANSFER,ML_HEADER_CONTRACT,ML_HEADER_FINANCE,
+  ML_HEADER_TROPHY,ML_HEADER_INTERNATIONAL,ML_HEADER_MANAGER,ML_HEADER_MESSAGES,
+  ML_HEADER_NEWS,ML_HEADER_SETTINGS,ML_HEADER_STATISTICS,ML_HEADER_MATCH
+} MlHeaderIcon;
 typedef enum {
   ML_PAGE_LANDING, ML_PAGE_SETTINGS, ML_PAGE_MANAGER, ML_PAGE_NATIONALITY,
   ML_PAGE_CLUBS, ML_PAGE_HUB, ML_PAGE_SLOTS, ML_PAGE_SQUAD, ML_PAGE_OFFICE,
@@ -47,6 +54,8 @@ typedef struct {
 typedef struct {
   uint32_t club_badge,nation_badge,home_badge,away_badge,has_result,home_goals,away_goals;
   char headline[64],summary[112],home[64],away[64];
+  uint32_t result_kind,result_day,result_team;
+  char competition[64],result[32];
   char stat_label[3][32],stat_value[3][48];
   MlViewRow history[3];uint32_t history_count;
 } MlStoryView;
@@ -61,6 +70,7 @@ typedef struct {
   uint32_t badge, portrait;
   int action_selected, action_enabled[4];
   uint32_t section, section_count, feed_index, feed_count;
+  float feed_progress,feed_opacity;
   uint32_t navigation_serial;
   int slide_direction;
   char club_name[64], competition[64], balance[32], season_summary[64];

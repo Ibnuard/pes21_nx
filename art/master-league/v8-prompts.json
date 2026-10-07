@@ -1,0 +1,29 @@
+{
+  "mode": "builtin-generation",
+  "prompt": "Generate one production-ready PNG sprite atlas of 16 reusable vector-style icons for a football management game's deep royal navy section headers. A square 1024x1024 image, exactly 4 columns and 4 rows of equal 256x256 cells. Transparent alpha background, no checkerboard, no backdrop, no labels, no typography, no cell borders. Every separate icon centered in its own cell, same visual size, wholly within the central 152x152 pixels, at least 52px empty transparent padding to each cell edge, absolutely no overlap. Row 1 left to right: calendar with two binder rings; league podium with three stepped places and a tiny star; save disk; three-person squad. Row 2 left to right: football tactics pitch with dots and paths; transfer arrows in opposite directions; contract document with pen; wallet with coin. Row 3 left to right: two-handle trophy cup; globe with longitude and latitude; manager briefcase; notification envelope. Row 4 left to right: newspaper; settings gear; ascending performance bar chart; referee whistle. Visual style: crisp original minimal flat vector pictograms with bold consistent rounded strokes, white and pale ice-blue primary shapes and small vivid cyan accents, occasional darker blue inner cutouts only. Strong clean silhouette readable at 28 pixels against dark blue. No gradients, no shadows, no 3D objects, no letters or numbers, no official logos. Alpha cutouts and transparent spaces are genuine. This is a final game texture sprite sheet, not a UI mockup. Output intended for art/master-league/header-icons-v8.png.",
+  "source": "exec-199345e9-07c7-43ed-ad3a-360b08fd41b7.png",
+  "output": "art/master-league/header-icons-v8.png",
+  "runtime": "data/master_league_headers_v8.bin",
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "icons": [
+      "calendar",
+      "ranking",
+      "save",
+      "squad",
+      "tactics",
+      "transfer",
+      "contract",
+      "finance",
+      "trophy",
+      "international",
+      "manager",
+      "messages",
+      "news",
+      "settings",
+      "statistics",
+      "match"
+    ]
+  }
+}

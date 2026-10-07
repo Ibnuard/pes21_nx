@@ -72,6 +72,103 @@ class MasterLeagueVisualTests(unittest.TestCase):
         for d in badges[1:]:
             self.assertGreaterEqual((d['vertices'][1]-d['vertices'][17])*360,36)
 
+    def test_compact_popups_fit_zero_one_two_and_three_actions(self):
+        heights={}
+        for name,count in (('rejected-offer',0),('expired-offer',1),
+                           ('national-offer-modal',2),('response-actions',3)):
+            draws=[d for d in self.frames[name] if d['layer']==2]
+            panel=next(d for d in draws if d['kind']==0 and d['color']==[1,1,1,1])
+            p=panel['vertices'];top=(1-p[1])*360;bottom=(1-p[17])*360
+            rows=[d for d in draws if d['texture']==6 or (d['kind']==0 and
+                  all(abs(a-b)<.001 for a,b in zip(d['color'][:3],[.93,.96,.98])))]
+            with self.subTest(page=name):
+                self.assertEqual(len(rows),count)
+                self.assertAlmostEqual(top+bottom,720,delta=.2)
+                self.assertGreater(top,50)
+                self.assertLess(bottom,660)
+                if count:
+                    self.assertAlmostEqual(bottom-max((1-d['vertices'][17])*360 for d in rows),.027*720,delta=.2)
+                for d in draws:
+                    if d['kind']==1 and d['vertices']:
+                        self.assertGreaterEqual(min((1-y)*360 for y in d['vertices'][1::4]),top)
+                        self.assertLessEqual(max((1-y)*360 for y in d['vertices'][1::4]),bottom-12)
+            heights[name]=bottom-top
+        self.assertLess(heights['rejected-offer'],heights['response-actions'])
+        self.assertLess(heights['expired-offer'],heights['response-actions']-90)
+        for name in ('overwrite-modal','play-modal','simulate-modal','release-modal'):
+            draws=[d for d in self.frames[name] if d['layer']==3]
+            p=next(d for d in draws if d['kind']==0 and d['color']==[1,1,1,1])['vertices']
+            self.assertLess((p[1]-p[17])*360,310,name)
+
+    def test_generated_header_catalog_and_alignment(self):
+        from PIL import Image
+        spec=json.loads((ROOT/'art/master-league/header-icons-v8.json').read_text())
+        source=ROOT/'art/master-league/header-icons-v8.png'
+        self.assertEqual(source.read_bytes(),(ROOT/'data/master_league_headers_v8.bin').read_bytes())
+        atlas=Image.open(source)
+        self.assertEqual(atlas.mode,'RGBA')
+        self.assertEqual(atlas.size,(spec['width'],spec['height']))
+        self.assertEqual(len(spec['sprites']),16)
+        self.assertEqual(atlas.getchannel('A').getextrema(),(0,255))
+        self.assertEqual(spec['canvas_size'],288)
+        for sprite in spec['sprites']:
+            with self.subTest(icon=sprite['name']):
+                b=sprite['bounds'];art=sprite['artwork_bounds']
+                self.assertEqual((b[2]-b[0],b[3]-b[1]),(288,288))
+                self.assertGreaterEqual(min(b),0)
+                self.assertLessEqual(max(b),atlas.width)
+                self.assertTrue(b[0]<art[0]<art[2]<b[2])
+                self.assertTrue(b[1]<art[1]<art[3]<b[3])
+                self.assertNotIn('header_offset_y_px_720p',sprite)
+                # Ignore the source generator's near-invisible alpha=1 noise.
+                # The complete icon must sit in the middle of the square,
+                # leaving a transparent gutter on every edge (no neighbours).
+                alpha=atlas.getchannel('A').crop(b).point(lambda a:255 if a>8 else 0)
+                visible=alpha.getbbox()
+                self.assertIsNotNone(visible)
+                self.assertAlmostEqual((visible[0]+visible[2])*.5,144,delta=.5)
+                self.assertAlmostEqual((visible[1]+visible[3])*.5,144,delta=.5)
+                self.assertGreaterEqual(min(visible[:2]),8)
+                self.assertLessEqual(max(visible[2:]),280)
+        icons=[d for d in self.frames['home-after-uefa-simulate'] if d['texture']==9]
+        self.assertEqual(len(icons),3)
+        for d in icons:
+            v=d['vertices']
+            self.assertAlmostEqual((2-v[1]-v[17])*180,.5725*720,delta=.1)
+            self.assertAlmostEqual((v[1]-v[17])*360,40,delta=.1)
+        for name,draws in self.frames.items():
+            for d in draws:
+                if d['texture']!=9:continue
+                v=d['vertices'];bounds=[v[2]*atlas.width,v[3]*atlas.height,v[18]*atlas.width,v[19]*atlas.height]
+                sprite=next((s for s in spec['sprites'] if all(abs(a-b)<.01 for a,b in zip(s['bounds'],bounds))),None)
+                self.assertIsNotNone(sprite,name)
+                aspect=(v[16]-v[0])*1280/((v[1]-v[17])*720)
+                self.assertAlmostEqual(aspect,1,places=3)
+                height=(v[1]-v[17])*360
+                if abs(height-40)<.1:
+                    top=(1-v[1])*360;bottom=(1-v[17])*360
+                    headers=[p for p in draws if p['kind']==0 and p['layer']==d['layer'] and
+                        all(abs(a-b)<.001 for a,b in zip(p['color'],[.02,.18,.47,1])) and
+                        abs((p['vertices'][1]-p['vertices'][17])*360-54)<.1 and
+                        p['vertices'][0]<=v[0] and p['vertices'][16]>=v[16] and
+                        (1-p['vertices'][1])*360<=top<(1-p['vertices'][17])*360]
+                    self.assertEqual(len(headers),1,name)
+                    p=headers[0]['vertices']
+                    self.assertAlmostEqual(top-(1-p[1])*360,7,delta=.1)
+                    self.assertAlmostEqual((1-p[17])*360-bottom,7,delta=.1)
+
+    def test_home_feed_rotates_real_summary_and_includes_world_results(self):
+        names=['home-slider-'+str(i) for i in range(4)]
+        self.assertTrue(set(names+['home-after-uefa-simulate','feed-uefa-result',
+                                'home-after-national-loss','feed-national-result'])<=self.frames.keys())
+        # Every summary contains different actual content, plus persistent
+        # club and national crests for score stories on the clickable tile.
+        self.assertEqual(len({json.dumps(self.frames[n]) for n in names}),4)
+        for name in ('home-after-uefa-simulate','home-after-national-loss'):
+            badges=[d for d in self.frames[name] if d['texture']==2 and d['vertices'][0]>0 and
+                    .28<(1-d['vertices'][1])*.5<.5]
+            self.assertEqual(len(badges),2,name)
+
     def test_quick_save_toast_dismisses_without_navigation(self):
         self.assertTrue(any(d.get('layer')==1 for d in self.frames['quick-save']))
         self.assertFalse(any(d.get('layer')==1 for d in self.frames['quick-save-dismissed']))

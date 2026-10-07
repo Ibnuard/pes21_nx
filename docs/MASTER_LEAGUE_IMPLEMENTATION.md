@@ -1,5 +1,91 @@
 # Master League implementation
 
+## Header square-canvas follow-up (2026-10-07)
+
+The per-symbol optical offsets in the initial v8 candidate overcorrected the
+header icons. All 16 reusable icon sampling regions now use equal **288 x 288**
+transparent square canvases, centred around the complete artwork (within half
+a source pixel). This is an atlas-coordinate/layout change: the generated PNG
+and its embedded bytes are preserved, with no regenerated or stretched art.
+`header-icons-v8.json` records both square canvases and original artwork bounds.
+
+The renderer samples the whole square and gives every panel icon the same
+**40 x 40px** destination inside the **54px** header at 720p. The square has
+**7px above and below**, scaled with the interface. There are no per-icon Y
+offsets or white-pixel-centroid corrections. Feed-body ornaments reuse the
+same square sampling contract at their own size. Tests check square regions,
+centred artwork, transparent gutters, aspect ratio and equal header margins.
+
+Verification: **21 focused tests passed**, with **48,916 geometry subtests**;
+public-tree audit passed (**616 files**). Production-renderer synthetic previews
+and the isolated diagnostic build are in `local-debug/master-league-v8-square/`.
+The NRO SHA256 is
+`8a56b52684bf0a33298a556a711fb661f8c75e947c1ae3fd10998c636bdeb667`
+(69,591,967 bytes; link build ID `ba9e44ed98ea59b3ed13422562f430f5bdd61255`).
+Staged source hashes, embedded assets and ELF/NRO sections verify. This revision
+changes only header rendering/catalog metadata; the runtime pair and save
+format are unchanged. Hardware visual confirmation is still pending.
+
+## Review revision v8 diagnostic (2026-10-07)
+
+Pre-review checkpoint: commit `8f5a389`, annotated local tag
+`checkpoint/master-league-v7`. No push was requested for this checkpoint.
+The unrelated stadium/camera documentation edit was excluded.
+
+- The international office remembers its entry page and selected destination.
+  Back from empty offers or the active national office returns to Cup
+  Competitions when entered there, or Manager when entered there. Nested
+  federation offers return to the national office without replacing this parent.
+- Home's clickable Club Feed cycles through four real story summaries every
+  five seconds, with a short opacity transition, progress line and page dots.
+  Opening it keeps the currently displayed story. Rotation runs on the input
+  thread, pauses off Home/during a modal/native match, and ignores suspend gaps.
+  A newly completed match is the first story shown after calendar playback or
+  reloading a save; projecting the view never writes state or advances RNG.
+- Match Centre derives its three newest managed-team results by calendar date
+  from the existing league, domestic cup, continental, friendly, qualifier,
+  regional and World Cup fixtures. It excludes byes, incomplete/future fixtures
+  and matches involving neither managed team. Full score cards retain home/away
+  order; one-opponent history rows use manager-versus-opponent score order.
+  Competition, day and WIN/LOSS/DRAW are displayed, including WIN/LOSS ON PENS
+  for tied knockout scores. No invented shootout score or duplicate result
+  journal is stored. History remains limited to the current season's fixtures.
+- Modal height is measured from the same wrapping routine used to render its
+  body/error text, identity block and zero-to-three actions. Renewal/propose
+  terms and overwrite/play/simulate/release confirmations share compact padding.
+  Terminal offers show a small final-status cue without disabled action rows.
+- Built-in imagegen produced 16 reusable vector-style raster icons in one
+  transparent atlas: `art/master-league/header-icons-v8.png`. The identical PNG
+  is embedded as `data/master_league_headers_v8.bin`; source prompt and measured
+  bounds are in `v8-prompts.json` and `header-icons-v8.json` beside the artwork.
+  Calendar, ranking, save and other blue headers use semantic icon IDs. Sampling
+  uses individual padded artwork bounds, not nominal cell centres. Per-symbol
+  optical offsets align visible white ink with the bitmap-font capitals
+  (calendar -6px, ranking -9px, save -3px at 720p, scaled with the interface).
+  Official club/national identities continue using the existing paired atlas.
+
+Save format remains **v5**, with the same v1-v4 migration support. This review
+does not alter economics, fixtures, roster identity or the active runtime.
+Host tests cover empty/active/nested international return paths, real simulated
+continental results, a complete club/national result stream, away-score and
+shootout labels, save reload, input-only carousel timing and read-only views.
+Production C-renderer previews check compact modal bounds, wrapped text,
+optical header alignment against visible title ink, icon aspect/sampling,
+layering, text overlap and the 384-draw/4096-quad limits. These synthetic previews
+are not Switch captures. Native play/halftime validation still needs hardware.
+
+Verification: **79 passed, 1 skipped**, with **48,900** geometry subtests; the
+skip requires the user's local hardware log. Public-tree audit: **616 files**.
+The isolated `build-wsl.ps1` diagnostic build and verification report are under
+`local-debug/master-league-v8/`; the NRO-only delivery directory is
+`local-debug/FootballNX-MasterLeague-v8-DIAGNOSTIC-COPY-TO-pes21_nx/`.
+The candidate is **69,591,967 bytes**, SHA256
+`717bc8e1e9d1e44b1742237564879a4102ef0e9e27057caf3d9ea5fb865c1905`,
+link build ID `7f317cb19c7bd192f8e49463cb2c4eaee0b69f43`.
+Captured WSL-stage source hashes, embedded art/badges, ELF-to-NRO initialized
+sections, launcher icon and active diagnostic logger all verify. Runtime pair
+remains `e861c583ec78e9ae`; active `dist/pes21_nx` and SaveData were not changed.
+
 ## Review revision v7 diagnostic (2026-10-07)
 
 The pre-review v6 checkpoint is commit `25faeeb`, pushed to `origin/cupleague`.

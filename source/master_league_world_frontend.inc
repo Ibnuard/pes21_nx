@@ -2,6 +2,13 @@ static uint32_t national_selected;
 static int ml_national_offers_page(void) {
   return page==ML_PAGE_NATIONAL_OFFERS || (page==ML_PAGE_NATIONAL && !career.world.national_team);
 }
+static void ml_national_back(void) {
+  if(page==ML_PAGE_NATIONAL_OFFERS && career.world.national_team) {
+    ml_page(ML_PAGE_NATIONAL);focus=4u;
+  }else {
+    ml_page(national_parent);focus=national_parent_focus;
+  }
+}
 static const char *ml_national_reply_label(uint32_t status) {
   return status==ML_OFFER_WAITING ? "AWAITING REPLY" : status==ML_OFFER_ACCEPTED ? "APPOINTMENT ACCEPTED" :
     status==ML_OFFER_REJECTED ? "OFFER DECLINED" : status==ML_OFFER_CANCELLED ? "WITHDRAWN - ROLE FILLED" : "OFFER EXPIRED";
@@ -35,7 +42,7 @@ static int ml_world_pad(uint32_t pressed) {
     return 1;
   }
   if(ml_national_offers_page()) {
-    if(pressed&ML_B){ml_page(career.world.national_team ? ML_PAGE_NATIONAL : ML_PAGE_MANAGER_OFFICE);return 1;}
+    if(pressed&ML_B){ml_national_back();return 1;}
     ml_scroll(pressed,career.world.national_count,&focus,1u);
     if((pressed&ML_A) && focus<career.world.national_count) {
       national_selected=focus;
@@ -47,7 +54,7 @@ static int ml_world_pad(uint32_t pressed) {
     return 1;
   }
   if(page==ML_PAGE_NATIONAL) {
-    if(pressed&ML_B){ml_page(ML_PAGE_MANAGER_OFFICE);return 1;}
+    if(pressed&ML_B){ml_national_back();return 1;}
     ml_scroll(pressed,5u,&focus,1u);
     if(pressed&ML_A) {
       if(focus==4u)ml_page(ML_PAGE_NATIONAL_OFFERS);

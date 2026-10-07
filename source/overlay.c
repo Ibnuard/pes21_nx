@@ -61,6 +61,7 @@ static struct {
   GLuint master_league_pearl_tex, master_league_cards_tex;
   GLuint master_league_icons_tex;
   GLuint master_league_emblems_tex;
+  GLuint master_league_headers_tex;
   GLuint cup_hub_trophy_tex;
   GLuint cup_logo_tex[FL26_CUP_CATALOG_COUNT];
   uint8_t cup_logo_attempted[FL26_CUP_CATALOG_COUNT];
@@ -249,6 +250,7 @@ static int gl_init(void) {
   glGenTextures(1, &gl.master_league_cards_tex);
   glGenTextures(1, &gl.master_league_icons_tex);
   glGenTextures(1, &gl.master_league_emblems_tex);
+  glGenTextures(1, &gl.master_league_headers_tex);
   glGenTextures(1, &gl.cup_hub_trophy_tex);
   glGenTextures(FL26_CUP_CATALOG_COUNT, gl.cup_logo_tex);
   glGenTextures(FL26_LEAGUE_CATALOG_COUNT, gl.league_logo_tex);
@@ -1327,6 +1329,8 @@ static void prepare_main_menu_assets(int active) {
       master_league_icons_v4_bin, master_league_icons_v4_bin_end);
   uploaded &= upload_main_menu_png(gl.master_league_emblems_tex,
       master_league_emblems_v7_bin, master_league_emblems_v7_bin_end);
+  uploaded &= upload_main_menu_png(gl.master_league_headers_tex,
+      master_league_headers_v8_bin, master_league_headers_v8_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_hub_trophy_tex,
       cup_hub_trophy_bin, cup_hub_trophy_bin_end);
   gl.cup_hub_header_ornament_uploaded = upload_main_menu_png(

@@ -9,4 +9,6 @@ extern const uint8_t master_league_icons_v4_bin[];
 extern const uint8_t master_league_icons_v4_bin_end[];
 extern const uint8_t master_league_emblems_v7_bin[];
 extern const uint8_t master_league_emblems_v7_bin_end[];
+extern const uint8_t master_league_headers_v8_bin[];
+extern const uint8_t master_league_headers_v8_bin_end[];
 #endif

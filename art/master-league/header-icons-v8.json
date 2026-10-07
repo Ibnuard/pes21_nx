@@ -1,0 +1,265 @@
+{
+  "image": "header-icons-v8.png",
+  "width": 1254,
+  "height": 1254,
+  "notes": "All sprites use equal 288x288 transparent square sampling canvases, centred on the complete artwork bounds (within half a source pixel). Original generated artwork is unchanged. Render the entire square with no per-symbol offsets or rectangular fitting.",
+  "sprites": [
+    {
+      "id": 1,
+      "name": "calendar",
+      "bounds": [
+        28,
+        45,
+        316,
+        333
+      ],
+      "artwork_bounds": [
+        63,
+        73,
+        282,
+        306
+      ]
+    },
+    {
+      "id": 2,
+      "name": "ranking",
+      "bounds": [
+        333,
+        50,
+        621,
+        338
+      ],
+      "artwork_bounds": [
+        360,
+        91,
+        594,
+        297
+      ]
+    },
+    {
+      "id": 3,
+      "name": "save",
+      "bounds": [
+        639,
+        50,
+        927,
+        338
+      ],
+      "artwork_bounds": [
+        672,
+        87,
+        895,
+        301
+      ]
+    },
+    {
+      "id": 4,
+      "name": "squad",
+      "bounds": [
+        948,
+        55,
+        1236,
+        343
+      ],
+      "artwork_bounds": [
+        958,
+        107,
+        1227,
+        291
+      ]
+    },
+    {
+      "id": 5,
+      "name": "tactics",
+      "bounds": [
+        33,
+        339,
+        321,
+        627
+      ],
+      "artwork_bounds": [
+        50,
+        383,
+        305,
+        584
+      ]
+    },
+    {
+      "id": 6,
+      "name": "transfer",
+      "bounds": [
+        333,
+        342,
+        621,
+        630
+      ],
+      "artwork_bounds": [
+        361,
+        390,
+        594,
+        583
+      ]
+    },
+    {
+      "id": 7,
+      "name": "contract",
+      "bounds": [
+        649,
+        338,
+        937,
+        626
+      ],
+      "artwork_bounds": [
+        684,
+        367,
+        902,
+        597
+      ]
+    },
+    {
+      "id": 8,
+      "name": "finance",
+      "bounds": [
+        952,
+        337,
+        1240,
+        625
+      ],
+      "artwork_bounds": [
+        985,
+        368,
+        1207,
+        594
+      ]
+    },
+    {
+      "id": 9,
+      "name": "trophy",
+      "bounds": [
+        30,
+        630,
+        318,
+        918
+      ],
+      "artwork_bounds": [
+        49,
+        654,
+        299,
+        895
+      ]
+    },
+    {
+      "id": 10,
+      "name": "international",
+      "bounds": [
+        332,
+        631,
+        620,
+        919
+      ],
+      "artwork_bounds": [
+        352,
+        652,
+        601,
+        899
+      ]
+    },
+    {
+      "id": 11,
+      "name": "manager",
+      "bounds": [
+        635,
+        625,
+        923,
+        913
+      ],
+      "artwork_bounds": [
+        652,
+        658,
+        906,
+        880
+      ]
+    },
+    {
+      "id": 12,
+      "name": "messages",
+      "bounds": [
+        949,
+        625,
+        1237,
+        913
+      ],
+      "artwork_bounds": [
+        972,
+        657,
+        1214,
+        882
+      ]
+    },
+    {
+      "id": 13,
+      "name": "news",
+      "bounds": [
+        28,
+        920,
+        316,
+        1208
+      ],
+      "artwork_bounds": [
+        49,
+        956,
+        296,
+        1173
+      ]
+    },
+    {
+      "id": 14,
+      "name": "settings",
+      "bounds": [
+        337,
+        915,
+        625,
+        1203
+      ],
+      "artwork_bounds": [
+        358,
+        938,
+        604,
+        1181
+      ]
+    },
+    {
+      "id": 15,
+      "name": "statistics",
+      "bounds": [
+        636,
+        914,
+        924,
+        1202
+      ],
+      "artwork_bounds": [
+        654,
+        953,
+        907,
+        1164
+      ]
+    },
+    {
+      "id": 16,
+      "name": "match",
+      "bounds": [
+        946,
+        911,
+        1234,
+        1199
+      ],
+      "artwork_bounds": [
+        960,
+        948,
+        1221,
+        1163
+      ]
+    }
+  ],
+  "canvas_size": 288
+}

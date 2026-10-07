@@ -26,6 +26,7 @@ $allowedBinaries = @(
   "data/master_league_cards_v2.bin",
   "data/master_league_icons_v4.bin",
   "data/master_league_emblems_v7.bin",
+  "data/master_league_headers_v8.bin",
   "data/main_menu_background.bin",
   "data/main_menu_brand.bin",
   "data/main_menu_button_a.bin",

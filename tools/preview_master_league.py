@@ -20,7 +20,7 @@ from test_gameplan_editor import function, struct
 
 
 def main(output=None):
-    output=Path(output) if output else ROOT/'local-debug/master-league-v7/previews'
+    output=Path(output) if output else ROOT/'local-debug/master-league-v8/previews'
     output.mkdir(parents=True,exist_ok=True)
     overlay=(ROOT/'source/overlay.c').read_text(encoding='utf-8')
     renderer=(ROOT/'source/master_league_overlay.inc').read_text(encoding='utf-8').split('static void master_league_draw')[0]
@@ -37,9 +37,9 @@ def main(output=None):
 typedef float GLfloat;
 typedef unsigned int GLuint;
 static int screen_width=1280,screen_height=720;
-static struct {GLuint badge_tex,master_league_background_tex,master_league_pearl_tex,master_league_cards_tex,master_league_icons_tex,master_league_emblems_tex;
+static struct {GLuint badge_tex,master_league_background_tex,master_league_pearl_tex,master_league_cards_tex,master_league_icons_tex,master_league_emblems_tex,master_league_headers_tex;
   GLuint league_logo_tex[FL26_LEAGUE_CATALOG_COUNT];int league_logo_uploaded[FL26_LEAGUE_CATALOG_COUNT];
-  float league_logo_aspect[FL26_LEAGUE_CATALOG_COUNT];int loc_color;} gl={.badge_tex=2,.master_league_background_tex=4,.master_league_pearl_tex=5,.master_league_cards_tex=6,.master_league_icons_tex=7,.master_league_emblems_tex=8};
+  float league_logo_aspect[FL26_LEAGUE_CATALOG_COUNT];int loc_color;} gl={.badge_tex=2,.master_league_background_tex=4,.master_league_pearl_tex=5,.master_league_cards_tex=6,.master_league_icons_tex=7,.master_league_emblems_tex=8,.master_league_headers_tex=9};
 static void prepare_league_logo_index(uint32_t index){(void)index;}
 static float rgba[4];
 static void glUniform4f(int loc,float r,float g,float b,float a){(void)loc;rgba[0]=r;rgba[1]=g;rgba[2]=b;rgba[3]=a;}
@@ -128,6 +128,8 @@ int main(void) {
   go(2,3);dump("manager-office");press(DOWN);press(A);dump("president-messages");press(A);dump("president-message");
   go(2,4);dump("career-settings");
   go(3,2);dump("cup-competitions");press(A);dump("cup-bracket");press(R);dump("cup-next-round");press(B);press(B);dump("competitions-section");
+  go(3,2);press(DOWN);press(DOWN);press(A);dump("international-empty-from-cup");
+  press(B);assert(view().page==ML_PAGE_COMPETITIONS && view().selected==2u);dump("international-back-to-cup");
   go(0,1);assert(view().page==ML_PAGE_NEWS);dump("club-feed");press(RIGHT);dump("feed-results-empty");
   press(RIGHT);dump("feed-season");press(RIGHT);dump("feed-transfers");
   for(uint32_t i=0;i<12u;i++) {
@@ -146,6 +148,13 @@ int main(void) {
   ui_clock+=900u;ml_frontend_tick(ui_clock);dump("advance-match-date");finish_advance();
   go(0,3);press(Y);dump("scorers-with-badges");
   go(0,1);while(view().feed_index!=1u)press(RIGHT);ticks+=3100000000u;dump("feed-results");
+  press(B);dump("home-feed-result");
+  for(uint32_t slide=0;slide<4u;slide++) {
+    for(uint32_t t=0;t<10u;t++){ui_clock+=500u;ml_frontend_tick(ui_clock);}
+    ui_clock+=200u;ml_frontend_tick(ui_clock);
+    char name[40];snprintf(name,sizeof(name),"home-slider-%u",view().feed_index);dump(name);
+  }
+  press(RIGHT);const uint32_t story=view().feed_index;press(A);assert(view().page==ML_PAGE_NEWS && view().feed_index==story);
   go(2,0);press(A);press(DOWN);press(A);dump("my-players");press(A);dump("my-player-actions");
   press(DOWN);press(A);assert(view().modal.open);dump("release-modal");press(B);
   /* Synthetic terminal states exercise projection only, without game payloads. */
@@ -170,11 +179,17 @@ int main(void) {
   go(0,2);press(R);press(R);dump("international-calendar");
   for(;;) {
     MlEvent e;assert(ml_next_event(fixture,&e));if(ml_event_is_national(e.kind))break;
-    if(ml_event_is_match(e.kind) && e.home && e.away)assert(ml_record_event(fixture,&e,e.home==fixture->settings.club ? 3u : 0u,e.away==fixture->settings.club ? 3u : 0u,NULL,0u,0));
+    if(e.kind==ML_EVENT_CONTINENTAL && e.home && e.away) {
+      go(0,0);press(DOWN);press(A);press(A);assert(view().page==ML_PAGE_HUB && view().story.result_kind==ML_EVENT_CONTINENTAL);
+      ticks+=3100000000u;dump("home-after-uefa-simulate");go(0,1);dump("feed-uefa-result");
+    }else if(ml_event_is_match(e.kind) && e.home && e.away)assert(ml_record_event(fixture,&e,e.home==fixture->settings.club ? 3u : 0u,e.away==fixture->settings.club ? 3u : 0u,NULL,0u,0));
     else assert(ml_simulate_event(fixture,&e));
   }
   go(0,0);dump("national-next");press(B);ticks+=3100000000u;dump("national-hub");
   go(2,0);dump("club-market-national-upcoming");
+  go(0,0);press(A);press(A);assert(ml_frontend_take_action()==ML_ACTION_MATCH);
+  ml_frontend_result(1u,3u,NULL,0u);assert(ml_frontend_restore());finish_advance();
+  ticks+=3100000000u;dump("home-after-national-loss");go(0,1);dump("feed-national-result");
   return 0;
 }
 '''
@@ -199,7 +214,8 @@ int main(void) {
               5:Image.open(ROOT/'art/master-league/pearl-football-v2.png').convert('RGBA'),
               6:Image.open(ROOT/'art/master-league/card-sprites-v2.png').convert('RGBA'),
               7:Image.open(ROOT/'art/master-league/office-icons-v4.png').convert('RGBA'),
-              8:Image.open(ROOT/'art/master-league/career-emblems-v7.png').convert('RGBA')}
+              8:Image.open(ROOT/'art/master-league/career-emblems-v7.png').convert('RGBA'),
+              9:Image.open(ROOT/'art/master-league/header-icons-v8.png').convert('RGBA')}
     header=(ROOT/'source/badge_atlas.h').read_text()
     def define(name):return int(re.search(r'#define '+name+r' (\d+)',header)[1])
     cell=define('BADGE_CELL_SIZE')

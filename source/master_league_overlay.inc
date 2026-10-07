@@ -131,7 +131,41 @@ static void ml_ui_emblem(MasterLeagueRender *ui,uint32_t sprite,float x,float y,
   *quads+=emit_image_rect_uv(x*screen_width,y*screen_height,h*screen_height,h*screen_height,
     u,v,u+.488f,v+.488f,verts+*quads*24);
 }
-static void ml_ui_panel(MasterLeagueRender *ui,const char *title,
+static void ml_ui_header_icon(MasterLeagueRender *ui,uint32_t icon,float x,float y,float h,GLfloat *verts,int *quads) {
+  if(!icon || icon>16u)return;
+  MlDraw *d=ml_ui_draw(ui,*quads,2);if(!d)return;d->texture=gl.master_league_headers_tex;
+  /* Equal transparent 288x288 canvases centred around the complete symbols.
+   * Keep the original artwork; sample the square, not a tight rectangular crop.
+   * The matching reusable atlas regions live in header-icons-v8.json. */
+  static const uint16_t bounds[16][4]={
+    {28,45,316,333},{333,50,621,338},{639,50,927,338},{948,55,1236,343},
+    {33,339,321,627},{333,342,621,630},{649,338,937,626},{952,337,1240,625},
+    {30,630,318,918},{332,631,620,919},{635,625,923,913},{949,625,1237,913},
+    {28,920,316,1208},{337,915,625,1203},{636,914,924,1202},{946,911,1234,1199}
+  };
+  const uint16_t *b=bounds[icon-1u];const float box=h*screen_height;
+  *quads+=emit_image_rect_uv(x*screen_width,y*screen_height,box,box,
+      b[0]/1254.f,b[1]/1254.f,b[2]/1254.f,b[3]/1254.f,verts+*quads*24);
+}
+static uint32_t ml_ui_page_icon(MlPage page) {
+  switch(page) {
+    case ML_PAGE_SLOTS:return ML_HEADER_SAVE;
+    case ML_PAGE_SETTINGS:return ML_HEADER_SETTINGS;
+    case ML_PAGE_SQUAD:case ML_PAGE_MY_TEAM:case ML_PAGE_MY_PLAYERS:return ML_HEADER_SQUAD;
+    case ML_PAGE_CONTRACTS:return ML_HEADER_CONTRACT;
+    case ML_PAGE_MARKET_CLUBS:case ML_PAGE_MARKET_PLAYERS:case ML_PAGE_OFFERS:return ML_HEADER_TRANSFER;
+    case ML_PAGE_FINANCES:return ML_HEADER_FINANCE;
+    case ML_PAGE_TABLE:return ML_HEADER_RANKING;
+    case ML_PAGE_COMPETITIONS:case ML_PAGE_CUP:return ML_HEADER_TROPHY;
+    case ML_PAGE_NEWS:return ML_HEADER_NEWS;
+    case ML_PAGE_MESSAGES:return ML_HEADER_MESSAGES;
+    case ML_PAGE_NATIONAL:case ML_PAGE_NATIONAL_OFFERS:case ML_PAGE_NATIONALITY:
+    case ML_PAGE_QUALIFIERS:case ML_PAGE_INTERNATIONAL_SCHEDULE:return ML_HEADER_INTERNATIONAL;
+    case ML_PAGE_NEXT:return ML_HEADER_MATCH;
+    default:return ML_HEADER_MANAGER;
+  }
+}
+static void ml_ui_panel(MasterLeagueRender *ui,const char *title,uint32_t icon,
     float x,float y,float w,float h,int selected,GLfloat *verts,int *quads) {
   ml_ui_frame(ui,x,y,w,h,selected,verts,quads);
   ml_ui_rect(ui,x,y,w,h,1,1,1,1,-1,0,1,verts,quads);
@@ -140,7 +174,12 @@ static void ml_ui_panel(MasterLeagueRender *ui,const char *title,
    * outer card radius. Same component for landing, drawers, hub and tables. */
   ml_ui_rect(ui,x,y+.040f,w,.035f,.02f,.18f,.47f,1,-1,0,1,verts,quads);
   ui->draws[ui->draw_count-1u].round.radius=0.f;
-  ml_ui_text(ui,title,x+.016f,y+.021f,w-.032f,.0347f,0,-1,0,1,verts,quads);
+  ml_ui_text(ui,title,x+.016f,y+.021f,w-(icon ? .078f : .032f),.0347f,0,-1,0,1,verts,quads);
+  /* One 40px square centred in the 54px header at 720p: equal 7px top/bottom
+   * spacing, scaling together at other resolutions. No optical Y overrides. */
+  const float icon_h=40.f/720.f;
+  ml_ui_header_icon(ui,icon,x+w-.015f-icon_h*screen_height/screen_width,
+      y+(.075f-icon_h)*.5f,icon_h,verts,quads);
 }
 static void ml_ui_minirows(MasterLeagueRender *ui,const MlViewRow *rows,uint32_t count,
     float x,float y,float w,int rank,GLfloat *verts,int *quads) {
@@ -156,11 +195,52 @@ static void ml_ui_minirows(MasterLeagueRender *ui,const MlViewRow *rows,uint32_t
     ml_ui_text(ui,r->value,x+w-.040f,yy+.014f,.035f,.0264f,0,-2,0,1,verts,quads);
   }
 }
+static void ml_ui_feed_summary(MasterLeagueRender *ui,const MlView *v,float x,float y,float w,GLfloat *verts,int *quads) {
+  const MlStoryView *s=&v->story;
+  ml_ui_text(ui,"CLUB FEED",x+.021f,y+.018f,w*.55f,.0347f,0,-1,0,1,verts,quads);
+  const uint32_t content=ui->draw_count;
+  const char *tag=v->feed_index==0u ? "MANAGER" : v->feed_index==1u ? (s->has_result ? s->result : "MATCH CENTRE") :
+    v->feed_index==2u ? "SEASON WATCH" : "TRANSFER DESK";
+  const float tag_w=fminf(.166f,measure_efootball_line_mode(tag,(int)strlen(tag),.0222f*screen_height,EFOOTBALL_FONT_BOLD,0)/screen_width);
+  ml_ui_text(ui,tag,x+w-.021f-tag_w,y+.026f,tag_w+.001f,.0222f,0,-1,0,1,verts,quads);
+  char footer[112];
+  if(v->feed_index==1u && s->has_result) {
+    ml_ui_image(ui,gl.badge_tex,s->home_badge,x+w*.22f-.017f,y+.067f,.034f,.0604f,verts,quads);
+    ml_ui_image(ui,gl.badge_tex,s->away_badge,x+w*.78f-.017f,y+.067f,.034f,.0604f,verts,quads);
+    char score[24];snprintf(score,sizeof(score),"%u - %u",s->home_goals,s->away_goals);
+    ml_ui_center_text(ui,score,x+w*.39f,y+.069f,w*.22f,.061f,.0444f,0,-1,verts,quads);
+    ml_ui_center_text(ui,s->home,x+.009f,y+.132f,w*.43f,.036f,.0236f,0,-1,verts,quads);
+    ml_ui_center_text(ui,s->away,x+w*.55f,y+.132f,w*.43f,.036f,.0236f,0,-1,verts,quads);
+    snprintf(footer,sizeof(footer),"DAY %u / %s",s->result_day+1u,s->competition);
+  }else {
+    if(v->feed_index==0u)ml_ui_image(ui,gl.badge_tex,s->club_badge,x+.022f,y+.078f,.044f,.0782f,verts,quads);
+    else ml_ui_header_icon(ui,v->feed_index==2u ? ML_HEADER_RANKING : v->feed_index==3u ? ML_HEADER_TRANSFER : ML_HEADER_MATCH,
+      x+.014f,y+.070f,.096f,verts,quads);
+    ml_ui_text(ui,v->feed_index==1u ? "NO MATCHES PLAYED YET" : s->headline,x+.087f,y+.079f,w-.110f,.0347f,0,-1,0,1,verts,quads);
+    ml_ui_text(ui,v->feed_index==1u ? "Results appear after play or simulate" : s->summary,x+.087f,y+.131f,w-.110f,.025f,2,-1,0,1,verts,quads);
+    if(v->feed_index==1u)snprintf(footer,sizeof(footer),"OPEN MATCH CENTRE");
+    else if(v->feed_index==2u)snprintf(footer,sizeof(footer),"POSITION %s / TARGET %s",s->stat_value[0],s->stat_value[1]);
+    else if(v->feed_index==3u)snprintf(footer,sizeof(footer),"WINDOW %s / %s COMPLETED DEALS",s->stat_value[0],s->stat_value[1]);
+    else snprintf(footer,sizeof(footer),"SEASON %s / %s",s->stat_value[0],s->stat_value[1]);
+  }
+  ml_ui_text(ui,footer,x+.021f,y+.185f,w-.102f,.021f,0,-1,0,1,verts,quads);
+  for(uint32_t i=content;i<ui->draw_count;i++)ui->draws[i].color[3]*=v->feed_opacity;
+  for(uint32_t i=0;i<4u;i++) {
+    const float xx=x+w-.069f+i*.013f;
+    ml_ui_rect(ui,xx,y+.191f,.007f,.0124f,1,1,1,i==v->feed_index ? 1.f : .38f,-1,0,1,verts,quads);
+    ui->draws[ui->draw_count-1u].round.radius=5.f;
+  }
+  if(v->feed_progress>0.f) {
+    ml_ui_rect(ui,x+.021f,y+.214f,(w-.042f)*v->feed_progress,.003f,.07f,.77f,.90f,.8f,-1,0,1,verts,quads);
+    ui->draws[ui->draw_count-1u].round.radius=0.f;
+  }
+}
 static void ml_ui_feature(MasterLeagueRender *ui,const MlView *v,uint32_t item,
     uint32_t art,float x,float y,float w,float h,GLfloat *verts,int *quads) {
   const MlViewRow *r=&v->rows[item];const int selected=v->selected==item && r->enabled;
   ml_ui_frame(ui,x,y,w,h,selected,verts,quads);
   ml_ui_art(ui,art,x,y,w,h,verts,quads);
+  if(!v->section && item==1u){ml_ui_feed_summary(ui,v,x,y,w,verts,quads);return;}
   if(r->unread)ml_ui_unread(ui,x+w-.023f,y+.023f,verts,quads);
   ml_ui_text(ui,r->label,x+.021f,y+.021f,w-.04f,.0444f,0,-1,0,1,verts,quads);
   if(v->section==0u && item==0u && v->next.home[0]) {
@@ -174,8 +254,7 @@ static void ml_ui_feature(MasterLeagueRender *ui,const MlView *v,uint32_t item,
   } else {
     ml_ui_text(ui,r->detail,x+.021f,y+.100f,w-.05f,.0278f,2,-1,0,1,verts,quads);
     char value[80];
-    if(v->section==0u && item==1u) snprintf(value,sizeof(value),"4 STORIES  /  OPEN CLUB CAROUSEL");
-    else if(v->section==1u && item==0u) snprintf(value,sizeof(value),"%u REGISTERED PLAYERS",v->squad_size);
+    if(v->section==1u && item==0u) snprintf(value,sizeof(value),"%u REGISTERED PLAYERS",v->squad_size);
     else if(v->section==2u && item==0u) snprintf(value,sizeof(value),"TRANSFER BALANCE  %s",v->balance);
     else if(v->section==3u && item==0u) snprintf(value,sizeof(value),"YOUR POSITION  %u",v->rank);
     else snprintf(value,sizeof(value),"%s",r->value[0] ? r->value : "VIEW DETAILS");
@@ -270,7 +349,7 @@ static void ml_ui_pills(MasterLeagueRender *ui,uint32_t selected,float y,GLfloat
 }
 static void ml_ui_calendar(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const MlView *v=&ui->view;
-  ml_ui_panel(ui,v->calendar_month,.04f,.205f,.92f,.684f,0,verts,quads);
+  ml_ui_panel(ui,v->calendar_month,ML_HEADER_CALENDAR,.04f,.205f,.92f,.684f,0,verts,quads);
   static const char *days[]={"MON","TUE","WED","THU","FRI","SAT","SUN"};
   const float w=.122f,gap=.006f;
   uint32_t last=0u;
@@ -296,7 +375,7 @@ static void ml_ui_calendar(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   }
   ml_ui_text(ui,v->calendar_detail,.061f,.835f,.873f,.0292f,2,-2,0,1,verts,quads);
 }
-static void ml_ui_paragraph(MasterLeagueRender *ui,const char *text,float x,float y,float w,
+static float ml_ui_paragraph(MasterLeagueRender *ui,const char *text,float x,float y,float w,
     float size,uint32_t lines,int ink,GLfloat *verts,int *quads);
 static void ml_ui_primary(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const MlView *v=&ui->view;
@@ -312,7 +391,7 @@ static void ml_ui_primary(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const float shift=retained.modal ? 0.f : progress;
   const float x=.13f-.08f*shift,w=.74f-.175f*shift;
   const int setting=v->page==ML_PAGE_SETTINGS;
-  ml_ui_panel(ui,v->left_title,x,.205f,w,.630f,0,verts,quads);
+  ml_ui_panel(ui,v->left_title,ml_ui_page_icon(v->page),x,.205f,w,.630f,0,verts,quads);
   const int actions=v->page==ML_PAGE_LANDING || v->page==ML_PAGE_MANAGER || v->page==ML_PAGE_SQUAD ||
       v->page==ML_PAGE_NEXT || v->page==ML_PAGE_SLOTS || v->page==ML_PAGE_MY_TEAM || v->page==ML_PAGE_MANAGER_OFFICE || v->page==ML_PAGE_COMPETITIONS;
   const float gap=setting ? .006f : .016f;
@@ -350,36 +429,47 @@ static void ml_ui_primary(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
       const uint32_t start=ui->draw_count;
       ml_ui_rect(ui,0,0,1,1,.01f,.035f,.10f,.64f*progress,-1,0,1,verts,quads);
       ui->draws[ui->draw_count-1u].round.radius=0.f;
-      const float px=.20f,py=.185f+(1.f-progress)*.045f,pw=.60f;
-      ml_ui_panel(ui,d->title,px,py,pw,.677f,0,verts,quads);
+      const float px=.20f,pw=.60f,pad=.027f;
+      const float body_h=d->modal==2 ? ml_ui_paragraph(NULL,d->body,0,0,pw-.060f,.0278f,8u,-3,NULL,NULL) : 0.f;
+      const float error_h=ml_ui_paragraph(NULL,v->status,0,0,pw-.060f,.025f,4u,-2,NULL,NULL);
+      const float identity_h=d->modal==2 ? fmaxf(d->badge ? .096f : 0.f,
+        (d->subtitle[0] ? .037f : 0.f)+(d->detail[0] ? .009f+.0264f : 0.f)) : .0389f;
+      float cursor=.075f+pad;
+      const float identity_y=cursor;cursor+=identity_h;
+      float value_y=0.f,body_y=0.f,error_y=0.f;
+      if(d->modal==2 && d->value[0]){cursor+=.018f;value_y=cursor;cursor+=.0292f;}
+      if(body_h>0.f){cursor+=.020f;body_y=cursor;cursor+=body_h;}
+      if(error_h>0.f){cursor+=.018f;error_y=cursor;cursor+=error_h;}
+      cursor+=.026f;
+      const float rows_y=cursor,rh=d->modal==2 ? .080f : .096f,gap=.017f;
+      if(d->count)cursor+=d->count*rh+(d->count-1u)*gap;
+      else if(d->modal==2)cursor+=.064f;
+      float confirm_y=0.f;
+      if(d->modal!=2){cursor+=.023f;confirm_y=cursor;cursor+=.065f;}
+      const float ph=cursor+pad,py=(1.f-ph)*.5f+(1.f-progress)*.025f;
+      ml_ui_panel(ui,d->title,ml_ui_page_icon(v->page),px,py,pw,ph,0,verts,quads);
+      const float tx=px+(d->modal==2 && d->badge ? .10f : .030f);
+      if(d->modal==2 && d->badge)ml_ui_image(ui,gl.badge_tex,d->badge,px+.03f,py+identity_y,.054f,.096f,verts,quads);
+      ml_ui_text(ui,d->subtitle,tx,py+identity_y,pw-(tx-px)-.03f,d->modal==2 ? .037f : .0389f,0,-2,0,1,verts,quads);
       if(d->modal==2) {
-        if(d->badge)ml_ui_image(ui,gl.badge_tex,d->badge,px+.03f,py+.098f,.054f,.096f,verts,quads);
-        const float tx=px+(d->badge ? .10f : .03f);
-        ml_ui_text(ui,d->subtitle,tx,py+.100f,pw-(tx-px)-.03f,.037f,0,-2,0,1,verts,quads);
-        ml_ui_text(ui,d->detail,tx,py+.148f,pw-(tx-px)-.03f,.0264f,2,-3,0,1,verts,quads);
-        ml_ui_text(ui,d->value,px+.03f,py+.210f,pw-.06f,.0292f,0,-2,0,1,verts,quads);
-        ml_ui_paragraph(ui,d->body,px+.03f,py+.260f,pw-.06f,.0278f,2u,-3,verts,quads);
-        if(v->status[0])ml_ui_text(ui,v->status,px+.03f,py+.335f,pw-.06f,.024f,0,-2,0,1,verts,quads);
-        if(!d->count) {
-          ml_ui_icon(ui,2u,px+pw*.5f-.0281f,py+.384f,.100f,verts,quads);
-          ml_ui_center_text(ui,d->title,px+.03f,py+.504f,pw-.06f,.075f,.045f,0,-2,verts,quads);
-        }else {
-          const float rh=.080f,gap=.017f,top=py+.355f+(.286f-(d->count*rh+(d->count-1u)*gap))*.5f;
-          for(uint32_t i=0;i<d->count;i++)ml_ui_row(ui,&d->rows[i],px+.027f,top+i*(rh+gap),pw-.054f,rh,
-            i==d->selected,0,verts,quads);
-        }
-      }else {
-        ml_ui_text(ui,d->subtitle,px+.030f,py+.100f,pw-.060f,.0389f,0,-2,0,1,verts,quads);
-        for(uint32_t i=0;i<d->count;i++)ml_ui_row(ui,&d->rows[i],px+.027f,py+.164f+i*.108f,pw-.054f,.096f,
-            i==d->selected,0,verts,quads);
-        if(v->status[0])ml_ui_text(ui,v->status,px+.03f,py+.507f,pw-.06f,.024f,0,-2,0,1,verts,quads);
-        ml_ui_button(ui,px+.16f,py+.560f,pw-.32f,.065f,d->confirm_selected,1,verts,quads);
-        ml_ui_center_text(ui,d->confirm_label,px+.16f,py+.560f,pw-.32f,.065f,.0333f,0,-1,verts,quads);
+        ml_ui_text(ui,d->detail,tx,py+identity_y+.046f,pw-(tx-px)-.03f,.0264f,2,-3,0,1,verts,quads);
+        if(value_y)ml_ui_text(ui,d->value,px+.03f,py+value_y,pw-.06f,.0292f,0,-2,0,1,verts,quads);
+        if(body_h)ml_ui_paragraph(ui,d->body,px+.03f,py+body_y,pw-.06f,.0278f,8u,-3,verts,quads);
+      }
+      if(error_h)ml_ui_paragraph(ui,v->status,px+.03f,py+error_y,pw-.06f,.025f,4u,-2,verts,quads);
+      for(uint32_t i=0;i<d->count;i++)ml_ui_row(ui,&d->rows[i],px+pad,py+rows_y+i*(rh+gap),pw-2.f*pad,rh,
+          i==d->selected,0,verts,quads);
+      if(d->modal==2 && !d->count) {
+        ml_ui_icon(ui,2u,px+.030f,py+rows_y,.064f,verts,quads);
+        ml_ui_text(ui,"NO ACTION REQUIRED",px+.082f,py+rows_y+.018f,pw-.112f,.0278f,0,-3,0,1,verts,quads);
+      }else if(d->modal!=2) {
+        ml_ui_button(ui,px+.16f,py+confirm_y,pw-.32f,.065f,d->confirm_selected,1,verts,quads);
+        ml_ui_center_text(ui,d->confirm_label,px+.16f,py+confirm_y,pw-.32f,.065f,.0333f,0,-1,verts,quads);
       }
       for(uint32_t i=start;i<ui->draw_count;i++)ui->draws[i].layer=2;
       return;
     }
-    ml_ui_panel(ui,d->title,dx,.205f,dw,.630f,0,verts,quads);
+    ml_ui_panel(ui,d->title,ml_ui_page_icon(v->page),dx,.205f,dw,.630f,0,verts,quads);
     if(d->subtitle[0])ml_ui_text(ui,d->subtitle,dx+.015f,.297f,dw-.03f,.0306f,0,-2,0,1,verts,quads);
     if(d->detail[0])ml_ui_text(ui,d->detail,dx+.015f,.336f,dw-.03f,.025f,2,-3,0,1,verts,quads);
     if(d->value[0])ml_ui_text(ui,d->value,dx+.015f,.369f,dw-.03f,.025f,2,-3,0,1,verts,quads);
@@ -422,7 +512,7 @@ static void ml_ui_primary(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
 }
 static void ml_ui_table(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const MlView *v=&ui->view;
-  ml_ui_panel(ui,v->page==ML_PAGE_QUALIFIERS ? v->left_title : "LEAGUE STANDINGS",.04f,.205f,.92f,.675f,0,verts,quads);
+  ml_ui_panel(ui,v->page==ML_PAGE_QUALIFIERS ? v->left_title : "LEAGUE STANDINGS",ML_HEADER_RANKING,.04f,.205f,.92f,.675f,0,verts,quads);
   const char *columns[]={"P","W","D","L","GF","GA","GD","PTS"};
   const float xs[]={.532f,.585f,.638f,.691f,.744f,.797f,.850f,.907f};
   ml_ui_text(ui,"POS",.062f,.303f,.041f,.025f,0,-3,0,1,verts,quads);
@@ -449,7 +539,7 @@ static void ml_ui_table(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
 }
 static void ml_ui_bracket(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const MlView *v=&ui->view;
-  ml_ui_panel(ui,"KNOCKOUT BRACKET",.04f,.205f,.92f,.675f,0,verts,quads);
+  ml_ui_panel(ui,"KNOCKOUT BRACKET",ML_HEADER_TROPHY,.04f,.205f,.92f,.675f,0,verts,quads);
   for(uint32_t col=0;col<3u;col++)ml_ui_center_text(ui,v->bracket_titles[col],.061f+col*.305f,.298f,.265f,.044f,.028f,0,-3,verts,quads);
   for(uint32_t i=0;i<v->bracket_count;i++) {
     const MlBracketMatch *m=&v->bracket[i];const float x=.061f+m->round*.305f;
@@ -487,9 +577,9 @@ static void ml_ui_toast(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   ml_ui_text(ui,v->toast,x+.016f,.205f,.278f,.0278f,0,-1,0,1,verts,quads);
   for(uint32_t i=first;i<ui->draw_count;i++)ui->draws[i].layer=1;
 }
-static void ml_ui_paragraph(MasterLeagueRender *ui,const char *text,float x,float y,float w,
+static float ml_ui_paragraph(MasterLeagueRender *ui,const char *text,float x,float y,float w,
     float size,uint32_t lines,int ink,GLfloat *verts,int *quads) {
-  const char *p=text;
+  const char *p=text;uint32_t used=0u;
   for(uint32_t line=0u;*p && line<lines;line++) {
     char part[112]={0};uint32_t n=0u,space=0u;
     while(p[n] && p[n]!='\n' && n<110u) {
@@ -501,22 +591,28 @@ static void ml_ui_paragraph(MasterLeagueRender *ui,const char *text,float x,floa
     if(p[n] && p[n]!='\n' && space)n=space;
     if(!n)break;
     memcpy(part,p,n);part[n]=0;
-    ml_ui_text(ui,part,x,y+line*(size+.014f),w,size,2,ink,0,1,verts,quads);
+    if(ui)ml_ui_text(ui,part,x,y+line*(size+.014f),w,size,2,ink,0,1,verts,quads);
+    used++;
     p+=n;while(*p==' ' || *p=='\n')p++;
   }
+  return used ? used*(size+.014f)-.014f : 0.f;
 }
 static void ml_ui_confirmation(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const MlModalView *m=&ui->view.modal;if(!m->open)return;
   const uint32_t first=ui->draw_count;
   ml_ui_rect(ui,0,0,1,1,.01f,.035f,.10f,.72f,-1,0,1,verts,quads);
   ui->draws[ui->draw_count-1u].round.radius=0.f;
-  ml_ui_panel(ui,m->title,.225f,.285f,.55f,.430f,0,verts,quads);
-  ml_ui_paragraph(ui,m->body,.255f,.395f,.49f,.0333f,3u,-2,verts,quads);
-  if(m->error[0])ml_ui_text(ui,m->error,.255f,.554f,.49f,.025f,0,-2,0,1,verts,quads);
+  const float body_h=ml_ui_paragraph(NULL,m->body,0,0,.49f,.0333f,8u,-2,NULL,NULL);
+  const float error_h=ml_ui_paragraph(NULL,m->error,0,0,.49f,.025f,4u,-2,NULL,NULL);
+  const float actions_y=.105f+body_h+(error_h ? .018f+error_h : 0.f)+.030f;
+  const float ph=actions_y+.065f+.030f,py=(1.f-ph)*.5f;
+  ml_ui_panel(ui,m->title,ml_ui_page_icon(ui->view.page),.225f,py,.55f,ph,0,verts,quads);
+  ml_ui_paragraph(ui,m->body,.255f,py+.105f,.49f,.0333f,8u,-2,verts,quads);
+  if(error_h)ml_ui_paragraph(ui,m->error,.255f,py+.123f+body_h,.49f,.025f,4u,-2,verts,quads);
   for(uint32_t i=0;i<2u;i++) {
     const float x=.255f+i*.251f;
-    ml_ui_button(ui,x,.618f,.239f,.065f,m->selected==i,1,verts,quads);
-    ml_ui_center_text(ui,i ? "CANCEL" : m->accept,x,.618f,.239f,.065f,.032f,0,-1,verts,quads);
+    ml_ui_button(ui,x,py+actions_y,.239f,.065f,m->selected==i,1,verts,quads);
+    ml_ui_center_text(ui,i ? "CANCEL" : m->accept,x,py+actions_y,.239f,.065f,.032f,0,-1,verts,quads);
   }
   for(uint32_t i=first;i<ui->draw_count;i++)ui->draws[i].layer=3;
 }
@@ -524,7 +620,7 @@ static void ml_ui_story(MasterLeagueRender *ui,float slide,GLfloat *verts,int *q
   const MlView *v=&ui->view;const MlStoryView *s=&v->story;
   const float x=.05f+slide,hx=x+.014f,hw=.40f,rx=x+.438f,rw=.446f;
   static const char *kickers[]={"THE MANAGER","MATCH CENTRE","SEASON JOURNAL","TRANSFER JOURNAL"};
-  ml_ui_panel(ui,kickers[v->feed_index],x,.205f,.90f,.630f,0,verts,quads);
+  ml_ui_panel(ui,kickers[v->feed_index],ML_HEADER_NEWS,x,.205f,.90f,.630f,0,verts,quads);
   ml_ui_art(ui,v->feed_index==1u ? 1u : v->feed_index==2u ? 0u : 3u,hx,.297f,hw,.518f,verts,quads);
   ml_ui_text(ui,"CLUB STORIES",hx+.024f,.321f,hw-.048f,.025f,0,-1,0,1,verts,quads);
   char number[32];snprintf(number,sizeof(number),"%02u / %02u",v->feed_index+1u,v->feed_count);
@@ -536,7 +632,9 @@ static void ml_ui_story(MasterLeagueRender *ui,float slide,GLfloat *verts,int *q
     ml_ui_center_text(ui,score,hx+.130f,.427f,hw-.260f,.09f,.0667f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->home,hx+.012f,.575f,.176f,.080f,.0306f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->away,hx+.212f,.575f,.176f,.080f,.0306f,0,-1,verts,quads);
-    ml_ui_center_text(ui,"FULL TIME",hx+.02f,.682f,hw-.04f,.036f,.0278f,0,-1,verts,quads);
+    char result[64];snprintf(result,sizeof(result),"FULL TIME / %s",s->result);
+    ml_ui_center_text(ui,result,hx+.02f,.662f,hw-.04f,.036f,.0278f,0,-1,verts,quads);
+    ml_ui_center_text(ui,s->competition,hx+.02f,.709f,hw-.04f,.030f,.0236f,0,-1,verts,quads);
   }else {
     if(s->club_badge)ml_ui_image(ui,gl.badge_tex,s->club_badge,hx+.143f,.402f,.114f,.203f,verts,quads);
     if(v->feed_index==3u)ml_ui_icon(ui,2u,hx+.273f,.536f,.097f,verts,quads);
@@ -593,6 +691,12 @@ static void master_league_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads)
   }
 
   if (v->page==ML_PAGE_HUB) {
+    static const uint32_t icons[4][5]={
+      {ML_HEADER_MATCH,ML_HEADER_NEWS,ML_HEADER_CALENDAR,ML_HEADER_RANKING,ML_HEADER_SAVE},
+      {ML_HEADER_SQUAD,ML_HEADER_CONTRACT,ML_HEADER_TRANSFER,ML_HEADER_SQUAD,ML_HEADER_NEWS},
+      {ML_HEADER_TRANSFER,ML_HEADER_CONTRACT,ML_HEADER_FINANCE,ML_HEADER_MANAGER,ML_HEADER_SETTINGS},
+      {ML_HEADER_RANKING,ML_HEADER_STATISTICS,ML_HEADER_TROPHY,ML_HEADER_RANKING,ML_HEADER_CALENDAR}
+    };
     static const char *tabs[]={"HOME","SQUAD","CLUB OFFICE","COMPETITIONS"};
     for (uint32_t i=0;i<4u;i++) {
       const float x=.10f+i*.205f;
@@ -610,7 +714,7 @@ static void master_league_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads)
     for(uint32_t item=2;item<=4u;item+=2u) {
       const float x=(item==2u ? .04f : .680f)+slide;
       const MlViewRow *r=&v->rows[item];
-      ml_ui_panel(ui,r->label,x,.535f,.280f,.298f,v->selected==item && r->enabled,verts,quads);
+      ml_ui_panel(ui,r->label,icons[v->section][item],x,.535f,.280f,.298f,v->selected==item && r->enabled,verts,quads);
       if(r->unread)ml_ui_unread(ui,x+.259f,.557f,verts,quads);
       if(!v->section && item==2u) {
         ml_ui_minirows(ui,v->fixtures,v->fixture_count,x+.009f,.626f,.262f,0,verts,quads);
@@ -627,7 +731,7 @@ static void master_league_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads)
       }
     }
     const float cx=.338f+slide;
-    ml_ui_panel(ui,v->rows[3].label,cx,.535f,.324f,.298f,v->selected==3u,verts,quads);
+    ml_ui_panel(ui,v->rows[3].label,icons[v->section][3],cx,.535f,.324f,.298f,v->selected==3u,verts,quads);
     if(v->section==1u) ml_ui_minirows(ui,v->squad,v->squad_count,cx+.009f,.626f,.306f,0,verts,quads);
     else if(v->section==2u) {
       char fact[64];snprintf(fact,sizeof(fact),"LEAGUE POSITION  %u",v->rank);

@@ -25,7 +25,14 @@ static void ml_begin_advance(uint32_t from,const char *notice) {
   if(ml_autosave())ml_start_advance(from,notice);
 }
 void ml_frontend_tick(uint64_t milliseconds) {
+  const uint64_t delta_clock=milliseconds>=frontend_clock ? milliseconds-frontend_clock : 0u;
   frontend_clock=milliseconds;
+  /* Slide timing belongs to the update thread. Pause outside Home and ignore
+   * suspension/native-loading gaps so a fresh result gets its full five seconds. */
+  if(session_ready && page==ML_PAGE_HUB && !hub_section && !drawer_kind && !match_active && delta_clock<=1000u) {
+    feed_elapsed+=(uint32_t)delta_clock;
+    if(feed_elapsed>=5000u){feed_index=(feed_index+1u)%4u;feed_elapsed%=5000u;feed_rotated=1u;}
+  }
   if(!session_ready || page!=ML_PAGE_ADVANCE)return;
   const uint64_t elapsed=milliseconds>=advance_started ? milliseconds-advance_started : 0u;
   const uint32_t travel=advance_duration-500u;
@@ -54,6 +61,7 @@ static uint32_t ml_league_badge(uint32_t index) {
 static void ml_review_reset(void) {
   drawer_kind=drawer_focus=drawer_first=0u; drawer_serial++; calendar_day=0u;
   toast[0]=0;toast_serial++;
+  feed_elapsed=feed_rotated=feed_seen_season=0u;memset(&feed_seen,0,sizeof(feed_seen));
 }
 static void ml_drawer_close(void) { drawer_kind=0u; drawer_serial++; }
 static void ml_drawer_open(uint32_t kind,uint32_t selected) {
