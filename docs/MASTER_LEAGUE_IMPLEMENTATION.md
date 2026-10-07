@@ -1,5 +1,119 @@
 # Master League implementation
 
+## Review revision v7 diagnostic (2026-10-07)
+
+The pre-review v6 checkpoint is commit `25faeeb`, pushed to `origin/cupleague`.
+This revision keeps that runtime pair and the post-result-only calendar flow.
+The user confirmed that a club move preserves the season date/results while
+adopting the new club's squad, money and targets, and that international dates
+may use a fictional game calendar rather than official UEFA/FIFA schedules.
+
+### UI and transfer balancing
+
+- Closed-window transfer attempts use the timed foreground toast. Short data
+  lists, including Club Offers and selector results, now start below the header;
+  centred one/two-destination action groups remain unchanged. Club Feed history
+  and statistic cards sit directly below their heading/summary.
+- Offer rows include the counterparty club's atlas crest beside the player
+  portrait. Fees are right-aligned at a fixed right edge and vertically centred;
+  unread dots sit in the upper-right corner, never shifting the monetary text.
+- Normal/Hard negotiations now include elite-player fee/wage premiums, starting
+  XI importance, remaining contract, club-strength step-down and willingness.
+  A stable identity/buyer/season/window roll prevents re-rolling willingness by
+  sending another offer. Rejected players cannot immediately be approached again
+  in that window. Easy retains the prior forgiving terms behavior. Prices and
+  probabilities are fictional game balance, not real-world valuations.
+- Built-in imagegen created the transparent 2x2 decorative atlas in
+  `art/master-league/career-emblems-v7.png`, embedded unchanged as
+  `data/master_league_emblems_v7.bin`; prompts are in `v7-prompts.json` alongside
+  the source artwork. Trophy, globe, manager and laurel emblems decorate career
+  destinations and stories. Insets isolate cells and preserve square geometry.
+  Official club/national identities still use the existing paired badge atlas.
+
+### Club and international calendar
+
+- Cup Competitions links domestic, continental and international views. New
+  careers without a named domestic cup use their verified league pool for a
+  generic domestic knockout cup. Existing cup-less saves are not retroactively
+  given a new domestic competition.
+- European supported top-division pools feed a compact **UEFA Champions League**
+  knockout (up to 32 teams); South American and Asian pools use corresponding
+  generic Champions Cups. Seeded strength chooses up to four qualifiers per
+  league in season one; the managed club's previous final rank must be top four
+  in later seasons. This is not an official multi-stage UEFA competition format.
+- Federation offers arrive as **2-4 distinct countries simultaneously**, selected
+  from the paired national pool independently of manager nationality. Each has
+  its flag, expiry, read receipt and persisted decision. Its modal offers Accept
+  and Decline; declining leaves other offers open. Accepting keeps one club plus
+  one national appointment and withdraws other pending federation offers. The
+  Federation Offers destination retains terminal statuses without disabled
+  actions. Appointments continue across seasons; switching between multiple
+  national posts mid-season is not implemented.
+- National management has two friendlies, a four-team home/away qualifying group
+  (six rounds, top two advance), a regional knockout and an eight-team World Cup
+  finals bracket. Dates share the club calendar and avoid domestic/continental
+  fixture dates. These are annual compact career competitions, not official
+  international cycles. Header captions show the active club/country name,
+  season and date. Home Hub/Next Match switch to national identity for an
+  upcoming national match; club office/squad pages keep club identity. National
+  contexts show the country flag without club budgets, not a generic dual-job label.
+- Native matches use existing paired national rosters. No canonical club player
+  is duplicated or transferred to a national club; no national wages, transfer
+  market, club cash prizes or permanent national squad/preset editor is added.
+  Club weekly wages still accrue with elapsed calendar time. National results
+  are isolated from the domestic standings and club board-loss counter.
+- National fixtures, continental rounds and office events all use the canonical
+  next-event path. Actual shootout winners are required for played knockout draws;
+  duplicate result callbacks cannot advance twice. Results save before return
+  calendar playback. National managed-side identity delegates to the existing
+  paired native roster validation rather than the career club roster override.
+- Club job checks occur on three seed-varied mid-season dates, subject to
+  results and availability. Offers remain inside the current league/domestic-cup
+  pool, expire after 14 days, and reset current/named tactics and financial/board
+  summaries on acceptance. Existing fixtures/results and a national appointment
+  remain intact; no cross-league season migration is claimed.
+
+### Save compatibility and acceptance
+
+The append-only world extension writes **save version 5**. Frozen v1-v4 layouts
+remain readable, checksum-validated and zero-extended in memory. Enabling world
+features on an old save never invents past continental results: saves at day 78
+or later defer that competition to next season; after day 76 national offers
+also wait until next season. Back up **SaveData before testing**. A rollback
+needs both the older NRO and its pre-v5 saves; old builds cannot read v5 saves.
+
+Host coverage includes a complete parallel season, all 13 paired league pools,
+national/club job isolation, multiple unrelated federation offers, independent
+declines, read receipts, expiry, duplicate/invalid replies, world save roundtrip,
+v4 migration, shootout/result retries, elite transfer behavior over 100 seeds,
+and actual C renderer geometry (crest presence, stable fee positions, sprite
+gutters, top-aligned histories, text overlap and draw/vertex limits).
+
+Final focused regression: **76 passed, 1 skipped**, with **38,951** geometry
+subtests. The skipped identity check requires the user's ignored Switch log.
+The public-tree audit checks 611 files successfully; `git diff --check` passes.
+
+The clean diagnostic candidate and synthetic host previews are under
+`local-debug/master-league-v7/`; the delivery folder contains only the NRO, never
+game payloads. Runtime pair remains `e861c583ec78e9ae`, catalog content
+`97e84d7f8c21ba930bb0e13793ac46c91a60836a33902d40100d36aa5801a59f`, with 304 clubs
+and 9,075 canonical players. Diagnostics remain enabled and performance trace
+disabled. No active runtime or existing user save is modified by this build.
+
+Verified NRO: **68,645,791 bytes**, SHA-256
+`d87c9532e0259ce552b77ba0f5d8feff54a413f7ae0c6e80705591f29e2725d7`.
+Staged source hashes, all initialized ELF/NRO sections, paired badge/artwork
+bytes, launcher icon and enabled diagnostic logger were checked. Copy candidate:
+`local-debug/FootballNX-MasterLeague-v7-DIAGNOSTIC-COPY-TO-pes21_nx/pes21_nx.nro`.
+The verification report is `local-debug/master-league-v7/build-verification.json`.
+
+**Switch acceptance remains required**, especially national match/kit/roster
+handoff, pre-match/live substitutions, actual shootout return and season rollover.
+The reported whistle -> loading -> halftime crash is not declared fixed without
+a hardware rerun/log; the v6 diagnostic breadcrumbs remain enabled. Host passes
+and a successful native build are not a substitute for those checks. The broader
+legacy-suite/optional-fixture caveats below still apply.
+
 ## Review revision v6 diagnostic (2026-10-07)
 
 This revision supersedes v5's **pre-kickoff** calendar playback and confirmation

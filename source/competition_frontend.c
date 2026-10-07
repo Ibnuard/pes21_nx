@@ -2280,7 +2280,10 @@ uint32_t competition_frontend_league_team_slot_focus(void) {
 }
 
 int competition_frontend_league_team_is_human(uint32_t team) {
-  if (ml_frontend_match_active()) return ml_frontend_career()->settings.club == team;
+  if (ml_frontend_match_active()) {
+    uint32_t home=0u;ml_frontend_match_teams(&home,NULL);
+    return home==team; /* career handoff places the managed club/nation at HOME */
+  }
   for (uint32_t i = 0; i < league_draft.team_count; i++)
     if (league_draft.teams[i] == team)
       return league_draft.owners[i] != 0u;

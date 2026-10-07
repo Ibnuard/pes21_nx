@@ -50,7 +50,12 @@ const char *ml_offer_submit(MasterLeague *c,uint32_t player,uint32_t fee,uint32_
   if(id && (!o || o->player!=player || !ml_offer_live(o) || o->status==ML_OFFER_WAITING || o->from!=p->club))return "OFFER IS NOT NEGOTIABLE";
   if(!id && p->club==c->settings.club)return "USE MY TEAMS TO REVIEW BUYER OFFERS";
   if(!id)for(uint32_t i=0;i<c->office.offer_count;i++)
-    if(c->office.offers[i].player==player && ml_offer_live(&c->office.offers[i]))return "A NEGOTIATION IS ALREADY OPEN";
+    if(c->office.offers[i].player==player) {
+      const MlOffer *old=&c->office.offers[i];
+      if(ml_offer_live(old))return "A NEGOTIATION IS ALREADY OPEN";
+      if(!old->incoming && old->status==ML_OFFER_REJECTED && old->season==c->season &&
+          old->created/184u==c->day/184u)return "NEGOTIATION CLOSED UNTIL THE NEXT WINDOW";
+    }
   const uint32_t to=o ? o->to : c->settings.club;
   const MlClub *buyer=ml_find_club(c,to);
   if(!buyer || buyer->cash<fee)return "INSUFFICIENT TRANSFER BUDGET";
@@ -123,12 +128,31 @@ const char *ml_release(MasterLeague *c,uint32_t index) {
 }
 static void ml_offer_resolve(MasterLeague *c,MlOffer *o) {
   const MlPlayer *p=&c->players[o->player];
-  const uint32_t fee=ml_transfer_fee(c,p),wage=ml_wage_for(p);
+  uint32_t fee=ml_transfer_fee(c,p),wage=ml_wage_for(p);
   o->updated=c->day;
   if(p->club!=o->from){o->status=ML_OFFER_CANCELLED;return;}
+  /* The interest roll is stable for this player/club/window, not offer ID.
+   * Reloading or resubmitting cannot reroll a star's willingness to leave. */
+  int unwilling=0;
+  if(!o->incoming && c->options.transfer_difficulty!=1u) {
+    const uint32_t elite=p->overall>84u ? p->overall-84u : 0u;
+    const int step_down=(int)ml_strength(c,o->from)-(int)ml_strength(c,o->to);
+    const MlClub *seller=ml_find_club(c,o->from);
+    uint32_t starter=0u;
+    if(seller)for(uint32_t i=0;i<11u && i<seller->count;i++)starter|=seller->players[i]==o->player;
+    const uint32_t remaining=p->contract_end>c->season ? p->contract_end-c->season : 0u;
+    const uint32_t premium=elite*6u+(elite && starter ? 20u : 0u)+(elite && remaining>1u ? 15u : 0u);
+    fee=(uint32_t)((uint64_t)fee*(100u+premium)/100u);
+    wage=(uint32_t)((uint64_t)wage*(100u+elite*3u+(step_down>4 ? 15u : 0u))/100u);
+    uint32_t roll=c->seed^p->identity*2654435761u^o->to*97u^c->season*193u^(o->created/184u);
+    const uint32_t resistance=elite*3u+(elite && step_down>4 ? 18u : 0u)+
+        (c->options.transfer_difficulty==2u ? 15u : 0u);
+    unwilling=elite && ml_random(&roll)%100u<(resistance>80u ? 80u : resistance);
+  }
   int acceptable=o->incoming ? o->fee<=(uint64_t)fee*110u/100u : o->fee>=fee;
-  if(acceptable && o->wage>=wage)o->status=ML_OFFER_ACCEPTED;
-  else if(o->rounds>=3u || (!o->incoming && (uint64_t)o->fee*100u<(uint64_t)fee*60u) ||
+  if(unwilling)o->status=ML_OFFER_REJECTED;
+  else if(acceptable && o->wage>=wage)o->status=ML_OFFER_ACCEPTED;
+  else if(o->rounds>=3u || (!o->incoming && (uint64_t)o->fee*100u<(uint64_t)ml_transfer_fee(c,p)*60u) ||
           (o->incoming && o->fee>(uint64_t)fee*150u/100u))o->status=ML_OFFER_REJECTED;
   else {o->status=ML_OFFER_COUNTER;o->fee=fee;o->wage=wage;}
   char line[96];snprintf(line,sizeof(line),"%.47s: %s",p->name,o->status==ML_OFFER_ACCEPTED ? "terms accepted" :
@@ -171,8 +195,9 @@ static void ml_office_schedule(const MasterLeague *c,MlEvent *event) {
     if(o->status==ML_OFFER_WAITING && o->due>=c->day && o->due<=event->day)
       *event=(MlEvent){ML_EVENT_RESPONSE,o->due,o->id,0u,0u,0u};
   }
-  if(!c->office.job_checked && c->day<=183u && event->day>183u)
+  if(!c->world.version && !c->office.job_checked && c->day<=183u && event->day>183u)
     *event=(MlEvent){ML_EVENT_BOARD,183u,0u,0u,0u,0u};
+  ml_world_office_schedule(c,event);
   const MlClub *club=ml_find_club(c,c->settings.club);
   if(club && club->cash<0) {
     uint32_t due=c->office.negative_since ? c->office.negative_since-1u+14u : c->day;
@@ -201,6 +226,7 @@ static void ml_board_check(MasterLeague *c) {
     ml_notice(c,ML_NOTICE_DISMISSED,o->dismissed==1u ? "Contract terminated: six consecutive losses. Career over." :
       "Contract terminated: 14 days in negative balance. Career over.");return;
   }
+  if(c->world.version) {ml_world_board_check(c);return;}
   if(c->day>=183u && !o->job_checked) {
     o->job_checked=1u;
     if(ml_rank(c)<=c->target_rank)for(uint32_t i=0;i<c->league.team_count;i++) {
@@ -228,15 +254,21 @@ const char *ml_accept_job(MasterLeague *c) {
   }
   c->settings.club=team;c->league.human_teams[0]=team;
   if(c->cup_enabled)c->cup.human_teams[0]=team;
+  if(c->world.continental.team_count) {
+    CupTournament *cup=&c->world.continental;cup->human_count=0u;cup->human_teams[0]=team;
+    for(uint32_t i=0;i<cup_tournament_fixture_count(cup,0u);i++)
+      cup->human_count|=cup->fixtures[0][i].home==team || cup->fixtures[0][i].away==team;
+  }
   for(uint32_t i=0;i<c->office.offer_count;i++)if(ml_offer_live(&c->office.offers[i]))c->office.offers[i].status=ML_OFFER_CANCELLED;
   c->office.losses=c->office.negative_since=c->office.job_team=0u;
   memset(&c->current_plan,0,sizeof(c->current_plan));memset(c->presets,0,sizeof(c->presets));
+  c->wages_paid=c->match_income=c->prize_income=0;
   uint32_t stronger=0u;for(uint32_t i=0;i<c->league.team_count;i++)stronger+=ml_strength(c,c->league.standings[i].team)>ml_strength(c,team);
   c->target_rank=stronger+3u<c->league.team_count ? stronger+3u : c->league.team_count;
   c->transaction_sequence++;ml_notice(c,ML_NOTICE_JOB,"Welcome to your new club. Existing fixtures and results are preserved.");return "";
 }
 int ml_process_office_event(MasterLeague *c,const MlEvent *event) {
-  if(!event || event->kind<ML_EVENT_WINDOW || !ml_event_matches(c,event) || !ml_advance_date(c,event))return 0;
+  if(!event || event->kind<ML_EVENT_WINDOW || event->kind>ML_EVENT_BOARD || !ml_event_matches(c,event) || !ml_advance_date(c,event))return 0;
   if(event->kind==ML_EVENT_WINDOW) {
     c->office.milestone_mask|=1u<<event->index;
     ml_notice(c,ML_NOTICE_WINDOW,ml_event_label(c,event));
@@ -248,8 +280,8 @@ int ml_process_office_event(MasterLeague *c,const MlEvent *event) {
   ml_board_check(c);c->transaction_sequence++;return 1;
 }
 const char *ml_event_label(const MasterLeague *c,const MlEvent *event) {
-  (void)c;
   if(!event)return "NEXT EVENT";
+  if(event->kind>=ML_EVENT_CONTINENTAL)return ml_world_name(c,event->kind);
   if(event->kind==ML_EVENT_WINDOW)return event->index%3u==0u ? "TRANSFER WINDOW OPENS" : event->index%3u==1u ? "MID-WINDOW REVIEW" : "TRANSFER DEADLINE DAY";
   if(event->kind==ML_EVENT_RESPONSE)return "TRANSFER RESPONSE";
   if(event->kind==ML_EVENT_BOARD)return "PRESIDENT REVIEW";

@@ -9,6 +9,17 @@ CORE = ['master_league.c', 'master_league_save.c', 'gameplan_preset.c',
         'league_tournament.c', 'cup_tournament.c']
 
 class MasterLeagueTests(unittest.TestCase):
+    def test_world_career(self):
+        cc=shutil.which('gcc')
+        if not cc:
+            self.skipTest('Host C compiler unavailable')
+        with tempfile.TemporaryDirectory() as temp:
+            binary=Path(temp)/'world-tests.exe'
+            subprocess.run([cc,'-std=c11','-Wall','-Wextra','-Werror',
+                '-I',str(ROOT/'source'),'-I',str(ROOT/'tests'),str(ROOT/'tests/test_master_league_world.c'),
+                *[str(ROOT/'source'/name) for name in CORE],'-o',str(binary)],check=True)
+            subprocess.run([str(binary)],cwd=temp,check=True,timeout=60)
+
     def test_optional_local_paired_catalog(self):
         catalog=ROOT/'local-debug/master-league-v1/master_league_catalog_generated.inc'
         leagues=ROOT/'local-debug/fl26-league-curated-v3/fl26_league_catalog_generated.h'

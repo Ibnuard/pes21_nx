@@ -3,7 +3,7 @@
 enum { ML_DRAWER_NONE, ML_DRAWER_SETTING, ML_DRAWER_COUNTRY,
        ML_DRAWER_SQUAD, ML_DRAWER_CLUB, ML_DRAWER_TRANSACTION,
        ML_DRAWER_MARKET_LEAGUE,ML_DRAWER_MARKET_TEAM,ML_DRAWER_OFFER,
-       ML_DRAWER_OFFER_ACTIONS,ML_DRAWER_NOTICE,ML_DRAWER_JOB,ML_DRAWER_MY_PLAYER };
+       ML_DRAWER_OFFER_ACTIONS,ML_DRAWER_NOTICE,ML_DRAWER_JOB,ML_DRAWER_MY_PLAYER,ML_DRAWER_NATIONAL_JOB };
 enum { ML_SETTING_LEAGUE, ML_SETTING_CLUB, ML_SETTING_DIFFICULTY,
        ML_SETTING_TIME, ML_SETTING_TRANSFER, ML_SETTING_CURRENCY,
        ML_SETTING_SKIP_WINDOW, ML_SETTING_COUNT };
@@ -154,6 +154,7 @@ static void ml_calendar_move(int change,int month_step) {
   calendar_day=next<0 ? 0u : next>last ? (uint32_t)last : (uint32_t)next;
 }
 static int ml_review_pad(uint32_t pressed) {
+  if(ml_world_pad(pressed))return 1;
   if(page==ML_PAGE_CONFIRM && (pressed&(ML_LEFT|ML_RIGHT))) {
     focus=(pressed&ML_RIGHT) ? 1u : 0u;return 1;
   }
@@ -479,3 +480,4 @@ static void ml_review_view(MlView *v) {
 }
 
 #include "master_league_office_frontend.inc"
+#include "master_league_world_frontend.inc"

@@ -16,11 +16,16 @@ int main(void) {
     assert(ml_init(c,ml_catalog_content_id(),&settings,"Local Audit",1u,999u));
     assert(ml_catalog_import(c));
     assert(ml_start_season(c,entry->team_ids,entry->pool_count,NULL,0u));
+    ml_world_enable(c);
     assert(ml_valid(c));
     MlEvent event;uint32_t events=0u;
     while(ml_next_event(c,&event) && event.kind!=ML_EVENT_SEASON_END) {
-      assert(ml_simulate_event(c,&event));assert(ml_valid(c));
-      assert(++events<=62u);
+      if(ml_event_is_match(event.kind) && event.home && event.away) {
+        const uint32_t team=ml_event_manager_team(c,event.kind);
+        assert(ml_record_event(c,&event,event.home==team ? 3u : 0u,event.away==team ? 3u : 0u,NULL,0u,0));
+      }else assert(ml_simulate_event(c,&event));
+      if(c->world.national_count && !c->world.national_team)assert(!*ml_accept_national_job(c,0u));
+      assert(ml_valid(c));assert(++events<=100u);
     }
     assert(ml_next_season(c) && ml_valid(c));eligible++;
   }

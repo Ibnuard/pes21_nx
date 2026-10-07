@@ -67,7 +67,7 @@ static void office_ui_tests(void) {
   assert(ml_find_club(c,c->settings.club)->cash==renew_cash-ml_renew_fee(c,own_player,3u));
   office_go(0u,3u);assert(view().table_count==8u);press(R);assert(view().first==8u && view().table[0].rank==9u);
   press(Y);assert(view().empty[0] && !view().info[0][0]);
-  office_go(3u,2u);assert(view().bracket_count==7u);press(R);assert(view().bracket_round==1u);
+  office_go(3u,2u);assert(view().page==ML_PAGE_COMPETITIONS);press(A);assert(view().bracket_count==7u);press(R);assert(view().bracket_round==1u);
   office_go(2u,0u);assert(view().count==4u && !strcmp(view().rows[0].label,"MY TEAMS"));
   press(DOWN);press(A);assert(view().page==ML_PAGE_OFFERS && view().empty[0]);
   press(B);press(DOWN);press(DOWN);press(A);assert(view().page==ML_PAGE_MARKET_PLAYERS && view().rows[0].rating);
@@ -107,7 +107,9 @@ static void office_ui_tests(void) {
   assert(o->status==ML_OFFER_ACCEPTED && c->day>=1u && c->day<=3u);
   office_go(2u,0u);assert(view().rows[1].unread);press(DOWN);press(A);assert(view().page==ML_PAGE_OFFERS);
   assert(view().rows[0].unread);(void)view();assert(ml_offer_unread(c,0u)); /* mere projection is not reading */
+  assert(view().rows[0].badge);
   press(A);assert(!view().rows[0].unread && !ml_offer_unread(c,0u));
+  assert(view().rows[0].badge);
   assert(!strcmp(view().drawer.rows[0].label,"ACCEPT TERMS"));press(A);
   assert(o->status==ML_OFFER_COMPLETED && c->players[player].club==c->settings.club && ml_valid(c));
   office_go(2u,0u);press(A);assert(view().page==ML_PAGE_MY_TEAM && view().count==2u);
@@ -163,6 +165,53 @@ static void office_ui_tests(void) {
     press(B);assert(ml_find_club(c,c->settings.club)->cash==original_cash);
   }
   puts("office UI: market navigation, compact currency steps, replies, accept/reject and manager mail OK");
+}
+static void world_ui_tests(void) {
+  MasterLeague *c=(MasterLeague *)ml_frontend_career();MlEvent e;
+  while(!c->world.national_count) {
+    assert(ml_next_event(c,&e) && e.day<=76u);
+    if(ml_event_is_match(e.kind) && e.home && e.away)
+      assert(ml_record_event(c,&e,e.home==c->settings.club ? 3u : 0u,e.away==c->settings.club ? 3u : 0u,NULL,0u,0));
+    else assert(ml_simulate_event(c,&e));
+  }
+  const uint32_t club=c->settings.club,players=c->player_count;
+  office_go(2u,0u);press(DOWN);press(DOWN);press(A);press(A);
+  assert(!view().drawer.open && !view().status[0] && !strcmp(view().toast,"Transfer window closed"));
+  assert(strstr(view().caption,exhibition_team_catalog_name(club)) && view().annual_budget[0]);
+  office_go(2u,3u);press(DOWN);press(DOWN);press(A);assert(view().page==ML_PAGE_NATIONAL);
+  assert(view().count>=2u && view().rows[0].badge && view().rows[1].badge);
+  assert(view().rows[0].unread && view().rows[1].unread);
+  press(A);assert(view().drawer.modal==2 && view().drawer.badge);press(B);assert(!c->world.national_team);
+  assert(!view().rows[0].unread && view().rows[1].unread);
+  press(A);press(DOWN);press(A);assert(!c->world.national_team && ml_national_offer_status(c,0u)==ML_OFFER_REJECTED);
+  press(A);assert(!view().drawer.count);press(B);press(DOWN);
+  const uint32_t team=c->world.national_offers[1].team;
+  press(A);press(A);assert(c->world.national_team==team && view().count==5u && c->settings.club==club && c->player_count==players);
+  press(DOWN);press(DOWN);press(DOWN);press(DOWN);press(A);assert(view().page==ML_PAGE_NATIONAL_OFFERS);
+  assert(strstr(view().rows[0].detail,"DECLINED") && strstr(view().rows[1].detail,"ACCEPTED"));press(B);
+  press(DOWN);press(A);assert(view().page==ML_PAGE_QUALIFIERS && view().table_count==4u);
+  press(B);press(DOWN);press(DOWN);press(A);assert(view().page==ML_PAGE_CUP && view().bracket_count);
+  while(ml_next_event(c,&e) && !ml_event_is_national(e.kind)) {
+    if(ml_event_is_match(e.kind) && e.home && e.away)
+      assert(ml_record_event(c,&e,e.home==club ? 3u : 0u,e.away==club ? 3u : 0u,NULL,0u,0));
+    else assert(ml_simulate_event(c,&e));
+  }
+  assert(e.kind==ML_EVENT_FRIENDLY);
+  office_go(0u,0u);
+  assert(view().badge==exhibition_team_catalog_badge(team) && strstr(view().caption,exhibition_team_catalog_name(team)));
+  assert(!view().annual_budget[0] && !strstr(view().caption,"CLUB + COUNTRY"));
+  press(B);assert(view().page==ML_PAGE_HUB && view().badge==exhibition_team_catalog_badge(team) && !view().annual_budget[0]);
+  press(A);press(A);press(A);assert(ml_frontend_take_action()==ML_ACTION_MATCH);
+  uint32_t home,away;assert(ml_frontend_match_teams(&home,&away) && home==c->world.national_team);
+  assert(ml_frontend_player_allowed(home,0u)==-1 && ml_frontend_player_allowed(away,123u)==-1);
+  uint32_t ids[40],count;uint8_t shirts[40];assert(!ml_frontend_roster(home,ids,shirts,&count));
+  assert(!ml_frontend_match_is_cup());
+  const uint32_t old_day=c->day;
+  ml_frontend_result(2u,0u,NULL,0u);assert(c->day>old_day && c->settings.club==club);
+  const uint32_t new_day=c->day;ml_frontend_result(2u,0u,NULL,0u);assert(c->day==new_day);
+  assert(ml_frontend_restore() && view().page==ML_PAGE_ADVANCE);finish_advance();
+  assert(ml_valid(c));
+  puts("world UI: national appointment, native roster delegation, result isolation and toast OK");
 }
 int main(void) {
   ml_frontend_open();assert(view().page==ML_PAGE_LANDING);
@@ -337,6 +386,7 @@ int main(void) {
   for(int i=0;i<5;i++)press(R);
   assert(view().section==3u);
   office_ui_tests();
+  world_ui_tests();
   puts("career UI: profile, paged hub, feed, native context, save/continue OK");
   return 0;
 }

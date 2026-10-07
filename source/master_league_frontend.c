@@ -36,6 +36,10 @@ static MlView confirm_background;
 static uint32_t plan_editor;
 static uint32_t shootout_winner;
 static uint32_t table_scorers;
+static uint32_t cup_kind=ML_EVENT_CUP;
+static const CupTournament *ml_view_cup(void) {return ml_event_cup(&career,cup_kind);}
+static int ml_world_pad(uint32_t pressed);
+static void ml_world_view(MlView *v);
 static uint32_t hub_section, feed_index, navigation_serial;
 static int slide_direction;
 static MlEvent pending;
@@ -73,6 +77,7 @@ static const char *ml_competition_name(void) {
   return "MASTER LEAGUE";
 }
 static const char *ml_cup_name(void) {
+  if(!career.settings.cup_id)return "DOMESTIC CUP";
   for (uint32_t i=0; i<FL26_CUP_CATALOG_COUNT; i++)
     if (fl26_cup_catalog[i].competition_id==career.settings.cup_id)
       return fl26_cup_catalog[i].name;
@@ -133,7 +138,7 @@ static uint32_t ml_count(void) {
     case ML_PAGE_CONFIRM: return 2u;
     case ML_PAGE_NEWS: return 4u;
     case ML_PAGE_CALENDAR: return career.league.matchday_count;
-    case ML_PAGE_CUP: return career.cup_enabled ? career.cup.round_count : 0u;
+    case ML_PAGE_CUP: return ml_view_cup()->round_count;
     default: return 1u;
   }
 }
@@ -205,6 +210,11 @@ static void ml_create(void) {
         cup_teams[cup_count++]=cup->team_ids[t];
     setup.cup_id=cup->competition_id; break;
   }
+  if(!cup_count) {
+    /* A generic domestic career cup for a league without a curated named cup.
+     * Only its verified playable clubs participate; no invented native teams. */
+    for(uint32_t i=0;i<entry->pool_count && cup_count<CUP_MAX_TEAMS;i++)cup_teams[cup_count++]=entry->team_ids[i];
+  }
   const uint32_t seed=0x4d4c2026u ^ (setup.club*2654435761u);
   if (!ml_init(&career,ml_catalog_content_id(),&setup,manager,nationality,seed) ||
       !ml_catalog_import(&career) ||
@@ -213,6 +223,7 @@ static void ml_create(void) {
     session_ready=0u; ml_message("CAREER DATA VALIDATION FAILED - ORIGINAL SAVES UNCHANGED"); return;
   }
   career.options=setup_options;
+  ml_world_enable(&career);
   session_ready=1u; saving=1u; active_slot=ML_INVALID_INDEX;
   ml_scan_saves(); ml_page(ML_PAGE_SLOTS);
 }
@@ -241,7 +252,7 @@ static void ml_hub_open(uint32_t item) {
     {ML_PAGE_NEXT, ML_PAGE_NEWS, ML_PAGE_CALENDAR, ML_PAGE_SLOTS},
     {ML_PAGE_SQUAD, ML_PAGE_CONTRACTS, ML_PAGE_MARKET_CLUBS, ML_PAGE_NEWS},
     {ML_PAGE_MARKET_CLUBS, ML_PAGE_CONTRACTS, ML_PAGE_FINANCES, ML_PAGE_SETTINGS},
-    {ML_PAGE_TABLE, ML_PAGE_TABLE, ML_PAGE_CUP, ML_PAGE_CALENDAR}
+    {ML_PAGE_TABLE, ML_PAGE_TABLE, ML_PAGE_COMPETITIONS, ML_PAGE_CALENDAR}
   };
   const MlPage next=pages[hub_section][item];
   if (next==ML_PAGE_CUP && !career.cup_enabled) return;
@@ -291,6 +302,7 @@ static void ml_confirm(void) {
         if (existing) { fclose(existing); overwrite_slot=focus; ml_open_confirmation(4u); }
         else ml_save_selected(focus);
       } else if (slot_valid[focus] && ml_save_read(focus,ml_catalog_content_id(),&career)) {
+        ml_world_enable(&career); /* append-only in-memory upgrade; save only on explicit progress */
         session_ready=1u; active_slot=focus; hub_section=0u; ml_page(ML_PAGE_HUB);
       } else ml_message("EMPTY, DAMAGED OR DIFFERENT ROSTER VERSION - NOT OVERWRITTEN");
       break;
@@ -352,7 +364,7 @@ static void ml_confirm(void) {
          * return from the native result screen. */
         match_from_day=career.day;result_saved=0u;
         match_active=1u;plan_editor=0u;result_received=shootout_winner=0u;
-        match_swapped=pending.away==career.settings.club;action=ML_ACTION_MATCH;
+        match_swapped=pending.away==ml_event_manager_team(&career,pending.kind);action=ML_ACTION_MATCH;
         ml_page(ML_PAGE_HUB);break;
       }
       if (confirm_kind==6u) {
@@ -459,7 +471,7 @@ void ml_frontend_pad(uint32_t pressed) {
 int ml_frontend_match_active(void) { return match_active!=0u; }
 int ml_frontend_plan_editor(void) { return match_active && plan_editor; }
 void ml_frontend_plan_error(void) { ml_message("SQUAD EDITOR COULD NOT OPEN - PLEASE RETRY"); }
-int ml_frontend_match_is_cup(void) { return match_active && !plan_editor && pending.kind==ML_EVENT_CUP; }
+int ml_frontend_match_is_cup(void) { return match_active && !plan_editor && ml_event_is_knockout(pending.kind); }
 int ml_frontend_match_teams(uint32_t *home,uint32_t *away) {
   if (!match_active || !pending.home || !pending.away) return 0;
   if (home) *home=match_swapped ? pending.away : pending.home;
@@ -511,6 +523,7 @@ int ml_frontend_roster(uint32_t team,uint32_t players[40],uint8_t shirts[40],uin
 }
 int ml_frontend_player_allowed(uint32_t team,uint32_t native) {
   if (!match_active) return -1;
+  if(ml_event_is_national(pending.kind) && (team==pending.home || team==pending.away))return -1;
   const MlPlayer *p=ml_find_native(&career,native);
   return p && p->club==team;
 }
@@ -546,7 +559,7 @@ static void ml_dashboard_view(MlView *v) {
   ml_money(v->balance,sizeof(v->balance),club ? club->cash : 0);
   snprintf(v->season_summary,sizeof(v->season_summary),"SEASON %u  /  DAY %u",career.season,career.day+1u);
   MlEvent next={0};ml_next_event(&career,&next);
-  snprintf(v->next.competition,sizeof(v->next.competition),"%s",next.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
+  snprintf(v->next.competition,sizeof(v->next.competition),"%s",next.kind>=ML_EVENT_CONTINENTAL ? ml_world_name(&career,next.kind) : next.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
   snprintf(v->next.day,sizeof(v->next.day),"DAY %u",next.day+1u);
   if(next.home && next.away) {
     snprintf(v->next.home,sizeof(v->next.home),"%s",exhibition_team_catalog_name(next.home));
@@ -623,7 +636,7 @@ static void ml_base_view(MlView *v) {
       {"NEXT MATCH","CLUB FEED","SEASON CALENDAR","SAVE CAREER"},
       {"SQUAD","CONTRACTS","TRANSFER MARKET","CLUB FEED"},
       {"TRANSFER MARKET","CONTRACTS","FINANCES","CAREER SETTINGS"},
-      {"LEAGUE TABLE","TOP SCORER","DOMESTIC CUP","SEASON CALENDAR"}
+      {"LEAGUE TABLE","TOP SCORER","CUP COMPETITIONS","SEASON CALENDAR"}
     };
     static const char *details[4][4]={
       {"PLAY OR SIMULATE THE NEXT EVENT","RESULTS, CLUB NEWS AND SEASON STORIES","LEAGUE MATCHDAYS AND RESULTS","THREE INDEPENDENT CAREER SLOTS"},
@@ -638,13 +651,13 @@ static void ml_base_view(MlView *v) {
     for (uint32_t i=0;i<4u;i++) {
       snprintf(v->rows[i].label,64,"%s",labels[hub_section][i]);
       snprintf(v->rows[i].detail,96,"%s",details[hub_section][i]);
-      v->rows[i].enabled=!(hub_section==3u && i==2u && !career.cup_enabled);
+      v->rows[i].enabled=1;
       if (!v->rows[i].enabled) snprintf(v->rows[i].detail,96,"NO SUPPORTED DOMESTIC CUP IN THIS LEAGUE");
     }
     MlEvent next={0}; ml_next_event(&career,&next);
     memset(v->info,0,sizeof(v->info));
     snprintf(v->info[0],96,"%s",next.kind==ML_EVENT_SEASON_END ? "SEASON REVIEW" :
-             next.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
+             next.kind>=ML_EVENT_CONTINENTAL ? ml_world_name(&career,next.kind) : next.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
     snprintf(v->info[1],96,"SEASON DAY %u",next.day+1u);
     snprintf(v->info[2],96,"%s",next.home ? exhibition_team_catalog_name(next.home) : "NO CLUB FIXTURE");
     snprintf(v->info[3],96,"%s",next.away ? "VS" : "ADVANCE THE CALENDAR");
@@ -922,7 +935,7 @@ static void ml_base_view(MlView *v) {
       case ML_PAGE_NEXT:
         if (pending.kind==ML_EVENT_SEASON_END) snprintf(row->label,64,"%s",index ? "BACK" : "START NEXT SEASON");
         else { snprintf(row->label,64,"%s",index ? "SIMULATE" : "PLAY MATCH"); row->enabled=index || (pending.home && pending.away); }
-        snprintf(v->left_title,64,"%s",pending.kind==ML_EVENT_SEASON_END ? "SEASON COMPLETE" : pending.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
+        snprintf(v->left_title,64,"%s",pending.kind==ML_EVENT_SEASON_END ? "SEASON COMPLETE" : pending.kind>=ML_EVENT_CONTINENTAL ? ml_world_name(&career,pending.kind) : pending.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
         snprintf(row->detail,96,"%s",index ? "ADVANCE THE WHOLE MATCH EVENT" : "YOUR GAME PLAN IS AVAILABLE BEFORE KICKOFF");
         v->helper_count=2u; break;
       case ML_PAGE_TABLE:
@@ -969,4 +982,5 @@ void ml_frontend_view(MlView *v) {
   }
   ml_base_view(v);
   ml_review_view(v);
+  ml_world_view(v);
 }

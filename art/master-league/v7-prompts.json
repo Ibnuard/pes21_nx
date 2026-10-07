@@ -1,0 +1,7 @@
+{
+  "mode": "builtin-generation",
+  "prompt": "Generate a production-ready transparent PNG sprite atlas for a football career management game's pearl-white and deep navy UI. Square 1024x1024 canvas, precisely four equal 512x512 cells in a 2 by 2 grid, no visible grid lines. Each icon wholly centered inside its own cell with at least 80px transparent padding on every side, no pixels or shadows crossing cell boundaries. Top left: original silver two-handled football trophy with restrained electric-blue ribbons. Top right: deep navy and cyan globe with a small football, representing international management. Bottom left: navy manager briefcase with a small cyan shield and subtle gold clasp, representing club job offers. Bottom right: silver laurel and small crimson star, representing season history. Style: refined crisp semi-dimensional game UI emblem, strong navy outlines, pearl silver, small cyan and gold details, good recognition at 48 pixels, not cartoony. Truly transparent alpha background, no checkerboard, no backdrop, no floor, no text, no letters, no labels, no logos, no official club or competition emblems. Four separate isolated sprites, not a UI screenshot. Save project-bound output as art/master-league/career-emblems-v7.png.",
+  "source": "exec-acce1801-91ae-486f-b36d-f7ae985a2842.png",
+  "output": "art/master-league/career-emblems-v7.png",
+  "runtime": "data/master_league_emblems_v7.bin"
+}

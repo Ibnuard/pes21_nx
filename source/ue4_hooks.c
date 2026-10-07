@@ -4449,8 +4449,9 @@ static uint32_t exhibition_roster_effective_player_count(
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
-  if (ml_frontend_match_active()) {
-    /* Stable per-club storage: a HOME lookup cannot invalidate AWAY's
+  if (ml_frontend_match_active() && ml_frontend_player_allowed(team_id,0u)>=0) {
+    /* National fixtures use the paired native national assignments below.
+     * Stable per-club storage: a HOME lookup cannot invalidate AWAY's
      * pointer. Only the match imports this overlay; base PESDB stays intact. */
     static ExhibitionMasterRoster career_rosters[ML_MAX_CLUBS];
     static uint32_t career_players[ML_MAX_CLUBS][ML_SQUAD_SIZE];
@@ -11644,6 +11645,7 @@ static void main_menu_activate_league_fixture(void) {
     return;
   }
   master_league_plan_restore_pending = ml_frontend_match_active() &&
+      home == ml_frontend_career()->settings.club &&
       ml_frontend_career()->current_plan.player_count != 0u;
   __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);

@@ -63,6 +63,21 @@ typedef struct {
   MlNotice notices[ML_MAX_MESSAGES];
 } MlOfficeState;
 
+/* v5 extension. National assignments reference the paired native national
+ * rosters; they never duplicate canonical club players or change ownership. */
+#define ML_MAX_NATIONAL_OFFERS 4u
+typedef struct { uint32_t team, expiry, status, seen; } MlNationalOffer;
+typedef struct {
+  uint32_t version, continental_id, job_checks;
+  CupTournament continental;
+  uint32_t national_team, national_count, national_checked;
+  MlNationalOffer national_offers[ML_MAX_NATIONAL_OFFERS];
+  uint32_t national_region, friendly_mask, finals_started;
+  LeagueFixture friendlies[2];
+  LeagueTournament qualifiers;
+  CupTournament regional, world_cup;
+} MlWorldState;
+
 typedef struct {
   uint32_t seed, season, day, transaction_sequence;
   uint32_t club_count, player_count, target_rank, last_rank, seasons_completed;
@@ -82,10 +97,13 @@ typedef struct {
   _Alignas(8) MlOfficeState office;
   /* v4 append-only read receipts, parallel to office.offers. Zero = unseen. */
   _Alignas(8) uint32_t offer_seen[ML_MAX_OFFERS];
+  _Alignas(8) MlWorldState world;
 } MasterLeague;
 
 typedef enum { ML_EVENT_LEAGUE = 1, ML_EVENT_CUP, ML_EVENT_SEASON_END,
-  ML_EVENT_WINDOW, ML_EVENT_RESPONSE, ML_EVENT_BOARD } MlEventKind;
+  ML_EVENT_WINDOW, ML_EVENT_RESPONSE, ML_EVENT_BOARD,
+  ML_EVENT_CONTINENTAL, ML_EVENT_FRIENDLY, ML_EVENT_QUALIFIER,
+  ML_EVENT_REGIONAL, ML_EVENT_WORLD_CUP } MlEventKind;
 typedef struct {
   uint32_t kind, day, index, round, home, away;
 } MlEvent;
@@ -117,6 +135,19 @@ int ml_process_office_event(MasterLeague *c, const MlEvent *event);
 const char *ml_event_label(const MasterLeague *c, const MlEvent *event);
 uint32_t ml_calendar_transfer(const MasterLeague *c, uint32_t day);
 uint32_t ml_weak_position(const MasterLeague *c);
+int ml_event_is_match(uint32_t kind);
+int ml_event_is_knockout(uint32_t kind);
+int ml_event_is_national(uint32_t kind);
+uint32_t ml_event_manager_team(const MasterLeague *c, uint32_t kind);
+void ml_world_enable(MasterLeague *c);
+uint32_t ml_national_offer_status(const MasterLeague *c, uint32_t index);
+int ml_national_offer_unread(const MasterLeague *c, uint32_t index);
+void ml_national_offer_mark_read(MasterLeague *c, uint32_t index);
+const char *ml_accept_national_job(MasterLeague *c, uint32_t index);
+const char *ml_reject_national_job(MasterLeague *c, uint32_t index);
+const char *ml_world_name(const MasterLeague *c, uint32_t kind);
+uint32_t ml_world_day(const MasterLeague *c, uint32_t kind, uint32_t index);
+const CupTournament *ml_event_cup(const MasterLeague *c, uint32_t kind);
 /* Returns an explanatory message; empty means success. No partial writes. */
 const char *ml_transfer(MasterLeague *career, uint32_t player_index,
                         uint32_t destination, uint32_t years);

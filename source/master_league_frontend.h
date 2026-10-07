@@ -10,14 +10,15 @@ typedef enum {
   ML_PAGE_FINANCES, ML_PAGE_TABLE, ML_PAGE_NEXT, ML_PAGE_CONFIRM,
   ML_PAGE_NEWS, ML_PAGE_CALENDAR, ML_PAGE_CUP, ML_PAGE_OFFERS,
   ML_PAGE_MANAGER_OFFICE, ML_PAGE_MESSAGES, ML_PAGE_JOBS, ML_PAGE_ADVANCE,
-  ML_PAGE_MY_TEAM, ML_PAGE_MY_PLAYERS
+  ML_PAGE_MY_TEAM, ML_PAGE_MY_PLAYERS, ML_PAGE_COMPETITIONS,
+  ML_PAGE_NATIONAL, ML_PAGE_QUALIFIERS, ML_PAGE_INTERNATIONAL_SCHEDULE, ML_PAGE_NATIONAL_OFFERS
 } MlPage;
 
 typedef struct {
   char label[64], detail[96], value[48];
   uint32_t badge, portrait, league_logo; /* catalog index + 1, zero means none */
   int enabled;
-  uint32_t rating, role, adjustable, unread;
+  uint32_t rating, role, adjustable, unread, emblem;
 } MlViewRow;
 /* Small, read-only dashboard projections. Never substitute these display rows
  * for the canonical fixture/roster state used by the match adapter. */

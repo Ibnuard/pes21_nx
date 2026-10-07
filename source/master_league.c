@@ -9,6 +9,12 @@ static void ml_board_check(MasterLeague *c);
 static void ml_board_result(MasterLeague *c, uint32_t home, uint32_t away,
                             uint32_t hg, uint32_t ag);
 static int ml_office_valid(const MasterLeague *c);
+static void ml_world_schedule(const MasterLeague *c,MlEvent *event);
+static int ml_world_record(MasterLeague *c,const MlEvent *event,uint32_t hg,uint32_t ag,int simulated,uint32_t winner);
+static void ml_world_start(MasterLeague *c);
+static int ml_world_valid(const MasterLeague *c);
+static void ml_world_office_schedule(const MasterLeague *c,MlEvent *event);
+static void ml_world_board_check(MasterLeague *c);
 
 static uint32_t ml_random(uint32_t *seed) {
   uint32_t x = *seed ? *seed : 1u;
@@ -177,6 +183,7 @@ int ml_start_season(MasterLeague *c, const uint32_t *teams, uint32_t count,
   for (uint32_t i = 0; i < count; i++)
     stronger += ml_strength(c, teams[i]) > ml_strength(c, c->settings.club);
   c->target_rank = stronger + 3u < count ? stronger + 3u : count;
+  if(c->world.version)ml_world_start(c);
   return 1;
 }
 
@@ -340,6 +347,7 @@ int ml_next_event(const MasterLeague *c, MlEvent *event) {
       event->index = index; event->home = f->home; event->away = f->away;
     }
   }
+  ml_world_schedule(c,event);
   ml_office_schedule(c,event);
   return 1;
 }
@@ -416,6 +424,8 @@ uint32_t ml_rank(const MasterLeague *c) {
 int ml_record_event_decided(MasterLeague *c, const MlEvent *event,
                      uint32_t hg, uint32_t ag, const LeagueScorer *scorers,
                      uint32_t scorer_count, int simulated, uint32_t shootout_winner) {
+  if(event && event->kind>=ML_EVENT_CONTINENTAL)
+    return ml_world_record(c,event,hg,ag,simulated,shootout_winner);
   if (!ml_event_matches(c, event) || (event->kind != ML_EVENT_LEAGUE && event->kind != ML_EVENT_CUP) ||
       hg > 99u || ag > 99u || scorer_count > 80u ||
       (scorer_count && !scorers)) return 0;
@@ -497,7 +507,7 @@ int ml_record_event(MasterLeague *c, const MlEvent *event,
   return ml_record_event_decided(c,event,hg,ag,scorers,scorer_count,simulated,0u);
 }
 int ml_simulate_event(MasterLeague *c, const MlEvent *event) {
-  if(event && event->kind>=ML_EVENT_WINDOW)return ml_process_office_event(c,event);
+  if(event && !ml_event_is_match(event->kind))return ml_process_office_event(c,event);
   return ml_record_event(c, event, 0u, 0u, NULL, 0u, 1);
 }
 
@@ -709,8 +719,10 @@ int ml_valid(const MasterLeague *c) {
   }
   if(valid && c->current_plan.player_count && !ml_plan_compatible(c,&c->current_plan))valid=0;
   if(valid && !ml_office_valid(c))valid=0;
+  if(valid && !ml_world_valid(c))valid=0;
   free(seen); free(ids);
   return valid;
 }
 
 #include "master_league_office.inc"
+#include "master_league_world.inc"

@@ -50,6 +50,7 @@ static uint32_t ml_offer_action_count(const MlOffer *o) {
   return 0u;
 }
 static void ml_offer_open(uint32_t index,uint32_t id) {
+  if(!ml_window_open(&career)){ml_toast("Transfer window closed");return;}
   if(career.office.dismissed){ml_message("MANAGER DISMISSED");return;}
   if(!id && career.players[index].club==career.settings.club){ml_message("REVIEW BUYER OFFERS IN MY TEAMS");return;}
   current_offer=id;transaction_player=index;years=3u;
@@ -174,7 +175,7 @@ static int ml_office_pad(uint32_t pressed) {
   }
   if(page==ML_PAGE_OFFERS || page==ML_PAGE_MANAGER_OFFICE || page==ML_PAGE_MESSAGES || page==ML_PAGE_JOBS) {
     if(pressed&ML_B){ml_page(page==ML_PAGE_OFFERS ? (offers_incoming ? ML_PAGE_MY_TEAM : ML_PAGE_MARKET_CLUBS) : page==ML_PAGE_MANAGER_OFFICE ? ML_PAGE_HUB : ML_PAGE_MANAGER_OFFICE);return 1;}
-    const uint32_t count=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 2u :
+    const uint32_t count=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 3u :
       page==ML_PAGE_MESSAGES ? career.office.notice_count : career.office.job_team && career.day<=career.office.job_expiry ? 1u : 0u;
     ml_scroll(pressed,count,&focus,pressed&(ML_L|ML_R) ? 5u : 1u);
     if((pressed&ML_A) && count) {
@@ -183,12 +184,12 @@ static int ml_office_pad(uint32_t pressed) {
         current_offer=career.office.offers[index].id;ml_drawer_open(ML_DRAWER_OFFER_ACTIONS,0u);
         if(ml_offer_unread(&career,index)){ml_offer_mark_read(&career,index);ml_autosave();}
       }
-      else if(page==ML_PAGE_MANAGER_OFFICE)ml_page(focus ? ML_PAGE_MESSAGES : ML_PAGE_JOBS);
+      else if(page==ML_PAGE_MANAGER_OFFICE)ml_page(focus==2u ? ML_PAGE_NATIONAL : focus ? ML_PAGE_MESSAGES : ML_PAGE_JOBS);
       else if(page==ML_PAGE_MESSAGES)ml_drawer_open(ML_DRAWER_NOTICE,0u);
       else ml_drawer_open(ML_DRAWER_JOB,0u);
     }return 1;
   }
-  if(page==ML_PAGE_NEXT && (career.office.dismissed || pending.kind>=ML_EVENT_WINDOW)) {
+  if(page==ML_PAGE_NEXT && (career.office.dismissed || (pending.kind>=ML_EVENT_WINDOW && !ml_event_is_match(pending.kind)))) {
     if(pressed&ML_B){ml_page(ML_PAGE_HUB);return 1;}
     if((pressed&ML_A) && !career.office.dismissed) {
       const uint32_t from=career.day;
@@ -204,10 +205,11 @@ static int ml_office_pad(uint32_t pressed) {
     ml_scroll(pressed,career.league.team_count,&focus,pressed&(ML_L|ML_R) ? 8u : 1u);return 1;
   }
   if(page==ML_PAGE_CUP) {
-    if(pressed&ML_B){ml_page(ML_PAGE_HUB);return 1;}
+    const CupTournament *cup=ml_view_cup();
+    if(pressed&ML_B){ml_page(ml_event_is_national(cup_kind) ? ML_PAGE_NATIONAL : ML_PAGE_COMPETITIONS);return 1;}
     if((pressed&(ML_LEFT|ML_L)) && focus){focus--;cup_page=0u;}
-    if((pressed&(ML_RIGHT|ML_R)) && focus+1u<career.cup.round_count){focus++;cup_page=0u;}
-    const uint32_t count=cup_tournament_fixture_count(&career.cup,focus),pages=(count+3u)/4u;
+    if((pressed&(ML_RIGHT|ML_R)) && focus+1u<cup->round_count){focus++;cup_page=0u;}
+    const uint32_t count=cup_tournament_fixture_count(cup,focus),pages=(count+3u)/4u;
     if((pressed&ML_UP) && cup_page)cup_page--;
     if((pressed&ML_DOWN) && cup_page+1u<pages)cup_page++;
     return 1;
@@ -277,7 +279,11 @@ static void ml_office_drawer(MlView *v) {
       snprintf(d->body,sizeof(d->body),"%s",n->text);
     }else {
       snprintf(d->body,sizeof(d->body),"Join %s? Your current club and its budgets stay behind. Fixtures and results remain unchanged.",exhibition_team_catalog_name(career.office.job_team));
-      d->confirm=1;d->confirm_selected=1;snprintf(d->confirm_label,32,"ACCEPT JOB");
+      d->modal=2;d->confirm=2;d->count=d->total=1u;d->rows[0].enabled=1;
+      d->badge=exhibition_team_catalog_badge(career.office.job_team);
+      snprintf(d->subtitle,96,"%s",exhibition_team_catalog_name(career.office.job_team));
+      snprintf(d->detail,96,"FRESH SQUAD, BUDGET AND BOARD TARGET");
+      snprintf(d->rows[0].label,64,"ACCEPT JOB");
     }
   }
   v->helper_count=2u;v->helper_key[0]="A";v->helper_key[1]="B";v->helper_label[0]="CONFIRM";v->helper_label[1]="CLOSE";
@@ -290,7 +296,7 @@ static void ml_office_drawer(MlView *v) {
   }
 }
 static const char *ml_round_title(uint32_t r) {
-  const uint32_t remaining=career.cup.round_count-r;
+  const uint32_t remaining=ml_view_cup()->round_count-r;
   return remaining==1u ? "FINAL" : remaining==2u ? "SEMI FINAL" : remaining==3u ? "QUARTER FINAL" : remaining==4u ? "ROUND OF 16" : "ROUND OF 32";
 }
 static void ml_office_view(MlView *v) {
@@ -323,7 +329,7 @@ static void ml_office_view(MlView *v) {
   }
   if(page==ML_PAGE_HUB && hub_section==0u) {
     MlEvent event={0};ml_next_event(&career,&event);
-    if(event.kind>=ML_EVENT_WINDOW) {
+    if(event.kind>=ML_EVENT_WINDOW && !ml_event_is_match(event.kind)) {
       snprintf(v->rows[0].label,64,"NEXT EVENT");snprintf(v->rows[0].detail,96,"%s",ml_event_label(&career,&event));
     }
     if(career.office.dismissed){snprintf(v->rows[0].label,64,"CAREER OVER");snprintf(v->rows[0].detail,96,"Your manager contract has been terminated");}
@@ -339,26 +345,29 @@ static void ml_office_view(MlView *v) {
     v->helper_count=4u;v->helper_key[0]="L";v->helper_label[0]="PREV PAGE";
     v->helper_key[3]="R";v->helper_label[3]="NEXT PAGE";
   }else if(page==ML_PAGE_TABLE && table_scorers && !v->count)snprintf(v->empty,sizeof(v->empty),"No Matches Played Yet");
-  if(page==ML_PAGE_CUP && career.cup_enabled) {
+  if(page==ML_PAGE_CUP && ml_view_cup()->team_count) {
+    const CupTournament *cup=ml_view_cup();
+    snprintf(v->title,64,"%s",cup_kind==ML_EVENT_CUP ? ml_cup_name() : ml_world_name(&career,cup_kind));
     v->count=0u;v->bracket_round=focus;v->bracket_page=cup_page;
-    v->bracket_pages=(cup_tournament_fixture_count(&career.cup,focus)+3u)/4u;
+    v->bracket_pages=(cup_tournament_fixture_count(cup,focus)+3u)/4u;
     const uint32_t page_index=cup_page<v->bracket_pages ? cup_page : 0u;
-    for(uint32_t col=0;col<3u && focus+col<career.cup.round_count;col++) {
+    for(uint32_t col=0;col<3u && focus+col<cup->round_count;col++) {
       snprintf(v->bracket_titles[col],32,"%s",ml_round_title(focus+col));
       uint32_t start=(page_index*4u)>>col,limit=4u>>col;
-      for(uint32_t i=0;i<limit && start+i<cup_tournament_fixture_count(&career.cup,focus+col);i++) {
-        const CupFixture *f=cup_tournament_fixture(&career.cup,focus+col,start+i);
+      for(uint32_t i=0;i<limit && start+i<cup_tournament_fixture_count(cup,focus+col);i++) {
+        const CupFixture *f=cup_tournament_fixture(cup,focus+col,start+i);
         MlBracketMatch *m=&v->bracket[v->bracket_count++];m->round=col;m->index=i;
         snprintf(m->home,64,"%s",f->home ? exhibition_team_catalog_name(f->home) : "TO BE DECIDED");
         snprintf(m->away,64,"%s",f->away ? exhibition_team_catalog_name(f->away) : (f->home && f->complete ? "BYE" : "TO BE DECIDED"));
         m->home_badge=exhibition_team_catalog_badge(f->home);m->away_badge=exhibition_team_catalog_badge(f->away);
         m->hg=f->home_goals;m->ag=f->away_goals;m->complete=f->complete;
-        m->own=f->home==career.settings.club || f->away==career.settings.club;
+        const uint32_t team=ml_event_manager_team(&career,cup_kind);
+        m->own=f->home==team || f->away==team;
       }
     }
     v->helper_count=3u;v->helper_key[0]="L";v->helper_label[0]="PREV ROUND";v->helper_key[2]="R";v->helper_label[2]="NEXT ROUND";
   }
-  if(page==ML_PAGE_NEXT && (pending.kind>=ML_EVENT_WINDOW || career.office.dismissed)) {
+  if(page==ML_PAGE_NEXT && ((pending.kind>=ML_EVENT_WINDOW && !ml_event_is_match(pending.kind)) || career.office.dismissed)) {
     memset(v->rows,0,sizeof(v->rows));v->count=career.office.dismissed ? 0u : 1u;v->total=v->count;v->first=v->selected=0u;
     snprintf(v->title,64,"%s",career.office.dismissed ? "CAREER OVER" : "NEXT EVENT");
     snprintf(v->left_title,64,"%s",career.office.dismissed ? "MANAGER CONTRACT" : ml_event_label(&career,&pending));
@@ -388,20 +397,22 @@ static void ml_office_view(MlView *v) {
     snprintf(v->title,64,"%s",page==ML_PAGE_OFFERS ? (offers_incoming ? "CLUB OFFERS" : "TRANSFER RESPONSE") :
       page==ML_PAGE_MANAGER_OFFICE ? "MANAGER" : page==ML_PAGE_MESSAGES ? "PRESIDENT MESSAGES" : "JOB OFFERS");
     snprintf(v->left_title,64,"%s",v->title);
-    v->total=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 2u : page==ML_PAGE_MESSAGES ? career.office.notice_count :
+    v->total=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 3u : page==ML_PAGE_MESSAGES ? career.office.notice_count :
       career.office.job_team && career.day<=career.office.job_expiry && !career.office.dismissed ? 1u : 0u;
     for(uint32_t i=0;i<5u && v->first+i<v->total;i++) {
       const uint32_t index=v->first+i;MlViewRow *r=&v->rows[v->count++];r->enabled=1;
       if(page==ML_PAGE_OFFERS) {
         const MlOffer *o=&career.office.offers[offer_indices[index]];
         r->unread=ml_offer_unread(&career,offer_indices[index]);
+        r->badge=exhibition_team_catalog_badge(offers_incoming ? o->to : o->from);
         snprintf(r->label,64,"%s",career.players[o->player].name);
         snprintf(r->detail,96,"%s / DAY %u / %.42s",ml_offer_status(o->status),o->status==ML_OFFER_WAITING ? o->due+1u : o->updated+1u,
           exhibition_team_catalog_name(offers_incoming ? o->to : o->from));
         ml_money(r->value,48,o->fee);r->portrait=career.players[o->player].portrait_id;
       }else if(page==ML_PAGE_MANAGER_OFFICE) {
-        snprintf(r->label,64,"%s",index ? "PRESIDENT MESSAGES" : "JOB OFFERS");
-        snprintf(r->detail,96,"%s",index ? "Board feedback, warnings and club notifications" : "Review opportunities within your league");
+        snprintf(r->label,64,"%s",index==2u ? "NATIONAL TEAM" : index ? "PRESIDENT MESSAGES" : "JOB OFFERS");
+        snprintf(r->detail,96,"%s",index==2u ? "International appointment alongside your club" : index ? "Board feedback, warnings and club notifications" : "Review opportunities within your league");
+        r->emblem=index==2u ? 2u : index ? 4u : 3u;
       }else if(page==ML_PAGE_MESSAGES) {
         const MlNotice *n=&career.office.notices[career.office.notice_count-1u-index];
         snprintf(r->label,64,"SEASON %u / DAY %u",n->season,n->day+1u);snprintf(r->detail,96,"%s",n->text);

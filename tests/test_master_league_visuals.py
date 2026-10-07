@@ -186,5 +186,47 @@ class MasterLeagueVisualTests(unittest.TestCase):
                     with self.subTest(page=name,first=a,second=b):
                         self.assertFalse(overlap_x>1.5 and overlap_y>1.5)
 
+    def test_offer_crests_and_fee_positions_survive_reading(self):
+        positions=[]
+        for name in ('club-offers-top','club-offers-read'):
+            draws=self.frames[name]
+            self.assertGreaterEqual(sum(d['kind']==2 and d['texture']==2 for d in draws),3)
+            fees=[d for d in draws if d['kind']==1 and d['layer']==0 and d['vertices'] and
+                  min(d['vertices'][0::4])>0 and .29<(1-d['vertices'][1])*.5<.8]
+            self.assertEqual(len(fees),2)
+            xs=[max(d['vertices'][0::4]) for d in fees]
+            self.assertAlmostEqual(xs[0],xs[1],delta=.0001)
+            self.assertGreater((xs[0]+1)*640,1060) # right edge, not a left-aligned value column
+            positions.append(xs)
+            dots=[d for d in draws if d['kind']==0 and abs(d['color'][0]-.91)<.001 and abs(d['color'][1]-.08)<.001]
+            for dot in dots:
+                dot_top=(1-dot['vertices'][1])*360
+                self.assertLess(min(abs(dot_top-y*720) for y in (.307,.448)),1)
+        self.assertEqual(positions[0],positions[1])
+        offers=self.frames['national-offer']
+        self.assertGreaterEqual(sum(d['kind']==2 and d['texture']==2 for d in offers),2)
+        self.assertTrue(any(d['layer']==2 and d['texture']==2 for d in self.frames['national-offer-modal']))
+        self.assertFalse(any(d['layer']==2 and d['kind']==0 and abs(d['color'][0]-.89)<.005 and
+                             abs(d['color'][1]-.91)<.005 for d in self.frames['national-declined-modal']))
+
+    def test_v7_lists_start_at_top_and_world_sprites_are_isolated(self):
+        for name,y in (('club-offers-top',.297),('feed-results',.421),('feed-transfers',.421)):
+            rows=[d for d in self.frames[name] if d['layer']==0 and
+                  ((d['kind']==0 and abs(d['color'][0]-.93)<.005 and abs(d['color'][1]-.96)<.005) or
+                   (name=='club-offers-top' and d['kind']==2 and d['texture']==6 and
+                    .28<(1-d['vertices'][1])*.5<.8))]
+            if rows:
+                self.assertAlmostEqual((1-rows[0]['vertices'][1])*.5,y,delta=.001)
+        self.assertTrue(any(d['layer']==1 for d in self.frames['window-closed-toast']))
+        for name in ('cup-competitions','national-office','feed-results'):
+            icons=[d for d in self.frames[name] if d['texture']==8]
+            self.assertTrue(icons,name)
+            for d in icons:
+                v=d['vertices']
+                self.assertEqual(int(v[2]*2),int(v[18]*2))
+                self.assertEqual(int(v[3]*2),int(v[19]*2))
+                self.assertAlmostEqual((v[16]-v[0])*640,(v[1]-v[17])*360,delta=.2)
+        self.assertTrue(any(d['texture']==2 for d in self.frames['national-regional-cup']))
+
 
 if __name__=='__main__':unittest.main()

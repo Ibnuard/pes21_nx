@@ -218,7 +218,7 @@ static void unread_tests(MasterLeague *c,MasterLeague *copy) {
     c->office.offers[i]=template;c->office.offers[i].id=i+1u;c->offer_seen[i]=0u;
     if(i+1u<ML_MAX_OFFERS)ml_offer_mark_read(c,i);
   }
-  assert(!*ml_offer_submit(c,p,template.fee,template.wage,3u,0u));
+  assert(!*ml_offer_submit(c,p+1u,template.fee,template.wage,3u,0u));
   assert(c->office.offers[0].id==2u && !ml_offer_unread(c,0u));
   assert(c->office.offers[30].id==32u && ml_offer_unread(c,30u));
   assert(c->office.offers[31].id==33u && !ml_offer_unread(c,31u) && !c->offer_seen[31]);
