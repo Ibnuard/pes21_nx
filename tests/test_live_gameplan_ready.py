@@ -23,8 +23,10 @@ class LiveReadyTests(unittest.TestCase):
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+#include <stdio.h>
 #define debugPrintf(...) ((void)0)
 #define PREMATCH_GAMEPLAN_NO_SELECTION UINT32_MAX
+#define ML_CURRENT_PLAN_SLOT 3u
 typedef struct { uint32_t waiting, root_focus, page, substitute_area,
  selected_area, selected_index, formation_focus, position_focus,
  position_picker_open, preset_step, preset_action, preset_focus;
@@ -33,6 +35,13 @@ static PrematchGameplanSide exhibition_gameplan_sides[2];
 static void *live_gameplan_window;
 static uint32_t exhibition_gameplan_custom_active, main_menu_2p_prematch_hub_input_armed[2];
 static uint32_t saved, footer_calls, single_player, preset_refreshes, published;
+static uint32_t editor, editor_saved, editor_closed, save_ok=1u;
+static uint32_t main_menu_2p_selector_postbootstrap_host;
+static int ml_frontend_plan_editor(void){return editor;}
+static int prematch_gameplan_save_preset(uint32_t side,uint32_t slot){
+ assert(side==0u && slot==ML_CURRENT_PLAN_SLOT);editor_saved++;return save_ok;
+}
+static void main_menu_2p_team_selector_close(void){editor_closed++;}
 static uint64_t pause_editor_transition_tick;
 static uint32_t live_gameplan_returning_to_pause;
 static uint64_t armGetSystemTick(void) { return 12345; }
@@ -72,6 +81,16 @@ int main(void) {
  assert(!preset_refreshes && exhibition_gameplan_sides[0].page == 0);
  prematch_gameplan_process_root(0, PES_PAUSE_INPUT_BACK);
  assert(footer_calls == 2 && saved == 1 && !published);
+ memset(exhibition_gameplan_sides,0,sizeof(exhibition_gameplan_sides));
+ editor=1u;save_ok=0u;
+ prematch_gameplan_process_root(0,PES_PAUSE_INPUT_BACK);
+ assert(editor_saved==1u && !editor_closed);
+ assert(exhibition_gameplan_sides[0].page==PES_PREMATCH_GAMEPLAN_PAGE_PRESET);
+ assert(strstr(exhibition_gameplan_sides[0].preset_status,"SAVE FAILED"));
+ save_ok=1u;
+ prematch_gameplan_process_root(0,PES_PAUSE_INPUT_BACK);
+ assert(editor_saved==2u && editor_closed==1u && main_menu_2p_selector_postbootstrap_host);
+ assert(footer_calls==2u && !published); /* Never kickoff/publish a fixture. */
  return 0;
 }
 '''

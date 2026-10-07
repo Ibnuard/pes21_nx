@@ -4,6 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
+static void ml_office_schedule(const MasterLeague *c, MlEvent *event);
+static void ml_board_check(MasterLeague *c);
+static void ml_board_result(MasterLeague *c, uint32_t home, uint32_t away,
+                            uint32_t hg, uint32_t ag);
+static int ml_office_valid(const MasterLeague *c);
+
 static uint32_t ml_random(uint32_t *seed) {
   uint32_t x = *seed ? *seed : 1u;
   x ^= x << 13; x ^= x >> 17; x ^= x << 5;
@@ -54,6 +60,15 @@ uint32_t ml_transfer_value(const MlPlayer *p) {
   const uint32_t rating = p->overall > 40u ? p->overall - 40u : 1u;
   return 100000u + rating * rating * 7500u;
 }
+uint32_t ml_transfer_fee(const MasterLeague *c, const MlPlayer *p) {
+  uint32_t percent=100u;
+  if (c && p) {
+    const int selling=p->club==c->settings.club;
+    if (c->options.transfer_difficulty==1u) percent=selling ? 110u : 90u;
+    if (c->options.transfer_difficulty==2u) percent=selling ? 85u : 125u;
+  }
+  return (uint32_t)((uint64_t)ml_transfer_value(p)*percent/100u);
+}
 static uint32_t ml_wage_for(const MlPlayer *p) {
   const uint32_t rating = p->overall > 40u ? p->overall - 40u : 1u;
   return 1000u + rating * rating * 15u;
@@ -83,6 +98,7 @@ int ml_init(MasterLeague *c, const char *content_id, const MlSettings *settings,
       settings->injuries > 1u || settings->max_substitutions > 12u) return 0;
   memset(c, 0, sizeof(*c));
   c->settings = *settings;
+  c->settings.condition=5u;
   c->seed = seed ? seed : 1u;
   c->season = 1u;
   strcpy(c->content_id, content_id);
@@ -165,7 +181,8 @@ int ml_start_season(MasterLeague *c, const uint32_t *teams, uint32_t count,
 }
 
 int ml_window_open(const MasterLeague *c) {
-  return c && (c->day < 31u || (c->day >= 183u && c->day < 214u));
+  return c && ((c->day < 31u && !(c->season==1u && c->options.skip_first_window)) ||
+               (c->day >= 184u && c->day < 215u));
 }
 
 /* Replace a sold starter with a matching bench role; never shift an entire
@@ -192,11 +209,13 @@ static void ml_remove_member(MasterLeague *c, MlClub *club, uint32_t slot) {
   club->players[--club->count] = 0u;
 }
 
-const char *ml_transfer(MasterLeague *c, uint32_t index,
-                        uint32_t destination, uint32_t years) {
+static const char *ml_transfer_terms(MasterLeague *c, uint32_t index,
+                        uint32_t destination, uint32_t years, uint32_t fee, uint32_t wage) {
   if (!c || index >= c->player_count || years < 1u || years > 5u)
     return "INVALID TRANSFER";
   if (!ml_window_open(c)) return "TRANSFER WINDOW CLOSED";
+  if(c->office.dismissed) return "MANAGER DISMISSED";
+  if(fee>1000000000u || !wage || wage>1000000u) return "INVALID TERMS";
   MlPlayer *p = &c->players[index];
   MlClub *from = ml_club(c, p->club), *to = ml_club(c, destination);
   if (!to || p->club == destination) return "SELECT ANOTHER CLUB";
@@ -217,7 +236,6 @@ const char *ml_transfer(MasterLeague *c, uint32_t index,
       if (!replacement) return "NO SUITABLE STARTER REPLACEMENT";
     }
   }
-  const uint32_t fee = ml_transfer_value(p), wage = ml_wage_for(p);
   if (to->cash < (int64_t)fee) return "INSUFFICIENT TRANSFER BUDGET";
   if ((uint64_t)ml_weekly_wage(c, destination) + wage > to->wage_budget)
     return "WAGE BUDGET EXCEEDED";
@@ -234,19 +252,37 @@ const char *ml_transfer(MasterLeague *c, uint32_t index,
   to->players[to->count++] = index;
   p->club = destination; p->shirt = (uint8_t)shirt;
   p->wage = wage; p->contract_end = c->season + years - 1u;
+  if(ml_club(c,c->settings.club)->cash>=0)c->office.negative_since=0u;
   c->transaction_sequence++;
   memset(&c->current_plan, 0, sizeof(c->current_plan));
+  for(uint32_t i=0;i<c->office.offer_count;i++)
+    if(c->office.offers[i].player==index && c->office.offers[i].status<=ML_OFFER_COUNTER)
+      c->office.offers[i].status=ML_OFFER_CANCELLED;
   return "";
 }
 
+const char *ml_transfer(MasterLeague *c, uint32_t index, uint32_t destination, uint32_t years) {
+  if(!c || index>=c->player_count)return "INVALID TRANSFER";
+  return ml_transfer_terms(c,index,destination,years,ml_transfer_fee(c,&c->players[index]),ml_wage_for(&c->players[index]));
+}
+
+int64_t ml_renew_fee(const MasterLeague *c, uint32_t index, uint32_t years) {
+  if(!c || index>=c->player_count || years<1u || years>5u)return 0;
+  /* Fictional signing bonus: four weeks of the new wage per contract year. */
+  return (int64_t)ml_wage_for(&c->players[index])*4u*years;
+}
 const char *ml_renew(MasterLeague *c, uint32_t index, uint32_t years) {
   if (!c || index >= c->player_count || years < 1u || years > 5u ||
-      c->players[index].club != c->settings.club) return "INVALID CONTRACT";
+      c->office.dismissed || c->players[index].club != c->settings.club) return "INVALID CONTRACT";
   MlPlayer *p = &c->players[index];
-  const MlClub *club = ml_find_club(c, p->club);
+  MlClub *club = ml_club(c, p->club);
   const uint32_t wage = ml_wage_for(p);
+  const int64_t fee=ml_renew_fee(c,index,years);
+  if(c->season+years<=p->contract_end)return "CHOOSE A LONGER CONTRACT";
   if (!club || (uint64_t)ml_weekly_wage(c, p->club) - p->wage + wage >
                    club->wage_budget) return "WAGE BUDGET EXCEEDED";
+  if(club->cash<fee)return "INSUFFICIENT TRANSFER BUDGET";
+  club->cash-=fee;
   p->contract_end = c->season + years; p->wage = wage;
   c->transaction_sequence++;
   return "";
@@ -267,11 +303,11 @@ int ml_swap(MasterLeague *c, uint32_t team, uint32_t first, uint32_t second) {
   return 1;
 }
 
-static uint32_t ml_league_day(const MasterLeague *c, uint32_t matchday) {
+uint32_t ml_league_day(const MasterLeague *c, uint32_t matchday) {
   return 42u + (c->league.matchday_count > 1u
       ? matchday * 280u / (c->league.matchday_count - 1u) : 0u);
 }
-static uint32_t ml_cup_day(const MasterLeague *c, uint32_t round) {
+uint32_t ml_cup_day(const MasterLeague *c, uint32_t round) {
   uint32_t day = 70u + round * (259u / (c->cup.round_count > 1u
                                     ? c->cup.round_count - 1u : 1u));
   for (uint32_t i = 0; i < c->league.matchday_count; i++)
@@ -279,7 +315,7 @@ static uint32_t ml_cup_day(const MasterLeague *c, uint32_t round) {
   return day;
 }
 int ml_next_event(const MasterLeague *c, MlEvent *event) {
-  if (!c || !event || !c->league.team_count) return 0;
+  if (!c || !event || !c->league.team_count || c->office.dismissed) return 0;
   *event = (MlEvent){ML_EVENT_SEASON_END, 350u, ML_INVALID_INDEX, 0u, 0u, 0u};
   if (c->league.active_matchday < c->league.matchday_count) {
     event->kind = ML_EVENT_LEAGUE;
@@ -304,6 +340,7 @@ int ml_next_event(const MasterLeague *c, MlEvent *event) {
       event->index = index; event->home = f->home; event->away = f->away;
     }
   }
+  ml_office_schedule(c,event);
   return 1;
 }
 static int ml_event_matches(const MasterLeague *c, const MlEvent *event) {
@@ -324,6 +361,8 @@ int ml_advance_date(MasterLeague *c, const MlEvent *event) {
     if (club->team == c->settings.club) c->wages_paid += wages;
   }
   c->wage_week = week; c->day = event->day;
+  if(!ml_window_open(c))for(uint32_t i=0;i<c->office.offer_count;i++)
+    if(c->office.offers[i].status<=ML_OFFER_COUNTER)c->office.offers[i].status=ML_OFFER_EXPIRED;
   return 1;
 }
 
@@ -377,7 +416,7 @@ uint32_t ml_rank(const MasterLeague *c) {
 int ml_record_event_decided(MasterLeague *c, const MlEvent *event,
                      uint32_t hg, uint32_t ag, const LeagueScorer *scorers,
                      uint32_t scorer_count, int simulated, uint32_t shootout_winner) {
-  if (!ml_event_matches(c, event) || event->kind == ML_EVENT_SEASON_END ||
+  if (!ml_event_matches(c, event) || (event->kind != ML_EVENT_LEAGUE && event->kind != ML_EVENT_CUP) ||
       hg > 99u || ag > 99u || scorer_count > 80u ||
       (scorer_count && !scorers)) return 0;
   if (!simulated && event->kind == ML_EVENT_CUP && event->home && event->away &&
@@ -420,6 +459,7 @@ int ml_record_event_decided(MasterLeague *c, const MlEvent *event,
     if (away_club) away_club->cash += 200000;
     if (home == c->settings.club) c->match_income += 600000;
     if (away == c->settings.club) c->match_income += 200000;
+    ml_board_result(c,home,away,h,a);
   }
   /* Native scorer events must resolve to the current registered identity and
    * cannot add more goals than the actual played result on either side. */
@@ -442,14 +482,13 @@ int ml_record_event_decided(MasterLeague *c, const MlEvent *event,
   }
   if (event->kind == ML_EVENT_LEAGUE) league_tournament_commit_matchday(&c->league);
   else cup_tournament_commit_round(&c->cup);
-  MlEvent next;
-  ml_next_event(c, &next);
-  if (next.kind == ML_EVENT_SEASON_END) {
+  if (c->league.phase==LEAGUE_PHASE_COMPLETE && (!c->cup_enabled || c->cup.champion) && !c->prize_income) {
     c->last_rank = ml_rank(c);
     const int64_t prize = (int64_t)(c->league.team_count + 1u - c->last_rank) * 500000;
     ml_club(c, c->settings.club)->cash += prize;
     c->prize_income += prize;
   }
+  ml_board_check(c);
   return 1;
 }
 int ml_record_event(MasterLeague *c, const MlEvent *event,
@@ -458,6 +497,7 @@ int ml_record_event(MasterLeague *c, const MlEvent *event,
   return ml_record_event_decided(c,event,hg,ag,scorers,scorer_count,simulated,0u);
 }
 int ml_simulate_event(MasterLeague *c, const MlEvent *event) {
+  if(event && event->kind>=ML_EVENT_WINDOW)return ml_process_office_event(c,event);
   return ml_record_event(c, event, 0u, 0u, NULL, 0u, 1);
 }
 
@@ -495,6 +535,8 @@ int ml_next_season(MasterLeague *c) {
     p->club = p->wage = p->contract_end = 0u;
   }
   c->seasons_completed++; c->season++;
+  memset(&c->office,0,sizeof(c->office));
+  memset(c->offer_seen,0,sizeof(c->offer_seen));
   memset(&c->current_plan, 0, sizeof(c->current_plan));
   /* Modest annual operating grant; AI finances cannot become an unbounded
    * negative transfer sink after many unattended seasons. */
@@ -554,6 +596,8 @@ int ml_valid(const MasterLeague *c) {
       c->settings.injuries>1u || c->settings.max_substitutions>12u ||
       c->seasons_completed!=c->season-1u || c->wages_paid<0 ||
       c->match_income<0 || c->prize_income<0 ||
+      c->options.transfer_difficulty>2u || c->options.currency>2u ||
+      c->options.skip_first_window>1u || c->options.reserved ||
       !ml_manager_name_valid(c->manager_name) || !c->manager_nationality ||
       !c->content_id[0] || !memchr(c->content_id, 0, sizeof(c->content_id)) ||
       c->league.team_count < 2u || c->league.team_count > LEAGUE_MAX_TEAMS ||
@@ -590,7 +634,8 @@ int ml_valid(const MasterLeague *c) {
     if (!p->identity || !p->native_id || !p->name[0] ||
         !memchr(p->name,0,sizeof(p->name)) || !p->overall || p->overall > 99u ||
         p->position > 12u || p->shirt > 99u || (p->club && !seen[i]) ||
-        p->wage > 1000000u || p->contract_end > c->season + 5u) valid=0;
+        p->wage > 1000000u || p->contract_end > c->season + 5u ||
+        (p->reserved & ~ML_PLAYER_RELEASE_PAID)) valid=0;
     ids[i] = p->identity;
   }
   if (valid) {
@@ -663,6 +708,9 @@ int ml_valid(const MasterLeague *c) {
         c->presets[i].team_id!=c->settings.club)) valid=0;
   }
   if(valid && c->current_plan.player_count && !ml_plan_compatible(c,&c->current_plan))valid=0;
+  if(valid && !ml_office_valid(c))valid=0;
   free(seen); free(ids);
   return valid;
 }
+
+#include "master_league_office.inc"

@@ -954,6 +954,9 @@ static float (*pause_stats_control)(const void *, uint32_t, uint32_t);
 static _Alignas(4) uint32_t pause_stats_values[2][8];
 static _Alignas(8) uint64_t pause_stats_seen;
 static _Alignas(4) uint32_t pause_stats_busy;
+#ifdef DEBUG_LOG
+static uint32_t match_result_current_phase(void);
+#endif
 
 // Both original GetMatchStats overloads are exactly four instructions: return
 // RecordInfo + 0x750cc. Snapshot only while native owns that RecordInfo; never
@@ -965,9 +968,19 @@ static void *pause_record_get_stats(void *record) {
   if (pause_stats_team && pause_stats_data && pause_stats_control &&
       (!seen || armTicksToNs(now - seen) > 500000000ULL) &&
       !__atomic_exchange_n(&pause_stats_busy, 1, __ATOMIC_ACQ_REL)) {
+#ifdef DEBUG_LOG
+    static uint32_t last_phase=UINT32_MAX;
+    const uint32_t phase=match_result_current_phase();
+    const int trace=ml_frontend_match_active() && phase!=last_phase;
+    last_phase=phase;
+    if(trace)debugPrintf("ml-v5-diag: stats snapshot begin phase=%u record=%p\n",phase,record);
+#endif
     static const uint32_t kinds[8] = {0, 6, 0x37, 0x3f, 0x3d, 0x16, 0x32, 0x85};
     for (uint32_t side = 0; side < 2; ++side) {
       const void *team = pause_stats_team(stats, side);
+#ifdef DEBUG_LOG
+      if(trace)debugPrintf("ml-v5-diag: stats side=%u team=%p before scores/control\n",side,team);
+#endif
       if (!team) continue;
       if (pause_score_get) __atomic_store_n(&pause_scores[side], pause_score_get(team, 5), __ATOMIC_RELAXED);
       // Native TimeUpDemo uses HalfKind 4 as the shootout tiebreaker;
@@ -1003,6 +1016,9 @@ static void *pause_record_get_stats(void *record) {
       }
     }
     __atomic_store_n(&pause_stats_seen, now, __ATOMIC_RELEASE);
+#ifdef DEBUG_LOG
+    if(trace)debugPrintf("ml-v5-diag: stats snapshot complete phase=%u score=%u-%u\n",phase,pause_scores[0],pause_scores[1]);
+#endif
     __atomic_store_n(&pause_stats_busy, 0, __ATOMIC_RELEASE);
   }
   return stats;
@@ -1912,6 +1928,13 @@ static uint32_t match_result_current_phase(void) {
     return MATCH_PHASE_INVALID;
   uint32_t phase = MATCH_PHASE_INVALID;
   memcpy(&phase, (const uint8_t *)info + 0x1168, sizeof(phase));
+#ifdef DEBUG_LOG
+  static uint32_t logged_phase=UINT32_MAX;
+  if(ml_frontend_match_active() && phase!=logged_phase) {
+    logged_phase=phase;
+    debugPrintf("ml-v5-diag: native phase=%u\n",phase);
+  }
+#endif
   return phase > MATCH_PHASE_END ? MATCH_PHASE_INVALID : phase;
 }
 
@@ -3264,12 +3287,16 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
       !match_squad_data_get_member_id || !match_squad_data_get_order_no ||
       !match_tmpdb_match_get_player || !exhibition_tmpdb_match_get_team ||
       !exhibition_common_get_crypt_key || !matchplan_common_get_player_num ||
-      !matchplan_common_set_member_id || !matchplan_common_set_match_order)
+      !matchplan_common_set_member_id || !matchplan_common_set_match_order) {
+    debugPrintf("ml-v5-diag: lineup guard side=%u live=%u squad=%p\n",side,live_gameplan_window!=NULL,squad);
     return 0;
+  }
   void *common = exhibition_matchplan_common_side(side);
   void *match = exhibition_get_tmpdb_match();
-  if (!common || !match)
+  if (!common || !match) {
+    debugPrintf("ml-v5-diag: lineup missing context side=%u common=%p match=%p\n",side,common,match);
     return 0;
+  }
   unsigned char *team = exhibition_tmpdb_match_get_team(match, &side);
   const uint32_t count = exhibition_squad_data_get_player_count(squad);
   uint32_t team_flags = 0;
@@ -3296,8 +3323,10 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
   for (uint32_t i = 0; i < count; ++i) {
     records[i] = (unsigned char *)match_tmpdb_match_get_player(match, &side, &i);
     if (records[i] != (unsigned char *)match + 0x1248u +
-                          side * 0x8c00u + i * 0x380u)
+                          side * 0x8c00u + i * 0x380u) {
+      debugPrintf("ml-v5-diag: lineup record layout side=%u member=%u\n",side,i);
       return 0;
+    }
     uint64_t player_id = 0, team_player_id = 0;
     const void *info_player = NULL;
     memcpy(&player_id, records[i] + 44u, sizeof(player_id));
@@ -3312,7 +3341,9 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
       return 0;
     }
     for (uint32_t j = 0; j < i; ++j)
-      if (ids[j] == ids[i]) return 0;
+      if (ids[j] == ids[i]) {
+        debugPrintf("ml-v5-diag: lineup duplicate identity side=%u members=%u/%u id=%u\n",side,j,i,ids[i]);return 0;
+      }
     source[i] = i;
   }
 
@@ -3320,13 +3351,15 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
   const uint32_t crypt_key = exhibition_common_get_crypt_key();
   for (uint32_t i = 0; i < count; ++i) {
     const void *key = exhibition_squad_data_get_player_by_index(squad, &i);
-    if (!key) return 0;
+    if (!key) {debugPrintf("ml-v5-diag: lineup missing key side=%u index=%u\n",side,i);return 0;}
     const uint32_t member = match_squad_data_get_member_id(squad, key);
     const uint32_t order = match_squad_data_get_order_no(squad, key);
     if (member == 0xffu && order == 0xffu) continue; // Unregistered reserve.
     if (member >= registered || order >= registered ||
-        (members_seen & (1u << member)) || (orders_seen & (1u << order)))
+        (members_seen & (1u << member)) || (orders_seen & (1u << order))) {
+      debugPrintf("ml-v5-diag: lineup duplicate/invalid key side=%u index=%u order=%u member=%u\n",side,i,order,member);
       return 0;
+    }
     uint32_t unique = 0;
     memcpy(&unique, (const unsigned char *)key + 4u, sizeof(unique));
     unique ^= crypt_key;
@@ -3344,7 +3377,9 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
     orders_seen |= 1u << order;
   }
   const uint32_t complete = (1u << registered) - 1u;
-  if (members_seen != complete || orders_seen != complete) return 0;
+  if (members_seen != complete || orders_seen != complete) {
+    debugPrintf("ml-v5-diag: lineup incomplete registration side=%u members=%x orders=%x expected=%x\n",side,members_seen,orders_seen,complete);return 0;
+  }
   for (uint32_t member = 0; member < registered; ++member) {
     uint32_t from = member;
     while (from < count && source[from] != wanted[member]) ++from;
@@ -3394,6 +3429,10 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
 // screen edits HOME and AWAY independently, so select and save each requested
 // side before publishing the complete match plan back to tmpdb::Match.
 static void exhibition_save_matchplan_sides(uint32_t side_mask) {
+  /* The office editor owns a career lineup, not a playable fixture. Its
+   * canonical plan is saved by prematch_gameplan_save_and_refresh. Do not
+   * require or publish Match/AdditionalData bindings in this context. */
+  if (ml_frontend_plan_editor() && !live_gameplan_window) return;
   unsigned char *squad_edit = exhibition_get_squad_edit();
   if (!__atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) ||
       !side_mask || !squad_edit || !matchplan_squad_save ||
@@ -4787,11 +4826,18 @@ int pes_controller_2p_prematch_hub_active(void) {
 }
 
 int pes_controller_2p_transition_active(void) {
+  /* The native bootstrap can publish the Hub one frame before opening the
+   * office editor. Keep the opaque loading layer until custom Game Plan has
+   * actually published its ready state, including the return teardown. */
+  if (ml_frontend_plan_editor() &&
+      !pes_controller_custom_prematch_gameplan_active()) return 1;
   return __atomic_load_n(&main_menu_2p_transition_active,
                          __ATOMIC_ACQUIRE) != 0;
 }
 
 uint32_t pes_controller_2p_transition_kind(void) {
+  if (ml_frontend_plan_editor() &&
+      !pes_controller_custom_prematch_gameplan_active()) return PES_2P_TRANSITION_LOADING;
   return __atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE);
 }
 
@@ -7894,12 +7940,37 @@ static void prematch_gameplan_save_and_refresh(uint32_t side) {
     return;
   exhibition_save_matchplan_sides(1u << side);
   prematch_gameplan_refresh_side(side);
-  if (ml_frontend_match_active() && !live_gameplan_window)
+  if (ml_frontend_plan_editor() && !live_gameplan_window)
     prematch_gameplan_save_preset(side, ML_CURRENT_PLAN_SLOT);
 }
 
 // A failed validation must not leave a UI-only substitution behind. SquadData
 // has owning vectors, so use its native deep-copy lifecycle for rollback.
+static int master_league_office_lineup_valid(uint32_t side,void *squad) {
+  if(side!=0u || !ml_frontend_plan_editor() || !squad || live_gameplan_window ||
+      !exhibition_common_get_crypt_key || !exhibition_squad_data_get_player_count ||
+      !exhibition_squad_data_get_player_by_index || !match_squad_data_get_member_id ||
+      !match_squad_data_get_order_no)return 0;
+  const MasterLeague *career=ml_frontend_career();
+  uint32_t native[40],count=0u;uint8_t shirts[40];
+  if(!career || !ml_frontend_roster(career->settings.club,native,shirts,&count) ||
+      count<18u || count>40u || exhibition_squad_data_get_player_count(squad)!=count)return 0;
+  uint64_t seen=0u;uint32_t orders=0u,members=0u;
+  const uint32_t crypt=exhibition_common_get_crypt_key();
+  for(uint32_t i=0;i<count;i++) {
+    const void *key=exhibition_squad_data_get_player_by_index(squad,&i);
+    if(!key)return 0;
+    uint32_t id=0u;memcpy(&id,(const unsigned char *)key+4u,4u);id^=crypt;
+    uint32_t at=0u;while(at<count && native[at]!=id)at++;
+    if(at==count || (seen&(1ULL<<at)))return 0;
+    seen|=1ULL<<at;
+    const uint32_t order=match_squad_data_get_order_no(squad,key),member=match_squad_data_get_member_id(squad,key);
+    if(order==0xffu && member==0xffu)continue;
+    if(order>=18u || member>=18u || (orders&(1u<<order)) || (members&(1u<<member)))return 0;
+    orders|=1u<<order;members|=1u<<member;
+  }
+  return seen==((1ULL<<count)-1u) && orders==0x3ffffu && members==0x3ffffu;
+}
 static int prematch_gameplan_replace_player(
     uint32_t side, void *squad_data, const void *field_player_id,
     const void *bench_player_id) {
@@ -7908,8 +7979,10 @@ static int prematch_gameplan_replace_player(
       !match_squad_data_get_order_no || !match_squad_data_get_member_id ||
       !match_swap_member_info_construct || !match_replace_squad_player ||
       !match_squad_data_copy_construct || !match_squad_data_copy_assign ||
-      !match_squad_data_destruct)
+      !match_squad_data_destruct) {
+    debugPrintf("ml-v5-diag: substitute rejected before native replacement side=%u live=%u squad=%p\n",side,live_gameplan_window!=NULL,squad_data);
     return 0;
+  }
   const uint32_t field_order = match_squad_data_get_order_no(squad_data, field_player_id);
   const uint32_t bench_order = match_squad_data_get_order_no(squad_data, bench_player_id);
   const uint32_t field_member = match_squad_data_get_member_id(squad_data, field_player_id);
@@ -7917,18 +7990,26 @@ static int prematch_gameplan_replace_player(
   if (field_order >= 18u || field_member >= 18u ||
       !((bench_order < 18u && bench_member < 18u) ||
         (bench_order == 0xffu && bench_member == 0xffu)) ||
-      field_order == bench_order || field_member == bench_member)
+      field_order == bench_order || field_member == bench_member) {
+    debugPrintf("ml-v5-diag: substitute invalid registration side=%u field=%u/%u bench=%u/%u\n",side,field_order,field_member,bench_order,bench_member);
     return 0;
+  }
+  debugPrintf("ml-v5-diag: substitute native begin side=%u field=%u/%u bench=%u/%u\n",side,field_order,field_member,bench_order,bench_member);
   _Alignas(8) unsigned char before[EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES] = {0};
   _Alignas(8) unsigned char field_info[24] = {0}, bench_info[24] = {0};
   match_squad_data_copy_construct(before, squad_data);
   match_swap_member_info_construct(field_info, field_order, field_member, field_player_id);
   match_swap_member_info_construct(bench_info, bench_order, bench_member, bench_player_id);
   match_replace_squad_player(squad_data, field_info, bench_info);
+#ifdef DEBUG_LOG
+  debugPrintf("ml-v5-diag: substitute native returned side=%u new-orders=%u/%u; checking lineup\n",side,
+      match_squad_data_get_order_no(squad_data,field_player_id),match_squad_data_get_order_no(squad_data,bench_player_id));
+#endif
   const int committed =
       match_squad_data_get_order_no(squad_data, field_player_id) == bench_order &&
       match_squad_data_get_order_no(squad_data, bench_player_id) == field_order &&
-      exhibition_sync_prematch_lineup(side, squad_data);
+      (ml_frontend_plan_editor() ? master_league_office_lineup_valid(side,squad_data)
+                                 : exhibition_sync_prematch_lineup(side, squad_data));
   if (!committed) {
     match_squad_data_copy_assign(squad_data, before);
     debugPrintf("prematch-lineup-v3: replacement rolled back side=%u "
@@ -7936,6 +8017,7 @@ static int prematch_gameplan_replace_player(
                 bench_order, bench_member);
   }
   match_squad_data_destruct(before);
+  debugPrintf("ml-v5-diag: substitute complete side=%u committed=%u\n",side,committed);
   return committed;
 }
 
@@ -8643,6 +8725,19 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
     state->root_focus =
         (state->root_focus + 1) % PES_PREMATCH_GAMEPLAN_ACTION_COUNT;
   } else if (action == PES_PAUSE_INPUT_BACK && side == 0) {
+    if (ml_frontend_plan_editor()) {
+      /* Career office edits are permanent. Use the shared canonical preset
+       * adapter, then tear down the bootstrap without ever starting Strategy. */
+      if (!prematch_gameplan_save_preset(0u, ML_CURRENT_PLAN_SLOT)) {
+        state->page = PES_PREMATCH_GAMEPLAN_PAGE_PRESET;
+        snprintf(state->preset_status,sizeof(state->preset_status),
+                 "CAREER SAVE FAILED - BACK AND RETRY");
+        return;
+      }
+      __atomic_store_n(&main_menu_2p_selector_postbootstrap_host, 1u, __ATOMIC_RELEASE);
+      main_menu_2p_team_selector_close();
+      return;
+    }
     // Commit both sides before handing the hub back to the frontend. Stock
     // Strategy only reloads the local HOME side on some Exhibition builds.
     exhibition_save_matchplan_sides(3u);
@@ -10990,6 +11085,16 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
 
   main_menu_2p_native_uniform_track_init();
+  if (ml_frontend_plan_editor() && pes_controller_2p_prematch_hub_active() &&
+      !pes_controller_custom_prematch_gameplan_active()) {
+    /* Reuse the normal squad initializer/editor, but never expose Kick Off. */
+    if (!exhibition_gameplan_open_custom()) {
+      ml_frontend_plan_error();
+      __atomic_store_n(&main_menu_2p_selector_postbootstrap_host, 1u, __ATOMIC_RELEASE);
+      main_menu_2p_team_selector_close();
+    }
+    return;
+  }
   if (!live_gameplan_window) exhibition_gameplan_process_pending();
 
   const uint32_t kit_action = __atomic_exchange_n(
@@ -11045,6 +11150,7 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
   if (action != 3)
     return;
+  if (ml_frontend_plan_editor()) return; /* No fixture exists in the office. */
 
   /* Apply the saved career tactics before the existing transactional kickoff
    * synchronization. Never repair only a HUD after actors have been created. */
@@ -11178,6 +11284,7 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     return;
 
   if (competition_frontend_active()) {
+    ml_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
     competition_frontend_pad_event(buttons, previous_buttons);
     const uint32_t action = competition_frontend_take_action();
     if (action == COMPETITION_ACTION_MANAGER_NAME) {
@@ -11570,6 +11677,12 @@ static void main_menu_activate_league_fixture(void) {
       competition_frontend_league_team_is_human(away);
   const int started = two_humans ? main_menu_start_two_player_match()
                                  : main_menu_start_exhibition_match();
+#ifdef DEBUG_LOG
+  if(started && ml_frontend_match_active()) {
+    cup_3d_probe_ending_calls=cup_3d_probe_create_calls=cup_3d_probe_result_create_calls=0u;
+    debugPrintf("ml-v5-diag: career match handoff home=%u away=%u office-editor=%u\n",home,away,ml_frontend_plan_editor());
+  }
+#endif
   competition_frontend_league_handoff_result(started);
   if (started)
     debugPrintf("league: match handoff HOME=%u AWAY=%u knockout=%d "
@@ -12708,16 +12821,33 @@ int pes_controller_gameplan_pause_route(void) {
 // MatchResultMainMenuHalfTime, so it needs its own cursor lifetime even though
 // both pages use the same bottom-right native Next footer.
 static int pes_match_stats_init(void *window) {
+#ifdef DEBUG_LOG
+  static void *last_window;static uint32_t calls;
+  if(last_window!=window){last_window=window;calls=0u;}
+  const int trace=ml_frontend_match_active() && ++calls<=8u;
+  if(trace)debugPrintf("ml-v5-diag: halftime stats init begin window=%p call=%u\n",window,calls);
+#endif
   match_result_clear_handoff();
   __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_STATS,
                    __ATOMIC_RELEASE);
   match_result_set_surface(match_result_interval_surface(
       MATCH_RESULT_SURFACE_HALF_STATS, MATCH_RESULT_SURFACE_FULL_STATS));
   __atomic_store_n(&match_result_seen_tick, armGetSystemTick(), __ATOMIC_RELEASE);
+#ifdef DEBUG_LOG
+  if(trace)debugPrintf("ml-v5-diag: stats native InitMobile enter\n");
+#endif
   const int ready = match_stats_init_original(window);
+#ifdef DEBUG_LOG
+  if(trace)debugPrintf("ml-v5-diag: stats native InitMobile returned ready=%d; skin enter\n",ready);
+#endif
   // InitMobile runs before the first displayed frame, unlike Update. Keep
   // the cover while font/layout initialization retries, then hide native nodes.
-  match_result_prepare_skin(window);
+  /* A retrying InitMobile has not published its layout yet. Keep the cover,
+   * and only touch its surface/root once native initialization is complete. */
+  if(ready)match_result_prepare_skin(window);
+#ifdef DEBUG_LOG
+  if(trace)debugPrintf("ml-v5-diag: stats init skin returned ready=%d\n",ready);
+#endif
   if (!ready)
     __atomic_store_n(&match_result_cover_tick, armGetSystemTick(), __ATOMIC_RELEASE);
   return ready;
@@ -15665,11 +15795,12 @@ static int match_result_competition_finished(void) {
 
 #ifdef DEBUG_LOG
 static void pes_cup_3d_probe_ending(void *listener, const void *context) {
-  const int cup_match = competition_frontend_cup_match_active();
+  const int cup_match = competition_frontend_cup_match_active() || ml_frontend_match_active();
   const uint32_t call = cup_match ? __atomic_add_fetch(
       &cup_3d_probe_ending_calls, 1u, __ATOMIC_RELAXED) : 0u;
   if (call && call <= 16u)
     debugPrintf("cup-3d-probe: ending enter call=%u\n", call);
+  if(call && call<=16u && ml_frontend_match_active())debugPrintf("ml-v5-diag: ending native enter phase=%u\n",match_result_current_phase());
   if (cup_match)
     cup_3d_probe_in_ending++;
   cup_3d_probe_ending_original(listener, context);
@@ -15677,11 +15808,15 @@ static void pes_cup_3d_probe_ending(void *listener, const void *context) {
     cup_3d_probe_in_ending--;
   if (call && call <= 16u)
     debugPrintf("cup-3d-probe: ending return call=%u\n", call);
+  if(call && call<=16u && ml_frontend_match_active())debugPrintf("ml-v5-diag: ending native returned\n");
 }
 
 static void *pes_cup_3d_probe_create(uint32_t scene_id, uint32_t side) {
+  const int trace=ml_frontend_match_active() && cup_3d_probe_create_calls<24u;
+  if(trace)debugPrintf("ml-v5-diag: demo create enter scene=%u side=%u\n",scene_id,side);
   void *demo = cup_3d_probe_create_original(scene_id, side);
-  if (competition_frontend_cup_match_active()) {
+  if(trace)debugPrintf("ml-v5-diag: demo create returned scene=%u ptr=%p\n",scene_id,demo);
+  if (competition_frontend_cup_match_active() || ml_frontend_match_active()) {
     const uint32_t call = __atomic_add_fetch(
         &cup_3d_probe_create_calls, 1u, __ATOMIC_RELAXED);
     if (call <= 24u)
@@ -15694,8 +15829,11 @@ static void *pes_cup_3d_probe_create(uint32_t scene_id, uint32_t side) {
 
 static void *pes_cup_3d_probe_result_create(uint32_t scene_id,
                                             uint32_t side) {
+  const int trace=ml_frontend_match_active() && cup_3d_probe_result_create_calls<24u;
+  if(trace)debugPrintf("ml-v5-diag: result create enter scene=%u side=%u\n",scene_id,side);
   void *demo = cup_3d_probe_result_create_original(scene_id, side);
-  if (competition_frontend_cup_match_active()) {
+  if(trace)debugPrintf("ml-v5-diag: result create returned scene=%u ptr=%p\n",scene_id,demo);
+  if (competition_frontend_cup_match_active() || ml_frontend_match_active()) {
     const uint32_t call = __atomic_add_fetch(
         &cup_3d_probe_result_create_calls, 1u, __ATOMIC_RELAXED);
     if (call <= 24u)
@@ -16396,6 +16534,7 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
                                        uint32_t modal) {
   (void)name;
   (void)modal;
+  debugPrintf("ml-v5-diag: halftime menu enter window=%p\n",result);
   if (result) {
     match_result_clear_handoff();
     match_result_window = result;
@@ -16414,6 +16553,7 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
                                     : PES_VIRTUAL_CURSOR_FULL_TIME,
                                 32768, 32768);
   }
+  debugPrintf("ml-v5-diag: halftime menu resume native window=%p\n",result);
   return match_result_half_resume;
 }
 
@@ -18838,6 +18978,7 @@ void install_ue4_hooks(so_module *module) {
           "_ZN5match8registry14GlobalRegistry19GetInstanceForRetryEv");
   pause_stats_team = (void *)so_find_addr_rx(module,
       "_ZNK5match6output14StatsMatchInfo11GetTeamInfoE8HomeAway");
+  debugPrintf("ml-v5-diag: enabled; halftime initialization and substitution breadcrumbs\n");
   pause_score_get = (void *)so_find_addr_rx(module,
       "_ZNK5match6output13StatsTeamInfo8GetScoreE8HalfKind");
   pause_stats_data = (void *)so_find_addr_rx(module,

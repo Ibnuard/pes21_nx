@@ -262,7 +262,10 @@ int main(void) {
         self.assertNotIn("MATCH_RESULT_SURFACE_NONE", branch)
         # The result cover owns the Top Menu handoff, released by the Match page
         # rebuild rather than a fixed delay.
-        cover = function(self.hooks, "pes_controller_match_result_transition")
+        # Start at the definition: the generic extractor can mistake an
+        # earlier call inside a multiline if-condition for a function body.
+        start = self.hooks.index("uint32_t pes_controller_match_result_transition(void)")
+        cover = function(self.hooks[start:], "pes_controller_match_result_transition")
         self.assertIn("pause_top_menu_transition_tick", cover)
         self.assertIn("match_result_exit_requested", cover)
 

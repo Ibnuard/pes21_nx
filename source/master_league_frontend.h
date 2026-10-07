@@ -8,13 +8,16 @@ typedef enum {
   ML_PAGE_CLUBS, ML_PAGE_HUB, ML_PAGE_SLOTS, ML_PAGE_SQUAD, ML_PAGE_OFFICE,
   ML_PAGE_MARKET_CLUBS, ML_PAGE_MARKET_PLAYERS, ML_PAGE_CONTRACTS,
   ML_PAGE_FINANCES, ML_PAGE_TABLE, ML_PAGE_NEXT, ML_PAGE_CONFIRM,
-  ML_PAGE_NEWS, ML_PAGE_CALENDAR, ML_PAGE_CUP
+  ML_PAGE_NEWS, ML_PAGE_CALENDAR, ML_PAGE_CUP, ML_PAGE_OFFERS,
+  ML_PAGE_MANAGER_OFFICE, ML_PAGE_MESSAGES, ML_PAGE_JOBS, ML_PAGE_ADVANCE,
+  ML_PAGE_MY_TEAM, ML_PAGE_MY_PLAYERS
 } MlPage;
 
 typedef struct {
   char label[64], detail[96], value[48];
-  uint32_t badge, portrait;
+  uint32_t badge, portrait, league_logo; /* catalog index + 1, zero means none */
   int enabled;
+  uint32_t rating, role, adjustable, unread;
 } MlViewRow;
 /* Small, read-only dashboard projections. Never substitute these display rows
  * for the canonical fixture/roster state used by the match adapter. */
@@ -23,9 +26,33 @@ typedef struct {
   uint32_t home_badge, away_badge;
 } MlMatchPreview;
 typedef struct {
+  char title[64], subtitle[96], detail[96], value[96];
+  char body[256],confirm_label[32];
+  MlViewRow rows[5];
+  uint32_t count, first, total, selected, serial, badge, portrait;
+  int open, confirm, confirm_selected, modal;
+} MlDrawerView;
+typedef struct {
+  uint32_t day, badge, kind, current, selected, transfer;
+  char label[16], detail[24];
+} MlCalendarCell;
+
+typedef struct { char name[64]; uint32_t badge, rank, own; LeagueStanding stats; } MlTableRow;
+typedef struct { char home[64],away[64]; uint32_t home_badge,away_badge,hg,ag,complete,own,round,index; } MlBracketMatch;
+typedef struct {
+  char title[64],body[256],accept[32],error[112];
+  uint32_t open,selected,destructive;
+} MlModalView;
+typedef struct {
+  uint32_t club_badge,nation_badge,home_badge,away_badge,has_result,home_goals,away_goals;
+  char headline[64],summary[112],home[64],away[64];
+  char stat_label[3][32],stat_value[3][48];
+  MlViewRow history[3];uint32_t history_count;
+} MlStoryView;
+typedef struct {
   MlPage page;
   char title[64], caption[96], left_title[64], right_title[64];
-  MlViewRow rows[5];
+  MlViewRow rows[8];
   char info[8][96], status[112];
   char action[4][32];
   const char *helper_key[4], *helper_label[4];
@@ -40,15 +67,32 @@ typedef struct {
   MlViewRow fixtures[3], ranking[3], squad[3];
   uint32_t fixture_count, ranking_count, squad_count;
   uint32_t rank, squad_size, board_target;
+  char annual_budget[32], transfer_budget[32];
+  MlDrawerView drawer;
+  MlModalView modal;
+  MlStoryView story;
+  MlCalendarCell calendar[42];
+  char calendar_month[48], calendar_detail[112];
+  uint32_t calendar_count;
+  float advance_progress, advance_fraction;
+  char empty[96],toast[64];uint32_t toast_serial;
+  uint32_t transfer_unread;
+  MlTableRow table[8];uint32_t table_count;
+  MlBracketMatch bracket[7];uint32_t bracket_count,bracket_round,bracket_page,bracket_pages;
+  char bracket_titles[3][32];
 } MlView;
 
 void ml_frontend_open(void);
 void ml_frontend_close(void);
 void ml_frontend_pad(uint32_t pressed);
+/* Called on the input/update thread, never from the renderer. */
+void ml_frontend_tick(uint64_t milliseconds);
 void ml_frontend_view(MlView *view);
 uint32_t ml_frontend_take_action(void);
 const MasterLeague *ml_frontend_career(void);
 int ml_frontend_match_active(void);
+int ml_frontend_plan_editor(void);
+void ml_frontend_plan_error(void);
 int ml_frontend_match_is_cup(void);
 int ml_frontend_match_teams(uint32_t *home, uint32_t *away);
 void ml_frontend_handoff_result(int opened);

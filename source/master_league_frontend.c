@@ -21,6 +21,7 @@
 
 static MasterLeague career;
 static MlSettings setup;
+static MlCareerOptions setup_options;
 static MlPage page, return_page;
 static uint32_t focus, action, league_choice, club_choice;
 static uint32_t league_options[FL26_LEAGUE_CATALOG_COUNT], league_count;
@@ -30,17 +31,38 @@ static uint32_t transaction_player, destination, years=3u, confirm_kind;
 static uint32_t selected_player=ML_INVALID_INDEX;
 static uint32_t active_slot=ML_INVALID_INDEX, saving, overwrite_slot;
 static uint32_t session_ready, match_active, result_received, match_swapped;
+static uint32_t match_from_day, result_saved, return_focus;
+static MlView confirm_background;
+static uint32_t plan_editor;
 static uint32_t shootout_winner;
 static uint32_t table_scorers;
 static uint32_t hub_section, feed_index, navigation_serial;
 static int slide_direction;
 static MlEvent pending;
 static char manager[ML_NAME_SIZE], message[112];
+static uint32_t toast_serial;
+static char toast[64];
+static uint64_t frontend_clock,advance_started;
+static uint32_t advance_from,advance_to,advance_duration;
+static char advance_notice[64];
+static void ml_begin_advance(uint32_t from,const char *notice);
+static void ml_start_advance(uint32_t from,const char *notice);
+static void ml_open_confirmation(uint32_t kind);
+static void ml_cancel_confirmation(void);
+static void ml_renew_open(uint32_t index);
 static uint8_t slot_valid[ML_SAVE_SLOTS];
 static char slot_club[ML_SAVE_SLOTS][64], slot_progress[ML_SAVE_SLOTS][80];
 
-static void ml_message(const char *text) { snprintf(message,sizeof(message),"%s",text); }
-static void ml_page(MlPage next) { page=next; focus=0u; message[0]=0; }
+static int ml_review_pad(uint32_t pressed);
+static void ml_review_view(MlView *view);
+static void ml_review_reset(void);
+
+static void ml_message(const char *text) { snprintf(message,sizeof(message),"%s",text);toast[0]=0;toast_serial++; }
+static void ml_toast(const char *text) {snprintf(toast,sizeof(toast),"%s",text);toast_serial++;message[0]=0;}
+static void ml_page(MlPage next) {
+  page=next; focus=next==ML_PAGE_SETTINGS && session_ready ? 2u : 0u; message[0]=0;
+  if(next==ML_PAGE_SETTINGS && session_ready) setup_options=career.options;
+}
 static const Fl26LeagueCatalogEntry *ml_league_entry(void) {
   return league_count ? &fl26_league_catalog[league_options[league_choice]] : NULL;
 }
@@ -57,7 +79,11 @@ static const char *ml_cup_name(void) {
   return "DOMESTIC CUP";
 }
 static void ml_money(char *out, size_t size, int64_t amount) {
-  snprintf(out,size,"%s%lld.%02lld M",amount<0 ? "-" : "",
+  const uint32_t currency=session_ready ? career.options.currency : setup_options.currency;
+  const char *unit=currency==1u ? "GBP" : currency==2u ? "USD" : "EUR";
+  /* Fixed fictional economy conversion, never fetched live or used in storage. */
+  amount=amount*(currency==1u ? 85 : currency==2u ? 110 : 100)/100;
+  snprintf(out,size,"%s %s%lld.%02lld M",unit,amount<0 ? "-" : "",
       (long long)((amount<0 ? -amount : amount)/1000000),
       (long long)(((amount<0 ? -amount : amount)%1000000)/10000));
 }
@@ -100,7 +126,7 @@ static uint32_t ml_count(void) {
     case ML_PAGE_SLOTS: return ML_SAVE_SLOTS;
     case ML_PAGE_OFFICE: return 5u;
     case ML_PAGE_MARKET_CLUBS: return career.club_count+1u;
-    case ML_PAGE_SQUAD: case ML_PAGE_MARKET_PLAYERS: case ML_PAGE_CONTRACTS:
+    case ML_PAGE_SQUAD: case ML_PAGE_MARKET_PLAYERS: case ML_PAGE_CONTRACTS: case ML_PAGE_MY_PLAYERS:
       return player_rows;
     case ML_PAGE_TABLE: return table_scorers ? 4u : career.league.team_count;
     case ML_PAGE_NEXT: return 2u;
@@ -112,7 +138,8 @@ static uint32_t ml_count(void) {
   }
 }
 void ml_frontend_open(void) {
-  session_ready=match_active=result_received=0u;
+  session_ready=match_active=result_received=plan_editor=0u;
+  ml_review_reset();
   hub_section=feed_index=0u; navigation_serial++; slide_direction=0;
   active_slot=ML_INVALID_INDEX; action=0u;
   league_count=country_count=0u;
@@ -131,10 +158,20 @@ void ml_frontend_open(void) {
     if (!strstr(category->label,"NATIONAL")) continue;
     for (uint32_t t=0;t<category->team_count;t++) countries[country_count++]=category->teams[t];
   }
+  /* Sort by the displayed country name, not database or confederation order. */
+  for(uint32_t i=1;i<country_count;i++) {
+    uint32_t country=countries[i],j=i;
+    while(j && strcmp(exhibition_team_catalog_name(countries[j-1u]),
+                      exhibition_team_catalog_name(country))>0) {
+      countries[j]=countries[j-1u]; j--;
+    }
+    countries[j]=country;
+  }
   ml_scan_saves(); ml_page(ML_PAGE_LANDING);
 }
 void ml_frontend_close(void) {
-  match_active=session_ready=action=0u;
+  match_active=session_ready=action=plan_editor=0u;
+  ml_review_reset();
   selected_player=ML_INVALID_INDEX;
 }
 const MasterLeague *ml_frontend_career(void) { return session_ready ? &career : NULL; }
@@ -175,6 +212,7 @@ static void ml_create(void) {
       !ml_valid(&career)) {
     session_ready=0u; ml_message("CAREER DATA VALIDATION FAILED - ORIGINAL SAVES UNCHANGED"); return;
   }
+  career.options=setup_options;
   session_ready=1u; saving=1u; active_slot=ML_INVALID_INDEX;
   ml_scan_saves(); ml_page(ML_PAGE_SLOTS);
 }
@@ -184,7 +222,18 @@ static void ml_save_selected(uint32_t slot) {
 }
 static void ml_choose_transaction(uint32_t index, int renewal) {
   transaction_player=index; years=3u; confirm_kind=renewal ? 2u : 1u;
-  return_page=page; ml_page(ML_PAGE_CONFIRM);
+  ml_open_confirmation(confirm_kind);
+}
+static void ml_open_confirmation(uint32_t kind) {
+  /* Capture the actual underlying page once; rendering a modal must not
+   * temporarily mutate global navigation or accidentally mark inboxes read. */
+  ml_frontend_view(&confirm_background);
+  return_page=page;return_focus=focus;confirm_kind=kind;
+  ml_page(ML_PAGE_CONFIRM);
+  if(kind==4u || kind==6u)focus=1u; /* destructive actions default to Cancel */
+}
+static void ml_cancel_confirmation(void) {
+  ml_page(return_page);focus=return_focus;
 }
 static void ml_hub_open(uint32_t item) {
   /* Section cards are intentionally destinations, not a dense nested menu. */
@@ -214,6 +263,7 @@ static void ml_confirm(void) {
         if (!league_count) { ml_message("PAIRED CAREER CATALOG REQUIRED"); return; }
         session_ready=0u; active_slot=ML_INVALID_INDEX;
         setup=(MlSettings){0}; setup.difficulty=3u; setup.match_minutes=10u;
+        setup_options=(MlCareerOptions){0};
         setup.condition=5u; setup.injuries=1u; setup.max_substitutions=5u;
         league_choice=club_choice=nationality=0u; manager[0]=0;
         ml_page(ML_PAGE_SETTINGS);
@@ -238,7 +288,7 @@ static void ml_confirm(void) {
         char path[80]; snprintf(path,sizeof(path),"SaveData/footballnx_master_league_%u_a.bin",focus+1u);
         FILE *existing=fopen(path,"rb");
         if (!existing) { snprintf(path,sizeof(path),"SaveData/footballnx_master_league_%u_b.bin",focus+1u); existing=fopen(path,"rb"); }
-        if (existing) { fclose(existing); overwrite_slot=focus; confirm_kind=4u; return_page=page; ml_page(ML_PAGE_CONFIRM); }
+        if (existing) { fclose(existing); overwrite_slot=focus; ml_open_confirmation(4u); }
         else ml_save_selected(focus);
       } else if (slot_valid[focus] && ml_save_read(focus,ml_catalog_content_id(),&career)) {
         session_ready=1u; active_slot=focus; hub_section=0u; ml_page(ML_PAGE_HUB);
@@ -259,7 +309,7 @@ static void ml_confirm(void) {
       if (destination) {
         destination=market_club;
         if (!destination || destination==career.settings.club) { ml_message("SELECT A BUYING CLUB"); destination=career.settings.club; break; }
-        confirm_kind=1u; return_page=ML_PAGE_MARKET_PLAYERS; ml_page(ML_PAGE_CONFIRM);
+        ml_open_confirmation(1u);
       } else { ml_refresh_players(market_club); ml_page(ML_PAGE_MARKET_PLAYERS); }
       break;
     case ML_PAGE_MARKET_PLAYERS:
@@ -287,21 +337,36 @@ static void ml_confirm(void) {
       if (pending.kind==ML_EVENT_SEASON_END) {
         if (focus) { ml_page(ML_PAGE_HUB); break; }
         if (!ml_next_season(&career)) ml_message("RENEW EXPIRING CONTRACTS: KEEP 18 PLAYERS AND A GOALKEEPER");
-        else { hub_section=0u; ml_page(ML_PAGE_HUB); ml_autosave(); }
+        else { ml_begin_advance(0u,"New season started"); }
       } else if (!focus) {
         if (!pending.home || !pending.away) { ml_message("YOUR CLUB HAS NO MATCH - CHOOSE SIMULATE"); break; }
-        if (!ml_advance_date(&career,&pending) || !ml_autosave()) break;
-        match_active=1u; result_received=shootout_winner=0u;
-        match_swapped=pending.away==career.settings.club;
-        action=ML_ACTION_MATCH;
-      } else { confirm_kind=3u; return_page=ML_PAGE_NEXT; ml_page(ML_PAGE_CONFIRM); }
+        ml_open_confirmation(5u);
+      } else ml_open_confirmation(3u);
       break;
     case ML_PAGE_CONFIRM:
-      if (focus) { ml_page(return_page); break; }
+      if (focus) { ml_cancel_confirmation(); break; }
       if (confirm_kind==4u) { ml_save_selected(overwrite_slot); break; }
+      if (confirm_kind==5u) {
+        /* A kickoff, failed handoff or quit is not a completed calendar event.
+         * Date/wages move only when the result is committed, then animate on
+         * return from the native result screen. */
+        match_from_day=career.day;result_saved=0u;
+        match_active=1u;plan_editor=0u;result_received=shootout_winner=0u;
+        match_swapped=pending.away==career.settings.club;action=ML_ACTION_MATCH;
+        ml_page(ML_PAGE_HUB);break;
+      }
+      if (confirm_kind==6u) {
+        const char *error=ml_release(&career,transaction_player);
+        if(*error){ml_message(error);break;}
+        ml_cancel_confirmation();ml_refresh_players(career.settings.club);
+        if(focus>=player_rows)focus=player_rows ? player_rows-1u : 0u;
+        if(ml_autosave())ml_toast("Player released to free agency");
+        break;
+      }
       if (confirm_kind==3u) {
+        const uint32_t from=career.day;
         if (!ml_simulate_event(&career,&pending)) { ml_message("EVENT CHANGED - RETURN TO CAREER HUB"); break; }
-        hub_section=0u; ml_page(ML_PAGE_HUB); ml_autosave(); break;
+        ml_begin_advance(from,"Matchday completed"); break;
       }
       {
         const char *error=confirm_kind==2u ? ml_renew(&career,transaction_player,years)
@@ -316,7 +381,8 @@ static void ml_confirm(void) {
 }
 
 void ml_frontend_pad(uint32_t pressed) {
-  if (match_active) return;
+  if (match_active || page==ML_PAGE_ADVANCE) return;
+  if (ml_review_pad(pressed)) return;
   if (pressed & ML_B) {
     if (page==ML_PAGE_LANDING) { ml_frontend_close(); action=ML_ACTION_EXIT; }
     else if (page==ML_PAGE_HUB) { if (ml_autosave()) { ml_frontend_close(); action=ML_ACTION_EXIT; } }
@@ -325,7 +391,7 @@ void ml_frontend_pad(uint32_t pressed) {
     else if (page==ML_PAGE_NATIONALITY) { ml_page(ML_PAGE_MANAGER); focus=1u; }
     else if (page==ML_PAGE_CLUBS) { ml_page(ML_PAGE_SETTINGS); focus=1u; }
     else if (page==ML_PAGE_SLOTS) ml_page(session_ready && active_slot<3u ? ML_PAGE_HUB : ML_PAGE_LANDING);
-    else if (page==ML_PAGE_CONFIRM) ml_page(return_page);
+    else if (page==ML_PAGE_CONFIRM) ml_cancel_confirmation();
     else if (page==ML_PAGE_MARKET_PLAYERS) { destination=0u; ml_page(ML_PAGE_MARKET_CLUBS); }
     else if (page==ML_PAGE_SQUAD && selected_player!=ML_INVALID_INDEX) selected_player=ML_INVALID_INDEX;
     else if (page==ML_PAGE_OFFICE || page==ML_PAGE_SQUAD || page==ML_PAGE_NEXT) ml_page(ML_PAGE_HUB);
@@ -391,7 +457,9 @@ void ml_frontend_pad(uint32_t pressed) {
 }
 
 int ml_frontend_match_active(void) { return match_active!=0u; }
-int ml_frontend_match_is_cup(void) { return match_active && pending.kind==ML_EVENT_CUP; }
+int ml_frontend_plan_editor(void) { return match_active && plan_editor; }
+void ml_frontend_plan_error(void) { ml_message("SQUAD EDITOR COULD NOT OPEN - PLEASE RETRY"); }
+int ml_frontend_match_is_cup(void) { return match_active && !plan_editor && pending.kind==ML_EVENT_CUP; }
 int ml_frontend_match_teams(uint32_t *home,uint32_t *away) {
   if (!match_active || !pending.home || !pending.away) return 0;
   if (home) *home=match_swapped ? pending.away : pending.home;
@@ -399,7 +467,10 @@ int ml_frontend_match_teams(uint32_t *home,uint32_t *away) {
   return 1;
 }
 void ml_frontend_handoff_result(int opened) {
-  if (!opened) { match_active=0u; ml_message("MATCH COULD NOT START - FIXTURE KEPT"); }
+  if (!opened) {
+    ml_message(plan_editor ? "SQUAD EDITOR COULD NOT OPEN - PLEASE RETRY" : "MATCH COULD NOT START - FIXTURE KEPT");
+    match_active=plan_editor=0u;
+  }
 }
 void ml_frontend_penalty_result(uint32_t home,uint32_t away) {
   if (!ml_frontend_match_is_cup() || result_received) return;
@@ -408,19 +479,23 @@ void ml_frontend_penalty_result(uint32_t home,uint32_t away) {
   shootout_winner=home==away || home>99u || away>99u ? 0u : home>away ? native_home : native_away;
 }
 void ml_frontend_result(uint32_t home,uint32_t away,const LeagueScorer *scorers,uint32_t count) {
-  if (!match_active || result_received) return;
+  if (!match_active || plan_editor || result_received) return;
   if (!ml_record_event_decided(&career,&pending,match_swapped ? away : home,
         match_swapped ? home : away,scorers,count,0,shootout_winner)) {
     ml_message("RESULT NOT AVAILABLE - FIXTURE KEPT FOR RETRY"); return;
   }
   message[0]=0;
-  result_received=1u; ml_autosave();
+  result_received=1u; result_saved=ml_autosave();
 }
 int ml_frontend_restore(void) {
   if (!match_active) return 0;
   match_active=0u;
   char saved_message[112]; snprintf(saved_message,sizeof(saved_message),"%s",message);
-  hub_section=0u; ml_page(ML_PAGE_HUB);
+  if(plan_editor) {plan_editor=0u;ml_page(ML_PAGE_SQUAD);focus=1u;}
+  else {
+    hub_section=0u;ml_page(ML_PAGE_HUB);
+    if(result_received && result_saved)ml_start_advance(match_from_day,"Matchday completed");
+  }
   if (saved_message[0]) ml_message(saved_message);
   return 1;
 }
@@ -452,7 +527,9 @@ int ml_frontend_preset_write(uint32_t team,uint32_t slot,const GameplanPreset *p
   return ml_autosave();
 }
 int ml_frontend_store_current_plan(const GameplanPreset *plan) {
-  return match_active && ml_store_plan(&career,plan) && ml_autosave();
+  /* Match-hub and pause changes are temporary. Only the office editor owns
+   * the career default; explicit named preset saves remain independent. */
+  return match_active && plan_editor && ml_store_plan(&career,plan) && ml_autosave();
 }
 
 static const char *ml_role(uint32_t role) {
@@ -511,7 +588,7 @@ static void ml_dashboard_view(MlView *v) {
     snprintf(row->value,sizeof(row->value),"%u",p->overall);
   }
 }
-void ml_frontend_view(MlView *v) {
+static void ml_base_view(MlView *v) {
   memset(v,0,sizeof(*v)); v->page=page; v->selected=focus;
   v->total=ml_count(); v->first=focus/5u*5u;
   snprintf(v->title,sizeof(v->title),"MASTER LEAGUE");
@@ -564,7 +641,7 @@ void ml_frontend_view(MlView *v) {
       v->rows[i].enabled=!(hub_section==3u && i==2u && !career.cup_enabled);
       if (!v->rows[i].enabled) snprintf(v->rows[i].detail,96,"NO SUPPORTED DOMESTIC CUP IN THIS LEAGUE");
     }
-    MlEvent next; ml_next_event(&career,&next);
+    MlEvent next={0}; ml_next_event(&career,&next);
     memset(v->info,0,sizeof(v->info));
     snprintf(v->info[0],96,"%s",next.kind==ML_EVENT_SEASON_END ? "SEASON REVIEW" :
              next.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
@@ -620,6 +697,52 @@ void ml_frontend_view(MlView *v) {
       snprintf(v->info[1],96,"WINDOW  %s",ml_window_open(&career) ? "OPEN" : "CLOSED");
       snprintf(v->info[2],96,"%u COMPLETED CLUB TRANSACTIONS",career.transaction_sequence);
       snprintf(v->info[4],96,"SQUAD SIZE  %u / %u",ml_find_club(&career,career.settings.club)->count,ML_SQUAD_SIZE);
+    }
+    MlStoryView *story=&v->story;
+    story->club_badge=exhibition_team_catalog_badge(career.settings.club);
+    story->nation_badge=exhibition_team_catalog_badge(career.manager_nationality);
+    snprintf(story->headline,64,"%s",feed_index==0u ? career.manager_name : feed_index==1u ? "MATCH CENTRE" :
+        feed_index==2u ? "THE SEASON SO FAR" : "TRANSFER DESK");
+    snprintf(story->summary,112,"%s",feed_index==0u ? exhibition_team_catalog_name(career.manager_nationality) :
+        feed_index==1u ? "Latest league results" : feed_index==2u ? ml_competition_name() : "Your club's transfer activity");
+    for(uint32_t i=career.league.fixture_count;i>0u && story->history_count<3u;i--) {
+      const LeagueFixture *f=&career.league.fixtures[i-1u];
+      if(feed_index!=1u || !f->complete || (f->home!=career.settings.club && f->away!=career.settings.club))continue;
+      if(!story->has_result) {
+        story->has_result=1u;story->home_badge=exhibition_team_catalog_badge(f->home);story->away_badge=exhibition_team_catalog_badge(f->away);
+        snprintf(story->home,64,"%s",exhibition_team_catalog_name(f->home));snprintf(story->away,64,"%s",exhibition_team_catalog_name(f->away));
+        story->home_goals=f->home_goals;story->away_goals=f->away_goals;
+      }
+      MlViewRow *r=&story->history[story->history_count++];
+      const int home=f->home==career.settings.club;const uint32_t opponent=home ? f->away : f->home;
+      r->enabled=1;r->badge=exhibition_team_catalog_badge(opponent);
+      snprintf(r->label,64,"%s",exhibition_team_catalog_name(opponent));
+      snprintf(r->detail,96,"%s / LEAGUE",home ? "HOME" : "AWAY");
+      snprintf(r->value,48,"%u - %u",f->home_goals,f->away_goals);
+    }
+    const MlClub *own=ml_find_club(&career,career.settings.club);
+    const char *labels[3]={feed_index==2u ? "LEAGUE POSITION" : feed_index==3u ? "WINDOW" : "SEASON",
+      feed_index==2u ? "BOARD TARGET" : feed_index==3u ? "COMPLETED DEALS" : "SQUAD",
+      feed_index==2u ? "SEASONS COMPLETED" : feed_index==3u ? "SQUAD" : "BOARD TARGET"};
+    for(uint32_t i=0;i<3u;i++)snprintf(story->stat_label[i],32,"%s",labels[i]);
+    snprintf(story->stat_value[0],48,"%u",feed_index==2u ? ml_rank(&career) : career.season);
+    snprintf(story->stat_value[1],48,feed_index==2u ? "TOP %u" : "%u PLAYERS",feed_index==2u ? career.target_rank : own->count);
+    snprintf(story->stat_value[2],48,feed_index==2u ? "%u" : "TOP %u",feed_index==2u ? career.seasons_completed : career.target_rank);
+    if(feed_index==3u) {
+      uint32_t deals=0u;
+      for(uint32_t i=career.office.offer_count;i>0u;i--) {
+        const MlOffer *o=&career.office.offers[i-1u];deals+=o->status==ML_OFFER_COMPLETED;
+        if(story->history_count>=3u)continue;
+        MlViewRow *r=&story->history[story->history_count++];r->enabled=1;
+        const uint32_t other=o->incoming ? o->to : o->from;
+        r->badge=exhibition_team_catalog_badge(other);
+        snprintf(r->label,64,"%s",career.players[o->player].name);
+        static const char *status[]={"","WAITING","APPROVED","COUNTEROFFER","REJECTED","COMPLETED","CANCELLED","OFFER EXPIRED"};
+        snprintf(r->detail,96,"%s / %.48s",status[o->status],other ? exhibition_team_catalog_name(other) : "FREE AGENT");
+        ml_money(r->value,48,o->fee);
+      }
+      snprintf(story->stat_value[0],48,"%s",ml_window_open(&career) ? "OPEN" : "CLOSED");
+      snprintf(story->stat_value[1],48,"%u",deals);snprintf(story->stat_value[2],48,"%u / 40",own->count);
     }
     v->helper_count=3u; v->helper_key[0]="L"; v->helper_label[0]="PREVIOUS STORY";
     v->helper_key[2]="R"; v->helper_label[2]="NEXT STORY";
@@ -807,6 +930,7 @@ void ml_frontend_view(MlView *v) {
           const LeagueScorer *s=&career.league.scorers[scorers[index]];
           snprintf(row->label,64,"%u  %s",index+1u,s->name); snprintf(row->detail,96,"%s",exhibition_team_catalog_name(s->team));
           snprintf(row->value,48,"%u GOALS",s->goals); row->portrait=s->portrait_id;
+          row->badge=exhibition_team_catalog_badge(s->team);
         } else {
           const LeagueStanding *s=&career.league.standings[standings[index]];
           snprintf(row->label,64,"%u  %.55s",index+1u,exhibition_team_catalog_name(s->team));
@@ -817,4 +941,32 @@ void ml_frontend_view(MlView *v) {
       default: break;
     }
   }
+}
+
+#include "master_league_navigation.inc"
+
+void ml_frontend_view(MlView *v) {
+  if(page==ML_PAGE_CONFIRM) {
+    *v=confirm_background;memset(&v->drawer,0,sizeof(v->drawer));
+    v->modal.open=1u;v->modal.selected=focus;v->modal.destructive=confirm_kind==4u || confirm_kind==6u;
+    snprintf(v->modal.accept,32,"%s",confirm_kind==3u ? "SIMULATE" : confirm_kind==5u ? "PLAY MATCH" : "CONFIRM");
+    snprintf(v->modal.title,64,"%s",confirm_kind==3u ? "SIMULATE MATCH?" : confirm_kind==5u ? "PLAY MATCH?" : "CONFIRM");
+    snprintf(v->modal.body,256,"%s",confirm_kind==3u ? "Simulate this event and save the result? This cannot be undone." :
+      "Open the pre-match Game Plan and play this fixture? The calendar advances after the match is completed.");
+    if(confirm_kind==4u) {
+      snprintf(v->modal.title,64,"OVERWRITE SLOT %u?",overwrite_slot+1u);
+      snprintf(v->modal.body,256,"Replace %s in this slot with the current career? Other slots remain unchanged.",slot_club[overwrite_slot]);
+      snprintf(v->modal.accept,32,"OVERWRITE");
+    }else if(confirm_kind==6u) {
+      char fee[32];ml_money(fee,sizeof(fee),ml_release_value(&career,transaction_player));
+      snprintf(v->modal.title,64,"RELEASE PLAYER?");
+      snprintf(v->modal.body,256,"Release %s as a free agent? Compensation: %s. Weekly wages stop. This cannot be undone.",career.players[transaction_player].name,fee);
+      snprintf(v->modal.accept,32,"RELEASE");
+    }
+    snprintf(v->modal.error,112,"%s",message);v->status[0]=v->toast[0]=0;
+    v->helper_count=2u;v->helper_key[0]="A";v->helper_label[0]="SELECT";v->helper_key[1]="B";v->helper_label[1]="CANCEL";
+    return;
+  }
+  ml_base_view(v);
+  ml_review_view(v);
 }

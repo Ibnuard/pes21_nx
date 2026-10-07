@@ -167,6 +167,29 @@ static void test_conditions(void) {
   exhibition_prepare_team_conditions(100, 200);
   assert(condition_calls == 4 && last_condition_mode == 2);
 }
+static void test_office(void) {
+  unsigned char before[sizeof(match_bytes)],before_plan[sizeof(plan)];
+  memcpy(before,match_bytes,sizeof(before));memcpy(before_plan,plan,sizeof(plan));
+  office_editor=1;exhibition_plan_ready=0; /* No playable MatchPlan is required. */
+  assert(prematch_gameplan_replace_player(0,&squads[0],squads[0].key[7],squads[0].key[21]));
+  assert(get_order(&squads[0],squads[0].key[21])==7u);
+  assert(get_order(&squads[0],squads[0].key[7])==0xffu);
+  assert(prematch_gameplan_replace_player(0,&squads[0],squads[0].key[21],squads[0].key[12]));
+  assert(get_order(&squads[0],squads[0].key[12])==7u);
+  exhibition_save_matchplan_sides(3u);assert(!saves[0] && !saves[1] && !publishes);
+  assert(!memcmp(before,match_bytes,sizeof(before)) && !memcmp(before_plan,plan,sizeof(plan)));
+  TestSquad own=squads[0],other=squads[1];
+  assert(!prematch_gameplan_replace_player(1,&squads[1],squads[1].key[7],squads[1].key[21]));
+  assert(!memcmp(&other,&squads[1],sizeof(other)));
+  squads[0].key[24][1]^=0x10000000u;own=squads[0];
+  assert(!prematch_gameplan_replace_player(0,&squads[0],squads[0].key[12],squads[0].key[24]));
+  assert(!memcmp(&own,&squads[0],sizeof(own))); /* unknown career identity rolls back */
+  squads[0].key[24][1]^=0x10000000u;
+  memcpy(squads[0].key[24],squads[0].key[23],16u);own=squads[0];
+  assert(!prematch_gameplan_replace_player(0,&squads[0],squads[0].key[12],squads[0].key[23]));
+  assert(!memcmp(&own,&squads[0],sizeof(own))); /* duplicate reserves also fail */
+  assert(copies==destroys);
+}
 
 int main(int argc, char **argv) {
   assert(argc == 2); init();
@@ -177,6 +200,7 @@ int main(int argc, char **argv) {
   else if (!strcmp(argv[1], "reject")) test_reject();
   else if (!strcmp(argv[1], "live")) test_live();
   else if (!strcmp(argv[1], "conditions")) test_conditions();
+  else if (!strcmp(argv[1], "office")) test_office();
   else assert(0);
   return 0;
 }

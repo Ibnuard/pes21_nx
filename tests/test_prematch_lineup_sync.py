@@ -25,7 +25,7 @@ class PrematchLineupSyncTests(unittest.TestCase):
             (ROOT / "tests/prematch_lineup_stubs.inc").read_text(),
             *[function(hooks, name) for name in (
                 "exhibition_matchplan_common_side", "exhibition_sync_prematch_lineup",
-                "exhibition_save_matchplan_sides", "prematch_gameplan_replace_player",
+                "exhibition_save_matchplan_sides", "master_league_office_lineup_valid", "prematch_gameplan_replace_player",
                 "exhibition_prepare_team_conditions")],
             (ROOT / "tests/prematch_lineup_cases.inc").read_text(),
         ])
@@ -59,6 +59,9 @@ class PrematchLineupSyncTests(unittest.TestCase):
 
     def test_live_substitution_path_never_reorders_match_records(self):
         self.run_case("live")
+
+    def test_office_substitution_validates_career_without_match_bindings(self):
+        self.run_case("office")
 
     def test_random_conditions_are_seeded_once_per_match_and_respect_uniform_override(self):
         self.run_case("conditions")

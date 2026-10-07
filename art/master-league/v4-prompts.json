@@ -1,0 +1,6 @@
+{
+  "mode": "built-in image_gen",
+  "asset": "office-icons-v4.png",
+  "runtime": "data/master_league_icons_v4.bin",
+  "prompt": "Use case: stylized-concept. Asset type: one production game UI sprite atlas, transparent PNG, exactly 2 columns by 2 rows of equal square cells, 1024x1024. Primary request: four clean readable football-manager UI symbols. Top-left: one chunky left-pointing chevron. Top-right: one matching chunky right-pointing chevron. Bottom-left: a friendly handshake of two hands with navy and cyan suit cuffs, transfer negotiations symbol. Bottom-right: empty football statistics symbol, a clipboard with three blank horizontal marks and a small football overlapping its lower corner. Style: polished flat modern sports UI pictograms, strong silhouettes, navy blue outlines, ice-blue and cyan fills, restrained red accent on clipboard; no 3D, no tiny details, no gradients. Each symbol centered at the exact center of its quadrant, all visible content inset at least 18% from the quadrant edges. Genuinely transparent background including between symbols. No cells, grid lines, labels, words, letters, digits, branding, watermark, shadow cast outside silhouettes. Arrows dark navy for use on pale white UI. This is an asset sheet, not a screenshot or UI mockup."
+}

@@ -4,19 +4,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
 #endif
 
 #define ML_SAVE_MAGIC 0x314c4d46u /* FML1 */
-#define ML_SAVE_VERSION 1u
+#define ML_SAVE_VERSION 4u
+#define ML_V1_SIZE offsetof(MasterLeague, options)
+#define ML_V2_SIZE offsetof(MasterLeague, office)
+#define ML_V3_SIZE offsetof(MasterLeague, offer_seen)
 typedef struct { uint32_t magic, version, size, sequence, checksum; } MlSaveHeader;
 
-static uint32_t ml_checksum(const MasterLeague *career) {
+static uint32_t ml_checksum(const MasterLeague *career, size_t size) {
   const unsigned char *p = (const unsigned char *)career;
   uint32_t value = 2166136261u;
-  for (size_t i=0; i<sizeof(*career); i++) value = (value ^ p[i]) * 16777619u;
+  for (size_t i=0; i<size; i++) value = (value ^ p[i]) * 16777619u;
   return value;
 }
 static void ml_save_path(uint32_t slot, uint32_t copy, char path[80]) {
@@ -28,14 +32,20 @@ static int ml_read_copy(uint32_t slot, uint32_t copy, const char *content,
   char path[80]; ml_save_path(slot, copy, path);
   FILE *file = fopen(path, "rb");
   if (!file) return 0;
-  MlSaveHeader header;
+  MlSaveHeader header={0};
+  memset(out,0,sizeof(*out));
   const int read = fread(&header, 1, sizeof(header), file) == sizeof(header) &&
-      header.magic == ML_SAVE_MAGIC && header.version == ML_SAVE_VERSION &&
-      header.size == sizeof(*out) &&
-      fread(out, 1, sizeof(*out), file) == sizeof(*out);
+      header.magic == ML_SAVE_MAGIC &&
+      ((header.version==1u && header.size==ML_V1_SIZE) ||
+       (header.version==2u && header.size==ML_V2_SIZE) ||
+       (header.version==3u && header.size==ML_V3_SIZE) ||
+       (header.version==ML_SAVE_VERSION && header.size==sizeof(*out))) &&
+      fread(out, 1, header.size, file) == header.size;
   const int end = fgetc(file) == EOF, closed = fclose(file) == 0;
-  if (!read || !end || !closed || header.checksum != ml_checksum(out) ||
+  if (!read || !end || !closed || header.checksum != ml_checksum(out,header.size) ||
       !ml_valid(out) || (content && strcmp(content, out->content_id))) return 0;
+  /* Migration is in memory only, after checksum/structural validation. */
+  out->settings.condition=5u;
   *sequence = header.sequence;
   return 1;
 }
@@ -71,7 +81,7 @@ int ml_save_write(uint32_t slot, const MasterLeague *career) {
   const uint32_t sequence=(seq[0]>seq[1] ? seq[0] : seq[1])+1u;
   if (!sequence) { free(verify); return 0; }
   const MlSaveHeader header={ML_SAVE_MAGIC,ML_SAVE_VERSION,sizeof(*career),
-                             sequence,ml_checksum(career)};
+                             sequence,ml_checksum(career,sizeof(*career))};
   char path[80]; ml_save_path(slot,copy,path);
   FILE *file=fopen(path,"wb");
   if (!file) { free(verify); return 0; }

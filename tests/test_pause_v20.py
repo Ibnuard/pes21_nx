@@ -101,7 +101,8 @@ static uint32_t exhibition_gameplan_custom_active, live_gameplan_returning_to_pa
 static uint64_t armGetSystemTick(void) {return now;}
 static uint64_t armTicksToNs(uint64_t t) {return t;}
 '''
-        code += function(hooks, 'pes_controller_pause_transition')
+        start=hooks.index('uint32_t pes_controller_pause_transition(void)')
+        code += function(hooks[start:], 'pes_controller_pause_transition')
         code += function(hooks, 'pause_resume_reveal')
         code += r'''
 int main(void) {

@@ -1,5 +1,335 @@
 # Master League implementation
 
+## Review revision v6 diagnostic (2026-10-07)
+
+This revision supersedes v5's **pre-kickoff** calendar playback and confirmation
+pages. It preserves the accepted catalog, generated artwork, palette and native
+live-match substitution rules. The frontend-design pass guided shared panel
+proportions and the richer crest-led Club Feed; no new raster assets were needed.
+
+- The office-only substitution path validates the entire SquadData against the
+  career roster: exact canonical native identities, all reserves, unique 18-player
+  registration/order maps, and the managed side only. It retains native deep-copy
+  rollback. It no longer requires or publishes executable Match/AdditionalData
+  records while editing from My Squad. Changes are persisted through the existing
+  canonical career-plan adapter. Pre-match/live paths retain their existing guards.
+- Two-destination groups (Squad, Next Match, My Teams, Manager) are centred
+  vertically; the three save slots fill their panel. Four Market tiles remain
+  evenly fitted. Short data/selector lists have bounded, centred rows, while
+  paginated lists keep stable row height on partially filled last pages.
+- Overwrite, Play, Simulate and Release use a centred two-button modal over the
+  original page. Destructive actions start on Cancel; left/right chooses the
+  button. The modal draws after global helper sprites. Projection never performs
+  an action. Drawer modals suppress transient toasts and show errors inline.
+- Play opens confirmation, then native pre-match/Game Plan without advancing
+  the date or charging wages. A committed, saved result triggers calendar playback
+  only when native result flow returns, then lands on the Hub. Cancel, failed
+  handoff, aborted matches and duplicate callbacks cannot advance again.
+  Simulated and office events still commit/save once before their playback.
+- My Teams now has Club Offers and My Players. `OFFER EXPIRED` explicitly means
+  the buyer's offer, not the player's contract. An expired incoming offer for a
+  still-owned player can open paid contract renewal; it cannot revive the bid.
+  Rejected/completed/cancelled details show status and no disabled action trio.
+  Waiting offers expose Cancel only. My Players provides renewal/release even
+  without an incoming bid. Renewal has an adjustable duration and readonly
+  signing-fee/wage quote in its existing payment modal.
+- Release creates a free agent and stops that player's wage. This candidate uses
+  a **proposed balancing default of 25% of player value** as compensation, matching
+  the request for release income; the percentage was not separately confirmed.
+  The payout is once per player identity, preventing release/re-sign cash loops.
+  Validation retains at least 18 players, the last keeper and suitable starter
+  cover, respects dismissal/balance limits, cancels live offers and invalidates
+  the current lineup. Checks precede mutation. Identity/face keys stay unchanged.
+- Top Scorer rows render the team crest beside the portrait. Four Club Feed
+  stories use existing artwork, club/nationality badges, actual latest league
+  results with scores/opponent crests, season statistics and recent transfer
+  statuses. They do not fabricate historical results or news.
+
+Save version remains **4** with unchanged struct layout. Bit 0 of the previously
+reserved `MlPlayer.reserved` byte stores the release-compensation receipt; unknown
+bits are rejected. v1/v2/v3 migration and v4 roundtrip remain tested. The receipt
+survives free-agent re-signing and save/reload. Back up SaveData for rollback;
+older builds lack the new release action and its balancing rules.
+
+### Verification and candidate
+
+Core/frontend tests cover expired-offer renewal, fee deduction, release/re-sign
+anti-exploit, goalkeeper/squad limits, identity preservation, cancellation and
+save roundtrip. Native host probes cover office bench/reserve substitution
+without a MatchPlan, unchanged Match buffers, and rollback on foreign/duplicate
+identities. Layout probes cover proportional groups, modal foreground order,
+badge presence, text overlap and the native draw/vertex budget.
+
+Focused regression: **73 passed, 1 skipped**, with 32,662 layout subtests.
+The skipped test needs the user's ignored hardware log. `git diff --check`
+and the public-tree audit (605 files) passed. The broader legacy-suite caveats
+below still apply; these checks do not constitute Switch acceptance.
+
+The v6 candidate was built cleanly with `build-wsl.ps1`, `DIAGNOSTICS=1`,
+`PERF_TRACE=0`, and the same full-loose pair `e861c583ec78e9ae` / catalog content
+`97e84d7f8c21ba930bb0e13793ac46c91a60836a33902d40100d36aa5801a59f`.
+Source hashes were compared against the live build stage; launcher icon,
+embedded UI/badge assets, diagnostic logging and initialized ELF/NRO sections
+were verified. The NRO is 66,823,071 bytes, SHA-256
+`2540187285a83a3812f81eb32cdc5a9cdfa5d6ea28f2f6aae91817eb60d006c6`.
+The copy folder is `local-debug/FootballNX-MasterLeague-v6-DIAGNOSTIC-COPY-TO-pes21_nx/`;
+verification and synthetic host previews stay under `local-debug/master-league-v6/`.
+No active runtime, game payload or existing save was changed.
+
+Hardware acceptance is still required: office substitution -> leave editor ->
+reopen -> save/relaunch -> verify the actual starting player at kickoff; played
+and simulated result return/calendar timing; first-half whistle -> loading ->
+halftime. The v5 diagnostic breadcrumbs/readiness guard remain. No new Switch
+log was supplied, so this is **not a claim that the halftime crash is fixed**.
+After reproducing, copy `pes21_nx/debug.log` before relaunching, plus any Atmosphere
+crash report. This log is replaced at each boot.
+
+## Review revision v5 diagnostic (2026-10-07)
+
+This pass retains the accepted palette, art, badge/font assets and gameplay
+catalog. The frontend-design pass informed the balanced card groups, equal
+team-name lanes and the notification hierarchy; no new raster art was needed.
+
+- Empty-state sampling excludes the neighbouring handshake tip and preserves
+  the icon's aspect ratio at 58% opacity. The host preview now honours texture
+  alpha, matching the native shader.
+- Profile cards are centred as a group within the card body. Four Market
+  tiles fill the available height and their title/description blocks are
+  vertically centred. Next Match names share equal-width centred badge lanes.
+- Toasts draw after the global Switch-helper sprite pass, with an opaque
+  background; the shoulder R can no longer overpaint them. Renewal success
+  uses the same timed toast as transfer updates.
+- Renewal quotes a signing fee of four weeks of the new wage per chosen
+  contract year. Confirmation validates both cash and the wage budget before
+  changing anything, deducts the displayed fee once, and refuses durations
+  that do not extend the current end season. Contract duration remains relative
+  to the current season, not an extra number of years added to the old contract.
+- Advance commits and saves once, then displays a full calendar for 1.1–2.45s,
+  stepping the highlighted date with a per-day sweep and overall progress bar.
+  Input is locked during playback. Office/simulation events return to the Hub;
+  choosing Play continues to the native match hub after the date transition.
+  Render projection does not advance dates or process transactions. Failed
+  saves stay on the Hub with an explicit retry-save error, without replaying
+  the already-committed event.
+- Calendar tile height adapts to the actual 4/5/6 week rows, filling a constant
+  grid area above the date-detail line. Five-week months use approximately
+  66px tiles at 720p; six-week months remain fully visible.
+- Red unread dots appear on My Teams/Transfer Response, individual offer rows,
+  the Hub's Club Office tab and its Transfer Market destinations. Merely
+  displaying a list does not mark an update read: opening its detail does.
+  New incoming bids, replies, counters, rejections and expirations are unread;
+  waiting bids and user-initiated completion/cancellation are not. Read receipts
+  follow offer compaction and distinguish subsequent negotiation rounds.
+
+Save **version 4** appends 32 read receipts after the frozen v3 layout. Exact
+v1/v2/v3 prefixes remain checksum-validated and migrated in memory without
+rewriting on read. Unknown/invalid files and A/B recovery retain the existing
+guards. Back up SaveData before this test: older builds cannot read v4 saves.
+
+### Halftime and substitution diagnostic boundary
+
+The reported failure is **first-half whistle -> loading -> crash**. No hardware
+log was available. This candidate is built with `DIAGNOSTICS=1`, `PERF_TRACE=0`;
+it is not a claim that the crash or reported failed substitution is reproduced
+or resolved. Native lineup validation and rollback are intentionally retained.
+
+`ml-v5-diag:` breadcrumbs bracket native ending/demo/result creation, stats
+InitMobile, stats snapshots, halftime-menu entry and substitution commit checks.
+They report registration/count/identity failure branches without dumping game
+payloads. Existing debug logging flushes each message to `debug.log`. The
+halftime initializer also defers skin/root access until native InitMobile says
+the layout is ready, keeping the cover during retries. Host tests execute this
+readiness guard in both release and diagnostic builds.
+
+On Switch, reproduce substitution once, then play through the first whistle.
+After a crash **copy `pes21_nx/debug.log` before relaunching** (each boot replaces
+it). Include the latest Atmosphère crash report if available, and say whether
+the failed substitution was in the career office editor, pre-match hub or
+pause/halftime. A successful host test or NRO build is not hardware acceptance.
+
+### Verification and candidate
+
+The focused regression run passed 69 tests and 29,877 layout subtests; one
+hardware-log test was skipped because its ignored Switch log was unavailable.
+`git diff --check` and the public-tree check (605 files) passed. This does not
+claim a clean full legacy suite or Switch acceptance.
+
+The diagnostic NRO is 66,782,111 bytes, SHA-256
+`9e3841e1568c040a3b87547e294c5a26d7bb0a4418600724156a20eaf2579ca2`.
+Verification compared staged sources, embedded assets, ELF/NRO sections,
+diagnostic logging and launcher icon bytes. Runtime pair `e861c583ec78e9ae`,
+content `97e84d7f8c21ba930bb0e13793ac46c91a60836a33902d40100d36aa5801a59f`
+and the 304-club/9,075-player catalog remain unchanged. Install only the NRO;
+do not replace game payloads. To roll back after saving with v5, restore both
+the previous NRO and the pre-v5 SaveData backup.
+
+## Review revision v4 (2026-10-07)
+
+This revision supersedes the v3 selector, condition-setting and fixed-price
+transfer behavior below. The accepted team/kit/logo catalog is unchanged.
+
+- Reusable white cards have opaque bodies, 54px blue headers, 25px title
+  geometry, rounded top corners and square header bottoms. Main and selector
+  panels have identical heights. Existing light artwork and shared font atlas
+  are retained; no native data is drawn into a generated screenshot.
+- League standings are a full-width table: eight clubs per page, larger
+  crests/text, and aligned P/W/D/L/GF/GA/GD/PTS columns. L/R pages through all
+  clubs. The domestic cup uses a connected three-round bracket viewport;
+  round navigation and fixture groups expose the entire actual bracket.
+- Player lists use colored position tags and large right-aligned ratings,
+  moving from blue/green toward red at higher values, without STARTER labels.
+  Empty panels show one centered message and the generated empty-state icon.
+- Settings retain drawers only for League/Club. The other five values change
+  inline with generated left/right chevrons. Player Condition is removed and
+  always Random, including old career loads. Nationalities remain alphabetical.
+- Office Game Plan holds the opaque native loading transition until the
+  custom editor is ready, including the intermediate native Hub publication.
+  Permanent career plans and temporary pre-match changes remain separate.
+- Quick Save uses a top-right 180ms-in/250ms-out toast, automatically dismissed
+  after three seconds without navigation. Errors remain separate and visible.
+- Transfer Market has My Teams, Transfer Response, Weak Position and Browse
+  Team. Browsing is category/league -> team -> players, with Free Agents also
+  available. Recommendations use the weakest registered starting role, not
+  invented season-performance statistics.
+- Propose Terms is a centered modal over a dimmed, unshrunk page. Contract,
+  weekly wage and fee have centered values and smaller generated arrows.
+  Fees use one-decimal M and 0.1 M steps (2.3 M -> 2.4 M); weekly wages use K
+  and 1 K steps. Steps follow the chosen display currency. Only the new draft
+  quote is rounded to its visible precision; saved balances/contracts are not
+  rewritten by changing currency. A advances fields; Send Offer is explicit.
+- Offers persist identity, ownership, terms, status and a rolled response date
+  one to three days ahead. Counteroffers/acceptance still require explicit
+  Accept Terms; duplicate/replayed transactions cannot move the player twice.
+  Negotiations, roster/keeper limits, budgets and ownership are revalidated
+  before committing. Incoming bids support Accept/Reject/Negotiate.
+- The calendar marks opening, middle, updates and deadline with the generated
+  handshake. July 1/16/31 and January 1/16/31 are in-game milestones, not a
+  real-world feed. Skip First Window affects only the first July. Next Event
+  stops for responses and deadlines before later matches; deadline responses
+  are processed before the deadline milestone. Unresolved offers expire after
+  the window; new bids cannot start on deadline day.
+- Manager offers and President Messages live in Club Office. The agreed rules
+  warn at three mid-season consecutive losses and terminate at six; negative
+  transfer cash warns first and terminates after 14 days. Dismissed careers
+  remain viewable/saveable but cannot play, advance or transact. A qualifying
+  mid-season job offer lasts 14 days and is restricted to the same league and
+  compatible cup field; accepting preserves fixtures/results and club budgets.
+
+Save version 3 appends the office state after the frozen v2 prefix. Exact-size
+v1/v2 files are checksum-validated, zero-extended and migrated in memory; reads
+never overwrite them. A/B recovery and content pairing remain mandatory.
+Back up career SaveData before testing: older NROs cannot read v3 saves.
+
+The built-in imagegen tool created `art/master-league/office-icons-v4.png`,
+embedded byte-for-byte as `data/master_league_icons_v4.bin`. Its exact prompt
+and mode are recorded in `art/master-league/v4-prompts.json`. The generated
+atlas supplies both chevrons, handshake and empty-state art; none are hand-drawn
+stand-ins. The frontend-design pass guided spacing, hierarchy and modal layout.
+
+Host tests cover delayed replies/counters/rejection, incoming terms, transaction
+atomicity, deadline stops, stored reply dates, v1/v2 save ABI migration, dismissal
+warnings and thresholds, same-league job changes, and non-mutating projections.
+Layout tests exercise actual C-emitted geometry, eight-row table sizing,
+centered modal/arrows, auto-dismiss without page navigation, text overlap and
+native draw/vertex budgets. Software previews use synthetic players and are
+not Switch captures. Hardware acceptance is still required for native editor
+entry/return, real player identity, transfers and save/relaunch.
+
+V4 verification: **49 focused tests passed, 1 optional hardware-log test
+skipped, 23,547 geometry subtests passed**. This includes all 13 paired curated
+leagues, Cup/League core/frontend/save checks and Game Plan regression probes.
+The public-tree audit passes (604 files); the older broad-suite caveats below
+still apply. There is no claim of an on-device or all-project-suite pass.
+
+The production candidate is 66,675,615 bytes, SHA-256
+`ea674aa1bdaabe1b1d11ebf8b03d8b05f1fd860df87666f99c1c50a6781f8a51`.
+It preserves full-loose pair `e861c583ec78e9ae`, dummy OBB size 53248 and content
+`97e84d7f8c21ba930bb0e13793ac46c91a60836a33902d40100d36aa5801a59f`.
+The native devkitPro build uses the existing private paired staging headers,
+diagnostics/perf trace off and authoritative OVR off. Verification checks source
+equality, initialized ELF/NRO sections, exact old/new artwork and badge bytes,
+launcher icon and the disabled logging stub. Candidate copy folder:
+`local-debug/FootballNX-MasterLeague-v4-COPY-TO-pes21_nx/` (NRO only).
+Instructions, reports and synthetic previews are under
+`local-debug/master-league-v4/`. No active runtime, CPK, OBB or save was changed.
+
+## Review revision v3 (2026-10-07)
+
+The white/blue/red artwork and native font/badge pipeline are retained. The
+frontend-design pass changes hierarchy and interaction, not the artwork or
+base rosters:
+
+- Landing and ordinary pages have one centered primary panel. NEW/CONTINUE
+  use 40px title geometry and regular-weight descriptions. A secondary panel
+  appears only when selecting something, with a 200ms in/out transition.
+- Settings, league/club selection, alphabetical nationalities, squad browsing,
+  transfers and contract terms share the right drawer. A confirms, B closes
+  without committing a selection, up/down scrolls and L/R moves five entries.
+  Closing an entire settings page without Apply leaves the career unchanged.
+- Eight settings: League, Club, Difficulty, Match Time, Transfer Difficulty,
+  Currency, Skip First Transfer Window, and Player Condition. Existing careers
+  show LOCKED on League/Club and start focus on Difficulty. All values open a
+  selector; there is no hidden left/right cycling on a settings tile.
+- Flat navy/cyan action buttons have centered labels. The full-width helper
+  strip has square corners, 32px sprite geometry, 22px text and measured gaps;
+  helpers are grouped left and vertically centered, not distributed evenly.
+- Hub navigation has two top and three bottom targets. The middle ranking is
+  now actionable. Fixed-gap rounded indicators replace the page counter text.
+  Header budgets show annual wage allocation (weekly wage budget x 52) and
+  the club's transfer cash, as agreed by the user.
+- The calendar is a full-width Monday-first month grid. Day zero maps to
+  1 July 2026 for season one; subsequent seasons use the next calendar year.
+  This is the game's calendar, not a real-world fixture feed. Cells use the
+  exact core league/cup dates, venue and recorded results; selecting a day
+  reveals the opponent in the detail line. Undrawn future cup pairings are
+  not invented. Browsing dates does not advance time or charge wages.
+- Squad opens My Squad List / Game Plan. The office Game Plan reuses the
+  native squad bootstrap and existing custom editor, not a second editor.
+  B at its root saves the canonical career default and returns to Squad.
+  It cannot kick off, accept a match result or advance the date/fixture.
+  Opening failures return to the career; a failed save keeps the editor open
+  for retry. Pre-match/pause changes no longer overwrite this permanent plan.
+  Explicitly saved named presets remain independent of the default plan.
+
+Options are an aligned append-only extension to the v1 career payload. Save
+version 2 reads both v1 (default options) and v2 after checking the exact
+version/size/checksum; reading never rewrites the file. A/B recovery and pinned
+content identity are unchanged. Back up career SaveData before testing: the
+older NRO does not understand newly written v2 saves.
+
+Transfer Difficulty has an actual game-economy effect: Normal is the old fee;
+Easy purchases cost 90% and sales return 110%; Hard purchases cost 125% and
+sales return 85%. The displayed quote and the transaction use the same core
+function. Free agents still have no transfer fee. Skip First Transfer Window
+closes only the season-one opening window, not January or later seasons.
+Currency is presentation only: EUR is the canonical unit; GBP uses a fixed
+0.85 multiplier and USD 1.10, not live exchange rates. Underlying cash/wages
+are never converted or rounded back into storage.
+
+The sections below describe the original v1/v2 checkpoint; this revision
+supersedes their old four-target/read-only-middle layout, calendar list and
+pre-match-only permanent tactics behavior.
+
+V3 verification: 46 focused tests passed, with one user-hardware-log fixture
+unavailable; 9,937 geometry subtests passed. This includes host save-v1 ABI/
+checksum migration, all setting selectors, cancellation, locked focus, country
+order, calendar navigation, permanent/temporary plan isolation, and native
+editor save-failure/return handling. Public-tree audit: 598 files. The optional
+paired-catalog test still imports all 13 leagues. The wider legacy suite's v2
+caveats below remain; this is not a new all-suite or on-device pass claim.
+
+The paired production NRO is 66,028,447 bytes, SHA-256
+`70dba33e4a3a181eafaa7c02f91517713dbd9c6d652ef13d5d9bc76c50315682`.
+Diagnostics/perf trace are off; ELF/NRO initialized sections, exact embedded
+art/accepted badge atlas, launcher icon, source-stage equality, curated catalogs,
+and pair/content identities were checked. The copy folder contains only the
+NRO: `local-debug/FootballNX-MasterLeague-v3-COPY-TO-pes21_nx/`. No active
+runtime or CPK/OBB/save was modified. Local instructions and verification live
+under `local-debug/master-league-v3/`. The 23 layout previews there are host
+software renders, not Switch screenshots. Re-check actual on-field identity
+and formation after an office edit, a temporary match override, an away
+fixture, and a save/relaunch on hardware.
+
 ## Agreed scope (2026-10-05)
 
 Existing-club career, one human manager, eligible curated league plus a domestic

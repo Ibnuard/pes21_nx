@@ -18,6 +18,15 @@ static unsigned char original[2][40][0x380], original_info[2][40][8];
 static uint32_t ids[40], exhibition_plan_ready = 1, my_side, saves[2], publishes;
 static uint32_t copies, destroys, fail_alloc;
 static void *live_gameplan_window;
+static int office_editor;
+typedef struct {struct {uint32_t club;} settings;} MasterLeague;
+static const MasterLeague career={.settings={101u}};
+static int ml_frontend_plan_editor(void){return office_editor;}
+static const MasterLeague *ml_frontend_career(void){return &career;}
+static int ml_frontend_roster(uint32_t team,uint32_t players[40],uint8_t shirts[40],uint32_t *count) {
+  assert(team==101u);*count=TEST_COUNT;
+  for(uint32_t i=0;i<TEST_COUNT;i++){players[i]=ids[i];shirts[i]=(uint8_t)(i+1u);}return 1;
+}
 static void *get_plan(void) { return plan; }
 static void *(*exhibition_matchplan_get_instance)(void) = get_plan;
 static void *exhibition_get_tmpdb_match(void) { return match_bytes; }
