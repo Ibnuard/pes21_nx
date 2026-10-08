@@ -11286,6 +11286,7 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
 
   if (competition_frontend_active()) {
     ml_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
+    competition_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
     competition_frontend_pad_event(buttons, previous_buttons);
     const uint32_t action = competition_frontend_take_action();
     if (action == COMPETITION_ACTION_MANAGER_NAME) {

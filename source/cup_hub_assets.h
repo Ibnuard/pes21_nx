@@ -11,4 +11,7 @@ extern const uint8_t cup_hub_trophy_bin_end[];
 extern const uint8_t cup_hub_header_ornament_bin[];
 extern const uint8_t cup_hub_header_ornament_bin_end[];
 
+extern const uint8_t cup_news_v1_bin[], cup_news_v1_bin_end[];
+extern const uint8_t cup_pearl_v1_bin[], cup_pearl_v1_bin_end[];
+
 #endif

@@ -563,19 +563,21 @@ static void ml_ui_bracket(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   char pages[80];snprintf(pages,sizeof(pages),"SECTION %u / %u    UP / DOWN: BRACKET SECTION",v->bracket_page+1u,v->bracket_pages);
   ml_ui_text(ui,pages,.062f,.839f,.86f,.025f,2,-3,0,1,verts,quads);
 }
+static void ml_ui_toast_card(MasterLeagueRender *ui,const char *text,float slide,GLfloat *verts,int *quads) {
+  const float x=.66f+slide*.35f;
+  const uint32_t first=ui->draw_count;
+  ml_ui_rect(ui,x,.181f,.31f,.072f,.025f,.20f,.43f,1,-1,0,1,verts,quads);
+  ml_ui_rect(ui,x,.181f,.004f,.072f,.07f,.77f,.70f,1,-1,0,1,verts,quads);
+  ml_ui_text(ui,text,x+.016f,.205f,.278f,.0278f,0,-1,0,1,verts,quads);
+  for(uint32_t i=first;i<ui->draw_count;i++)ui->draws[i].layer=1;
+}
 static void ml_ui_toast(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const MlView *v=&ui->view;static uint32_t serial;static uint64_t began;
   if(serial!=v->toast_serial){serial=v->toast_serial;began=armGetSystemTick();}
   const float ms=(float)armTicksToNs(armGetSystemTick()-began)/1000000.f;
   if(!v->toast[0] || ms>=3000.f || (v->drawer.open && v->drawer.modal) || v->modal.open)return;
   const float enter=fminf(1.f,ms/180.f),leave=fmaxf(0.f,(ms-2750.f)/250.f);
-  const float slide=(1.f-enter)*(1.f-enter)+leave*leave;
-  const float x=.66f+slide*.35f;
-  const uint32_t first=ui->draw_count;
-  ml_ui_rect(ui,x,.181f,.31f,.072f,.025f,.20f,.43f,1,-1,0,1,verts,quads);
-  ml_ui_rect(ui,x,.181f,.004f,.072f,.07f,.77f,.70f,1,-1,0,1,verts,quads);
-  ml_ui_text(ui,v->toast,x+.016f,.205f,.278f,.0278f,0,-1,0,1,verts,quads);
-  for(uint32_t i=first;i<ui->draw_count;i++)ui->draws[i].layer=1;
+  ml_ui_toast_card(ui,v->toast,(1.f-enter)*(1.f-enter)+leave*leave,verts,quads);
 }
 static float ml_ui_paragraph(MasterLeagueRender *ui,const char *text,float x,float y,float w,
     float size,uint32_t lines,int ink,GLfloat *verts,int *quads) {

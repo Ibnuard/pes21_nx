@@ -20,6 +20,8 @@ $allowedBinaries = @(
   "data/cup_hub_stadium.bin",
   "data/cup_hub_trophy.bin",
   "data/cup_hub_header_ornament.bin",
+  "data/cup_news_v1.bin",
+  "data/cup_pearl_v1.bin",
   "data/league_hub_stadium.bin",
   "data/master_league_background.bin",
   "data/master_league_pearl_v2.bin",

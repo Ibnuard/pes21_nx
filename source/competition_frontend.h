@@ -54,6 +54,7 @@ const char *competition_frontend_slot_competition(uint32_t index);
 const char *competition_frontend_slot_progress(uint32_t index);
 int competition_frontend_item_enabled(uint32_t index);
 const char *competition_frontend_status(void);
+uint32_t competition_frontend_status_serial(void);
 
 uint32_t competition_frontend_cup_team_count(void);
 uint32_t competition_frontend_cup_setting_count(void);
@@ -157,6 +158,14 @@ void competition_frontend_league_match_result_with_scorers(
     uint32_t home_goals, uint32_t away_goals,
     const LeagueScorer *scorers, uint32_t scorer_count);
 void competition_frontend_league_restore_after_match(void);
+
+typedef enum { CUP_PAGE_HOME, CUP_PAGE_BRACKET, CUP_PAGE_MATCHES, CUP_PAGE_TEAMS } CupFrontendPage;
+CupFrontendPage competition_frontend_cup_page(void);
+int competition_frontend_cup_slots_saving(void);
+int competition_frontend_cup_slot_valid(uint32_t slot);
+uint32_t competition_frontend_cup_news_index(void);
+float competition_frontend_cup_news_progress(void);
+void competition_frontend_tick(uint64_t milliseconds);
 
 void competition_frontend_pad_event(uint32_t buttons,
                                     uint32_t previous_buttons);

@@ -71,12 +71,86 @@ the first line of the installed `LooseCpk/manifest.txt`. Copy the candidate
 NRO and the `CupLogos/` directory beside it to
 `sdmc:/switch/pes21_nx/`, retaining the matching dummy OBB and loose CPKs.
 Do not copy the unrelated bare NRO from `dist/` as the full-loose candidate.
-The selected logo appears prominently in the center above the Cup Settings
-rows and as a subtle
-watermark behind the bracket, changing with Cup Type. FootballNX Cup uses the
-project's built-in brand image. If an optional FL26 logo is absent, the Cup
-remains playable and shows the built-in brand instead; copy `CupLogos/` and
-restart to see that Cup's original emblem. The renderer loads each selected
-emblem once, not every frame.
+The Cup news UI displays the selected competition's mapped `CupLogos/` PNG
+at the right of the main header and in the Cup Settings summary. The shared
+Master League trophy sprite remains at the left of the header. Changing Cup Type immediately
+selects the matching cached texture; PNG aspect ratio is preserved. FootballNX
+Cup and unavailable optional logos use the embedded FootballNX brand fallback.
+The logo files remain outside Git and are not recreated by the UI renderer.
 
 Do not commit the extracted PNGs, CPK files, or raw PC database records.
+
+## Cup news UI review (October 2026)
+
+`source/cup_overlay.inc` reuses Master League's actual white panels, navy
+headers, cyan/lime focus frames, blue buttons, font atlas, header icons and
+carousel pills. The Cup landing page offers New and Continue, settings show
+all Cup rule rows beside a tournament summary, and Home presents a Cup-wide
+news carousel with a next-match card. Page-intro captions, redundant next-page
+hints and the header's right-hand branding text are omitted. There is no
+managed-club identity.
+
+Every Cup page uses the reclaimed space below the main header: content starts
+at 19% of the screen height and extends to 88%, with pagination above the
+controller footer. Notifications reuse the Master League toast component,
+including its blue/cyan styling, foreground layer and slide animation. Normal
+toasts expire after three seconds; the source/target move hint remains until
+the move is confirmed or cancelled. Assignment counts stay in their containers.
+
+Home uses two large cards over four actions. Up/Down changes rows, Left/Right
+moves between cards, A opens, and B goes back. L/R changes the news story;
+the four stories also rotate every six seconds and pause outside Home.
+Next Match is one selectable card with two larger team tiles and crests; it has
+no nested play button. The footer shows A / Play Match (or Top Menu after the
+Cup finishes) while this card is selected.
+News reads assignment counts, the next human fixture, the latest recorded
+result (including COM results), and the champion. Browsing never resolves a
+fixture or changes a save.
+
+Teams opens an eight-entry participant page. Each row is ordered team crest,
+team name, a colored opening-slot code (01A/01B, 02A/02B), then a P1–P8/COM
+badge, including before a team is assigned. Both sides of a fixture share a
+color with its numbered badge on the Bracket page. Codes use the actual draft
+mapping, including byes, and stay with the position when teams and owners swap.
+The move prompt shows source and target codes. The second text line is omitted. A uses
+the existing eligible-team picker, X fills vacant slots, and Y starts a slot
+move. The core opening-round player rule and kickoff roster lock are retained.
+Bracket and Match Centre are separate pages: L/R browses rounds and Y (or
+Down) pages through pairs of fixtures. Final and third-place results share a
+readable final page. Fixture cards use a left-aligned number badge followed by
+the round title, larger crests and consistent team/owner/score spacing.
+The final's champion artwork renders the winner's team crest from the badge
+atlas above its Champions caption; pending finals keep the trophy artwork alone.
+A two-team Cup has only its Final page. Completed Cups
+still expose results, bracket and save before returning to the top menu.
+Save format, controller routing, eligible pools and match handoff are unchanged.
+
+Generated originals and exact built-in image-generation prompts are under
+`art/cup/`; runtime PNG bytes are `data/cup_news_v1.bin` and
+`data/cup_pearl_v1.bin`. Text, badges, scores, focus and buttons are rendered
+live rather than baked into the artwork.
+
+To regenerate the 38 synthetic review captures and browsable gallery:
+
+```sh
+python3 -B tools/preview_cup.py
+# Optional: use the PNGs from an existing runtime without copying them into Git.
+python3 -B tools/preview_cup.py --cup-logos /path/to/runtime/CupLogos
+# Open local-debug/cup-news-preview/index.html in a browser.
+```
+
+The tool compiles the production frontend/core and exact C renderer helpers
+on the host, records their geometry, and rasterizes the public font and assets
+with Pillow. All saves are temporary. It checks navigation, carousel timing,
+match completion, slot swaps, bye codes, toast lifetime, 8-player/32-team
+pagination and the native vertex budget;
+these are software previews, not Switch captures. On a Mac where Pillow is
+installed for x86_64, run the command with the matching x86_64 Python runtime.
+
+Validation for this revision: six focused Cup unittest cases passed, as did
+the host FL26 Cup catalog and League frontend C regressions. Switch GCC syntax
+checks passed for `overlay.c`, `competition_frontend.c` and `ue4_hooks.c`.
+The expanded-layout revision also passes the Cup frontend flow and all 17
+Master League visual regressions after sharing its toast component.
+A full local build was attempted but stopped at the missing OpenAL `AL/al.h`
+dependency; no linked candidate or hardware validation is claimed.

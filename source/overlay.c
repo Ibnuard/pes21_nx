@@ -57,6 +57,7 @@ static struct {
   GLuint team_select_bg_tex;
   GLuint main_menu_background_tex;
   GLuint cup_hub_stadium_tex;
+  GLuint cup_news_tex, cup_pearl_tex;
   GLuint league_hub_stadium_tex;
   GLuint master_league_pearl_tex, master_league_cards_tex;
   GLuint master_league_icons_tex;
@@ -66,6 +67,7 @@ static struct {
   GLuint cup_logo_tex[FL26_CUP_CATALOG_COUNT];
   uint8_t cup_logo_attempted[FL26_CUP_CATALOG_COUNT];
   uint8_t cup_logo_uploaded[FL26_CUP_CATALOG_COUNT];
+  float cup_logo_aspect[FL26_CUP_CATALOG_COUNT];
   GLuint league_logo_tex[FL26_LEAGUE_CATALOG_COUNT];
   uint8_t league_logo_attempted[FL26_LEAGUE_CATALOG_COUNT];
   uint8_t league_logo_uploaded[FL26_LEAGUE_CATALOG_COUNT];
@@ -245,6 +247,8 @@ static int gl_init(void) {
   glGenTextures(1, &gl.team_select_bg_tex);
   glGenTextures(1, &gl.main_menu_background_tex);
   glGenTextures(1, &gl.cup_hub_stadium_tex);
+  glGenTextures(1, &gl.cup_news_tex);
+  glGenTextures(1, &gl.cup_pearl_tex);
   glGenTextures(1, &gl.league_hub_stadium_tex);
   glGenTextures(1, &gl.master_league_pearl_tex);
   glGenTextures(1, &gl.master_league_cards_tex);
@@ -1317,6 +1321,8 @@ static void prepare_main_menu_assets(int active) {
   int uploaded = upload_main_menu_png(
       gl.main_menu_background_tex, main_menu_background_bin,
       main_menu_background_bin_end);
+  uploaded &= upload_main_menu_png(gl.cup_news_tex, cup_news_v1_bin, cup_news_v1_bin_end);
+  uploaded &= upload_main_menu_png(gl.cup_pearl_tex, cup_pearl_v1_bin, cup_pearl_v1_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_hub_stadium_tex,
       cup_hub_stadium_bin, cup_hub_stadium_bin_end);
   uploaded &= upload_main_menu_png(gl.league_hub_stadium_tex,
@@ -1408,6 +1414,14 @@ static void prepare_cup_logo_asset(int active) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     gl.cup_logo_uploaded[index] = upload_main_menu_png(
         gl.cup_logo_tex[index], bytes, bytes + (size_t)size);
+    if (gl.cup_logo_uploaded[index] && size >= 24 &&
+        memcmp(bytes, "\x89PNG\r\n\x1a\n", 8) == 0) {
+      const uint32_t width = ((uint32_t)bytes[16] << 24) |
+          ((uint32_t)bytes[17] << 16) | ((uint32_t)bytes[18] << 8) | bytes[19];
+      const uint32_t height = ((uint32_t)bytes[20] << 24) |
+          ((uint32_t)bytes[21] << 16) | ((uint32_t)bytes[22] << 8) | bytes[23];
+      if (width && height) gl.cup_logo_aspect[index] = (float)width / (float)height;
+    }
     glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
     glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
     glActiveTexture((GLenum)active_texture);
@@ -2605,6 +2619,7 @@ static void league_hub_draw(const LeagueHubRender *ui, uint32_t focus) {
 }
 
 #include "master_league_overlay.inc"
+#include "cup_overlay.inc"
 
 // The source mask is supersampled and downscaled offline. Drawing it as one
 // linearly filtered quad gives the small Switch UI stars clean edges; u_limit
@@ -2977,10 +2992,9 @@ static void overlay_render(void) {
   const int cup_team_picker = competition_frontend_cup_team_picker_active();
   const int league_settings_popup =
       competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_SETTINGS;
-  const int cup_settings_popup =
-      competition_frontend_state() == COMPETITION_FRONTEND_CUP_SETTINGS ||
-      league_settings_popup;
-  const int cup_general_popup = competition_frontend_cup_general_open();
+  const int cup_settings_popup = league_settings_popup;
+  const int cup_general_popup = competition_frontend_cup_general_open() &&
+      competition_frontend_state() != COMPETITION_FRONTEND_CUP_BRACKET;
   const int cup_rule_modal =
       competition_frontend_cup_opening_rule_popup();
   const int custom_2p_team_selector =
@@ -3360,10 +3374,12 @@ static void overlay_render(void) {
                                cinematic_helper_active || native_lab ||
                                setplay_options ||
                                penalty_session_active);
-  prepare_cup_logo_asset((cup_settings_popup && !league_settings_popup) || (custom_competition &&
+  prepare_cup_logo_asset(custom_competition &&
       (competition_display_state == COMPETITION_FRONTEND_CUP_SETTINGS ||
        competition_display_state == COMPETITION_FRONTEND_CUP_BRACKET ||
-       competition_display_state == COMPETITION_FRONTEND_CUP_CHECKPOINT)));
+       competition_display_state == COMPETITION_FRONTEND_CUP_CHECKPOINT ||
+       (competition_display_state == COMPETITION_FRONTEND_CUP_SLOTS &&
+        competition_frontend_cup_slots_saving())));
   prepare_league_logo_asset(league_settings_popup || (custom_competition &&
       competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB));
 
@@ -3509,6 +3525,7 @@ static void overlay_render(void) {
   int main_menu_helper_first_quad = 0, main_menu_helper_quads = 0;
   int competition_background_quad = 0;
   LeagueHubRender league_hub_ui = {0};
+  /* Cup and career are mutually exclusive and share one draw buffer. */
   MasterLeagueRender master_league_ui = {0};
   int competition_brand_quad = 0;
   int competition_portrait_quad = 0;
@@ -5419,7 +5436,15 @@ static void overlay_render(void) {
       quads += line_quads;
     }
   } else if (custom_competition) {
-    if (competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
+    if (competition_display_state == COMPETITION_FRONTEND_CUP_LANDING ||
+        competition_display_state == COMPETITION_FRONTEND_CUP_SLOTS ||
+        competition_display_state == COMPETITION_FRONTEND_CUP_SETTINGS ||
+        competition_display_state == COMPETITION_FRONTEND_CUP_BRACKET) {
+      cup_news_emit(&master_league_ui, competition_display_state, verts, &quads);
+      for(uint32_t i=0;i<master_league_ui.view.helper_count;i++)
+        ADD_SWITCH_HELPER(master_league_ui.view.helper_key[i],master_league_ui.helper_centers[i]*screen_width,
+            .9625f*screen_height,.0444f*screen_height);
+    } else if (competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
       master_league_emit(&master_league_ui, verts, &quads);
       const MlView *view=&master_league_ui.view;
       if(master_league_ui.shoulders) {
@@ -10823,7 +10848,7 @@ static void overlay_render(void) {
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if (custom_competition) {
-    if (competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
+    if (master_league_ui.draw_count) {
       master_league_draw(&master_league_ui);
     } else if (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
       league_hub_draw(&league_hub_ui, competition_display_focus);
@@ -12261,8 +12286,7 @@ static void overlay_render(void) {
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   /* Toasts are true foreground overlays, including above shoulder glyphs. */
-  if (custom_competition && competition_current_state == COMPETITION_FRONTEND_MASTER_LEAGUE)
-    master_league_draw_layer(&master_league_ui,1);
+  if (master_league_ui.draw_count) master_league_draw_layer(&master_league_ui,1);
   if (result_transition) {
     // Drawn last so it covers the custom result skin as well as the native
     // page underneath it.

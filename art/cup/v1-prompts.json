@@ -1,0 +1,15 @@
+{
+  "mode": "builtin image_gen",
+  "assets": [
+    {
+      "art": "art/cup/news-atlas-v1.png",
+      "runtime": "data/cup_news_v1.bin",
+      "prompt": "Use case: stylized-concept. Asset type: production decorative sprite atlas for a Nintendo Switch football cup tournament interface. Create ONE landscape 2048x1152 raster image divided precisely into a 2 by 2 grid of four equal 1024x576 rectangular edge-to-edge artwork cells. No gutters, no margins, no borders, no rounded corners. These are background images for a competition-wide news carousel, not a finished UI. TOP LEFT: premium deep royal blue silk ribbon sweeps and a sculptural silver two-handle generic football trophy on the RIGHT THIRD, quiet dark navy left 60 percent for white live text. TOP RIGHT: luminous deep teal stadium tunnel and abstract football field lines, a generic white football and subtle arena lights on the RIGHT THIRD, quiet dark teal left 60 percent. BOTTOM LEFT: rich crimson sports broadcast backdrop, diagonal fabric folds and a few restrained silver celebratory confetti accents on the right third; left 60 percent quiet deep burgundy. BOTTOM RIGHT: deep midnight blue with a warm gold stadium glow, a generic silver cup trophy silhouette and a few soft celebratory ribbons on the right third, left 60 percent quiet navy. Sophisticated modern Japanese football game art, refined photoreal materials, crisp at 720p, cohesive contrast and lighting, neutral to every team and suitable for local multiplayer competition. Text: NONE. No words, letters, numbers, logos, emblems, real-world trophies, teams, players, faces, controller graphics, UI components or watermark. Keep every artwork wholly within its quadrant. Exact straight grid boundaries at the image midpoints."
+    },
+    {
+      "art": "art/cup/pearl-cup-v1.png",
+      "runtime": "data/cup_pearl_v1.bin",
+      "prompt": "Use case: stylized-concept. Asset type: production full-screen background texture for a Nintendo Switch football Cup tournament UI, landscape 16:9, intended at 2048x1152. Create an elegant very light pearl white and ice-blue matte sports background matching a clean modern Japanese football-management game. Subtle embossed abstract trophy contours, tournament bracket connector curves and soft football pitch arcs near the outer 15 percent of the canvas. The central 80 percent is extremely quiet nearly uniform pearl grey so white cards with royal navy headers are readable. Very low contrast. Refined smooth paper and satin-like light, crisp linework, no grain. Restrained tiny cyan highlights near corners only. Team-neutral and appropriate to a whole multiplayer tournament. Background only: no text, no numbers, no logos, no real-world competition marks, no crests, no players, no people, no UI panels, buttons, borders, screenshots or watermark. Do not place a large dark trophy or central focal object."
+    }
+  ]
+}
