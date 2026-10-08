@@ -22,6 +22,8 @@ class LeagueSaveTests(unittest.TestCase):
                 "-I", str(ROOT / "source"),
                 str(ROOT / "tests/test_league_save.c"),
                 str(ROOT / "source/league_save.c"),
+                str(ROOT / "source/league_tournament.c"),
+                str(ROOT / "source/cup_tournament.c"),
                 "-o", str(binary),
             ], check=True)
             subprocess.run([str(binary)], cwd=destination, check=True)

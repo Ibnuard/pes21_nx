@@ -202,7 +202,7 @@ static int ml_office_pad(uint32_t pressed) {
   if(page==ML_PAGE_TABLE && !table_scorers) {
     if(pressed&ML_B){ml_page(ML_PAGE_HUB);return 1;}
     if(pressed&ML_Y){table_scorers=1u;focus=0u;return 1;}
-    ml_scroll(pressed,career.league.team_count,&focus,pressed&(ML_L|ML_R) ? 8u : 1u);return 1;
+    ml_scroll(pressed,career.league.team_count,&focus,pressed&(ML_L|ML_R) ? ML_TABLE_PAGE_ROWS : 1u);return 1;
   }
   if(page==ML_PAGE_CUP) {
     const CupTournament *cup=ml_view_cup();
@@ -335,10 +335,12 @@ static void ml_office_view(MlView *v) {
     if(career.office.dismissed){snprintf(v->rows[0].label,64,"CAREER OVER");snprintf(v->rows[0].detail,96,"Your manager contract has been terminated");}
   }
   if(page==ML_PAGE_TABLE && !table_scorers) {
-    v->count=0u;v->first=focus/8u*8u;v->total=career.league.team_count;
+    v->count=0u;v->first=focus/ML_TABLE_PAGE_ROWS*ML_TABLE_PAGE_ROWS;v->total=career.league.team_count;
     uint8_t order[LEAGUE_MAX_TEAMS];league_tournament_ranked_slots(&career.league,order);
-    for(uint32_t i=0;i<8u && v->first+i<v->total;i++) {
+    int8_t changes[LEAGUE_MAX_TEAMS];league_tournament_rank_changes(&career.league,changes);
+    for(uint32_t i=0;i<ML_TABLE_PAGE_ROWS && v->first+i<v->total;i++) {
       MlTableRow *r=&v->table[v->table_count++];r->stats=career.league.standings[order[v->first+i]];
+      r->rank_change=changes[order[v->first+i]];
       r->rank=v->first+i+1u;r->own=r->stats.team==career.settings.club;r->badge=exhibition_team_catalog_badge(r->stats.team);
       snprintf(r->name,sizeof(r->name),"%s",exhibition_team_catalog_name(r->stats.team));
     }

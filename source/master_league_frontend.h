@@ -3,6 +3,11 @@
 #include "master_league.h"
 
 enum { ML_ACTION_NONE, ML_ACTION_MATCH, ML_ACTION_NAME_INPUT, ML_ACTION_EXIT };
+enum { ML_VIEW_MAX_HELPERS = 5 };
+/* Shared standings pagination for Master League and standalone League. */
+enum { ML_TABLE_PAGE_ROWS = 6 };
+/* A fixed settings value keeps the selector's centered well without arrows. */
+enum { ML_VALUE_FIXED = 3 };
 /* One-based cells in the reusable generated 4x4 header atlas; zero is none. */
 typedef enum {
   ML_HEADER_NONE,ML_HEADER_CALENDAR,ML_HEADER_RANKING,ML_HEADER_SAVE,ML_HEADER_SQUAD,
@@ -45,7 +50,7 @@ typedef struct {
   char label[16], detail[24];
 } MlCalendarCell;
 
-typedef struct { char name[64]; uint32_t badge, rank, own; LeagueStanding stats; } MlTableRow;
+typedef struct { char name[64]; uint32_t badge, rank, own; int rank_change; LeagueStanding stats; } MlTableRow;
 typedef struct { char home[64],away[64]; uint32_t home_badge,away_badge,hg,ag,complete,own,round,index; } MlBracketMatch;
 typedef struct {
   char title[64],body[256],accept[32],error[112];
@@ -65,7 +70,7 @@ typedef struct {
   MlViewRow rows[8];
   char info[8][96], status[112];
   char action[4][32];
-  const char *helper_key[4], *helper_label[4];
+  const char *helper_key[ML_VIEW_MAX_HELPERS], *helper_label[ML_VIEW_MAX_HELPERS];
   uint32_t count, selected, first, total, action_count, action_focus, helper_count;
   uint32_t badge, portrait;
   int action_selected, action_enabled[4];

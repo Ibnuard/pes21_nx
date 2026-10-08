@@ -20,7 +20,7 @@ static void cup_ui_text(MasterLeagueRender *ui,const char *text,float x,float y,
 }
 static void cup_ui_helper(MasterLeagueRender *ui,const char *key,const char *label,GLfloat *verts,int *quads) {
   MlView *v=&ui->view;const uint32_t i=v->helper_count;
-  if(i>=4u)return;
+  if(i>=ML_VIEW_MAX_HELPERS)return;
   v->helper_key[i]=key;v->helper_label[i]=label;
   float x=.047f;
   if(i) x=ui->helper_centers[i-1]+.068f+measure_efootball_line_mode(v->helper_label[i-1],
@@ -73,6 +73,24 @@ static void cup_ui_logo(MasterLeagueRender *ui,float x,float y,float w,float h,G
   const float ih=aspect>box_aspect ? w*screen_width/aspect/screen_height : h;
   ml_ui_image(ui,texture ? texture : gl.main_menu_brand_tex,0,x+(w-iw)*.5f,y+(h-ih)*.5f,iw,ih,verts,quads);
 }
+static void competition_ui_pattern(MasterLeagueRender *ui,uint32_t sprite,float x,float y,float w,float h,
+    GLfloat *verts,int *quads) {
+  /* Corner watermark: keep native aspect, sink part of the sprite below/right
+   * of the card, and clip its UVs to the body before text and buttons render. */
+  static const float region[4][4]={{31,207,637,382},{727,100,526,512},{108,671,481,474},{787,700,425,445}};
+  const float *r=region[sprite%4u];const float aspect=r[2]/r[3];
+  const float iw=fminf(w*.70f,fminf(.22f,h*1.75f)*screen_height*aspect/screen_width);
+  const float ih=iw*screen_width/aspect/screen_height;
+  const float ix=x+w-iw*.78f,iy=y+h-ih*.58f;
+  const float cx=fmaxf(x,ix),cy=fmaxf(y,iy),cw=x+w-cx,ch=y+h-cy;
+  const float u=(r[0]+(cx-ix)/iw*r[2])/1295.f,v=(r[1]+(cy-iy)/ih*r[3])/1215.f;
+  const float uw=cw/iw*r[2]/1295.f,vh=ch/ih*r[3]/1215.f;
+  MlDraw *d=ml_ui_draw(ui,*quads,2);if(!d)return;d->texture=gl.competition_actions_tex;d->color[3]=.20f;
+  d->uv[0]=u;d->uv[1]=v;d->uv[2]=uw;d->uv[3]=vh;
+  d->round=(RoundedRectStyle){cw*screen_width,ch*screen_height,8.f};
+  *quads+=emit_image_rect_uv(cx*screen_width,cy*screen_height,cw*screen_width,ch*screen_height,
+      u,v,u+uw,v+vh,verts+*quads*24);
+}
 static void cup_ui_landing(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const uint32_t focus=competition_frontend_focus();
   cup_ui_art(ui,0,.04f,.190f,.522f,.690f,verts,quads);
@@ -81,10 +99,11 @@ static void cup_ui_landing(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   ml_ui_text(ui,"One tournament. Every player has a story.",.066f,.731f,.468f,.028f,2,-1,0,1,verts,quads);
   cup_ui_text(ui,"1-8 PLAYERS  /  KNOCKOUT FOOTBALL",.066f,.817f,.468f,.0222f,-1,verts,quads);
   const char *titles[]={"NEW CUP","CONTINUE"};
-  const char *details[]={"Choose a cup. Set the rules. Bring your rivals.","Pick up your tournament from a saved slot."};
+  const char *details[]={"Choose a cup. Set the rules.","Resume your tournament."};
   for(uint32_t i=0;i<2u;i++) {
     const float y=.190f+i*.360f;
     ml_ui_panel(ui,titles[i],i ? ML_HEADER_SAVE : ML_HEADER_TROPHY,.59f,y,.37f,.330f,focus==i,verts,quads);
+    competition_ui_pattern(ui,i ? 3u : 0u,.59f,y+.075f,.37f,.255f,verts,quads);
     ml_ui_text(ui,details[i],.607f,y+.123f,.334f,.025f,2,-3,0,1,verts,quads);
     cup_ui_text(ui,i ? "3 SAVE SLOTS" : "LOCAL MULTIPLAYER",.608f,y+.183f,.331f,.0222f,-2,verts,quads);
     ml_ui_button(ui,.608f,y+.247f,.331f,.064f,focus==i,1,verts,quads);
@@ -105,6 +124,7 @@ static void cup_ui_settings(MasterLeagueRender *ui,int general,GLfloat *verts,in
   cup_ui_text(ui,competition_frontend_cup_home_away() ? "HOME & AWAY LEGS" : "SINGLE MATCH KNOCKOUT",.061f,.718f,.276f,.025f,-2,verts,quads);
   ml_ui_text(ui,general ? "Changes apply to the next match." : "Choose your teams in the Cup Hub.",.061f,.817f,.276f,.024f,2,-3,0,1,verts,quads);
   ml_ui_panel(ui,general ? "GENERAL SETTINGS" : "CUP SETTINGS",ML_HEADER_SETTINGS,.383f,.190f,.577f,.690f,0,verts,quads);
+  if(general)competition_ui_pattern(ui,2u,.383f,.780f,.577f,.100f,verts,quads);
   for(uint32_t i=start;i<count && i<start+5u;i++) {
     const uint32_t index=general ? i : competition_frontend_cup_setting_row(i);
     MlViewRow row={0};row.enabled=1;row.adjustable=1;
@@ -175,17 +195,17 @@ static void cup_ui_news(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     snprintf(headline,sizeof(headline),"%s",cup->champion ? cup_ui_team(cup->champion) : "ONE TROPHY. EVERY CONTENDER.");
     snprintf(detail,sizeof(detail),cup->champion ? "The Cup is complete. Relive the journey in Match Centre." : "%u teams. Follow their path on the bracket page.",draft->team_count);
   }
-  ml_ui_frame(ui,.04f,.190f,.57f,.445f,competition_frontend_focus()==5u,verts,quads);
-  cup_ui_art(ui,story,.04f,.190f,.57f,.445f,verts,quads);
-  ml_ui_rect(ui,.04f,.441f,.57f,.194f,.015f,.07f,.22f,.94f,-1,0,1,verts,quads);
+  ml_ui_frame(ui,.04f,.190f,.57f,.480f,competition_frontend_focus()==5u,verts,quads);
+  cup_ui_art(ui,story,.04f,.190f,.57f,.480f,verts,quads);
+  ml_ui_rect(ui,.04f,.441f,.57f,.229f,.015f,.07f,.22f,.94f,-1,0,1,verts,quads);
   cup_ui_text(ui,"CUP NEWS",.061f,.216f,.40f,.0306f,-1,verts,quads);
   cup_ui_text(ui,tag,.061f,.462f,.523f,.021f,-1,verts,quads);
   cup_ui_text(ui,headline,.061f,.504f,.523f,.0375f,-1,verts,quads);
-  ml_ui_text(ui,detail,.061f,.568f,.523f,.025f,2,-1,0,1,verts,quads);
+  ml_ui_text(ui,detail,.061f,.563f,.523f,.025f,2,-1,0,1,verts,quads);
   const float progress=competition_frontend_cup_news_progress();
-  if(progress>0.f)ml_ui_rect(ui,.061f,.617f,.523f*progress,.003f,.07f,.77f,.90f,1,-1,0,1,verts,quads);
-  /* Same pill geometry/palette as ML, centred below this carousel. */
-  const uint32_t first=*quads;ml_ui_pills(ui,story,.658f,verts,quads);
+  if(progress>0.f)ml_ui_rect(ui,.061f,.610f,.523f*progress,.003f,.07f,.77f,.90f,1,-1,0,1,verts,quads);
+  /* Match League: shared ML pills sit inside the carousel caption panel. */
+  const uint32_t first=*quads;ml_ui_pills(ui,story,.640f,verts,quads);
   for(int q=(int)first;q<*quads;q++)for(int v=0;v<6;v++)verts[q*24+v*4]-=.35f;
 }
 static void cup_ui_next(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
@@ -193,22 +213,22 @@ static void cup_ui_next(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   uint32_t round=0,index=0;const int available=competition_frontend_cup_next_fixture(&round,&index);
   const CupFixture *fixture=available ? cup_tournament_fixture(cup,round,index) : NULL;
   const int selected=competition_frontend_focus()==1u;
-  ml_ui_panel(ui,cup->champion ? "CUP CHAMPION" : "NEXT MATCH",cup->champion ? ML_HEADER_TROPHY : ML_HEADER_MATCH,.635f,.190f,.325f,.445f,selected,verts,quads);
+  ml_ui_panel(ui,cup->champion ? "CUP CHAMPION" : "NEXT MATCH",cup->champion ? ML_HEADER_TROPHY : ML_HEADER_MATCH,.635f,.190f,.325f,.480f,selected,verts,quads);
   if(fixture) {
     char stage[64];snprintf(stage,sizeof(stage),"%s%s",round+1u==cup->round_count && index==CUP_THIRD_PLACE_INDEX ? "THIRD PLACE" : competition_frontend_cup_round_name(round),
         cup->home_away && round+1u<cup->round_count ? (fixture->first_leg_complete ? " / LEG 2" : " / LEG 1") : "");
     cup_ui_text(ui,stage,.652f,.289f,.288f,.0222f,-3,verts,quads);
     for(uint32_t side=0;side<2u;side++) {
-      const uint32_t team=side ? fixture->away : fixture->home;const float y=.333f+side*.147f;
-      ml_ui_rect(ui,.650f,y,.295f,.134f,.93f,.96f,.99f,1,-1,0,1,verts,quads);
-      cup_ui_badge(ui,team,.660f,y+.017f,.100f,verts,quads);
-      cup_ui_text(ui,cup_ui_team(team),.729f,y+.022f,.199f,.029f,-2,verts,quads);
-      cup_ui_player_badge(ui,competition_frontend_cup_player_slot(team),.729f,y+.077f,.055f,.035f,verts,quads);
+      const uint32_t team=side ? fixture->away : fixture->home;const float y=.338f+side*.156f;
+      ml_ui_rect(ui,.650f,y,.295f,.143f,.93f,.96f,.99f,1,-1,0,1,verts,quads);
+      cup_ui_badge(ui,team,.660f,y+.019f,.105f,verts,quads);
+      cup_ui_text(ui,cup_ui_team(team),.730f,y+.026f,.202f,.030f,-2,verts,quads);
+      cup_ui_player_badge(ui,competition_frontend_cup_player_slot(team),.730f,y+.085f,.059f,.037f,verts,quads);
     }
   } else if(cup->champion) {
-    cup_ui_badge(ui,cup->champion,.7469f,.301f,.180f,verts,quads);
-    ml_ui_center_text(ui,cup_ui_team(cup->champion),.650f,.507f,.295f,.048f,.032f,0,-2,verts,quads);
-    ml_ui_center_text(ui,"TOURNAMENT COMPLETE",.650f,.582f,.295f,.027f,.0222f,0,-3,verts,quads);
+    cup_ui_badge(ui,cup->champion,.7469f,.316f,.180f,verts,quads);
+    ml_ui_center_text(ui,cup_ui_team(cup->champion),.650f,.527f,.295f,.048f,.032f,0,-2,verts,quads);
+    ml_ui_center_text(ui,"TOURNAMENT COMPLETE",.650f,.612f,.295f,.027f,.0222f,0,-3,verts,quads);
   } else {
     cup_ui_text(ui,"BUILD THE LINE-UP",.653f,.353f,.29f,.031f,-2,verts,quads);
     ml_ui_text(ui,"Assign participants in Teams.",.653f,.429f,.29f,.025f,2,-3,0,1,verts,quads);
@@ -226,6 +246,7 @@ static void cup_ui_home(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   for(uint32_t i=0;i<4u;i++) {
     const float x=.04f+i*.2375f;
     ml_ui_panel(ui,titles[i],icons[i],x,.704f,.2075f,.176f,competition_frontend_focus()==ids[i],verts,quads);
+    competition_ui_pattern(ui,i,x,.779f,.2075f,.101f,verts,quads);
     cup_ui_text(ui,details[i],x+.015f,.816f,.18f,.0222f,-3,verts,quads);
   }
 }

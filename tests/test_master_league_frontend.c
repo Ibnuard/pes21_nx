@@ -73,7 +73,8 @@ static void office_ui_tests(void) {
   press(A);press(A);
   assert(!view().drawer.open && !view().status[0] && strstr(view().toast,"signing fee paid"));
   assert(ml_find_club(c,c->settings.club)->cash==renew_cash-ml_renew_fee(c,own_player,3u));
-  office_go(0u,3u);assert(view().table_count==8u);press(R);assert(view().first==8u && view().table[0].rank==9u);
+  office_go(0u,3u);assert(view().table_count==6u);press(R);assert(view().first==6u && view().table[0].rank==7u);
+  for(uint32_t i=0;i<view().table_count;i++)assert(!view().table[i].rank_change);
   press(Y);assert(view().empty[0] && !view().info[0][0]);
   office_go(3u,2u);assert(view().page==ML_PAGE_COMPETITIONS);press(A);assert(view().bracket_count==7u);press(R);assert(view().bracket_round==1u);
   office_go(2u,0u);assert(view().count==4u && !strcmp(view().rows[0].label,"MY TEAMS"));
@@ -412,7 +413,13 @@ int main(void) {
   assert(ml_find_club(career,career->settings.club)->cash==landed_cash);
   assert(ml_frontend_player_allowed(home,ids[0])==-1); /* base mode regains authority */
   assert(!ml_frontend_roster(home,ids,shirts,&count));
-  office_go(0u,3u);press(Y);assert(view().count && view().rows[0].badge);
+  office_go(0u,3u);
+  int8_t changes[LEAGUE_MAX_TEAMS];uint8_t order[LEAGUE_MAX_TEAMS];
+  league_tournament_rank_changes(&career->league,changes);
+  league_tournament_ranked_slots(&career->league,order);
+  const MlView table=view();assert(table.table_count==6u);
+  for(uint32_t i=0;i<table.table_count;i++)assert(table.table[i].rank_change==changes[order[table.first+i]]);
+  press(Y);assert(view().count && view().rows[0].badge);
   office_go(0u,1u);while(view().feed_index!=1u)press(RIGHT);
   assert(view().story.has_result && view().story.home_badge && view().story.away_badge && view().story.history_count);
   assert(view().story.home_goals+view().story.away_goals==4u);

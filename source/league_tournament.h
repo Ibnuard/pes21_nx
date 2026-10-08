@@ -80,6 +80,11 @@ int league_tournament_commit_matchday(LeagueTournament *league);
 /* Returns team slots in standing order, up to team_count. */
 void league_tournament_ranked_slots(const LeagueTournament *league,
                                      uint8_t slots[LEAGUE_MAX_TEAMS]);
+/* Read-only position changes, indexed by standing slot. Positive means up.
+ * Compare against the start of the latest matchday with a recorded result;
+ * derive the baseline from saved fixtures so loads retain the same indicators. */
+void league_tournament_rank_changes(const LeagueTournament *league,
+                                     int8_t changes[LEAGUE_MAX_TEAMS]);
 int league_tournament_credit_goals(LeagueTournament *league,
                                     uint32_t team, uint32_t base_id,
                                     uint32_t portrait_id, const char *name,

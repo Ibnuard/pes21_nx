@@ -98,7 +98,6 @@ static uint32_t league_table_page;
 static uint32_t league_schedule_page;
 static uint32_t league_bracket_round;
 static uint32_t league_bracket_page;
-static uint32_t league_scorers_open;
 static uint32_t league_teams_editing;
 static uint32_t league_team_slot_focus;
 static uint32_t league_match_active;
@@ -113,6 +112,9 @@ static uint8_t league_slot_valid[LEAGUE_SAVE_SLOTS];
 static uint8_t league_slot_completed[LEAGUE_SAVE_SLOTS];
 static char league_slot_competition[LEAGUE_SAVE_SLOTS][40];
 static char league_slot_progress[LEAGUE_SAVE_SLOTS][32];
+static LeagueFrontendPage league_page;
+static uint32_t league_news_index, league_view_matchday;
+static uint64_t league_news_tick, league_news_elapsed;
 
 enum {
   CUP_HUB_ACTION_TEAMS = 0,
@@ -223,7 +225,6 @@ static void competition_reset_league_setup(void) {
   league_schedule_page = 0u;
   league_bracket_round = 0u;
   league_bracket_page = 0u;
-  league_scorers_open = 0u;
   league_teams_editing = 0u;
   league_team_slot_focus = 0u;
   league_match_active = 0u;
@@ -328,6 +329,16 @@ static void competition_set_state(CompetitionFrontendState state,
     cup_news_index = cup_tournament.champion ? 3u : cup_tournament.history_count ? 2u : 0u;
     cup_news_tick = cup_news_elapsed = 0u;
   }
+  if (state == COMPETITION_FRONTEND_LEAGUE_HUB) {
+    league_page = LEAGUE_PAGE_HOME;
+    league_teams_editing = 0u;
+    league_news_index = league_tournament.phase == LEAGUE_PHASE_COMPLETE ? 3u
+        : league_tournament.first_match_started ? 2u : 0u;
+    league_news_tick = league_news_elapsed = 0u;
+    league_view_matchday = league_tournament.active_matchday < league_tournament.matchday_count
+        ? league_tournament.active_matchday : league_tournament.matchday_count
+        ? league_tournament.matchday_count - 1u : 0u;
+  }
   if (state != COMPETITION_FRONTEND_CUP_BRACKET &&
       state != COMPETITION_FRONTEND_LEAGUE_HUB)
     cup_general_open = 0u;
@@ -362,7 +373,7 @@ static uint32_t competition_item_count_for_state(void) {
     case COMPETITION_FRONTEND_LEAGUE_SETTINGS:
       return 6u;
     case COMPETITION_FRONTEND_LEAGUE_HUB:
-      return league_tournament.phase == LEAGUE_PHASE_COMPLETE ? 1u : 4u;
+      return 6u;
     case COMPETITION_FRONTEND_CUP_CHECKPOINT:
     case COMPETITION_FRONTEND_NOTICE:
       return 1;
@@ -615,10 +626,12 @@ static void competition_back(void) {
       competition_set_state(COMPETITION_FRONTEND_LEAGUE_LANDING, 0u);
       return;
     case COMPETITION_FRONTEND_LEAGUE_HUB:
-      if (league_tournament.phase == LEAGUE_PHASE_COMPLETE) return;
-      if (league_teams_editing) {
+      if (league_page != LEAGUE_PAGE_HOME) {
         league_teams_editing = 0u;
-        frontend_focus = 0u;
+        frontend_focus = league_page == LEAGUE_PAGE_TEAMS ? 0u
+            : league_page == LEAGUE_PAGE_TABLE || league_page == LEAGUE_PAGE_BRACKET ? 4u : 5u;
+        league_page = LEAGUE_PAGE_HOME;
+        competition_clear_status();
         return;
       }
       competition_frontend_close();
@@ -925,7 +938,6 @@ static void competition_open_league_hub(void) {
   league_schedule_page = 0u;
   league_bracket_round = 0u;
   league_bracket_page = 0u;
-  league_scorers_open = 0u;
   league_teams_editing = 0u;
   league_team_slot_focus = 0u;
   competition_set_state(COMPETITION_FRONTEND_LEAGUE_HUB, 0u);
@@ -1105,15 +1117,13 @@ static int competition_load_league_slot(uint32_t slot) {
   league_tournament = save.tournament;
   league_active_slot = slot;
   league_teams_editing = 0u;
-  league_scorers_open = 0u;
   league_table_page = 0u;
   league_schedule_page = 0u;
   league_bracket_round = league_tournament.knockout.active_round;
   league_bracket_page = 0u;
   cup_team_picker_active = 0u;
   competition_set_state(COMPETITION_FRONTEND_LEAGUE_HUB,
-                         league_tournament.phase == LEAGUE_PHASE_COMPLETE
-                             ? 0u : 2u);
+                         2u);
   return 1;
 }
 
@@ -1138,17 +1148,6 @@ static void competition_focus_cup_slot(uint32_t slot) {
     cup_bracket_stage = 0u;
     cup_bracket_page = competition_bracket_stage_pages(0u) > 1u
         ? fixture / 2u : 0u;
-  }
-}
-
-static void competition_move_hub_action(int direction) {
-  const uint32_t count = competition_item_count_for_state();
-  for (uint32_t attempt = 0; attempt < count; attempt++) {
-    const uint32_t next = direction > 0
-        ? (frontend_focus + 1u) % count
-        : (frontend_focus + count - 1u) % count;
-    frontend_focus = next;
-    if (competition_frontend_item_enabled(next)) return;
   }
 }
 
@@ -1212,14 +1211,19 @@ static void competition_confirm(void) {
         competition_adjust_setting(1);
       return;
     case COMPETITION_FRONTEND_LEAGUE_HUB:
-      if (league_tournament.phase == LEAGUE_PHASE_COMPLETE) {
-        competition_frontend_close();
+      if (frontend_focus == 0u) {
+        league_page = LEAGUE_PAGE_TEAMS;
+        league_teams_editing = !league_tournament.first_match_started;
+        league_team_slot_focus = 0u;
         return;
       }
-      if (frontend_focus == 0u) {
-        if (league_tournament.first_match_started) return;
-        league_teams_editing = 1u;
-        league_team_slot_focus = 0u;
+      if (frontend_focus == 4u) {
+        league_page = LEAGUE_PAGE_TABLE;
+        return;
+      }
+      if (frontend_focus == 5u) {
+        league_page = LEAGUE_PAGE_MATCHES;
+        league_schedule_page = 0u;
         return;
       }
       if (frontend_focus == 1u) {
@@ -1239,6 +1243,13 @@ static void competition_confirm(void) {
         competition_set_status("ASSIGN ALL LEAGUE TEAMS FIRST");
         return;
       }
+      if (league_tournament.phase == LEAGUE_PHASE_COMPLETE) {
+        league_page = league_tournament.knockout.round_count ? LEAGUE_PAGE_BRACKET : LEAGUE_PAGE_TABLE;
+        league_bracket_round = league_tournament.knockout.round_count
+            ? league_tournament.knockout.round_count - 1u : 0u;
+        league_bracket_page = 0u;
+        return;
+      }
       if ((pes_controller_native_hid_connected_mask() &
            (league_player_count > 1u ? 3u : 1u)) !=
           (league_player_count > 1u ? 3u : 1u)) {
@@ -1250,7 +1261,9 @@ static void competition_confirm(void) {
       league_bracket_round = league_tournament.knockout.active_round;
       league_bracket_page = 0u;
       if (league_tournament.phase == LEAGUE_PHASE_COMPLETE) {
-        frontend_focus = 0u;
+        frontend_focus = 2u;
+        league_news_index = 3u;
+        league_news_elapsed = 0u;
         competition_set_status("LEAGUE COMPLETE");
         if (league_active_slot < LEAGUE_SAVE_SLOTS)
           competition_save_league_slot(league_active_slot);
@@ -1579,13 +1592,13 @@ const char *competition_frontend_item_label(uint32_t index) {
     case COMPETITION_FRONTEND_LEAGUE_SETTINGS:
       return index < 6u ? league_settings_labels[index] : "";
     case COMPETITION_FRONTEND_LEAGUE_HUB:
-      if (league_tournament.phase == LEAGUE_PHASE_COMPLETE)
-        return index == 0u ? "TOP TO MENU" : "";
       switch (index) {
         case 0u: return "TEAMS";
         case 1u: return "GENERAL SETTING";
         case 2u: return "NEXT";
         case 3u: return "SAVE";
+        case 4u: return "STANDINGS";
+        case 5u: return "MATCH CENTRE";
         default: return "";
       }
     case COMPETITION_FRONTEND_CUP_TEAMS:
@@ -1719,11 +1732,8 @@ int competition_frontend_item_enabled(uint32_t index) {
       index < LEAGUE_SAVE_SLOTS)
     return league_slots_saving || league_slot_valid[index];
   if (frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
-    if (league_tournament.phase == LEAGUE_PHASE_COMPLETE)
-      return index == 0u;
-    if (index == 0u) return !league_tournament.first_match_started;
     if (index == 2u) return league_tournament_valid != 0u;
-    return index == 1u || index == 3u;
+    return index < 6u;
   }
   return index < competition_item_count_for_state();
 }
@@ -2267,6 +2277,16 @@ void competition_frontend_cup_restore_after_match(void) {
 const LeagueTournament *competition_frontend_league_tournament(void) {
   return league_draft.team_count ? &league_tournament : NULL;
 }
+LeagueFrontendPage competition_frontend_league_page(void) { return league_page; }
+uint32_t competition_frontend_league_news_index(void) { return league_news_index; }
+float competition_frontend_league_news_progress(void) { return (float)league_news_elapsed / 6000.f; }
+uint32_t competition_frontend_league_view_matchday(void) { return league_view_matchday; }
+uint32_t competition_frontend_league_team_count(void) { return league_team_count; }
+uint32_t competition_frontend_league_player_count(void) { return league_player_count; }
+int competition_frontend_league_home_away(void) { return league_home_away != 0u; }
+LeagueSystem competition_frontend_league_system(void) { return (LeagueSystem)league_system; }
+int competition_frontend_league_slots_saving(void) { return league_slots_saving != 0u; }
+int competition_frontend_league_slot_valid(uint32_t slot) { return slot < LEAGUE_SAVE_SLOTS && league_slot_valid[slot]; }
 
 const CompetitionEntryDraft *competition_frontend_league_draft(void) {
   return league_draft.team_count ? &league_draft : NULL;
@@ -2289,7 +2309,7 @@ uint32_t competition_frontend_league_bracket_page(void) {
 }
 
 int competition_frontend_league_scorers_open(void) {
-  return league_scorers_open != 0u;
+  return league_page == LEAGUE_PAGE_SCORERS;
 }
 
 int competition_frontend_league_teams_editing(void) {
@@ -2433,7 +2453,7 @@ void competition_frontend_league_restore_after_match(void) {
   if (!league_match_active) return;
   league_match_active = 0u;
   competition_set_state(COMPETITION_FRONTEND_LEAGUE_HUB,
-      league_tournament.phase == LEAGUE_PHASE_COMPLETE ? 0u : 2u);
+      2u);
   frontend_skip_input_tick = 1u;
   if (!league_match_result_received)
     competition_set_status("MATCH NOT FINISHED - FIXTURE STILL PENDING");
@@ -2485,6 +2505,16 @@ int competition_frontend_cup_slot_valid(uint32_t slot) {
 uint32_t competition_frontend_cup_news_index(void) { return cup_news_index; }
 float competition_frontend_cup_news_progress(void) { return (float)cup_news_elapsed / 6000.f; }
 void competition_frontend_tick(uint64_t milliseconds) {
+  const uint64_t league_delta = league_news_tick && milliseconds >= league_news_tick ? milliseconds - league_news_tick : 0u;
+  league_news_tick = milliseconds;
+  if (frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB && league_page == LEAGUE_PAGE_HOME &&
+      !cup_general_open && !cup_team_picker_active && !frontend_closing && league_delta <= 1000u) {
+    league_news_elapsed += league_delta;
+    if (league_news_elapsed >= 6000u) {
+      league_news_elapsed %= 6000u;
+      league_news_index = (league_news_index + 1u) % 4u;
+    }
+  }
   const uint64_t delta = cup_news_tick && milliseconds >= cup_news_tick ? milliseconds - cup_news_tick : 0u;
   cup_news_tick = milliseconds;
   if (frontend_state != COMPETITION_FRONTEND_CUP_BRACKET || cup_page != CUP_PAGE_HOME ||
@@ -2683,37 +2713,6 @@ void competition_frontend_pad_event(uint32_t buttons,
     }
     return;
   }
-  if (frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB &&
-      league_teams_editing) {
-    if (pressed & COMPETITION_BUTTON_B) {
-      competition_back();
-    } else if (pressed & (COMPETITION_BUTTON_UP |
-                          COMPETITION_BUTTON_LEFT)) {
-      league_team_slot_focus = league_team_slot_focus
-          ? league_team_slot_focus - 1u : league_draft.team_count - 1u;
-      league_table_page = league_team_slot_focus / 5u;
-    } else if (pressed & (COMPETITION_BUTTON_DOWN |
-                          COMPETITION_BUTTON_RIGHT)) {
-      league_team_slot_focus = (league_team_slot_focus + 1u) %
-          league_draft.team_count;
-      league_table_page = league_team_slot_focus / 5u;
-    } else if (pressed & COMPETITION_BUTTON_A) {
-      cup_team_picker_active = 1u;
-      cup_team_picker_phase = competition_league_is_custom() ? 1u : 2u;
-      cup_team_picker_category = competition_league_is_custom()
-          ? 0u : competition_league_entry()->category_index;
-      cup_team_picker_focus = 0u;
-      cup_team_picker_scroll = 0u;
-    } else if (pressed & COMPETITION_BUTTON_X) {
-      if (competition_random_fill_league())
-        competition_clear_status();
-      else
-        competition_set_status("NOT ENOUGH ELIGIBLE TEAMS");
-    } else if (pressed & COMPETITION_BUTTON_Y) {
-      league_scorers_open = !league_scorers_open;
-    }
-    return;
-  }
   if (pressed & COMPETITION_BUTTON_B) {
     competition_back();
     return;
@@ -2756,53 +2755,89 @@ void competition_frontend_pad_event(uint32_t buttons,
     return;
   }
   if (frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB) {
-    if (league_tournament.phase == LEAGUE_PHASE_COMPLETE) {
-      if (pressed & COMPETITION_BUTTON_A) competition_confirm();
+    if (pressed) competition_clear_status();
+    if (league_page == LEAGUE_PAGE_TEAMS) {
+      const uint32_t count = league_draft.team_count;
+      if (!count) return;
+      if (pressed & (COMPETITION_BUTTON_LEFT | COMPETITION_BUTTON_RIGHT)) {
+        const uint32_t step = count > 4u ? 4u : 1u;
+        league_team_slot_focus = (league_team_slot_focus +
+            ((pressed & COMPETITION_BUTTON_LEFT) ? count - step : step)) % count;
+      } else if (pressed & COMPETITION_BUTTON_UP) {
+        league_team_slot_focus = (league_team_slot_focus + count - 1u) % count;
+      } else if (pressed & COMPETITION_BUTTON_DOWN) {
+        league_team_slot_focus = (league_team_slot_focus + 1u) % count;
+      } else if (pressed & COMPETITION_BUTTON_Y) {
+        const uint32_t start = ((league_team_slot_focus / 8u + 1u) % ((count + 7u) / 8u)) * 8u;
+        league_team_slot_focus = start;
+      } else if ((pressed & COMPETITION_BUTTON_A) && league_teams_editing) {
+        cup_team_picker_active = 1u;
+        cup_team_picker_phase = competition_league_is_custom() ? 1u : 2u;
+        cup_team_picker_category = competition_league_is_custom() ? 0u : competition_league_entry()->category_index;
+        cup_team_picker_focus = cup_team_picker_scroll = 0u;
+      } else if ((pressed & COMPETITION_BUTTON_X) && league_teams_editing) {
+        if (!competition_random_fill_league()) competition_set_status("NOT ENOUGH ELIGIBLE TEAMS");
+      }
       return;
     }
-    if (pressed & COMPETITION_BUTTON_Y) {
-      league_scorers_open = !league_scorers_open;
-    } else if (pressed & COMPETITION_BUTTON_L) {
-      if (league_tournament.phase == LEAGUE_PHASE_TABLE) {
-        if (league_table_page) league_table_page--;
-      } else if (league_bracket_round) {
-        league_bracket_round--;
+    if (league_page == LEAGUE_PAGE_TABLE) {
+      const uint32_t pages = (league_team_count + ML_TABLE_PAGE_ROWS - 1u) / ML_TABLE_PAGE_ROWS;
+      if ((pressed & (COMPETITION_BUTTON_L | COMPETITION_BUTTON_UP)) && league_table_page) league_table_page--;
+      else if ((pressed & (COMPETITION_BUTTON_R | COMPETITION_BUTTON_DOWN)) && league_table_page + 1u < pages) league_table_page++;
+      else if ((pressed & COMPETITION_BUTTON_Y) && league_tournament.knockout.round_count) {
+        league_page = LEAGUE_PAGE_BRACKET;
+        league_bracket_round = league_tournament.knockout.active_round < league_tournament.knockout.round_count
+            ? league_tournament.knockout.active_round : league_tournament.knockout.round_count - 1u;
         league_bracket_page = 0u;
       }
-    } else if (pressed & COMPETITION_BUTTON_R) {
-      if (league_tournament.phase == LEAGUE_PHASE_TABLE) {
-        if ((league_table_page + 1u) * 5u < league_team_count)
-          league_table_page++;
-      } else if (league_bracket_round + 1u <
-                 league_tournament.knockout.round_count) {
-        league_bracket_round++;
-        league_bracket_page = 0u;
-      }
-    } else if (pressed & COMPETITION_BUTTON_UP) {
-      if (league_tournament.phase == LEAGUE_PHASE_TABLE &&
-          league_schedule_page) league_schedule_page--;
-      else if (league_tournament.phase == LEAGUE_PHASE_KNOCKOUT &&
-               league_bracket_page) league_bracket_page--;
-    } else if (pressed & COMPETITION_BUTTON_DOWN) {
-      if (league_tournament.phase == LEAGUE_PHASE_TABLE &&
-          league_tournament_valid &&
-          league_tournament.active_matchday <
-              league_tournament.matchday_count &&
-          (league_schedule_page + 1u) * 4u <
-              league_tournament.matchday_fixture_count[
-                  league_tournament.active_matchday])
-        league_schedule_page++;
-      else if (league_tournament.phase == LEAGUE_PHASE_KNOCKOUT &&
-          (league_bracket_page + 1u) * 2u < cup_tournament_fixture_count(
-              &league_tournament.knockout, league_bracket_round))
-        league_bracket_page++;
-    } else if (pressed & COMPETITION_BUTTON_LEFT) {
-      competition_move_hub_action(-1);
-    } else if (pressed & COMPETITION_BUTTON_RIGHT) {
-      competition_move_hub_action(1);
-    } else if (pressed & COMPETITION_BUTTON_A) {
-      competition_confirm();
+      return;
     }
+    if (league_page == LEAGUE_PAGE_MATCHES || league_page == LEAGUE_PAGE_SCORERS) {
+      if (pressed & COMPETITION_BUTTON_X) {
+        league_page = league_page == LEAGUE_PAGE_MATCHES ? LEAGUE_PAGE_SCORERS : LEAGUE_PAGE_MATCHES;
+        return;
+      }
+      if (league_page == LEAGUE_PAGE_SCORERS) return;
+      if ((pressed & COMPETITION_BUTTON_L) && league_view_matchday) {
+        league_view_matchday--; league_schedule_page = 0u;
+      } else if ((pressed & COMPETITION_BUTTON_R) && league_view_matchday + 1u < league_tournament.matchday_count) {
+        league_view_matchday++; league_schedule_page = 0u;
+      } else if ((pressed & COMPETITION_BUTTON_UP) && league_schedule_page) league_schedule_page--;
+      else if (pressed & (COMPETITION_BUTTON_DOWN | COMPETITION_BUTTON_Y)) {
+        const uint32_t count = league_view_matchday < league_tournament.matchday_count
+            ? league_tournament.matchday_fixture_count[league_view_matchday] : 0u;
+        if (count) league_schedule_page = (league_schedule_page + 1u) % ((count + 3u) / 4u);
+      }
+      return;
+    }
+    if (league_page == LEAGUE_PAGE_BRACKET) {
+      const uint32_t rounds = league_tournament.knockout.round_count;
+      if ((pressed & COMPETITION_BUTTON_X)) league_page = LEAGUE_PAGE_TABLE;
+      else if ((pressed & COMPETITION_BUTTON_L) && league_bracket_round) { league_bracket_round--; league_bracket_page = 0u; }
+      else if ((pressed & COMPETITION_BUTTON_R) && league_bracket_round + 1u < rounds) { league_bracket_round++; league_bracket_page = 0u; }
+      else if ((pressed & COMPETITION_BUTTON_UP) && league_bracket_page) league_bracket_page--;
+      else if (pressed & (COMPETITION_BUTTON_DOWN | COMPETITION_BUTTON_Y)) {
+        const uint32_t count = cup_tournament_fixture_count(&league_tournament.knockout, league_bracket_round);
+        if (count) league_bracket_page = (league_bracket_page + 1u) % ((count + 1u) / 2u);
+      }
+      return;
+    }
+    if (pressed & (COMPETITION_BUTTON_L | COMPETITION_BUTTON_R)) {
+      league_news_index = (league_news_index + ((pressed & COMPETITION_BUTTON_L) ? 3u : 1u)) % 4u;
+      league_news_elapsed = 0u;
+    } else if (pressed & (COMPETITION_BUTTON_UP | COMPETITION_BUTTON_DOWN)) {
+      if (frontend_focus == 5u) frontend_focus = 0u;
+      else if (frontend_focus == 2u) frontend_focus = 1u;
+      else frontend_focus = frontend_focus == 0u || frontend_focus == 4u ? 5u : 2u;
+    } else if (pressed & (COMPETITION_BUTTON_LEFT | COMPETITION_BUTTON_RIGHT)) {
+      if (frontend_focus == 5u || frontend_focus == 2u) frontend_focus = frontend_focus == 5u ? 2u : 5u;
+      else {
+        static const uint32_t row[4] = {0u,4u,1u,3u};
+        for (uint32_t i=0;i<4u;i++) if (row[i]==frontend_focus) {
+          frontend_focus = row[(i + ((pressed & COMPETITION_BUTTON_LEFT) ? 3u : 1u)) % 4u]; break;
+        }
+      }
+    } else if (pressed & COMPETITION_BUTTON_A) competition_confirm();
     return;
   }
   if (pressed & COMPETITION_BUTTON_UP) {

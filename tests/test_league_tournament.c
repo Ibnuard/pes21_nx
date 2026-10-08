@@ -170,6 +170,45 @@ static void check_simulated_knockout_scorers(void) {
   assert(simulated_goals == credited);
 }
 
+static void check_rank_changes(uint32_t count) {
+  uint32_t teams[LEAGUE_MAX_TEAMS];
+  for (uint32_t i = 0; i < count; i++) teams[i] = 100u + count - i;
+  assert(league_tournament_init(&league, teams, count, teams, 1u, 1, 37u));
+  league_tournament_set_system(&league, LEAGUE_SYSTEM_STANDINGS);
+  int8_t changes[LEAGUE_MAX_TEAMS];
+  league_tournament_rank_changes(&league, changes);
+  for (uint32_t i = 0; i < LEAGUE_MAX_TEAMS; i++) assert(!changes[i]);
+  uint32_t rises = 0u, falls = 0u, unchanged = 0u;
+  static LeagueTournament frozen;
+  for (uint32_t day = 0; day < league.matchday_count; day++) {
+    uint8_t before[LEAGUE_MAX_TEAMS], after[LEAGUE_MAX_TEAMS];
+    league_tournament_ranked_slots(&league, before);
+    for (uint32_t i = 0; i < league.matchday_fixture_count[day]; i++) {
+      const uint32_t index = league.matchday_first[day] + i;
+      /* Includes draws, partial multiplayer matchdays and odd-team byes. */
+      assert(league_tournament_record_table_fixture(&league, index,
+          (day + i) % 4u, (day * 2u + i) % 3u, i % 2u));
+      frozen = league;
+      league_tournament_rank_changes(&league, changes);
+      assert(!memcmp(&frozen, &league, sizeof(league)));
+      league_tournament_ranked_slots(&league, after);
+      for (uint32_t rank = 0; rank < count; rank++) {
+        uint32_t old = 0u;
+        while (before[old] != after[rank]) old++;
+        assert(changes[after[rank]] == (int)old - (int)rank);
+        rises += changes[after[rank]] > 0;
+        falls += changes[after[rank]] < 0;
+        unchanged += changes[after[rank]] == 0;
+      }
+    }
+    int8_t completed[LEAGUE_MAX_TEAMS];memcpy(completed,changes,sizeof(changes));
+    assert(league_tournament_commit_matchday(&league));
+    league_tournament_rank_changes(&league, changes);
+    assert(!memcmp(changes, completed, sizeof(changes)));
+  }
+  assert(league.phase == LEAGUE_PHASE_COMPLETE && rises && falls && unchanged);
+}
+
 int main(void) {
   for (uint32_t teams = 2u; teams <= 32u; teams++) {
     check_schedule(teams, 0);
@@ -185,6 +224,10 @@ int main(void) {
   check_knockout_seeding();
   check_simulated_opening_locks_teams();
   check_simulated_knockout_scorers();
+  check_rank_changes(2u);
+  check_rank_changes(3u);
+  check_rank_changes(4u);
+  check_rank_changes(32u);
   puts("league tournament tests passed");
   return 0;
 }

@@ -13,5 +13,7 @@ extern const uint8_t cup_hub_header_ornament_bin_end[];
 
 extern const uint8_t cup_news_v1_bin[], cup_news_v1_bin_end[];
 extern const uint8_t cup_pearl_v1_bin[], cup_pearl_v1_bin_end[];
+/* Shared flat action ornaments for Cup and League, rendered at 20% opacity. */
+extern const uint8_t competition_actions_v1_bin[], competition_actions_v1_bin_end[];
 
 #endif

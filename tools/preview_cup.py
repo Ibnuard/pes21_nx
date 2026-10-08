@@ -223,17 +223,18 @@ def build_driver(source, logos=()):
     gl_struct = "static struct {" + between(source, "// text-overlay GL objects, created lazily on first draw\nstatic struct {", "} gl;") + "} gl;"
     helpers = ["efootball_raster_level", "efootball_raster_height", "efootball_raster_width",
         "efootball_raster_advances", "measure_efootball_line_mode", "emit_efootball_line_mode",
-        "emit_badge", "emit_image_rect_uv", "emit_image_rect", "emit_round_rect_quad",
+        "emit_badge", "emit_image_rect_uv", "emit_image_rect", "emit_round_rect_quad", "emit_triangle",
         "use_rounded_rect", "fnx_button_color"]
     ui_helpers = ["ml_ui_draw", "ml_ui_rect", "ml_ui_text", "ml_ui_image", "ml_ui_button",
-        "ml_ui_center_text", "ml_ui_unread", "ml_ui_art", "ml_ui_icon", "ml_ui_frame",
+        "ml_ui_center_text", "ml_ui_unread", "ml_ui_art", "ml_ui_icon", "ml_ui_frame", "ml_ui_rank_change",
         "ml_ui_emblem", "ml_ui_header_icon", "ml_ui_panel", "ml_ui_row", "ml_ui_pills", "ml_ui_toast_card",
         "master_league_draw_layer", "master_league_draw"]
     uniforms = sorted(set(re.findall(r"gl\.(loc_\w+)", source)))
     fields = {"tex": 1, "efootball_tex": 2, "badge_tex": 3,
         "master_league_cards_tex": 50, "master_league_icons_tex": 51,
         "master_league_headers_tex": 52, "master_league_emblems_tex": 53,
-        "cup_pearl_tex": 54, "cup_news_tex": 55, "main_menu_brand_tex": 56}
+        "cup_pearl_tex": 54, "cup_news_tex": 55, "main_menu_brand_tex": 56,
+        "competition_actions_tex": 62}
     initialize = "static void initialize_gl(void) {\n" + "\n".join(
         [f"gl.{name}={i};" for i, name in enumerate(uniforms, 1)] +
         [f"gl.{name}={value};" for name, value in fields.items()] +
@@ -271,7 +272,8 @@ def textures(folder, logos=()):
     result = {2: Image.open(folder / "font.pgm").convert("RGB")}
     names = {20: "main_menu_button_a", 21: "main_menu_button_b",
         50: "master_league_cards_v2", 51: "master_league_icons_v4", 52: "master_league_headers_v8",
-        53: "master_league_emblems_v7", 54: "cup_pearl_v1", 55: "cup_news_v1", 56: "main_menu_brand"}
+        53: "master_league_emblems_v7", 54: "cup_pearl_v1", 55: "cup_news_v1", 56: "main_menu_brand",
+        62: "competition_actions_v1"}
     header = (ROOT / "source/switch_button_assets.h").read_text()
     for i, (name, _) in enumerate(re.findall(r'X\((\w+), "([^"]+)"\)', header)):
         names[22+i] = "switch_button_" + name

@@ -174,9 +174,11 @@ static void ml_world_view(MlView *v) {
         v->rows[4].emblem=3u;
     }else if(page==ML_PAGE_QUALIFIERS) {
       const LeagueTournament *q=&career.world.qualifiers;uint8_t ranked[LEAGUE_MAX_TEAMS];league_tournament_ranked_slots(q,ranked);
+      int8_t changes[LEAGUE_MAX_TEAMS];league_tournament_rank_changes(q,changes);
       v->total=q->team_count;
       for(uint32_t i=0;i<q->team_count;i++) {
         MlTableRow *r=&v->table[v->table_count++];r->stats=q->standings[ranked[i]];r->rank=i+1u;
+        r->rank_change=changes[ranked[i]];
         r->badge=exhibition_team_catalog_badge(r->stats.team);r->own=r->stats.team==career.world.national_team;
         snprintf(r->name,64,"%s",exhibition_team_catalog_name(r->stats.team));
       }

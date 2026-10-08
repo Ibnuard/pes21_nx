@@ -10,6 +10,8 @@ enum {
   BUTTON_A = 1u << 1,
   BUTTON_Y = 1u << 2,
   BUTTON_X = 1u << 3,
+  BUTTON_L = 1u << 4,
+  BUTTON_UP = 1u << 10,
   BUTTON_R = 1u << 7,
   BUTTON_DOWN = 1u << 11,
   BUTTON_LEFT = 1u << 12,
@@ -22,6 +24,16 @@ static void press(uint32_t button) {
   competition_frontend_pad_event(0u, 0u);
   competition_frontend_pad_event(button, 0u);
   competition_frontend_pad_event(0u, 0u);
+}
+
+static void focus_hub(uint32_t target) {
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
+  if (competition_frontend_league_page() != LEAGUE_PAGE_HOME) press(BUTTON_B);
+  const int top = target == 5u || target == 2u;
+  const uint32_t current = competition_frontend_focus();
+  if (top != (current == 5u || current == 2u)) press(BUTTON_UP);
+  for (uint32_t i=0;i<4u && competition_frontend_focus()!=target;i++) press(BUTTON_RIGHT);
+  assert(competition_frontend_focus()==target);
 }
 
 int main(void) {
@@ -51,14 +63,15 @@ int main(void) {
   assert(strcmp(competition_frontend_item_label(2u), "NEXT") == 0);
   assert(strcmp(competition_frontend_item_label(3u), "SAVE") == 0);
   assert(!competition_frontend_item_enabled(2u));
+  press(BUTTON_RIGHT); /* Bottom cards follow their on-screen positions. */
+  assert(competition_frontend_focus() == 4u);
   press(BUTTON_RIGHT);
   assert(competition_frontend_focus() == 1u);
-  press(BUTTON_RIGHT); /* Skip disabled Next. */
-  assert(competition_frontend_focus() == 3u);
-  press(BUTTON_LEFT); /* Reverse navigation skips it as well. */
-  assert(competition_frontend_focus() == 1u);
-  press(BUTTON_LEFT);
-  assert(competition_frontend_focus() == 0u);
+  press(BUTTON_UP); /* Disabled Next remains focusable for its explanation. */
+  assert(competition_frontend_focus() == 2u);
+  press(BUTTON_A);
+  assert(competition_frontend_take_action() == COMPETITION_ACTION_NONE);
+  focus_hub(0u);
   press(BUTTON_A); /* Teams editor. */
   assert(competition_frontend_league_teams_editing());
   press(BUTTON_X); /* Assign all missing teams. */
@@ -67,18 +80,19 @@ int main(void) {
   assert(competition_frontend_league_tournament()->matchday_count == 1u);
   press(BUTTON_B);
   assert(!competition_frontend_league_teams_editing());
-  press(BUTTON_RIGHT);
+  focus_hub(1u);
   press(BUTTON_A); /* General settings. */
   assert(competition_frontend_cup_general_open());
   press(BUTTON_B);
-  press(BUTTON_RIGHT);
-  assert(competition_frontend_focus() == 2u);
+  focus_hub(2u);
   assert(competition_frontend_item_enabled(2u));
-  press(BUTTON_Y);
+  focus_hub(5u);press(BUTTON_A);
+  assert(competition_frontend_league_page() == LEAGUE_PAGE_MATCHES);
+  press(BUTTON_X);
   assert(competition_frontend_league_scorers_open());
-  press(BUTTON_Y);
+  press(BUTTON_X);
   assert(!competition_frontend_league_scorers_open());
-  press(BUTTON_RIGHT);
+  focus_hub(3u);
   press(BUTTON_A); /* Save slot 1. */
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_SLOTS);
   assert(strcmp(competition_frontend_slot_competition(0u),
@@ -124,7 +138,15 @@ int main(void) {
   competition_frontend_league_restore_after_match();
   assert(competition_frontend_league_tournament()->phase ==
          LEAGUE_PHASE_KNOCKOUT);
-  assert(!competition_frontend_item_enabled(0u));
+  assert(competition_frontend_item_enabled(0u));
+  focus_hub(0u);press(BUTTON_A);
+  assert(competition_frontend_league_page() == LEAGUE_PAGE_TEAMS);
+  assert(!competition_frontend_league_teams_editing());
+  const LeagueTournament locked = *competition_frontend_league_tournament();
+  press(BUTTON_X);press(BUTTON_A);
+  assert(!competition_frontend_cup_team_picker_active());
+  assert(!memcmp(&locked,competition_frontend_league_tournament(),sizeof(locked)));
+  focus_hub(2u);
   assert(competition_frontend_focus() == 2u);
   press(BUTTON_A);
   assert(competition_frontend_take_action() ==
@@ -136,12 +158,19 @@ int main(void) {
   competition_frontend_league_restore_after_match();
   assert(competition_frontend_league_tournament()->phase ==
          LEAGUE_PHASE_COMPLETE);
-  assert(competition_frontend_item_count() == 1u);
-  assert(strcmp(competition_frontend_item_label(0u), "TOP TO MENU") == 0);
+  assert(competition_frontend_item_count() == 6u);
+  press(BUTTON_A); /* Completed seasons retain their results pages. */
+  assert(competition_frontend_league_page() == LEAGUE_PAGE_BRACKET);
+  press(BUTTON_X);
+  assert(competition_frontend_league_page() == LEAGUE_PAGE_TABLE);
+  press(BUTTON_Y);
+  assert(competition_frontend_league_page() == LEAGUE_PAGE_BRACKET);
+  focus_hub(3u);press(BUTTON_A);press(BUTTON_A);
+  LeagueSaveState completed;
+  assert(league_save_read(0u,&completed));
+  assert(completed.tournament.phase==LEAGUE_PHASE_COMPLETE);
   press(BUTTON_B);
-  assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
-  press(BUTTON_A);
-  assert(competition_frontend_state() == COMPETITION_FRONTEND_NONE);
+  assert(competition_frontend_closing());
 
   competition_frontend_finish_close();
   competition_frontend_open_modes();
@@ -209,10 +238,29 @@ int main(void) {
   press(BUTTON_B);
   assert(competition_frontend_league_tournament()->
          matchday_fixture_count[0] == 8u);
-  press(BUTTON_DOWN);
+  focus_hub(5u);press(BUTTON_A);press(BUTTON_DOWN);
   assert(competition_frontend_league_schedule_page() == 1u);
+  const LeagueTournament before = *competition_frontend_league_tournament();
   press(BUTTON_R);
+  assert(competition_frontend_league_view_matchday() == 1u);
+  assert(competition_frontend_league_schedule_page() == 0u);
+  press(BUTTON_L);
+  assert(competition_frontend_league_view_matchday() == 0u);
+  focus_hub(4u);press(BUTTON_A);press(BUTTON_R);
   assert(competition_frontend_league_table_page() == 1u);
-  assert(competition_frontend_league_schedule_page() == 1u);
+  press(BUTTON_R); /* Six rows per page; 16 teams ends on page three. */
+  assert(competition_frontend_league_table_page() == 2u);
+  press(BUTTON_R);assert(competition_frontend_league_table_page() == 2u);
+  press(BUTTON_L);assert(competition_frontend_league_table_page() == 1u);
+  assert(!memcmp(&before,competition_frontend_league_tournament(),sizeof(before)));
+  /* Carousel advances only on home, never while browsing a submenu. */
+  uint64_t tick=1000u;competition_frontend_tick(tick);
+  const uint32_t news=competition_frontend_league_news_index();
+  for(uint32_t i=0;i<8u;i++)competition_frontend_tick(tick+=1000u);
+  assert(competition_frontend_league_news_index()==news);
+  press(BUTTON_B);
+  for(uint32_t i=0;i<6u;i++)competition_frontend_tick(tick+=1000u);
+  assert(competition_frontend_league_news_index()==(news+1u)%4u);
+  assert(!memcmp(&before,competition_frontend_league_tournament(),sizeof(before)));
   return 0;
 }

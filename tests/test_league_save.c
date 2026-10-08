@@ -70,6 +70,18 @@ int main(void) {
   assert(league_save_read(0u, &loaded));
   assert(loaded.league_competition_id == 9u);
   assert(loaded.league_system == LEAGUE_SYSTEM_STANDINGS);
+  const uint32_t teams[] = {104u,103u,102u,101u};
+  assert(league_tournament_init(&loaded.tournament,teams,4u,teams,1u,1,17u));
+  league_tournament_set_system(&loaded.tournament,LEAGUE_SYSTEM_STANDINGS);
+  loaded.team_count=4u;
+  assert(league_tournament_record_table_fixture(&loaded.tournament,0u,2u,0u,0));
+  int8_t changes[LEAGUE_MAX_TEAMS],restored[LEAGUE_MAX_TEAMS];
+  league_tournament_rank_changes(&loaded.tournament,changes);
+  assert(changes[0]>0);
+  assert(league_save_write(1u,&loaded));
+  memset(&loaded,0,sizeof(loaded));assert(league_save_read(1u,&loaded));
+  league_tournament_rank_changes(&loaded.tournament,restored);
+  assert(!memcmp(changes,restored,sizeof(changes)));
   puts("league save migration tests passed");
   return 0;
 }

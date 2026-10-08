@@ -363,6 +363,16 @@ and the 304-club/9,075-player catalog remain unchanged. Install only the NRO;
 do not replace game payloads. To roll back after saving with v5, restore both
 the previous NRO and the pre-v5 SaveData backup.
 
+## Standings review (2026-10-08)
+
+Master League and standalone League now show six teams per standings page,
+with larger crests and consistent row spacing. L/R steps by six clubs. The
+shared rank indicator uses a blue up triangle, red down triangle or gray dash,
+comparing against the start of the latest matchday with recorded results.
+Its baseline comes from the existing saved fixtures, including partial rounds;
+rendering does not mutate the competition or add fields to career saves.
+The same projection supplies national qualifying standings.
+
 ## Review revision v4 (2026-10-07)
 
 This revision supersedes the v3 selector, condition-setting and fixed-price

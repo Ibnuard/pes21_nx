@@ -68,9 +68,22 @@ class MasterLeagueVisualTests(unittest.TestCase):
             self.assertAlmostEqual((left[1]-left[17])*360,24.48,delta=.1)
             self.assertAlmostEqual((left[0]+right[16])*.5,0,delta=.002)
         badges=[d for d in self.frames['league-table'] if d['kind']==2 and d['texture']==2]
-        self.assertEqual(len(badges),9) # header crest + eight table rows
+        self.assertEqual(len(badges),7) # header crest + six table rows
         for d in badges[1:]:
             self.assertGreaterEqual((d['vertices'][1]-d['vertices'][17])*360,36)
+
+    def test_standings_rank_changes_use_triangles_before_the_crest(self):
+        draws=self.frames['league-table-movement']
+        arrows=[d for d in draws if d['kind']==0 and
+                len(set(zip(d['vertices'][::4],d['vertices'][1::4])))==3]
+        self.assertTrue(any(d['color'][0]<.5 for d in arrows))
+        self.assertTrue(any(d['color'][0]>.8 for d in arrows))
+        for d in arrows:
+            v=d['vertices']
+            self.assertLessEqual(max(v[::4]),2*.110-1)
+            self.assertEqual(v[9]>v[1],d['color'][0]<.5)
+        badges=[d for d in self.frames['league-table-page2'] if d['kind']==2 and d['texture']==2]
+        self.assertEqual(len(badges),7)
 
     def test_compact_popups_fit_zero_one_two_and_three_actions(self):
         heights={}

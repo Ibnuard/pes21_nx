@@ -311,6 +311,51 @@ void league_tournament_ranked_slots(const LeagueTournament *league,
   }
 }
 
+void league_tournament_rank_changes(const LeagueTournament *league,
+                                     int8_t changes[LEAGUE_MAX_TEAMS]) {
+  if (!changes) return;
+  memset(changes, 0, LEAGUE_MAX_TEAMS * sizeof(*changes));
+  if (!league || !league->team_count || league->team_count > LEAGUE_MAX_TEAMS ||
+      league->matchday_count > LEAGUE_MAX_MATCHDAYS ||
+      league->fixture_count > LEAGUE_MAX_FIXTURES) return;
+  uint32_t latest = UINT32_MAX;
+  for (uint32_t day = 0; day < league->matchday_count; day++) {
+    const uint32_t first = league->matchday_first[day];
+    const uint32_t count = league->matchday_fixture_count[day];
+    if (first > league->fixture_count || count > league->fixture_count - first) return;
+    for (uint32_t i = 0; i < count; i++)
+      if (league->fixtures[first + i].complete) latest = day;
+  }
+  if (latest == UINT32_MAX) return;
+  LeagueStanding previous[LEAGUE_MAX_TEAMS] = {{0}};
+  for (uint32_t slot = 0; slot < league->team_count; slot++)
+    previous[slot].team = league->standings[slot].team;
+  /* Only points and goals take part in the canonical ranking comparator. */
+  for (uint32_t day = 0; day < latest; day++) {
+    for (uint32_t i = 0; i < league->matchday_fixture_count[day]; i++) {
+      const LeagueFixture *f = &league->fixtures[league->matchday_first[day] + i];
+      if (!f->complete) continue;
+      for (uint32_t slot = 0; slot < league->team_count; slot++) {
+        LeagueStanding *s = &previous[slot];
+        if (s->team != f->home && s->team != f->away) continue;
+        const uint32_t gf = s->team == f->home ? f->home_goals : f->away_goals;
+        const uint32_t ga = s->team == f->home ? f->away_goals : f->home_goals;
+        s->goals_for += gf; s->goals_against += ga;
+        s->points += gf > ga ? 3u : gf == ga ? 1u : 0u;
+      }
+    }
+  }
+  uint8_t order[LEAGUE_MAX_TEAMS];
+  league_tournament_ranked_slots(league, order);
+  for (uint32_t rank = 0; rank < league->team_count; rank++) {
+    const uint32_t slot = order[rank];
+    uint32_t old_rank = 0u;
+    for (uint32_t other = 0; other < league->team_count; other++)
+      old_rank += league_better(&previous[other], &previous[slot]);
+    changes[slot] = (int8_t)((int)old_rank - (int)rank);
+  }
+}
+
 static void league_begin_knockout(LeagueTournament *league) {
   uint8_t slots[LEAGUE_MAX_TEAMS] = {0};
   league_tournament_ranked_slots(league, slots);

@@ -49,7 +49,7 @@ static uint64_t armTicksToNs(uint64_t t){return t;}
 static GLuint gameplan_portrait_texture(uint32_t id){(void)id;return 0;}
 enum { FNX_BUTTON_FRAME, FNX_BUTTON_FILL, FNX_BUTTON_GLOSS, FNX_BUTTON_TEXT };
 '''
-    funcs=['emit_image_rect_uv','emit_image_rect','emit_round_rect_quad',
+    funcs=['emit_image_rect_uv','emit_image_rect','emit_round_rect_quad','emit_triangle',
            'efootball_raster_level','efootball_raster_height','efootball_raster_width',
            'efootball_raster_advances','measure_efootball_line_mode','emit_efootball_line_mode',
            'fnx_button_color','emit_badge']
@@ -146,7 +146,7 @@ int main(void) {
     .portrait_id=career->players[0].native_id,.goals=2u,.name="Synthetic Striker"};
   ml_frontend_result(2u,0u,&scorer,1u);assert(ml_frontend_restore() && view().page==ML_PAGE_ADVANCE);
   ui_clock+=900u;ml_frontend_tick(ui_clock);dump("advance-match-date");finish_advance();
-  go(0,3);press(Y);dump("scorers-with-badges");
+  go(0,3);ticks+=3100000000u;dump("league-table-movement");press(R);dump("league-table-page2");press(Y);dump("scorers-with-badges");
   go(0,1);while(view().feed_index!=1u)press(RIGHT);ticks+=3100000000u;dump("feed-results");
   press(B);dump("home-feed-result");
   for(uint32_t slide=0;slide<4u;slide++) {
@@ -229,12 +229,17 @@ int main(void) {
             verts=draw['vertices']
             for i in range(0,len(verts),24):
                 v=verts[i:i+24]
-                x0,y0=round((v[0]+1)*640),round((1-v[1])*360)
-                x1,y1=round((v[16]+1)*640),round((1-v[17])*360)
+                points=[(round((v[j]+1)*640),round((1-v[j+1])*360)) for j in range(0,24,4)]
+                x0,y0=min(x for x,y in points),min(y for x,y in points)
+                x1,y1=max(x for x,y in points),max(y for x,y in points)
                 w,h=max(1,x1-x0),max(1,y1-y0)
                 if draw['kind']==0:
                     tile=Image.new('RGBA',(w,h),color)
-                    mask=Image.new('L',(w*4,h*4));ImageDraw.Draw(mask).rounded_rectangle((0,0,w*4-1,h*4-1),radius=draw['radius']*4,fill=color[3])
+                    mask=Image.new('L',(w*4,h*4));painter=ImageDraw.Draw(mask)
+                    if len(set(points))==3:
+                        painter.polygon([((x-x0)*4,(y-y0)*4) for x,y in points[:3]],fill=color[3])
+                    else:
+                        painter.rounded_rectangle((0,0,w*4-1,h*4-1),radius=draw['radius']*4,fill=color[3])
                     tile.putalpha(mask.resize((w,h),Image.Resampling.LANCZOS))
                 elif draw['kind']==1:
                     box=(v[2]*font.width,v[3]*font.height,v[18]*font.width,v[19]*font.height)

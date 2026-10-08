@@ -21,10 +21,12 @@ and Serie B are intentionally absent from League Type. Named presets fix
 Number of Teams to their full eligible pool; only FootballNX League can
 change that count. Existing saves from those five retired presets continue
 under the custom FootballNX label with their fixtures intact.
-The League Hub uses four actions in this order: `Teams`, `General Setting`,
-`Next`, `Save`. During the season, B returns to the menu rather than adding a
-fifth `Top to Menu` action. `Teams` edits team assignments before the first
-match and locks after kickoff. Unlike Cup, League has no Swap mode.
+The League Hub uses a news carousel and a Next Match/Champions card above
+four actions: `Teams`, `Standings`, `Settings`, `Save League`. A activates the
+focused card; B returns to the menu. L/R changes the news story. Teams edits
+assignments before kickoff and remains available as a read-only participants
+page afterwards. Unlike Cup, League has no Swap mode. Standings, Match Centre,
+Top Scorers and Knockout each get a full-height page; B returns to the Hub.
 
 League Settings accepts 2–32 teams and 1–8 human owners, limited to the team
 count. Home & Away OFF schedules each pair once; ON schedules a return leg
@@ -33,28 +35,31 @@ with reversed home and away sides. League fixtures allow draws and award
 all pending human fixtures on that day are played. Standings sort by points,
 goal difference, goals for, then team ID.
 
-The League Hub has two sequential phases. During the League Phase, its left
-panel is the table at five teams per page with native full-color badge-atlas
-quads. The right panel shows up to four fixtures for the current matchday; its
-page moves independently with up/down for matchdays with more than four
-fixtures. L1/R1 pages the table; Y
-toggles Match Schedule and Top Scorer. COM fixtures deterministically assign
+Standings shows eight teams per page with native full-color badge-atlas quads;
+L/R changes page. Match Centre shows four fixtures per page: L/R changes the
+viewed matchday, Y changes its fixture page, and X opens Top Scorers. Browsing
+does not advance the season. All controller hints live in the bottom helper
+bar, including X for Standings, Fixtures, and Top Scorers. COM fixtures deterministically assign
 their simulated goals to players from a compact pool generated from the
 committed PESDB registry. The runtime result bridge samples native
 `StatsPlayerInfo` goals for played fixtures, maps portrait IDs back to
 eFootball BaseId, and skips unresolved identities instead of fabricating a
-scorer. The Hub requests the top four portrait PNGs asynchronously; a team
+scorer. Top Scorers requests the top four portrait PNGs asynchronously; a team
 badge remains visible when a portrait asset is missing. On-device validation
 of native player-stat timing is still needed.
 
 With `By Standing`, the highest-ranked club is champion after the last
 matchday; the table and final matchday remain visible. With `Knockout Stages`,
 the top 2 (for 2–3 teams), 4 (for 4–7), or 8 (for 8–32) qualify for a
-single-leg knockout. Seeds are 1v8/4v5/2v7/3v6 or 1v4/2v3. The left panel
-becomes the Knockout Bracket with two matches per page and a champion card at
-completion. L1/R1 changes round, up/down changes the two-match page, and Y
-continues to toggle the right panel. Completed League has only `Top to Menu`
-and A/Confirm.
+knockout. Home & Away applies to knockout rounds before the single-match
+final. Seeds are 1v8/4v5/2v7/3v6 or 1v4/2v3. Y on Standings opens Knockout,
+with two matches linked to their next-round fixture. L/R changes round,
+Y changes page, and X returns to Standings. Each fixture shows a colored code,
+the round name and right-aligned status on one line. Return-leg previews
+retain first-leg scores; finished two-leg ties show aggregate scores.
+At completion the Hub remains available for results, saving, participants
+and scorers. Selecting Champions opens the final bracket or final table.
+Champion cards draw the winning team's live atlas crest above the caption.
 
 ## Selector and local FL26 assets
 
@@ -91,6 +96,40 @@ boot with the dummy OBB/full-loose package. Copy only the paired NRO plus
 `LeagueLogos/` for this UI update; keep the matching OBB and LooseCpk intact.
 
 ## Art and implementation boundaries
+
+The current broadcast renderer is `source/league_overlay.inc`, using the
+same Master League/Cup panels, buttons, focus outlines, icons, indicator and
+toast primitives. `art/league/` contains original generated pearl/emerald
+background, four-story atlas, transparent action sprites and dark title
+banner. The background, banner and sprites follow a flat 2D sports graphic
+style, with white/blue shapes, restrained red accents and navy outlines. Each
+action has its own sprite: jerseys, ranking podium, football cog and save disk.
+The shared sprites in `art/competition/actions-v1.png` render at 20% opacity
+in Cup and League New/Continue and Hub cards. Their PNG bytes are linked as
+`data/competition_actions_v1.bin`; League art uses `data/league_*.bin`.
+Generation mode and prompt briefs are documented in `art/league/manifest.json`.
+Only presentation state is added; tournament rules and save layouts stay
+in the existing core. Rendering never simulates matches or invents results.
+Runtime LeagueLogos use their existing catalog mapping and remain ignored.
+
+Standings share Master League's six-row page size, larger crests, alternating
+row backgrounds and aligned statistics. Standalone League retains P1–P8 badges
+and highlights each human-controlled team. Blue up/red down triangles compare
+the current rank with the start of the latest matchday containing a result;
+unchanged teams show a gray dash. The baseline is reconstructed from saved
+fixtures, so partial multiplayer matchdays and reloaded seasons retain the same
+meaning without changing the save format. Empty seasons have neutral indicators.
+
+Reproduce the 54-frame review with `python tools/preview_league.py`. It drives
+the production frontend and renderer with temporary synthetic seasons,
+including empty/filled saves, 2/3/4/19/32 teams, eight human owners, both league
+systems and first/return knockout legs. Outputs go to
+`local-debug/league-news-preview/`. This is host rendering, not a device capture.
+`tests/test_league_visuals.py` checks production draw budgets, helper placement,
+header aspect, champion crests and fixture status alignment. The frontend flow
+test covers navigation, saved-season continuity and read-only browsing.
+
+Earlier references (superseded by the broadcast renderer):
 
 - `art/league_hub_stadium_v1.png` is an original 16:9 stadium backdrop for
   League, distinct from Cup's backdrop. Its PNG bytes are linked as

@@ -100,6 +100,9 @@ the move is confirmed or cancelled. Assignment counts stay in their containers.
 Home uses two large cards over four actions. Up/Down changes rows, Left/Right
 moves between cards, A opens, and B goes back. L/R changes the news story;
 the four stories also rotate every six seconds and pause outside Home.
+The carousel pills sit inside its caption panel, matching League. Both upper
+cards extend to 67% of screen height, with larger next-match tiles using the
+space reclaimed from the former external indicators.
 Next Match is one selectable card with two larger team tiles and crests; it has
 no nested play button. The footer shows A / Play Match (or Top Menu after the
 Cup finishes) while this card is selected.

@@ -17,12 +17,18 @@ class LeagueFrontendFlowTests(unittest.TestCase):
             self.skipTest("Host C compiler unavailable")
         with tempfile.TemporaryDirectory() as temp:
             binary = Path(temp) / "league-frontend-test.exe"
+            # Isolate the native loader type while compiling the real frontend.
+            (Path(temp) / "ue4_hooks.h").write_text((ROOT / "source/ue4_hooks.h").read_text().replace(
+                '#include "so_util.h"', 'typedef struct so_module so_module;'))
+            shutil.copy2(ROOT / "source/competition_frontend.c", Path(temp) / "competition_frontend.c")
+            clang = "clang" in subprocess.check_output([compiler, "--version"], text=True).lower()
             subprocess.run(
                 [
                     compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
-                    "-I", str(ROOT / "source"),
+                    *(["-Wno-constant-logical-operand"] if clang else []),
+                    "-I", str(Path(temp)), "-I", str(ROOT / "source"),
                     str(ROOT / "tests/test_league_frontend_flow.c"),
-                    str(ROOT / "source/competition_frontend.c"),
+                    str(Path(temp) / "competition_frontend.c"),
                     str(ROOT / "source/competition_entry_draft.c"),
                     str(ROOT / "source/cup_tournament.c"),
                     str(ROOT / "source/cup_save.c"),

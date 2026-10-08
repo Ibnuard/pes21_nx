@@ -136,6 +136,21 @@ void competition_frontend_cup_match_result(uint32_t home_goals,
 void competition_frontend_cup_restore_after_match(void);
 
 const LeagueTournament *competition_frontend_league_tournament(void);
+/* Presentation only; these pages never change the persisted season. */
+typedef enum {
+  LEAGUE_PAGE_HOME, LEAGUE_PAGE_TEAMS, LEAGUE_PAGE_TABLE,
+  LEAGUE_PAGE_MATCHES, LEAGUE_PAGE_SCORERS, LEAGUE_PAGE_BRACKET
+} LeagueFrontendPage;
+LeagueFrontendPage competition_frontend_league_page(void);
+uint32_t competition_frontend_league_news_index(void);
+float competition_frontend_league_news_progress(void);
+uint32_t competition_frontend_league_view_matchday(void);
+uint32_t competition_frontend_league_team_count(void);
+uint32_t competition_frontend_league_player_count(void);
+int competition_frontend_league_home_away(void);
+LeagueSystem competition_frontend_league_system(void);
+int competition_frontend_league_slots_saving(void);
+int competition_frontend_league_slot_valid(uint32_t slot);
 const char *competition_frontend_league_name(void);
 uint32_t competition_frontend_league_catalog_index(void);
 const char *competition_frontend_league_logo_file(void);

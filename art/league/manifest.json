@@ -1,0 +1,51 @@
+{
+  "generation_mode": "Built-in image_gen; original raster assets generated for FootballNX League",
+  "palette": "White, blue and restrained red accents; flat 2D sports graphics",
+  "note": "Generated with built-in image_gen. Final recolor prompts follow the project's white-blue-red palette. Shared action sprites are rendered at 20 percent opacity as partially clipped bottom-right background patterns in both Cup and League.",
+  "assets": [
+    {
+      "source": "league_news_v1.png",
+      "runtime": "../../data/league_news_v1.bin",
+      "size": [
+        1672,
+        941
+      ],
+      "prompt_brief": "One exact 2x2 equal gutterless atlas of cinematic sports broadcast artwork: top left stadium tunnel kickoff, top right football on matchday pitch, bottom left brushed silver ranking podium, bottom right silver league trophy with confetti. Dark petrol navy, emerald and silver. Keep the left third and lower quarter quiet for live captions. No text, brands or team logos."
+    },
+    {
+      "source": "league_pearl_v2.png",
+      "runtime": "../../data/league_pearl_v2.bin",
+      "size": [
+        1672,
+        941
+      ],
+      "transparent": false,
+      "prompt": "Use case: stylized-concept. Original 16:9 full-screen menu BACKGROUND for a modern football game's League mode, to sit behind large white cards. FLAT 2D graphic design in the restrained visual family of console football menus: nearly-white cool pearl base, very pale mint and light grey geometric layers, quiet central 80 percent. In the extreme left and right edges and lower corners only, abstract ascending league standings bars, football pitch arcs and thin flowing geometric curves, lightly overlapping flat translucent shapes. Tiny restrained emerald-teal accent at the outer corners. Clean crisp shapes, subtle faint linework, exceptionally low contrast, balanced generous negative space, pale all over. It should feel designed and modern with a calm graphic sports identity. No 3D, no dimensional stadium architecture, no chrome, no metal, no glass, no photorealism, no harsh dark areas, no complex ribbons, no text, no digits, no logos, no badges, no UI or panels, no watermark. Flat illustration, not a rendered physical scene.",
+      "recolor_prompt": "Edit only the palette of this pale FLAT 2D football League menu background. Preserve the composition, linework, geometric standings bars and pitch arcs, quiet center, pale overall contrast and all shapes. Replace mint/green/teal with very pale ice blue and soft cool grey. Add just two tiny pale red accents at the extreme lower corners. White and pale blue must dominate, matching a white-blue-red football game UI. Do not increase contrast or complexity. No green, no 3D, no textures, no text, no logos, no new shapes or panels."
+    },
+    {
+      "source": "league_header_v2.png",
+      "runtime": "../../data/league_header_v2.bin",
+      "size": [
+        2172,
+        724
+      ],
+      "transparent": false,
+      "prompt": "Use case: stylized-concept. A premium FLAT 2D graphic football LEAGUE menu HEADER BACKGROUND, wide 3:1 image. The game will center-crop this to a thin 12.5:1 title bar, so all useful graphics must fit through the middle horizontal 24 percent and flow naturally outside the edges. Color palette deep navy and petrol with restrained emerald teal shapes. Left 55 percent quiet deep navy for live white heading and subtitle. Right 45 percent: overlapping crisp flat diagonal bands, football pitch arcs and ascending league-bar line motifs, clean restrained tonal geometric pattern, subtle cyan-green edge accents. Dark far right for a live league logo. Modern console football graphic design, flat layered illustration, crisp clean silhouette, very slight smooth tonal gradient allowed in base navy only. No 3D, no silver metal, no glass, no textures, no architectural scene, no photorealistic lighting, no rendered object, no floating ornament, no logos, no text, no numerals, no watermark, no border. Fill the whole canvas.",
+      "recolor_prompt": "Recolor this flat 2D football League title banner only. Preserve its exact layout, empty dark left side, crisp right-side diagonal bands, standings bars and pitch linework. Keep deep navy background. Replace all emerald/green/teal with restrained medium royal blue and blue linework. Introduce one narrow dark red diagonal accent among the right-side blue bands, subtle not dominant. The visual identity is WHITE BLUE RED with dark navy; absolutely no green. Keep the flat modern style, no 3D, no silver, no textures, no text, no logos, no new geometry. The center horizontal quarter is cropped for a thin header in the game."
+    },
+    {
+      "source": "../competition/actions-v1.png",
+      "runtime": "../../data/competition_actions_v1.bin",
+      "size": [
+        1295,
+        1215
+      ],
+      "transparent": true,
+      "prompt": "Use case: stylized-concept. Production bitmap SPRITE ATLAS for a football game League UI. EXACTLY FOUR crisp FLAT 2D illustrated symbols on a precise 2x2 equal square grid, each centered within its own quadrant with 18 percent transparent padding on every edge. Top left: three overlapping football jersey shirts representing TEAMS. Top right: three simple league podium bars with a tiny five-point star above the tallest central bar representing STANDINGS, no digits. Bottom left: a simple cog with a small football center representing MATCH SETTINGS. Bottom right: a classic simple square save disk with a down-arrow inset representing SAVE. One unified MODERN FLAT CARTOON sports-game UI visual language, clean thick dark navy outlines, rounded corners, confident geometric silhouettes, emerald teal and pearl white solid color fills, one restrained darker offset flat shadow per shape. Must read beautifully at 64 pixels. Two-dimensional vector-like artwork delivered as raster, no gradients, no realistic lighting, no 3D, no bevels, no metal or glass, no textures, no perspective, no ground shadows. Actual transparent alpha background outside all symbols; transparent grid gutters and cell edges; no checkerboard, text, labels, numerals, brand, watermark or UI panels.",
+      "recolor_prompt": "Edit only the palette of this flat 2D four-symbol sprite atlas. Preserve the exact four shapes, their positions, scale, spacing, navy outlines, white areas, clean flat cartoon style and transparent alpha background. Change all green/emerald/teal fills into medium royal blue and light blue. Add only small tasteful red accent details on one stripe or inset per symbol. The theme is WHITE, BLUE, RED; absolutely no green. Keep fully transparent areas transparent. No new objects, no text, no 3D, no extra shadows. This is a recolor of the same atlas for consistent football game menu ornament sprites.",
+      "render_opacity": 0.2,
+      "rendering": "Enlarged bottom-right pattern, partially outside the card and clipped inside its rounded body; drawn beneath text and buttons."
+    }
+  ]
+}
