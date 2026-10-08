@@ -56,6 +56,8 @@ static struct {
   GLuint team_rating_star_tex;
   GLuint team_select_bg_tex;
   GLuint main_menu_background_tex;
+  GLuint frontdoor_flat_tex;
+  GLuint frontdoor_panels_tex;
   GLuint cup_hub_stadium_tex;
   GLuint cup_news_tex, cup_pearl_tex;
   GLuint league_news_tex, league_pearl_tex, competition_actions_tex, league_header_tex;
@@ -185,6 +187,7 @@ static const char fshader_src[] =
   "  else if (uImage > 0.5) {\n"
   "    vec3 imageColor = sampled.rgb;\n"
   "    float imageAlpha = sampled.a;\n"
+  "    if (uImage > 1.5) imageColor = uColor.rgb;\n"
   "    if (uImageCurve > 0.5) {\n"
   "      imageColor = pow(max(imageColor, vec3(0.0)), vec3(1.0 / 2.2));\n"
   "      imageAlpha = 1.0;\n"
@@ -247,6 +250,8 @@ static int gl_init(void) {
   glGenTextures(1, &gl.team_rating_star_tex);
   glGenTextures(1, &gl.team_select_bg_tex);
   glGenTextures(1, &gl.main_menu_background_tex);
+  glGenTextures(1, &gl.frontdoor_flat_tex);
+  glGenTextures(1, &gl.frontdoor_panels_tex);
   glGenTextures(1, &gl.cup_hub_stadium_tex);
   glGenTextures(1, &gl.cup_news_tex);
   glGenTextures(1, &gl.cup_pearl_tex);
@@ -1284,7 +1289,10 @@ static void prepare_switch_button_assets(int active) {
   glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
   glBindTexture(GL_TEXTURE_2D, texture);
   glActiveTexture(active_texture);
-  gl.switch_buttons_uploaded = uploaded;
+  /* Embedded bytes are immutable. A bad optional glyph must not re-upload
+   * every other button on every frame of a match/menu. Retry on GL reset. */
+  gl.switch_buttons_uploaded = 1;
+  if (!uploaded) debugPrintf("[overlay] one or more controller PNG assets failed to load\n");
 }
 
 static GLuint switch_button_texture(const char *key) {
@@ -1326,6 +1334,10 @@ static void prepare_main_menu_assets(int active) {
   int uploaded = upload_main_menu_png(
       gl.main_menu_background_tex, main_menu_background_bin,
       main_menu_background_bin_end);
+  uploaded &= upload_main_menu_png(gl.frontdoor_flat_tex,
+      frontdoor_flat_v3_bin, frontdoor_flat_v3_bin_end);
+  uploaded &= upload_main_menu_png(gl.frontdoor_panels_tex,
+      frontdoor_panels_v2_bin, frontdoor_panels_v2_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_news_tex, cup_news_v1_bin, cup_news_v1_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_pearl_tex, cup_pearl_v1_bin, cup_pearl_v1_bin_end);
   uploaded &= upload_main_menu_png(gl.league_news_tex, league_news_v1_bin, league_news_v1_bin_end);
@@ -1585,6 +1597,12 @@ static void prepare_gameplan_portraits(int active) {
       PesPrematchGameplanPortraitPng *portrait = pending[side][index];
       if (!portrait)
         continue;
+      /* HUD/menu requests can cross by one frame. An already resident ID
+       * needs neither PNG decoding nor texture/mipmap reallocation. */
+      if (gameplan_portrait_cache_slot(portrait->portrait_id) >= 0) {
+        free(portrait);
+        continue;
+      }
       unsigned char *pixels = NULL;
       GLint width = 0;
       GLint height = 0;
@@ -1778,6 +1796,18 @@ static void fnx_button_color(uint32_t layer, int selected, int enabled) {
   }
 }
 
+/* Bright Matchday controls for the preserved native Game Plan layout. */
+static void fnx_bright_button_color(uint32_t layer, int selected, int enabled) {
+  if (layer == FNX_BUTTON_GLOSS) glUniform4f(gl.loc_color, 1, 1, 1, 0);
+  else if (layer == FNX_BUTTON_TEXT) {
+    if (!enabled) glUniform4f(gl.loc_color, .46f, .53f, .64f, 1);
+    else if (selected) glUniform4f(gl.loc_color, 1, 1, 1, 1);
+    else glUniform4f(gl.loc_color, .025f, .09f, .27f, 1);
+  } else if (selected && enabled) glUniform4f(gl.loc_color, .025f, .34f, .88f, 1);
+  else if (layer == FNX_BUTTON_FRAME) glUniform4f(gl.loc_color, .82f, .86f, .91f, 1);
+  else glUniform4f(gl.loc_color, .99f, .995f, 1, 1);
+}
+
 static int emit_triangle(float x0, float y0, float x1, float y1, float x2,
                          float y2, GLfloat *verts) {
   const GLfloat triangle[24] = {
@@ -1831,6 +1861,7 @@ static int emit_gameplan_condition_arrow(float cx, float cy, float size,
 #include "master_league_overlay.inc"
 #include "cup_overlay.inc"
 #include "league_overlay.inc"
+#include "frontdoor_overlay.inc"
 
 // The source mask is supersampled and downscaled offline. Drawing it as one
 // linearly filtered quad gives the small Switch UI stars clean edges; u_limit
@@ -2412,6 +2443,28 @@ static void overlay_render(void) {
       main_menu_visual_row(pes_main_menu_focus_index());
   const float custom_main_menu_mix = update_main_menu_portrait_transition(
       custom_main_menu, custom_main_menu_row);
+  /* Native modal/transition priority is authoritative; one fullscreen owner. */
+  FrontdoorPage frontdoor_page=FD_NONE;
+  if(custom_2p_transition)frontdoor_page=custom_2p_transition_kind==PES_2P_TRANSITION_VS ? FD_VS : FD_LOADING;
+  else if(startup_transition || result_transition || pause_transition)frontdoor_page=FD_LOADING;
+  else if(pause_camera_active)frontdoor_page=FD_PAUSE_SETTINGS;
+  else if(pause_skin)frontdoor_page=FD_PAUSE;
+  else if(result_skin)frontdoor_page=FD_RESULT;
+  else if(custom_video_settings_popup)frontdoor_page=FD_VIDEO;
+  else if(custom_info_popup)frontdoor_page=FD_INFO;
+  else if (!custom_gameplan && !result_skin && !tutorial_play_active) {
+    if (start_prompt) frontdoor_page=FD_TITLE;
+    else if (custom_main_menu) frontdoor_page=FD_MENU;
+    else if (custom_competition && competition_display_state==COMPETITION_FRONTEND_MATCH_MODE)
+      frontdoor_page=FD_MATCH;
+    else if (custom_competition && competition_display_state==COMPETITION_FRONTEND_MODES)
+      frontdoor_page=FD_MODES;
+    else if (custom_2p_team_selector) frontdoor_page=FD_SELECTOR;
+    else if (custom_hub_settings_popup && !pause_settings_popup) frontdoor_page=FD_SETTINGS;
+    else if (custom_hub_kits_page) frontdoor_page=FD_KITS;
+    else if (custom_hub_stadium_page) frontdoor_page=FD_STADIUM;
+    else if (custom_2p_prematch_hub) frontdoor_page=FD_HUB;
+  }
   const int native_lab = pes_controller_native_pad_lab_active();
   PesNativePadLabDebug native_debug = {0};
   if (native_lab)
@@ -2572,14 +2625,18 @@ static void overlay_render(void) {
       (custom_competition &&
        (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB ||
         competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE)));
+  for (uint32_t i = 0; i < stamina_bar_count; ++i)
+    if (stamina_bars[i].portrait_id &&
+        !gameplan_portrait_texture(stamina_bars[i].portrait_id))
+      pes_controller_hud_request_portrait(stamina_bars[i].side, stamina_bars[i].portrait_id);
   // A/B helper glyphs share the main-menu button textures. GoalDemo can be the
   // first custom surface in a session, so include it in the upload gate rather
   // than binding two generated-but-empty texture names.
-  prepare_main_menu_assets(start_prompt ||
+  prepare_main_menu_assets(frontdoor_page!=FD_NONE || start_prompt || custom_gameplan ||
                            custom_main_menu || custom_competition ||
                            custom_popup || pause_skin ||
                            result_skin || cinematic_helper_active);
-  prepare_switch_button_assets(custom_competition || custom_popup ||
+  prepare_switch_button_assets(frontdoor_page!=FD_NONE || custom_gameplan || custom_competition || custom_popup ||
                                pause_skin || result_skin ||
                                cinematic_helper_active || native_lab ||
                                setplay_options ||
@@ -2598,6 +2655,27 @@ static void overlay_render(void) {
 
   static GLfloat verts[4096 * 24];
   int quads = 0;
+  static MasterLeagueRender frontdoor_ui;
+  static FrontdoorMenuMotion frontdoor_menu_motion;
+  fd_menu_motion_step(&frontdoor_menu_motion,frontdoor_page==FD_MENU,
+      custom_main_menu_row,armTicksToNs(armGetSystemTick()));
+  if (frontdoor_page!=FD_NONE) {
+    FrontdoorView view;
+    frontdoor_snapshot(&view,frontdoor_page,custom_main_menu_row,
+        frontdoor_page==FD_TITLE ? title_portrait_previous : main_menu_portrait_transition.previous,
+        frontdoor_page==FD_TITLE ? title_portrait_current : main_menu_portrait_transition.current,
+        frontdoor_page==FD_TITLE ? title_portrait_mix : custom_main_menu_mix,
+        team_selector_confirm_progress);
+    view.motion_phase=(float)(armTicksToNs(armGetSystemTick())%6000000000ULL)/6000000000.f;
+    if(frontdoor_page==FD_MENU) {
+      memcpy(view.menu_weights,frontdoor_menu_motion.weights,sizeof(view.menu_weights));
+      view.menu_pattern_phase=frontdoor_menu_motion.pattern_phase;
+    }
+    frontdoor_emit(&frontdoor_ui,&view,verts,&quads);
+    /* Do not emit the old full-screen geometry underneath the new one. This
+     * bounds the existing 4096-quad VBO and avoids drawing either UI twice. */
+    goto overlay_geometry_ready;
+  }
   // Controller legends use one optical text size across every custom page.
   // Content labels retain their own hierarchy.
   const float helper_text_gh = roundf((float)screen_height / 43.0f);
@@ -2878,6 +2956,7 @@ static void overlay_render(void) {
     PREMATCH_GAMEPLAN_VISIBLE_PICKER = 7,
   };
   int prematch_gameplan_backdrop_first_quad = 0;
+  int prematch_gameplan_footer_quad = 0;
   int prematch_gameplan_backdrop_quads = 0;
   int prematch_gameplan_panel_first_quad = 0;
   int prematch_gameplan_panel_quads = 0;
@@ -2971,6 +3050,10 @@ static void overlay_render(void) {
   int prematch_gameplan_preset_label_quads[2][3] = {{0}};
   int prematch_gameplan_focus_text_first_quad[2] = {0};
   int prematch_gameplan_focus_text_quads[2] = {0};
+  int prematch_gameplan_action_text_first[2][4] = {{0}};
+  int prematch_gameplan_action_text_count[2][4] = {{0}};
+  int prematch_gameplan_footer_text_first[2] = {0};
+  int prematch_gameplan_footer_text_count[2] = {0};
   int prematch_gameplan_muted_text_first_quad = 0;
   int prematch_gameplan_muted_text_quads = 0;
   int prematch_gameplan_accent_text_first_quad[2] = {0};
@@ -3144,7 +3227,7 @@ static void overlay_render(void) {
     const float header_h = 0.120f * (float)screen_height;
     const float content_y = 0.145f * (float)screen_height;
     const float content_h = 0.670f * (float)screen_height;
-    const float action_y = 0.838f * (float)screen_height;
+    const float action_y = 0.831f * (float)screen_height;
     const float action_h = 0.078f * (float)screen_height;
     const float action_gap = 0.006f * (float)screen_width;
     const float action_w = (half_w - action_gap * 3.0f) * 0.25f;
@@ -3170,6 +3253,9 @@ static void overlay_render(void) {
         0.0f, 0.0f, (float)screen_width, (float)screen_height,
         verts + quads * 24);
     quads += prematch_gameplan_backdrop_quads;
+    prematch_gameplan_footer_quad = quads;
+    quads += emit_rect(0, .925f * screen_height, screen_width,
+                      .075f * screen_height, verts + quads * 24);
 
     prematch_gameplan_panel_first_quad = quads;
     prematch_gameplan_panel_style = (RoundedRectStyle){
@@ -3374,7 +3460,7 @@ static void overlay_render(void) {
         const float modal_y = content_y + 0.065f * (float)screen_height;
         const float modal_w = half_w - 0.070f * (float)screen_width;
         const int slots =
-            pes_controller_custom_prematch_gameplan_preset_step(side);
+            pes_controller_custom_prematch_gameplan_preset_step(side) == 1u;
         const float button_gap = 0.012f * (float)screen_width;
         const float button_w = slots
             ? modal_w - 0.040f * (float)screen_width
@@ -3511,7 +3597,7 @@ static void overlay_render(void) {
         const float modal_y = content_y + 0.065f * (float)screen_height;
         const float modal_w = half_w - 0.070f * (float)screen_width;
         const int slots =
-            pes_controller_custom_prematch_gameplan_preset_step(side);
+            pes_controller_custom_prematch_gameplan_preset_step(side) == 1u;
         const float button_gap = 0.012f * (float)screen_width;
         const float button_w = slots
             ? modal_w - 0.040f * (float)screen_width
@@ -4147,8 +4233,10 @@ static void overlay_render(void) {
         const float modal_y = content_y + 0.065f * (float)screen_height;
         const float modal_w = half_w - 0.070f * (float)screen_width;
         const int slots =
-            pes_controller_custom_prematch_gameplan_preset_step(side);
-        const char *title = slots ?
+            pes_controller_custom_prematch_gameplan_preset_step(side) == 1u;
+        const int confirm = pes_controller_custom_prematch_gameplan_preset_step(side) == 2u;
+        const int loading = pes_controller_custom_prematch_gameplan_preset_action(side) != 0u;
+        const char *title = confirm ? (loading ? "REPLACE CURRENT PLAN?" : "SAVE TEAM PRESET?") : slots ?
             (pes_controller_custom_prematch_gameplan_preset_action(side)
                  ? "LOAD PRESET" : "SAVE PRESET") : "TEAM PRESETS";
         const float title_w = measure_efootball_line(
@@ -4160,7 +4248,10 @@ static void overlay_render(void) {
             EFOOTBALL_FONT_STENCIL, verts + quads * 24);
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
-        const char *question = slots ? "SELECT A TEAM PRESET SLOT"
+        char target[48];
+        snprintf(target,sizeof(target),"%s PRESET %u?",loading ? "LOAD" : "SAVE TO",
+            pes_controller_custom_prematch_gameplan_preset_target_slot(side)+1u);
+        const char *question = confirm ? target : slots ? "SELECT A TEAM PRESET SLOT"
                                      : "SAVE OR RESTORE YOUR FORMATION";
         const float question_w = measure_efootball_line(
             question, (int)strlen(question), body_gh, EFOOTBALL_FONT_BOLD);
@@ -4173,11 +4264,13 @@ static void overlay_render(void) {
         prematch_gameplan_white_text_quads += line_quads;
         quads += line_quads;
         if (!slots) {
-          const char *hint = "THREE SLOTS PER TEAM  |  ALL MODES";
-          line_quads = emit_efootball_line(
+          const char *hint = confirm ? (loading ? "UNSAVED LINEUP CHANGES WILL BE LOST"
+              : "EXISTING DATA IN THIS SLOT WILL BE REPLACED") : "THREE SLOTS PER TEAM  |  ALL MODES";
+          line_quads = emit_efootball_fit_line(
               hint, (int)strlen(hint),
-              modal_x + 0.035f * (float)screen_width,
-              modal_y + 0.205f * (float)screen_height, body_gh,
+              modal_x + 0.020f * (float)screen_width,
+              modal_y + 0.205f * (float)screen_height,
+              modal_w - 0.040f * (float)screen_width, body_gh, (float)screen_height / 58.0f,
               EFOOTBALL_FONT_BOLD, verts + quads * 24);
           prematch_gameplan_white_text_quads += line_quads;
           quads += line_quads;
@@ -4209,7 +4302,8 @@ static void overlay_render(void) {
                 button + 1u,
                 pes_controller_custom_prematch_gameplan_preset_exists(
                     side, button) ? "SAVED" : "EMPTY");
-          const char *label = slots ? slot_label : choices[button];
+          const char *label = confirm ? (button ? "CANCEL" : loading ? "LOAD" : "SAVE")
+              : slots ? slot_label : choices[button];
           const float width = measure_efootball_line(
               label, (int)strlen(label), body_gh,
               EFOOTBALL_FONT_BOLD);
@@ -4361,6 +4455,7 @@ static void overlay_render(void) {
           const float width = measure_efootball_line(
               action_label, (int)strlen(action_label),
               action_gh, EFOOTBALL_FONT_BOLD);
+          prematch_gameplan_action_text_first[side][action] = quads;
           line_quads = emit_efootball_line(
               action_label, (int)strlen(action_label),
               half_x[side] + (action_w + action_gap) * (float)action +
@@ -4368,10 +4463,11 @@ static void overlay_render(void) {
               action_y + (action_h - action_gh) * 0.5f, action_gh,
               EFOOTBALL_FONT_BOLD, verts + quads * 24);
           prematch_gameplan_white_text_quads += line_quads;
+          prematch_gameplan_action_text_count[side][action] = line_quads;
           quads += line_quads;
         }
-      // The Cup/League focus tile is yellow, so only its label is repainted
-      // in dark ink; unfocused action labels stay white on blue.
+      // Keep the legacy label range for the native layout; the bright control
+      // pass below paints every label in white-on-blue / navy-on-white.
       prematch_gameplan_focus_text_first_quad[side] = quads;
       line_quads = 0;
       if (!waiting && (!custom_gameplan_exhibition || side == 0)) {
@@ -4508,10 +4604,10 @@ static void overlay_render(void) {
     uint32_t footer_count[2] = {0};
     const char *context_keys[2] = {0};
     const char *context_labels[2] = {0};
-    const float footer_icon_size = 0.037f * (float)screen_height;
+    const float footer_icon_size = 0.0472f * (float)screen_height;
     const float context_icon_size = 0.031f * (float)screen_height;
-    const float footer_y = 0.958f * (float)screen_height;
-    const float footer_gh = helper_text_gh;
+    const float footer_y = 0.9625f * (float)screen_height;
+    const float footer_gh = 0.0306f * (float)screen_height;
     for (uint32_t side = 0; side < 2; side++) {
       if (custom_gameplan_exhibition && side == 1)
         continue;
@@ -4564,6 +4660,10 @@ static void overlay_render(void) {
               pes_controller_custom_prematch_gameplan_drag_state(side);
           context_labels[side] = drag == 1 ? "DROP PLAYER" : "HOLD TO MOVE";
         }
+      } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_PRESET) {
+        footer_labels[side][0] = "SELECT";
+        footer_labels[side][1] = pes_controller_custom_prematch_gameplan_preset_step(side) == 2u
+                                   ? "CANCEL" : "BACK";
       } else {
         footer_labels[side][0] =
             page == PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS ? "SELECT PLAYER"
@@ -4609,6 +4709,7 @@ static void overlay_render(void) {
 
     prematch_gameplan_muted_text_first_quad = quads;
     for (uint32_t side = 0; side < 2; side++) {
+      prematch_gameplan_footer_text_first[side] = quads;
       for (uint32_t helper = 0; helper < footer_count[side]; helper++) {
         line_quads = emit_efootball_line(
             footer_labels[side][helper],
@@ -4618,6 +4719,7 @@ static void overlay_render(void) {
         prematch_gameplan_muted_text_quads += line_quads;
         quads += line_quads;
       }
+      prematch_gameplan_footer_text_count[side] = quads - prematch_gameplan_footer_text_first[side];
       if (context_labels[side] &&
           prematch_gameplan_context_rect[side][2] > 0.0f) {
         const float *context = prematch_gameplan_context_rect[side];
@@ -9770,6 +9872,7 @@ static void overlay_render(void) {
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += main_menu_helper_quads;
   }
+overlay_geometry_ready:
   if (!quads)
     return;
 
@@ -9859,6 +9962,10 @@ static void overlay_render(void) {
   glUniform1f(gl.loc_round_feather, 1.15f);
   glUniform1f(gl.loc_cursor, 0.0f);
   glUniform1f(gl.loc_cursor_border, 0.0f);
+  if (frontdoor_page!=FD_NONE) {
+    master_league_draw(&frontdoor_ui);
+    goto overlay_restore;
+  }
   if (stamina_bar_count) {
     // Native scene samplers can require mipmaps absent from HUD textures.
     // Match the Game Plan portrait path and restore the engine sampler.
@@ -10657,7 +10764,7 @@ static void overlay_render(void) {
     };
 
     use_rounded_rect(NULL);
-    glBindTexture(GL_TEXTURE_2D, gl.team_select_bg_tex);
+    glBindTexture(GL_TEXTURE_2D, gl.frontdoor_flat_tex);
     glUniform1f(gl.loc_solid, 0.0f);
     glUniform1f(gl.loc_image, 1.0f);
     glUniform4f(gl.loc_color, 0.38f, 0.46f, 0.60f, 1.0f);
@@ -10669,15 +10776,17 @@ static void overlay_render(void) {
     glUniform1f(gl.loc_image, 0.0f);
     glUniform1f(gl.loc_solid, 1.0f);
     use_rounded_rect(&prematch_gameplan_panel_style);
-    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 0.74f);
+    glUniform4f(gl.loc_color, 0.99f, 0.995f, 1.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, prematch_gameplan_panel_first_quad * 6,
                  prematch_gameplan_panel_quads * 6);
     use_rounded_rect(NULL);
 
+    glUniform4f(gl.loc_color, .025f, .09f, .24f, 1);
+    glDrawArrays(GL_TRIANGLES, prematch_gameplan_footer_quad * 6, 6);
+
     for (uint32_t side = 0; side < 2; side++) {
-      glUniform4f(gl.loc_color, side_accent[side][0] * 0.16f,
-                  side_accent[side][1] * 0.16f,
-                  side_accent[side][2] * 0.16f, 0.98f);
+      if (side) glUniform4f(gl.loc_color, .48f, .02f, .14f, 1);
+      else glUniform4f(gl.loc_color, .025f, .18f, .48f, 1);
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_header_first_quad[side] * 6,
                    prematch_gameplan_header_quads[side] * 6);
@@ -10712,7 +10821,7 @@ static void overlay_render(void) {
           PES_PREMATCH_GAMEPLAN_PAGE_PRESET;
       use_rounded_rect(preset_page
           ? &prematch_gameplan_preset_button_style[side] : NULL);
-      if (preset_page) fnx_button_color(FNX_BUTTON_FILL, 0, 1);
+      if (preset_page) fnx_bright_button_color(FNX_BUTTON_FILL, 0, 1);
       else glUniform4f(gl.loc_color, 0.94f, 0.97f, 1.0f, 0.76f);
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_neutral_first_quad[side] * 6,
@@ -10732,7 +10841,7 @@ static void overlay_render(void) {
       if (pes_controller_custom_prematch_gameplan_page(side) ==
           PES_PREMATCH_GAMEPLAN_PAGE_PRESET) {
         use_rounded_rect(&prematch_gameplan_preset_button_style[side]);
-        fnx_button_color(FNX_BUTTON_FILL, 1, 1);
+        fnx_bright_button_color(FNX_BUTTON_FILL, 1, 1);
       } else {
         use_rounded_rect(NULL);
         glUniform4f(gl.loc_color, side_accent[side][0],
@@ -10755,7 +10864,7 @@ static void overlay_render(void) {
            action < (uint32_t)prematch_gameplan_action_frame_quads[side];
            action++) {
         const int enabled = !(action == 2u && pes_controller_live_gameplan_active());
-        fnx_button_color(FNX_BUTTON_FRAME, action == focus, enabled);
+        fnx_bright_button_color(FNX_BUTTON_FRAME, action == focus, enabled);
         glDrawArrays(GL_TRIANGLES,
                      (prematch_gameplan_action_frame_first_quad[side] + action) * 6,
                      6);
@@ -10771,14 +10880,14 @@ static void overlay_render(void) {
            action < (uint32_t)prematch_gameplan_action_quads[side];
            action++) {
         const int enabled = !(action == 2u && pes_controller_live_gameplan_active());
-        fnx_button_color(FNX_BUTTON_FILL, action == focus, enabled);
+        fnx_bright_button_color(FNX_BUTTON_FILL, action == focus, enabled);
         glDrawArrays(GL_TRIANGLES,
                      (prematch_gameplan_action_first_quad[side] + action) * 6,
                      6);
       }
     }
     use_rounded_rect(NULL);
-    fnx_button_color(FNX_BUTTON_GLOSS, 0, 1);
+    fnx_bright_button_color(FNX_BUTTON_GLOSS, 0, 1);
     for (uint32_t side = 0; side < 2; side++) {
       if (custom_gameplan_exhibition && side == 1)
         continue;
@@ -10957,10 +11066,17 @@ static void overlay_render(void) {
       const int enabled = !(
           pes_controller_custom_prematch_gameplan_root_focus(side) == 2u &&
           pes_controller_live_gameplan_active());
-      fnx_button_color(FNX_BUTTON_TEXT, 1, enabled);
+      fnx_bright_button_color(FNX_BUTTON_TEXT, 1, enabled);
       glDrawArrays(GL_TRIANGLES,
                    prematch_gameplan_focus_text_first_quad[side] * 6,
                    prematch_gameplan_focus_text_quads[side] * 6);
+      const uint32_t focus = pes_controller_custom_prematch_gameplan_root_focus(side);
+      for (uint32_t action = 0; action < 4u; action++) {
+        fnx_bright_button_color(FNX_BUTTON_TEXT, action == focus,
+            !(action == 2u && pes_controller_live_gameplan_active()));
+        glDrawArrays(GL_TRIANGLES, prematch_gameplan_action_text_first[side][action] * 6,
+                     prematch_gameplan_action_text_count[side][action] * 6);
+      }
     }
     for (uint32_t side = 0; side < 2; side++) {
       if (pes_controller_custom_prematch_gameplan_page(side) !=
@@ -10969,7 +11085,7 @@ static void overlay_render(void) {
           pes_controller_custom_prematch_gameplan_preset_focus(side);
       for (uint32_t button = 0; button < 3u; button++) {
         if (!prematch_gameplan_preset_label_quads[side][button]) continue;
-        fnx_button_color(FNX_BUTTON_TEXT, button == focus, 1);
+        fnx_bright_button_color(FNX_BUTTON_TEXT, button == focus, 1);
         glDrawArrays(GL_TRIANGLES,
                      prematch_gameplan_preset_label_first[side][button] * 6,
                      prematch_gameplan_preset_label_quads[side][button] * 6);
@@ -10997,10 +11113,14 @@ static void overlay_render(void) {
     glDrawArrays(GL_TRIANGLES,
                  prematch_gameplan_role_text_first_quad * 6,
                  prematch_gameplan_role_text_quads * 6);
-    glUniform4f(gl.loc_color, 0.96f, 0.98f, 1.0f, 1.0f);
+    glUniform4f(gl.loc_color, .24f, .34f, .48f, 1.0f);
     glDrawArrays(GL_TRIANGLES,
                  prematch_gameplan_muted_text_first_quad * 6,
                  prematch_gameplan_muted_text_quads * 6);
+    glUniform4f(gl.loc_color, 1, 1, 1, 1);
+    for (uint32_t side = 0; side < 2; side++)
+      glDrawArrays(GL_TRIANGLES, prematch_gameplan_footer_text_first[side] * 6,
+                   prematch_gameplan_footer_text_count[side] * 6);
     for (uint32_t side = 0; side < 2; side++) {
       for (uint32_t index = 0; index < PREMATCH_GAMEPLAN_FIELD_SLOTS;
            index++) {
@@ -11734,6 +11854,7 @@ static void overlay_render(void) {
 
 #undef ADD_SWITCH_HELPER
 
+overlay_restore:
   // restore the two attrib arrays to whatever the engine had (it uses the same
   // low indices); leaving them forced-off would break its next draw
   if (!prev_va_pos) glDisableVertexAttribArray(gl.loc_pos);

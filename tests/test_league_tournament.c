@@ -32,6 +32,7 @@ static void check_schedule(uint32_t count, int home_away) {
       opponents[home][away]++;
       home_counts[home][away]++;
     }
+    if (day == 0u) assert(seen[0]); /* P1 never opens on a bye. */
   }
   for (uint32_t home = 0; home < count; home++)
     for (uint32_t away = 0; away < count; away++)
@@ -40,6 +41,36 @@ static void check_schedule(uint32_t count, int home_away) {
                (home_away ? 2u : 1u));
         if (home_away) assert(home_counts[home][away] == 1u);
       }
+}
+
+static void check_all_opening_players(void) {
+  uint32_t teams[LEAGUE_MAX_TEAMS], humans[8];
+  for (uint32_t i = 0; i < LEAGUE_MAX_TEAMS; i++) teams[i] = 100u + i;
+  for (uint32_t count = 2u; count <= LEAGUE_MAX_TEAMS; count++) {
+    for (uint32_t players = 1u; players <= 8u && players <= count; players++) {
+      for (uint32_t offset = 0u; offset < count; offset++) {
+        for (uint32_t i = 0; i < players; i++) humans[i] = teams[(i + offset) % count];
+        const int possible = !(count & 1u) || players < count;
+        assert(league_tournament_init(&league, teams, count, humans, players,
+                                       0, 1u) == possible);
+        if (!possible) continue;
+        for (uint32_t p = 0; p < players; p++) {
+          uint32_t appearances = 0u;
+          for (uint32_t f = 0; f < league.matchday_fixture_count[0]; f++)
+            appearances += league.fixtures[f].home == humans[p] ||
+                           league.fixtures[f].away == humans[p];
+          assert(appearances == 1u);
+        }
+        for (uint32_t i = 0; i < count; i++) assert(league.standings[i].team == teams[i]);
+        static LeagueTournament snapshot;
+        snapshot = league;
+        uint32_t day = UINT32_MAX, fixture = UINT32_MAX;
+        assert(league_tournament_upcoming_human(&league, &fixture, &day, NULL, NULL));
+        assert(day == 0u && fixture < league.matchday_fixture_count[0]);
+        assert(!memcmp(&snapshot, &league, sizeof(league)));
+      }
+    }
+  }
 }
 
 static void check_full_progression(void) {
@@ -123,10 +154,11 @@ static void check_knockout_seeding(void) {
 
 static void check_simulated_opening_locks_teams(void) {
   const uint32_t teams[3] = {101u, 102u, 103u};
-  assert(league_tournament_init(&league, teams, 3u, teams, 1u, 0, 17u));
+  assert(league_tournament_init(&league, teams, 3u, teams + 1u, 1u, 0, 17u));
+  /* Reproduce a legacy saved schedule. New schedules cannot give P1 a bye,
+   * but the core must still safely progress historical/later-day COM rounds. */
+  league.human_teams[0] = teams[0];
   assert(!league.first_match_started);
-  /* Team 101 has the opening bye; the 102-vs-103 COM match still starts
-   * the season and must make team assignments immutable. */
   league_tournament_advance(&league);
   assert(league.fixtures[0].complete);
   assert(league.fixtures[0].simulated);
@@ -210,6 +242,7 @@ static void check_rank_changes(uint32_t count) {
 }
 
 int main(void) {
+  check_all_opening_players();
   for (uint32_t teams = 2u; teams <= 32u; teams++) {
     check_schedule(teams, 0);
     check_schedule(teams, 1);

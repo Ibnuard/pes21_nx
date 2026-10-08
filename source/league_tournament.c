@@ -43,6 +43,17 @@ int league_tournament_init(LeagueTournament *league,
     for (uint32_t j = 0; j < i; j++)
       if (teams[i] == teams[j]) return 0;
   }
+  for (uint32_t i = 0; i < human_count; i++) {
+    uint32_t found = 0u;
+    for (uint32_t j = 0; j < team_count; j++)
+      found |= human_teams[i] == teams[j];
+    if (!found) return 0;
+    for (uint32_t j = 0; j < i; j++)
+      if (human_teams[i] == human_teams[j]) return 0;
+  }
+  /* An odd field needs one bye every matchday. All human owners must play
+   * on day one, so a completely human-owned odd field is not schedulable. */
+  if ((team_count & 1u) && human_count == team_count) return 0;
   memset(league, 0, sizeof(*league));
   league->seed = seed ? seed : 1u;
   league->team_count = team_count;
@@ -59,6 +70,16 @@ int league_tournament_init(LeagueTournament *league,
   uint32_t rotation[LEAGUE_MAX_TEAMS];
   for (uint32_t i = 0; i < rotation_count; i++)
     rotation[i] = i < team_count ? i : UINT32_MAX;
+  if ((team_count & 1u) && league_is_human(league, teams[rotation[0]])) {
+    /* Slot zero meets the sentinel on day one. Give that bye to a COM
+     * team without moving owners, changing standings order or skipping days. */
+    for (uint32_t i = 1u; i < team_count; i++) {
+      if (league_is_human(league, teams[rotation[i]])) continue;
+      rotation[0] = i;
+      rotation[i] = 0u;
+      break;
+    }
+  }
 
   for (uint32_t round = 0; round < rounds; round++) {
     league->matchday_first[round] = league->fixture_count;
@@ -421,6 +442,28 @@ int league_tournament_next_human(const LeagueTournament *league,
   return league->phase == LEAGUE_PHASE_KNOCKOUT &&
       cup_tournament_next_human(&league->knockout,
                                  knockout_round, knockout_index);
+}
+
+int league_tournament_upcoming_human(const LeagueTournament *league,
+    uint32_t *fixture_index, uint32_t *matchday,
+    uint32_t *knockout_round, uint32_t *knockout_index) {
+  if (!league) return 0;
+  if (league->phase != LEAGUE_PHASE_TABLE)
+    return league_tournament_next_human(league, fixture_index,
+        knockout_round, knockout_index);
+  for (uint32_t day = league->active_matchday; day < league->matchday_count; day++) {
+    const uint32_t first = league->matchday_first[day];
+    for (uint32_t i = 0; i < league->matchday_fixture_count[day]; i++) {
+      const LeagueFixture *fixture = &league->fixtures[first + i];
+      if (!fixture->complete && (league_is_human(league, fixture->home) ||
+                                league_is_human(league, fixture->away))) {
+        if (fixture_index) *fixture_index = first + i;
+        if (matchday) *matchday = day;
+        return 1;
+      }
+    }
+  }
+  return 0;
 }
 
 void league_tournament_advance(LeagueTournament *league) {

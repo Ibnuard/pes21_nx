@@ -33,5 +33,7 @@ typedef struct {
  * leaves the previously valid copy loadable. */
 int cup_save_read(uint32_t slot, CupSaveState *state);
 int cup_save_write(uint32_t slot, const CupSaveState *state);
+/* Includes unreadable/incompatible copies: those still belong to the user. */
+int cup_save_slot_exists(uint32_t slot);
 
 #endif

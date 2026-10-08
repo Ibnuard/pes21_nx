@@ -1,0 +1,15 @@
+{
+  "mode": "built-in image_gen",
+  "intent": "edit",
+  "date": "2026-10-08",
+  "assets": [
+    {
+      "art": "art/frontdoor/flat-white-v3.png",
+      "runtime": "data/frontdoor_flat_v3.bin",
+      "width": 1672,
+      "height": 941,
+      "reference": "art/frontdoor/flat-white-v2.png",
+      "prompt": "Use case: precise-object-edit. Asset type: clean base layer for a modern football game UI background. Image 1 is the edit target. Change ONLY the saturated cobalt blue bands and the thin coral/red bands at the upper-left and lower-right corners: remove these colored bands entirely and continue the surrounding white / very pale blue gradient and subtle pale blue diagonal pattern underneath. Keep the rest of the supplied composition, proportions, subtle halftone dots, thin pale-blue linework, cropped pitch arcs, and flat bright white modern sports-game graphic style unchanged. The center must remain quiet negative space. This is the base layer, so absolutely NO saturated blue or red stripes should remain anywhere; those accents will be animated separately in code. No realism, stadium, fabric, 3D, depth effects, text, logos, player, watermark or new objects. Landscape full-bleed image, preserve aspect ratio."
+    }
+  ]
+}

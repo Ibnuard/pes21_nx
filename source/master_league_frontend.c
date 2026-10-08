@@ -252,7 +252,7 @@ static void ml_open_confirmation(uint32_t kind) {
   ml_frontend_view(&confirm_background);
   return_page=page;return_focus=focus;confirm_kind=kind;
   ml_page(ML_PAGE_CONFIRM);
-  if(kind==4u || kind==6u)focus=1u; /* destructive actions default to Cancel */
+  if(kind!=5u)focus=1u; /* only entering a match is non-destructive */
 }
 static void ml_cancel_confirmation(void) {
   ml_page(return_page);focus=return_focus;
@@ -359,8 +359,7 @@ static void ml_confirm(void) {
     case ML_PAGE_NEXT:
       if (pending.kind==ML_EVENT_SEASON_END) {
         if (focus) { ml_page(ML_PAGE_HUB); break; }
-        if (!ml_next_season(&career)) ml_message("RENEW EXPIRING CONTRACTS: KEEP 18 PLAYERS AND A GOALKEEPER");
-        else { ml_begin_advance(0u,"New season started"); }
+        ml_open_confirmation(8u);
       } else if (!focus) {
         if (!pending.home || !pending.away) { ml_message("YOUR CLUB HAS NO MATCH - CHOOSE SIMULATE"); break; }
         ml_open_confirmation(5u);
@@ -369,6 +368,15 @@ static void ml_confirm(void) {
     case ML_PAGE_CONFIRM:
       if (focus) { ml_cancel_confirmation(); break; }
       if (confirm_kind==4u) { ml_save_selected(overwrite_slot); break; }
+      if (confirm_kind==7u) {
+        if (ml_autosave()) { ml_frontend_close(); action=ML_ACTION_EXIT; }
+        break;
+      }
+      if (confirm_kind==8u) {
+        if (!ml_next_season(&career)) ml_message("RENEW EXPIRING CONTRACTS: KEEP 18 PLAYERS AND A GOALKEEPER");
+        else ml_begin_advance(0u,"New season started");
+        break;
+      }
       if (confirm_kind==5u) {
         /* A kickoff, failed handoff or quit is not a completed calendar event.
          * Date/wages move only when the result is committed, then animate on
@@ -405,10 +413,18 @@ static void ml_confirm(void) {
 
 void ml_frontend_pad(uint32_t pressed) {
   if (match_active || page==ML_PAGE_ADVANCE) return;
+  if (page==ML_PAGE_CONFIRM) {
+    /* B has priority over navigation/accept, and background shortcuts are inert. */
+    if (pressed&ML_B) ml_cancel_confirmation();
+    else if (pressed&ML_LEFT) focus=0u;
+    else if (pressed&ML_RIGHT) focus=1u;
+    else if (pressed&ML_A) ml_confirm();
+    return;
+  }
   if (ml_review_pad(pressed)) return;
   if (pressed & ML_B) {
     if (page==ML_PAGE_LANDING) { ml_frontend_close(); action=ML_ACTION_EXIT; }
-    else if (page==ML_PAGE_HUB) { if (ml_autosave()) { ml_frontend_close(); action=ML_ACTION_EXIT; } }
+    else if (page==ML_PAGE_HUB) ml_open_confirmation(7u);
     else if (page==ML_PAGE_SETTINGS) ml_page(session_ready ? ML_PAGE_OFFICE : ML_PAGE_LANDING);
     else if (page==ML_PAGE_MANAGER) ml_page(ML_PAGE_SETTINGS);
     else if (page==ML_PAGE_NATIONALITY) { ml_page(ML_PAGE_MANAGER); focus=1u; }
@@ -902,7 +918,7 @@ static void ml_base_view(MlView *v) {
 void ml_frontend_view(MlView *v) {
   if(page==ML_PAGE_CONFIRM) {
     *v=confirm_background;memset(&v->drawer,0,sizeof(v->drawer));
-    v->modal.open=1u;v->modal.selected=focus;v->modal.destructive=confirm_kind==4u || confirm_kind==6u;
+    v->modal.open=1u;v->modal.selected=focus;v->modal.destructive=confirm_kind!=5u;
     snprintf(v->modal.accept,32,"%s",confirm_kind==3u ? "SIMULATE" : confirm_kind==5u ? "PLAY MATCH" : "CONFIRM");
     snprintf(v->modal.title,64,"%s",confirm_kind==3u ? "SIMULATE MATCH?" : confirm_kind==5u ? "PLAY MATCH?" : "CONFIRM");
     snprintf(v->modal.body,256,"%s",confirm_kind==3u ? "Simulate this event and save the result? This cannot be undone." :
@@ -911,6 +927,14 @@ void ml_frontend_view(MlView *v) {
       snprintf(v->modal.title,64,"OVERWRITE SLOT %u?",overwrite_slot+1u);
       snprintf(v->modal.body,256,"Replace %s in this slot with the current career? Other slots remain unchanged.",slot_club[overwrite_slot]);
       snprintf(v->modal.accept,32,"OVERWRITE");
+    }else if(confirm_kind==8u) {
+      snprintf(v->modal.title,64,"START THE NEXT SEASON?");
+      snprintf(v->modal.body,256,"Finish this season and create the next season's fixtures? Contracts and budgets will advance and the career will be saved. This cannot be undone.");
+      snprintf(v->modal.accept,32,"START SEASON");
+    }else if(confirm_kind==7u) {
+      snprintf(v->modal.title,64,"SAVE AND RETURN TO TOP MENU?");
+      snprintf(v->modal.body,256,"Save this career to slot %u and return to the top menu? The current slot will be updated. Cancel to stay in your career.",active_slot+1u);
+      snprintf(v->modal.accept,32,"SAVE & LEAVE");
     }else if(confirm_kind==6u) {
       char fee[32];ml_money(fee,sizeof(fee),ml_release_value(&career,transaction_player));
       snprintf(v->modal.title,64,"RELEASE PLAYER?");

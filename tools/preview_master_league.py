@@ -180,7 +180,7 @@ int main(void) {
   for(;;) {
     MlEvent e;assert(ml_next_event(fixture,&e));if(ml_event_is_national(e.kind))break;
     if(e.kind==ML_EVENT_CONTINENTAL && e.home && e.away) {
-      go(0,0);press(DOWN);press(A);press(A);assert(view().page==ML_PAGE_HUB && view().story.result_kind==ML_EVENT_CONTINENTAL);
+      go(0,0);press(DOWN);press(A);press(LEFT);press(A);assert(view().page==ML_PAGE_HUB && view().story.result_kind==ML_EVENT_CONTINENTAL);
       ticks+=3100000000u;dump("home-after-uefa-simulate");go(0,1);dump("feed-uefa-result");
     }else if(ml_event_is_match(e.kind) && e.home && e.away)assert(ml_record_event(fixture,&e,e.home==fixture->settings.club ? 3u : 0u,e.away==fixture->settings.club ? 3u : 0u,NULL,0u,0));
     else assert(ml_simulate_event(fixture,&e));

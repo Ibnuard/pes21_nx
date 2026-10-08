@@ -124,6 +124,7 @@ typedef struct {
 void install_ue4_hooks(so_module *module);
 uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
                                      uint32_t capacity);
+void pes_controller_hud_request_portrait(uint32_t side, uint32_t portrait_id);
 int pes_controller_game_speed_debug(PesGameSpeedDebug *snapshot);
 void pes_controller_friend_press_update(int held, uint64_t now_ms);
 void ue4_hooks_post_finalize(so_module *module);
@@ -394,6 +395,7 @@ const char *pes_controller_custom_prematch_gameplan_formation_label(
 uint32_t pes_controller_custom_prematch_gameplan_team_power(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_team_spirit(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_preset_step(uint32_t pad);
+uint32_t pes_controller_custom_prematch_gameplan_preset_target_slot(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_preset_focus(uint32_t pad);
 uint32_t pes_controller_custom_prematch_gameplan_preset_action(uint32_t pad);
 int pes_controller_custom_prematch_gameplan_preset_exists(uint32_t pad,
@@ -501,6 +503,7 @@ uint32_t pes_controller_2p_transition_kind(void);
 uint32_t pes_controller_2p_prematch_hub_focus(void);
 uint32_t pes_controller_2p_prematch_hub_page(void);
 uint32_t pes_controller_2p_prematch_hub_page_focus(void);
+int pes_controller_2p_prematch_kit_editing(void);
 const char *pes_controller_2p_prematch_hub_team_name(uint32_t side);
 uint32_t pes_controller_2p_prematch_hub_badge(uint32_t side);
 uint32_t pes_controller_2p_prematch_hub_lineup_count(uint32_t side);
@@ -519,6 +522,7 @@ PesUniformPreviewPng *pes_controller_2p_take_uniform_preview_png(
 int pes_controller_2p_native_uniform_preview_active(void);
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void);
 uint32_t pes_controller_stadium_is_day(void);
+uint32_t pes_controller_night_lighting_balance_enabled(void);
 uint32_t pes_controller_stadium_weather(void);
 uint32_t pes_controller_stadium_season(void);
 uint32_t pes_controller_stadium_turf_length(void);

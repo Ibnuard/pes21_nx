@@ -72,7 +72,7 @@ class PauseSkinTests(unittest.TestCase):
         root = function(hooks, 'prematch_gameplan_process_root')
         self.assertIn('exhibition_gameplan_sides[1u - side].waiting', root)
         self.assertIn('live_gameplan_footer(window, 1u)', root)
-        self.assertIn('if (live_gameplan_window) return;', root)
+        self.assertRegex(root, r'if\s*\(live_gameplan_window\)\s*return\s*;')
 
     def test_stats_never_store_native_record_pointer(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()

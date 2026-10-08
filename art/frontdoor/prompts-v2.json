@@ -1,0 +1,27 @@
+{
+  "mode": "built-in image_gen",
+  "intent": "generate",
+  "date": "2026-10-08",
+  "assets": [
+    {
+      "art": "art/frontdoor/flat-white-v2.png",
+      "runtime": "data/frontdoor_flat_v2.bin",
+      "width": 1672,
+      "height": 941,
+      "prompt": "Use case: stylized-concept. Asset type: FLAT 2D graphic background for a modern console football game menu, 16:9 landscape target 1536x864. White / very light cool gray foundation with an extremely soft pale icy blue gradient. Subtle graphic PATTERN, not a scene: sparse thin diagonal parallel lines, micro halftone dot grids, broken outlines of pitch-circle arcs and restrained oversized geometric angles at the edges only. A few very narrow flat cobalt blue and coral-red diagonal accents at the extreme corners, 90 percent of the canvas stays white and pale gray. Crisp minimal contemporary sports-game identity, editorial vector-like graphic aesthetic, quiet center and left-center for separately rendered logo and UI. Entirely two dimensional, matte, no lighting, no cast shadows, no bevels, no depth, no reflections, no photography, no realistic stadium, no buildings, no sky, no clouds, no grass, no fabric or scarf, no 3D rendering, no panels or cards, no text, no letters, no logos, no watermark. Deliberately sophisticated white gradient with tonal graphic patterns."
+    },
+    {
+      "art": "art/frontdoor/flat-panels-v2.png",
+      "runtime": "data/frontdoor_panels_v2.bin",
+      "width": 1536,
+      "height": 1024,
+      "strips": [
+        "blue",
+        "red",
+        "navy",
+        "focus"
+      ],
+      "prompt": "Use case: stylized-concept. Asset type: flat 2D football game UI texture atlas, 1536x1024. Exactly FOUR equally tall horizontal strips filling quarter heights of the canvas, stacked edge to edge. Flat graphic-design textures only: soft color gradients and subtle sparse line/dot patterns. Strip one: cobalt-to-navy blue gradient, faint diagonal thin-line pattern and tonal pitch-circle arcs on the right. Strip two: burgundy-to-scarlet gradient with subtle diagonal tonal lines on the right. Strip three: deep midnight navy gradient, faint micro-dot grid on right, almost plain and calm. Strip four: royal-blue gradient, understated angular hatch pattern on right and a small red diagonal edge accent. Left two-thirds of each strip dark and calm for white text. Absolutely no realistic stadium, no photo, no sky, no grass, no rendered architecture, no lighting, no glow, no reflection, no 3D, no fabric folds or scarves, no objects. Sharp contemporary flat sports graphics only, not landscape scenery. No frames, gaps, gutters, rounded corners, text, numbers, logos, labels or watermark."
+    }
+  ]
+}

@@ -27,7 +27,62 @@ static void press(uint32_t button) {
   competition_frontend_pad_event(0u, 0u);
 }
 
+#include "competition_confirmation_checks.inc"
+
+static void new_custom_cup(uint32_t teams, uint32_t players) {
+  competition_frontend_close();
+  competition_frontend_finish_close();
+  competition_frontend_open_modes();
+  competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);press(BUTTON_A);press(BUTTON_LEFT);
+  press(BUTTON_DOWN);press(BUTTON_DOWN);
+  for (uint32_t i = teams; i < 8u; i++) press(BUTTON_LEFT);
+  for (uint32_t i = 8u; i < teams; i++) press(BUTTON_RIGHT);
+  press(BUTTON_UP);
+  for (uint32_t i = 1u; i < players; i++) press(BUTTON_RIGHT);
+  while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
+  press(BUTTON_A);
+}
+
+static void check_opening_owner_rule(void) {
+  for (uint32_t teams = 2u; teams <= 32u; teams++) {
+    uint32_t opening = 1u;
+    while (opening * 2u < teams) opening *= 2u;
+    for (uint32_t players = 1u; players <= teams && players <= 8u; players++) {
+      new_custom_cup(teams, players);
+      if (players > 2u * (teams - opening)) {
+        assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_SETTINGS);
+        assert(strstr(competition_frontend_status(), "NO PLAYER BYES"));
+        continue;
+      }
+      assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+      const CompetitionEntryDraft *draft = competition_frontend_cup_draft();
+      for (uint32_t i = 0; i < opening; i++) {
+        const uint32_t h = competition_draft_fixture_slot(draft, i, 0u);
+        const uint32_t a = competition_draft_fixture_slot(draft, i, 1u);
+        if (a == UINT32_MAX) assert(!draft->owners[h]);
+      }
+    }
+  }
+  /* One human playing is not enough: P2 must not be left on a bye either. */
+  new_custom_cup(3u, 2u);
+  press(BUTTON_A);press(BUTTON_X);
+  const CompetitionEntryDraft before = *competition_frontend_cup_draft();
+  const CupTournament bracket = *competition_frontend_cup_tournament();
+  press(BUTTON_DOWN); /* P2 */
+  press(BUTTON_Y);press(BUTTON_DOWN);press(BUTTON_A); /* -> bye */
+  assert(competition_frontend_cup_opening_rule_popup());
+  assert(!memcmp(&before, competition_frontend_cup_draft(), sizeof(before)));
+  assert(!memcmp(&bracket, competition_frontend_cup_tournament(), sizeof(bracket)));
+  press(BUTTON_B);
+  assert(!competition_frontend_cup_opening_rule_popup());
+  assert(competition_frontend_cup_bracket_swap_source() == 1u);
+  competition_frontend_close();
+  competition_frontend_finish_close();
+}
+
 int main(void) {
+  check_opening_owner_rule();
   competition_frontend_open_modes();
   competition_frontend_pad_event(0u, 0u); /* consume opening A tick */
   press(BUTTON_A);
@@ -128,6 +183,7 @@ int main(void) {
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   assert(competition_frontend_cup_draft()->teams[0] == manual_team);
 
+  check_save_confirmations(1);
   competition_frontend_close();
   competition_frontend_finish_close();
   competition_frontend_open_modes();
@@ -213,6 +269,8 @@ int main(void) {
   press(BUTTON_LEFT);press(BUTTON_A);
   assert(competition_frontend_cup_page()==CUP_PAGE_MATCHES);
   press(BUTTON_B);press(BUTTON_RIGHT);press(BUTTON_A);
+  assert(competition_frontend_confirmation_active() && competition_frontend_confirmation_focus()==1u);
+  press(BUTTON_LEFT);press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_NONE);
 
   competition_frontend_close();
@@ -341,6 +399,8 @@ int main(void) {
   assert(competition_frontend_focus() == 3u);
   press(BUTTON_A); /* persist new Cup and General rules in version 3 */
   press(BUTTON_A);
+  assert(competition_frontend_confirmation_active());
+  press(BUTTON_LEFT);press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   competition_frontend_close();
   competition_frontend_finish_close();
@@ -394,6 +454,8 @@ int main(void) {
                 "NO SAVE DATA") == 0);
   assert(strcmp(competition_frontend_slot_progress(1u), "") == 0);
   press(BUTTON_A);
+  assert(competition_frontend_confirmation_active());
+  press(BUTTON_LEFT);press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
   competition_frontend_close();
   competition_frontend_finish_close();

@@ -76,6 +76,10 @@ class PitchShadowTests(unittest.TestCase):
                 else:
                     self.assertIsNone(result)
             self.assertEqual(changed, 20)
-            for name in ('M_Pitch_Default_night', 'M_Pitch_Default_night_Low'):
+            # The old hue patch must never leak into Night, perimeter turf or
+            # the pitch-side people material. Hash refusal is checked on every
+            # available cooked variant, not inferred from a filename alone.
+            for name in ('M_Pitch_Default_night', 'M_Pitch_Default_night_Low',
+                         'M_field_ed', 'M_PitchSide'):
                 for body in bodies(native/(name+'.uexp')):
                     self.assertIsNone(transform(body))

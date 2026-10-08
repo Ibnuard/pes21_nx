@@ -79,7 +79,7 @@ static void glDrawArrays(int mode,int first,int count) {
   (void)mode;
   if(!count || uniforms[gl.loc_color][3]<=0.f)return;
   assert(first>=0 && count>=0 && first%6==0 && count%6==0 && first+count<=active_quads*6);
-  int kind=uniforms[gl.loc_solid][0]>.5f ? 0 : uniforms[gl.loc_image][0]>.5f ? 2 : 1;
+  int kind=uniforms[gl.loc_solid][0]>.5f ? 0 : uniforms[gl.loc_image][0]>1.5f ? 4 : uniforms[gl.loc_image][0]>.5f ? 2 : 1;
   fprintf(frame,"%s{\"kind\":%d,\"texture\":%u,\"radius\":%g,\"color\":[%g,%g,%g,%g],\"vertices\":[",
       draw_count++ ? "," : "",kind,bound_texture,uniforms[gl.loc_round_rect][0]>.5f ? uniforms[gl.loc_round_radius][0] : 0.f,
       uniforms[gl.loc_color][0],uniforms[gl.loc_color][1],uniforms[gl.loc_color][2],uniforms[gl.loc_color][3]);
@@ -164,6 +164,9 @@ int main(void) {
   for(uint32_t i=0;i<5;i++)press(DOWN);capture("10-general-settings-page2");
   press(B);press(RIGHT);press(A);assert(competition_frontend_state()==COMPETITION_FRONTEND_CUP_SLOTS);
   capture("11-save-slots");press(A);assert(competition_frontend_state()==COMPETITION_FRONTEND_CUP_BRACKET);
+  press(A);press(A);assert(competition_frontend_confirmation_active());capture("37-overwrite-cancel");
+  press(LEFT);capture("38-overwrite-selected");press(B);press(B);
+  press(B);assert(competition_frontend_confirmation_active());capture("39-leave-unsaved-cup");press(B);
   const uint32_t saved_team=competition_frontend_cup_draft()->teams[0];
   press(LEFT);press(LEFT);assert(competition_frontend_focus()==4u);press(A);
   assert(competition_frontend_cup_page()==CUP_PAGE_BRACKET);capture("12-bracket");
@@ -228,6 +231,7 @@ def build_driver(source, logos=()):
     ui_helpers = ["ml_ui_draw", "ml_ui_rect", "ml_ui_text", "ml_ui_image", "ml_ui_button",
         "ml_ui_center_text", "ml_ui_unread", "ml_ui_art", "ml_ui_icon", "ml_ui_frame", "ml_ui_rank_change",
         "ml_ui_emblem", "ml_ui_header_icon", "ml_ui_panel", "ml_ui_row", "ml_ui_pills", "ml_ui_toast_card",
+        "ml_ui_page_icon", "ml_ui_paragraph", "ml_ui_confirmation",
         "master_league_draw_layer", "master_league_draw"]
     uniforms = sorted(set(re.findall(r"gl\.(loc_\w+)", source)))
     fields = {"tex": 1, "efootball_tex": 2, "badge_tex": 3,
@@ -306,8 +310,9 @@ def rasterize(draws, assets):
                 tile = Image.new("RGBA", (w,h), color)
                 mask = Image.new("L", (w*4,h*4))
                 painter = ImageDraw.Draw(mask)
-                if len(set(points)) == 3:
+                if len(set(points)) == 3 or len({p[0] for p in points}) > 2 or len({p[1] for p in points}) > 2:
                     painter.polygon([((x-x0)*4,(y-y0)*4) for x,y in points[:3]], fill=color[3])
+                    painter.polygon([((x-x0)*4,(y-y0)*4) for x,y in points[3:]], fill=color[3])
                 else:
                     painter.rounded_rectangle((0,0,w*4-1,h*4-1), radius=draw["radius"]*4, fill=color[3])
                 tile.putalpha(mask.resize((w,h), Image.Resampling.LANCZOS))
@@ -318,6 +323,9 @@ def rasterize(draws, assets):
                 if draw["kind"] == 1:
                     tile = Image.new("RGBA", (w,h), color)
                     tile.putalpha(sample.getchannel("R").point(lambda a: round(a*color[3]/255)))
+                elif draw["kind"] == 4:
+                    tile = Image.new("RGBA", (w,h), color)
+                    tile.putalpha(sample.getchannel("A").point(lambda a: round(a*color[3]/255)))
                 else:
                     tile = sample.convert("RGBA")
                     tile.putalpha(tile.getchannel("A").point(lambda a: round(a*color[3]/255)))
@@ -358,7 +366,7 @@ document.querySelectorAll('[data-frame]').forEach(b=>b.onclick=()=>show(Number(b
 select.onchange=()=>show(Number(select.value));document.querySelector('#previous').onclick=()=>show(index-1);document.querySelector('#next').onclick=()=>show(index+1);
 document.addEventListener('keydown',e=>{if(e.target.tagName==='SELECT')return;if(e.key==='ArrowRight'){e.preventDefault();show(index+1)}if(e.key==='ArrowLeft'){e.preventDefault();show(index-1)}});show(0);
 </script></html>"""
-    (output / "index.html").write_text(html.replace("FILES", json.dumps(names)).replace("LABELS", json.dumps(labels)))
+    (output / "index.html").write_text(html.replace("FILES", json.dumps(names)).replace("LABELS", json.dumps(labels)), encoding="utf-8")
 
 
 def main():

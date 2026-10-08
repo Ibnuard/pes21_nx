@@ -1,5 +1,19 @@
 # Master League implementation
 
+## Risky-action safeguards (2026-10-08)
+
+Occupied-slot overwrite and player release retain their confirmation dialogs.
+Leaving the career hub now asks **Save & Leave** before updating the active
+slot or exiting. Simulation and next-season rollover also start on Cancel;
+Play Match remains a non-destructive, default-Play confirmation. B always
+cancels before processing simultaneous accept/navigation input, and modal
+input cannot reach background shortcuts. Save failures keep the career open.
+Normal progression autosaves and the intentional Quick Save shortcut are
+unchanged. Save format and content identity policy are unchanged. The host
+frontend tests cover cancellation, slot focus, no-exit-on-cancel and unchanged
+day/season when rejecting rollover. See `FRONTDOOR_UI.md` for matching
+Cup/League, preset and Pause safeguards.
+
 ## Header square-canvas follow-up (2026-10-07)
 
 The per-symbol optical offsets in the initial v8 candidate overcorrected the

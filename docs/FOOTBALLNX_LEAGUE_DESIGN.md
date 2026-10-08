@@ -35,6 +35,15 @@ with reversed home and away sides. League fixtures allow draws and award
 all pending human fixtures on that day are played. Standings sort by points,
 goal difference, goals for, then team ID.
 
+Every human-owned club must have a fixture on matchday one. For an odd field,
+the round-robin scheduler gives the opening bye to a COM club without changing
+the participant order, owner assignment or pair coverage. An all-human odd
+field is rejected in setup because this rule is impossible; choose an even
+team count or fewer players. Later matchdays may have normal human byes.
+The Hub's Next Match preview looks ahead read-only to the next pending human
+fixture and its actual matchday, including older schedules with an early bye.
+Played/saved fixture history is not silently reseeded.
+
 Standings shows eight teams per page with native full-color badge-atlas quads;
 L/R changes page. Match Centre shows four fixtures per page: L/R changes the
 viewed matchday, Y changes its fixture page, and X opens Top Scorers. Browsing
@@ -120,13 +129,20 @@ unchanged teams show a gray dash. The baseline is reconstructed from saved
 fixtures, so partial multiplayer matchdays and reloaded seasons retain the same
 meaning without changing the save format. Empty seasons have neutral indicators.
 
-Reproduce the 54-frame review with `python tools/preview_league.py`. It drives
+Participant cards use a fixed two-column, four-row grid (eight teams per page),
+including partial pages. A final page with three entries retains the full
+page's card width, height, row spacing and badge size. Empty slots stay blank:
+no taller cards, replacement stadium image or alternative partial-page layout.
+The user reconfirmed this geometry on 2026-10-09; this is not a four-column grid.
+
+Reproduce the 59-frame review with `python tools/preview_league.py`. It drives
 the production frontend and renderer with temporary synthetic seasons,
 including empty/filled saves, 2/3/4/19/32 teams, eight human owners, both league
 systems and first/return knockout legs. Outputs go to
 `local-debug/league-news-preview/`. This is host rendering, not a device capture.
 `tests/test_league_visuals.py` checks production draw budgets, helper placement,
-header aspect, champion crests and fixture status alignment. The frontend flow
+header aspect, champion crests, fixture status alignment and equal participant
+geometry on full, three-team and 19-team final pages. The frontend flow
 test covers navigation, saved-season continuity and read-only browsing.
 
 Earlier references (superseded by the broadcast renderer):

@@ -55,6 +55,11 @@ const char *competition_frontend_slot_progress(uint32_t index);
 int competition_frontend_item_enabled(uint32_t index);
 const char *competition_frontend_status(void);
 uint32_t competition_frontend_status_serial(void);
+int competition_frontend_confirmation_active(void);
+uint32_t competition_frontend_confirmation_focus(void);
+const char *competition_frontend_confirmation_title(void);
+const char *competition_frontend_confirmation_body(void);
+const char *competition_frontend_confirmation_accept(void);
 
 uint32_t competition_frontend_cup_team_count(void);
 uint32_t competition_frontend_cup_setting_count(void);

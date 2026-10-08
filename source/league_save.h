@@ -23,5 +23,6 @@ typedef struct {
 
 int league_save_read(uint32_t slot, LeagueSaveState *state);
 int league_save_write(uint32_t slot, const LeagueSaveState *state);
+int league_save_slot_exists(uint32_t slot);
 
 #endif

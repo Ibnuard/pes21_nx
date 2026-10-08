@@ -26,7 +26,7 @@ class LeagueFrontendFlowTests(unittest.TestCase):
                 [
                     compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
                     *(["-Wno-constant-logical-operand"] if clang else []),
-                    "-I", str(Path(temp)), "-I", str(ROOT / "source"),
+                    "-I", str(Path(temp)), "-I", str(ROOT / "source"), "-I", str(ROOT / "tests"),
                     str(ROOT / "tests/test_league_frontend_flow.c"),
                     str(Path(temp) / "competition_frontend.c"),
                     str(ROOT / "source/competition_entry_draft.c"),

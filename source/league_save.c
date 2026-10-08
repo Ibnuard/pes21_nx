@@ -26,6 +26,16 @@ static void league_save_path(uint32_t slot, uint32_t copy, char path[64]) {
            slot + 1u, copy ? 'b' : 'a');
 }
 
+int league_save_slot_exists(uint32_t slot) {
+  if (slot >= LEAGUE_SAVE_SLOTS) return 0;
+  for (uint32_t copy = 0; copy < 2u; copy++) {
+    char path[64]; struct stat info;
+    league_save_path(slot, copy, path);
+    if (stat(path, &info) == 0 || errno != ENOENT) return 1;
+  }
+  return 0;
+}
+
 static uint32_t league_save_checksum(const void *payload, size_t size) {
   const uint8_t *bytes = (const uint8_t *)payload;
   uint32_t hash = 2166136261u;

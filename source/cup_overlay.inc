@@ -1,5 +1,16 @@
 /* Cup editorial UI. Uses the exact Master League card, button, typography,
  * icon and indicator primitives. All tournament access below is read-only. */
+static void competition_ui_confirmation(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
+  if(!competition_frontend_confirmation_active())return;
+  MlModalView *m=&ui->view.modal;
+  memset(m,0,sizeof(*m));m->open=1u;m->destructive=1u;
+  m->selected=competition_frontend_confirmation_focus();
+  snprintf(m->title,sizeof(m->title),"%s",competition_frontend_confirmation_title());
+  snprintf(m->body,sizeof(m->body),"%s",competition_frontend_confirmation_body());
+  snprintf(m->accept,sizeof(m->accept),"%s",competition_frontend_confirmation_accept());
+  ui->view.page=strcmp(m->accept,"OVERWRITE")==0 ? ML_PAGE_SLOTS : ML_PAGE_NEXT;
+  ml_ui_confirmation(ui,verts,quads);
+}
 static void cup_ui_art(MasterLeagueRender *ui,uint32_t sprite,float x,float y,float w,float h,
     GLfloat *verts,int *quads) {
   MlDraw *d=ml_ui_draw(ui,*quads,2);if(!d)return;
@@ -152,11 +163,12 @@ static void cup_ui_slots(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     const float y=.190f+i*.237f;char label[24];snprintf(label,sizeof(label),"SLOT %02u",i+1u);
     const char *name=competition_frontend_slot_competition(i);
     const int used=competition_frontend_cup_slot_valid(i);const int selected=competition_frontend_focus()==i;
+    const int occupied=strcmp(competition_frontend_item_value(i),"EMPTY")!=0;
     ml_ui_panel(ui,label,ML_HEADER_SAVE,.383f,y,.577f,.216f,selected,verts,quads);
-    cup_ui_text(ui,used ? name : "EMPTY SLOT",.402f,y+.105f,.336f,.0306f,-2,verts,quads);
-    ml_ui_text(ui,used ? competition_frontend_slot_progress(i) : saving ? "Ready for a new tournament" : "Create a new Cup to get started",.402f,y+.159f,.336f,.024f,2,-3,0,1,verts,quads);
+    cup_ui_text(ui,occupied ? name : "EMPTY SLOT",.402f,y+.105f,.336f,.0306f,-2,verts,quads);
+    ml_ui_text(ui,used ? competition_frontend_slot_progress(i) : occupied ? "UNREADABLE DATA" : saving ? "Ready for a new tournament" : "Create a new Cup to get started",.402f,y+.159f,.336f,.024f,2,-3,0,1,verts,quads);
     ml_ui_button(ui,.785f,y+.119f,.153f,.070f,selected,saving || used,verts,quads);
-    ml_ui_center_text(ui,saving ? (used ? "OVERWRITE" : "SAVE") : "LOAD",.785f,y+.119f,.153f,.070f,.025f,0,-1,verts,quads);
+    ml_ui_center_text(ui,saving ? (occupied ? "OVERWRITE" : "SAVE") : "LOAD",.785f,y+.119f,.153f,.070f,.025f,0,-1,verts,quads);
   }
 }
 static void cup_ui_news(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
@@ -392,7 +404,9 @@ static void cup_news_emit(MasterLeagueRender *ui,CompetitionFrontendState state,
   else cup_ui_home(ui,verts,quads);
   ml_ui_rect(ui,0,.925f,1,.075f,.025f,.10f,.28f,1,-1,0,1,verts,quads);
   ui->draws[ui->draw_count-1u].round.radius=0.f;
-  if(hub && !general && (page==CUP_PAGE_BRACKET || page==CUP_PAGE_MATCHES)) {
+  if(competition_frontend_confirmation_active()) {
+    cup_ui_helper(ui,"A","SELECT",verts,quads);cup_ui_helper(ui,"B","CANCEL",verts,quads);
+  } else if(hub && !general && (page==CUP_PAGE_BRACKET || page==CUP_PAGE_MATCHES)) {
     cup_ui_helper(ui,"B","CUP HUB",verts,quads);cup_ui_helper(ui,"L","PREV ROUND",verts,quads);
     cup_ui_helper(ui,"R","NEXT ROUND",verts,quads);cup_ui_helper(ui,"Y","NEXT PAGE",verts,quads);
   } else {
@@ -405,13 +419,14 @@ static void cup_news_emit(MasterLeagueRender *ui,CompetitionFrontendState state,
       cup_ui_helper(ui,"L","PREV NEWS",verts,quads);cup_ui_helper(ui,"R","NEXT NEWS",verts,quads);
     }
   }
-  cup_ui_toast(ui,moving,verts,quads);
+  if(!competition_frontend_confirmation_active())cup_ui_toast(ui,moving,verts,quads);
+  competition_ui_confirmation(ui,verts,quads);
   if(competition_frontend_cup_opening_rule_popup()) {
     const uint32_t first=ui->draw_count;
     ml_ui_rect(ui,0,0,1,1,.0f,.025f,.08f,.74f,-1,0,1,verts,quads);
     ml_ui_panel(ui,"OPENING ROUND",ML_HEADER_MATCH,.21f,.30f,.58f,.35f,0,verts,quads);
-    cup_ui_text(ui,"At least one player must play in the first round.",.238f,.415f,.524f,.028f,-2,verts,quads);
-    cup_ui_text(ui,"Move a player into an opening fixture to continue.",.238f,.467f,.524f,.025f,-3,verts,quads);
+    cup_ui_text(ui,"Players cannot have a bye in the first round.",.238f,.415f,.524f,.028f,-2,verts,quads);
+    cup_ui_text(ui,"Choose a slot with an opponent. Only COM may take a bye.",.238f,.467f,.524f,.025f,-3,verts,quads);
     ml_ui_button(ui,.411f,.548f,.178f,.065f,1,1,verts,quads);
     ml_ui_center_text(ui,"OK",.411f,.548f,.178f,.065f,.0306f,0,-1,verts,quads);
     for(uint32_t i=first;i<ui->draw_count;i++)ui->draws[i].layer=1;

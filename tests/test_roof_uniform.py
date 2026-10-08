@@ -17,29 +17,42 @@ class RoofUniformTests(unittest.TestCase):
 #include <string.h>
 typedef unsigned GLuint;
 typedef int GLint;
-static int glc_enabled=1, binds, queries, sets, day=1, enabled=1;
-static float applied;
+typedef float GLfloat;
+static int glc_enabled=1, binds, queries, sets, night_sets, day=1, enabled=1, high=1;
+static float applied, night_applied;
 static struct {int have_prog; GLuint prog;} glc;
 static struct {GLuint program;} g_mc[1];
-static struct {GLuint program; GLint location; int valid;} roof_uniforms[128];
+static struct {GLuint program; GLint location,night_location; int valid,night_value;} roof_uniforms[128];
 static int mc_current_slot(void) {return 0;}
 static int pes_controller_stadium_is_day(void) {return day;}
 static int pes_controller_roof_shadow_enabled(void) {return enabled;}
+static int pes_controller_night_lighting_balance_enabled(void) {return high && !day;}
 static void glUseProgram(GLuint p) {(void)p; ++binds;}
 static void glDeleteProgram(GLuint p) {(void)p;}
 static GLint glGetUniformLocation(GLuint p, const char *name) {
-  assert(!strcmp(name,"nxRoofDisabled")); ++queries; return p==7 ? 2 : -1;
+  ++queries;
+  if(!strcmp(name,"nxRoofDisabled"))return p==7 ? 2 : -1;
+  assert(!strcmp(name,"nxNightIndirect")); return p==7 ? 3 : -1;
 }
-static void glUniform1f(GLint loc, float value) {assert(loc==2); ++sets; applied=value;}
+static void glUniform1f(GLint loc, float value) {
+  if(loc==2) {++sets;applied=value;}
+  else {assert(loc==3);++night_sets;night_applied=value;}
+}
 ''' + function(SOURCE,'glUseProgram_c') + function(SOURCE,'glDeleteProgram_c') + r'''
 int main(void) {
-  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==1);
-  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==1 && queries==1);
-  day=0; glUseProgram_c(7); assert(applied==0 && binds==1 && queries==1);
+  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==2);
+  assert(night_sets==1 && night_applied==0);
+  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==1 && queries==2);
+  assert(night_sets==1);
+  day=0; glUseProgram_c(7); assert(applied==0 && binds==1 && queries==2);
+  assert(night_sets==2 && night_applied==1);
   day=1; enabled=1; glUseProgram_c(7); assert(applied==0);
+  assert(night_sets==3 && night_applied==0);
   glUseProgram_c(9); assert(sets==4);
-  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==3);
-  glUseProgram_c(0); assert(queries==3);
+  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==6 && night_sets==4);
+  high=0;day=0;glUseProgram_c(7);assert(night_applied==0 && night_sets==4);
+  high=1;glUseProgram_c(7);assert(night_applied==1 && night_sets==5);
+  glUseProgram_c(0); assert(queries==6);
 }
 ''')
 

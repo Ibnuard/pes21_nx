@@ -117,7 +117,13 @@ color with its numbered badge on the Bracket page. Codes use the actual draft
 mapping, including byes, and stay with the position when teams and owners swap.
 The move prompt shows source and target codes. The second text line is omitted. A uses
 the existing eligible-team picker, X fills vacant slots, and Y starts a slot
-move. The core opening-round player rule and kickoff roster lock are retained.
+move. Every P1–P8 owner must play in round one; only COM may occupy a bye.
+A proposed swap is checked on a draft copy before committing. If any human
+would receive a bye, the ML-style rule alert opens and both the draft and
+bracket remain unchanged, even if another human still has a match. Setup also
+rejects team/player counts with insufficient opening-round playing slots
+(for example five teams cannot fit three humans into the single opening tie).
+The kickoff roster lock remains in place.
 Bracket and Match Centre are separate pages: L/R browses rounds and Y (or
 Down) pages through pairs of fixtures. Final and third-place results share a
 readable final page. Fixture cards use a left-aligned number badge followed by

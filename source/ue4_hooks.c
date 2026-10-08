@@ -8,6 +8,7 @@
 #include "aaudio_shim.h"
 #include "config.h"
 #include "competition_frontend.h"
+#include "prematch_kit_navigation.h"
 #include "master_league_frontend.h"
 #include "exhibition_team_catalog.h"
 #include "gameplan_preset.h"
@@ -1108,6 +1109,7 @@ typedef struct {
   uint32_t preset_step;
   uint32_t preset_action;
   uint32_t preset_focus;
+  uint32_t preset_target_slot;
   uint8_t preset_exists[GAMEPLAN_PRESET_SLOTS];
   char preset_status[48];
   uint32_t condition_mode;
@@ -1235,6 +1237,7 @@ static _Alignas(4) uint32_t main_menu_2p_prematch_hub_active;
 static _Alignas(4) uint32_t main_menu_2p_prematch_hub_focus;
 static _Alignas(4) uint32_t main_menu_2p_prematch_hub_page;
 static _Alignas(4) uint32_t main_menu_2p_prematch_hub_page_focus;
+static _Alignas(4) uint32_t main_menu_2p_prematch_kit_editing;
 static _Alignas(4) uint32_t main_menu_2p_prematch_stadium_index;
 static _Alignas(4) uint32_t main_menu_2p_prematch_hub_input_armed[2];
 static _Alignas(4) uint32_t main_menu_2p_prematch_hub_input_pending;
@@ -1607,10 +1610,6 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
       armTicksToNs(armGetSystemTick() - scoreboard_tick) > 80000000ULL ||
       !__atomic_load_n(&match_scoreboard_visible, __ATOMIC_ACQUIRE))
     return 0u;
-
-  // Complete the small asynchronous portrait reads requested by the active
-  // cards. No synchronous asset IO is performed in gameplay.
-  live_gameplan_poll_portraits();
 
   PesControllerSnapshot surface = {0};
   pes_controller_surface_cached_snapshot(&surface);
@@ -2393,6 +2392,15 @@ static void main_menu_2p_team_selector_open(void) {
 }
 
 static void main_menu_2p_team_selector_close(void) {
+  /* This teardown calls native code and must run on the game thread. Do not
+   * consume the return request until the native flow host is available. */
+  void *return_listener = exhibition_flow_listener_instance
+      ? *exhibition_flow_listener_instance : NULL;
+  if (__atomic_load_n(&main_menu_2p_selector_postbootstrap_host, __ATOMIC_ACQUIRE) &&
+      (!return_listener || !exhibition_flow_direct_set)) {
+    __atomic_store_n(&main_menu_2p_team_selector_close_pending, 1u, __ATOMIC_RELEASE);
+    return;
+  }
   main_menu_2p_uniform_preview_clear_pending();
   exhibition_discard_pre_strategy_squad_snapshot();
   exhibition_gameplan_reset();
@@ -2473,6 +2481,10 @@ static void main_menu_2p_team_selector_close(void) {
     __atomic_store_n(&exhibition_session_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_searching_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&exhibition_team_select_active, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_search_refresh_pending, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_return_to_selector, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&exhibition_strategy_pending, 0, __ATOMIC_RELEASE);
+    exhibition_search_window = NULL;
     void *listener = exhibition_flow_listener_instance
                          ? *exhibition_flow_listener_instance
                          : NULL;
@@ -2838,19 +2850,19 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
   const uint32_t page = __atomic_load_n(&main_menu_2p_prematch_hub_page,
                                          __ATOMIC_ACQUIRE);
   if (page == MAIN_MENU_2P_PREMATCH_PAGE_KITS) {
-    uint32_t side = __atomic_load_n(&main_menu_2p_prematch_hub_page_focus,
-                                    __ATOMIC_ACQUIRE) & 1u;
-    if (pressed & (1u << 10))
-      side = 0;
-    else if (pressed & (1u << 11))
-      side = 1;
-    else if (pressed & (1u << 12))
+    PesKitNavigation nav = {
+      __atomic_load_n(&main_menu_2p_prematch_hub_page_focus, __ATOMIC_ACQUIRE),
+      __atomic_load_n(&main_menu_2p_prematch_kit_editing, __ATOMIC_ACQUIRE)
+    };
+    const uint32_t action = pes_kit_navigate(&nav, pressed);
+    __atomic_store_n(&main_menu_2p_prematch_kit_editing, nav.editing, __ATOMIC_RELEASE);
+    if (action == PES_KIT_PREVIOUS)
       __atomic_store_n(&main_menu_2p_prematch_kit_input_pending,
-                       side * 2u + 1u, __ATOMIC_RELEASE);
-    else if (pressed & ((1u << 13) | (1u << 1)))
+                       nav.side * 2u + 1u, __ATOMIC_RELEASE);
+    else if (action == PES_KIT_NEXT)
       __atomic_store_n(&main_menu_2p_prematch_kit_input_pending,
-                       side * 2u + 2u, __ATOMIC_RELEASE);
-    else if (pressed & (1u << 0)) {
+                       nav.side * 2u + 2u, __ATOMIC_RELEASE);
+    else if (action == PES_KIT_BACK) {
       __atomic_store_n(&main_menu_2p_prematch_hub_page,
                        MAIN_MENU_2P_PREMATCH_PAGE_MAIN, __ATOMIC_RELEASE);
       __atomic_store_n(&main_menu_2p_native_uniform_close_pending, 1,
@@ -2858,7 +2870,7 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
       main_menu_2p_prematch_hub_input_armed[0] = 0;
       return;
     }
-    __atomic_store_n(&main_menu_2p_prematch_hub_page_focus, side,
+    __atomic_store_n(&main_menu_2p_prematch_hub_page_focus, nav.side,
                      __ATOMIC_RELEASE);
     return;
   }
@@ -2928,7 +2940,10 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
   } else if (pressed & (1u << 0)) {
     if (competition_frontend_cup_match_active() ||
         competition_frontend_league_match_active()) {
-      main_menu_2p_team_selector_close();
+      /* HID polling must not destroy native windows or DirectSet their flow.
+       * The existing game-thread consumer performs the return exactly once. */
+      __atomic_store_n(&main_menu_2p_team_selector_close_pending, 1u, __ATOMIC_RELEASE);
+      main_menu_2p_prematch_hub_input_armed[0] = 0;
       return;
     }
     __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
@@ -4864,6 +4879,10 @@ uint32_t pes_controller_2p_prematch_hub_page_focus(void) {
                          __ATOMIC_ACQUIRE);
 }
 
+int pes_controller_2p_prematch_kit_editing(void) {
+  return __atomic_load_n(&main_menu_2p_prematch_kit_editing, __ATOMIC_ACQUIRE) != 0u;
+}
+
 const char *pes_controller_2p_prematch_hub_team_name(uint32_t side) {
   if (side > 1)
     return "";
@@ -4939,6 +4958,11 @@ uint32_t pes_controller_2p_prematch_hub_stadium_index(void) {
 
 uint32_t pes_controller_stadium_is_day(void) {
   return !__atomic_load_n(&exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
+}
+
+uint32_t pes_controller_night_lighting_balance_enabled(void) {
+  return __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE) == 2u &&
+         !pes_controller_stadium_is_day();
 }
 
 uint32_t pes_controller_roof_shadow_enabled(void) {
@@ -7143,29 +7167,40 @@ static void live_gameplan_poll_portraits(void) {
   }
 }
 
-static void match_hud_queue_portrait(uint32_t side, uint32_t order,
-                                     uint32_t portrait_id) {
-  static uint32_t queued_id[2][11];
-  if (side > 1u || order >= 11u || !portrait_id ||
-      queued_id[side][order] == portrait_id)
-    return;
-  for (uint32_t i = 0; i < LIVE_PORTRAIT_CACHE_CAPACITY; ++i) {
-    const PesPrematchGameplanPortraitPng *cached = live_portrait_cache[i];
-    if (!cached || cached->portrait_id != portrait_id)
-      continue;
-    const size_t bytes = sizeof(*cached) + cached->byte_count;
-    PesPrematchGameplanPortraitPng *copy = malloc(bytes);
-    if (!copy) return;
-    memcpy(copy, cached, bytes);
-    free((void *)__atomic_exchange_n(
-        &exhibition_gameplan_portrait_pending[side][order], (uintptr_t)copy,
-        __ATOMIC_ACQ_REL));
-    queued_id[side][order] = portrait_id;
-    return;
+static _Alignas(4) uint32_t match_hud_portrait_requests[2];
+
+void pes_controller_hud_request_portrait(uint32_t side, uint32_t portrait_id) {
+  /* Render thread: IDs only. Native files and the CPU LRU have one owner. */
+  if (side < 2u && portrait_id)
+    __atomic_store_n(&match_hud_portrait_requests[side], portrait_id, __ATOMIC_RELEASE);
+}
+
+static void match_hud_process_portrait_requests(void) {
+  uint32_t requests[2];
+  for (uint32_t side = 0; side < 2u; ++side)
+    requests[side] = __atomic_exchange_n(&match_hud_portrait_requests[side], 0u, __ATOMIC_ACQ_REL);
+  if (!(requests[0] | requests[1])) return;
+  live_gameplan_poll_portraits();
+  for (uint32_t side = 0; side < 2u; ++side) {
+    const uint32_t portrait_id = requests[side];
+    if (!portrait_id) continue;
+    int found = 0;
+    for (uint32_t i = 0; i < LIVE_PORTRAIT_CACHE_CAPACITY; ++i) {
+      const PesPrematchGameplanPortraitPng *cached = live_portrait_cache[i];
+      if (!cached || cached->portrait_id != portrait_id) continue;
+      const size_t bytes = sizeof(*cached) + cached->byte_count;
+      PesPrematchGameplanPortraitPng *copy = malloc(bytes);
+      if (!copy) break;
+      memcpy(copy, cached, bytes);
+      free((void *)__atomic_exchange_n(
+          &exhibition_gameplan_portrait_pending[side][0], (uintptr_t)copy,
+          __ATOMIC_ACQ_REL));
+      live_portrait_cache_stamp[i] = ++live_portrait_cache_clock;
+      found = 1;
+      break;
+    }
+    if (!found) live_gameplan_request_portrait(portrait_id);
   }
-  // The fixture can start without opening the custom Game Plan. Queue only
-  // the currently selected portraits and let FileThread perform the read.
-  live_gameplan_request_portrait(portrait_id);
 }
 
 static int match_hud_cached_identity(PesStaminaBarSnapshot *bar,
@@ -7182,7 +7217,6 @@ static int match_hud_cached_identity(PesStaminaBarSnapshot *bar,
   bar->portrait_id = cached->portrait_id;
   bar->badge = cached->badge;
   bar->shirt_number = cached->shirt_number;
-  match_hud_queue_portrait(side, bar->player_no % 11u, bar->portrait_id);
   return 1;
 }
 
@@ -7196,8 +7230,6 @@ static void match_hud_cache_identity(const PesStaminaBarSnapshot *bar,
   cached->shirt_number = bar->shirt_number;
   cached->seen_tick = armGetSystemTick();
   snprintf(cached->name, sizeof(cached->name), "%s", bar->name);
-  match_hud_queue_portrait(bar->side, bar->player_no % 11u,
-                           bar->portrait_id);
 }
 
 static int match_hud_player_info(PesStaminaBarSnapshot *bar) {
@@ -8927,6 +8959,33 @@ static void prematch_gameplan_process_formation(uint32_t side,
 static void prematch_gameplan_process_preset(uint32_t side,
                                               uint32_t action) {
   PrematchGameplanSide *state = &exhibition_gameplan_sides[side];
+  if (state->preset_step == 2u) {
+    /* Each controller owns its own modal. Do not let navigation leak into
+     * the slot list, nor let cancelling load/save modify the current plan. */
+    if (action == PES_PAUSE_INPUT_LEFT || action == PES_PAUSE_INPUT_UP)
+      state->preset_focus = 0u;
+    else if (action == PES_PAUSE_INPUT_RIGHT || action == PES_PAUSE_INPUT_DOWN)
+      state->preset_focus = 1u;
+    else if (action == PES_PAUSE_INPUT_BACK || action == PES_PAUSE_INPUT_DECIDE) {
+      const uint32_t slot = state->preset_target_slot;
+      const int accept = action == PES_PAUSE_INPUT_DECIDE && !state->preset_focus;
+      state->preset_step = 1u;
+      state->preset_focus = slot;
+      if (!accept) return;
+      if (live_gameplan_window) return;
+      const int success = state->preset_action == 0u
+          ? prematch_gameplan_save_preset(side, slot)
+          : prematch_gameplan_load_preset(side, slot);
+      snprintf(state->preset_status, sizeof(state->preset_status),
+               success ? (state->preset_action == 0u
+                              ? "PRESET %u SAVED" : "PRESET %u LOADED")
+                       : (state->preset_action == 0u
+                              ? "PRESET %u SAVE FAILED"
+                              : "PRESET %u EMPTY OR ROSTER CHANGED"), slot + 1u);
+      prematch_gameplan_refresh_preset_slots(side);
+    }
+    return;
+  }
   if (action == PES_PAUSE_INPUT_BACK) {
     if (state->preset_step) {
       state->preset_step = 0u;
@@ -8955,18 +9014,12 @@ static void prematch_gameplan_process_preset(uint32_t side,
       snprintf(state->preset_status, sizeof(state->preset_status),
                "PRESETS AVAILABLE BEFORE KICKOFF");
     } else {
-      const uint32_t slot = state->preset_focus;
-      const int success = state->preset_action == 0u
-          ? prematch_gameplan_save_preset(side, slot)
-          : prematch_gameplan_load_preset(side, slot);
-      snprintf(state->preset_status, sizeof(state->preset_status),
-               success ? (state->preset_action == 0u
-                              ? "PRESET %u SAVED" : "PRESET %u LOADED")
-                       : (state->preset_action == 0u
-                              ? "PRESET %u SAVE FAILED"
-                              : "PRESET %u EMPTY OR ROSTER CHANGED"),
-               slot + 1u);
-      prematch_gameplan_refresh_preset_slots(side);
+      /* All explicit preset saves prompt, including unreadable old files.
+       * Loading also replaces the current unsaved lineup/formation. */
+      state->preset_target_slot = state->preset_focus;
+      state->preset_step = 2u;
+      state->preset_focus = 1u;
+      state->preset_status[0] = '\0';
     }
   }
 }
@@ -9299,6 +9352,10 @@ uint32_t pes_controller_custom_prematch_gameplan_team_spirit(uint32_t pad) {
 
 uint32_t pes_controller_custom_prematch_gameplan_preset_step(uint32_t pad) {
   return pad < 2 ? exhibition_gameplan_sides[pad].preset_step : 0u;
+}
+
+uint32_t pes_controller_custom_prematch_gameplan_preset_target_slot(uint32_t pad) {
+  return pad < 2 ? exhibition_gameplan_sides[pad].preset_target_slot : 0u;
 }
 
 uint32_t pes_controller_custom_prematch_gameplan_preset_focus(uint32_t pad) {
@@ -11124,6 +11181,7 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
   if (action == 2) {
     exhibition_gameplan_refresh_uniform_choices();
+    __atomic_store_n(&main_menu_2p_prematch_kit_editing, 0u, __ATOMIC_RELEASE);
     __atomic_store_n(&main_menu_2p_prematch_hub_page,
                      MAIN_MENU_2P_PREMATCH_PAGE_KITS, __ATOMIC_RELEASE);
     __atomic_store_n(&main_menu_2p_prematch_hub_page_focus, 0,
@@ -11521,23 +11579,43 @@ void pes_main_menu_simplify(void *window) {
   competition_frontend_league_restore_after_match();
 }
 
+static _Alignas(4) uint32_t league_portrait_requests[5];
+
 void pes_controller_league_request_scorer_portrait(uint32_t slot,
                                                    uint32_t portrait_id) {
-  if (slot >= 5u || !portrait_id) return;
-  live_gameplan_poll_portraits();
-  for (uint32_t i = 0; i < LIVE_PORTRAIT_CACHE_CAPACITY; i++) {
-    const PesPrematchGameplanPortraitPng *cached = live_portrait_cache[i];
-    if (!cached || cached->portrait_id != portrait_id) continue;
-    const size_t size = sizeof(*cached) + cached->byte_count;
-    PesPrematchGameplanPortraitPng *copy = malloc(size);
-    if (!copy) return;
-    memcpy(copy, cached, size);
-    free((void *)__atomic_exchange_n(
-        &exhibition_gameplan_portrait_pending[0][35u + slot],
-        (uintptr_t)copy, __ATOMIC_ACQ_REL));
-    return;
+  /* Called by the render thread. It must not poll native files or read the
+   * game-thread LRU: eviction there frees the cached PNG. Coalesce per slot. */
+  if (slot < 5u && portrait_id)
+    __atomic_store_n(&league_portrait_requests[slot], portrait_id, __ATOMIC_RELEASE);
+}
+
+static void league_process_portrait_requests(void) {
+  uint32_t requests[5], any = 0u;
+  for (uint32_t slot = 0; slot < 5u; slot++) {
+    requests[slot] = __atomic_exchange_n(&league_portrait_requests[slot], 0u, __ATOMIC_ACQ_REL);
+    any |= requests[slot];
   }
-  live_gameplan_request_portrait(portrait_id);
+  if (!any) return;
+  live_gameplan_poll_portraits();
+  for (uint32_t slot = 0; slot < 5u; slot++) {
+    const uint32_t portrait_id = requests[slot];
+    if (!portrait_id) continue;
+    int found = 0;
+    for (uint32_t i = 0; i < LIVE_PORTRAIT_CACHE_CAPACITY; i++) {
+      const PesPrematchGameplanPortraitPng *cached = live_portrait_cache[i];
+      if (!cached || cached->portrait_id != portrait_id) continue;
+      const size_t size = sizeof(*cached) + cached->byte_count;
+      PesPrematchGameplanPortraitPng *copy = malloc(size);
+      if (!copy) break;
+      memcpy(copy, cached, size);
+      free((void *)__atomic_exchange_n(
+          &exhibition_gameplan_portrait_pending[0][35u + slot],
+          (uintptr_t)copy, __ATOMIC_ACQ_REL));
+      found = 1;
+      break;
+    }
+    if (!found) live_gameplan_request_portrait(portrait_id);
+  }
 }
 
 uintptr_t pes_main_menu_selected_entry(void *window,
@@ -16733,6 +16811,8 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   }
   main_menu_2p_team_selector_refresh_ratings();
   main_menu_2p_team_selector_process_pending();
+  league_process_portrait_requests();
+  match_hud_process_portrait_requests();
   main_menu_2p_prematch_hub_process_pending();
   // Cobra::Pad::Update runs on the match game thread every frame, including
   // frames where PauseButton itself is not scheduled. Consume the frontend

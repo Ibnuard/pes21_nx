@@ -59,6 +59,7 @@
 #include "perf_trace.h"
 #include "perf_match.h"
 #include "pitch_shadow_policy.h"
+#include "night_lighting_policy.h"
 #include "ue4_hooks.h"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
@@ -360,7 +361,11 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
   }
   glBindTexture(target, tex);
 }
-static __thread struct { GLuint program; GLint location; int valid; } roof_uniforms[128];
+static __thread struct {
+  GLuint program;
+  GLint location, night_location;
+  int valid, night_value;
+} roof_uniforms[128];
 static void glUseProgram_c(GLuint p) {
   const int slot = mc_current_slot();
   if (slot >= 0)
@@ -373,11 +378,20 @@ static void glUseProgram_c(GLuint p) {
     if (!roof_uniforms[index].valid || roof_uniforms[index].program != p) {
       roof_uniforms[index].program = p;
       roof_uniforms[index].location = glGetUniformLocation(p, "nxRoofDisabled");
+      roof_uniforms[index].night_location = glGetUniformLocation(p, "nxNightIndirect");
+      roof_uniforms[index].night_value = -1;
       roof_uniforms[index].valid = 1;
     }
     if (roof_uniforms[index].location >= 0)
       glUniform1f(roof_uniforms[index].location,
           pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled() ? 1.0f : 0.0f);
+    if (roof_uniforms[index].night_location >= 0) {
+      const int enabled = pes_controller_night_lighting_balance_enabled();
+      if (enabled != roof_uniforms[index].night_value) {
+        glUniform1f(roof_uniforms[index].night_location, (GLfloat)enabled);
+        roof_uniforms[index].night_value = enabled;
+      }
+    }
   }
 }
 static void glDeleteTextures_c(GLsizei n, const GLuint *t) {
@@ -2102,24 +2116,35 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
                                   const GLint *lengths) {
   // Fail open on segmented or unsupported input; no blanket shader rewrite.
   char *patched = NULL;
+  int night_lighting = 0;
   if (count == 1 && strings && strings[0]) {
     const size_t n = lengths && lengths[0] >= 0 ? (size_t)lengths[0] : strlen(strings[0]);
     if (n && n < 2u*1024u*1024u) {
       char *copy = (char *)malloc(n+1);
       if (copy) {
         memcpy(copy, strings[0], n); copy[n] = 0;
-        if (strlen(copy) == n) patched = pitch_shadow_source(copy);
+        if (strlen(copy) == n) {
+          patched = pitch_shadow_source(copy);
+          if (!patched) {
+            patched = night_lighting_source(copy);
+            night_lighting = patched != NULL;
+          }
+        }
         free(copy);
       }
     }
   }
   if (patched) {
-    char *roof = pitch_roof_source(patched);
+    char *roof = night_lighting ? NULL : pitch_roof_source(patched);
     if (roof) { free(patched); patched = roof; }
     const GLchar *source = patched;
     glShaderSource(shader, 1, &source, NULL);
-    debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
-    debugPrintf("pitch-shadow: day slope=0.85 native-uv-color additive-highlight=off shader=%u\n", shader);
+    if (night_lighting) {
+      debugPrintf("night-light: decoded irradiance/reflection v6 shader=%u installed\n", shader);
+    } else {
+      debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
+      debugPrintf("pitch-shadow: day slope=0.85 native-uv-color additive-highlight=off shader=%u\n", shader);
+    }
     free(patched);
   } else glShaderSource(shader, count, strings, lengths);
 }
@@ -2738,6 +2763,7 @@ struct nmm_slab {
   void *bo;
   uint64_t size;
   uint64_t cur;
+  uint32_t live;
   struct nmm_alloc *free_list;
 };
 
@@ -2797,6 +2823,10 @@ static void *nmm_dedicated(void *cache, uint32_t sz, void **bo, uint32_t *offset
 }
 
 void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t *offset) {
+  if (bo) *bo = NULL;
+  if (offset) *offset = 0;
+  /* Do not wrap a very large request into a tiny, writable GPU range. */
+  if (size > UINT32_MAX - (NMM_ALIGN - 1u)) return NULL;
   uint32_t asz = (size + (NMM_ALIGN - 1)) & ~(NMM_ALIGN - 1);
   if (asz == 0) asz = NMM_ALIGN;
   if (asz > NMM_BIG_THRESH)
@@ -2813,7 +2843,7 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
   // Search reusable ranges across every slab first.  Looking only at the
   // newest slab would leave freed ranges in older slabs stranded forever.
   for (int i = g_nmm_nslabs - 1; i >= 0 && !s; i--) {
-    if (g_nmm_slabs[i].cache != cache)
+    if (!g_nmm_slabs[i].bo || g_nmm_slabs[i].cache != cache)
       continue;
     for (struct nmm_alloc *free_range = g_nmm_slabs[i].free_list;
          free_range; free_range = free_range->next) {
@@ -2825,7 +2855,7 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
   }
   // No reusable range: retain newest-first bump locality for a fresh range.
   for (int i = g_nmm_nslabs - 1; i >= 0 && !s; i--) {
-    if (g_nmm_slabs[i].cache == cache &&
+    if (g_nmm_slabs[i].bo && g_nmm_slabs[i].cache == cache &&
         (g_nmm_slabs[i].size - g_nmm_slabs[i].cur) >= asz)
       s = &g_nmm_slabs[i];
   }
@@ -2837,22 +2867,36 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
       link = &(*link)->next;
     if (*link) {
       struct nmm_alloc *reused = *link;
-      *link = reused->next;
-      free(allocation);
-      allocation = reused;
+      if (reused->size == asz) {
+        *link = reused->next;
+        free(allocation);
+        allocation = reused;
+      } else {
+        /* A coalesced 2 MiB hole must not become a 2 MiB allocation for
+         * a 256-byte menu buffer. Keep the remainder available in place. */
+        allocation->offset = reused->offset;
+        allocation->size = asz;
+        reused->offset += asz;
+        reused->size -= asz;
+      }
       allocation->next = NULL;
       allocation->slab = s;
-      void *slab_bo = s->bo;
+      ++s->live;
       if (offset)
         *offset = allocation->offset;
-      pthread_mutex_unlock(&g_nmm_mtx);
       if (bo)
-        nouveau_bo_ref(slab_bo, bo);
+        nouveau_bo_ref(s->bo, bo);
+      pthread_mutex_unlock(&g_nmm_mtx);
       return allocation;
     }
   }
   if (!s) {
-    if (g_nmm_nslabs >= NMM_MAX_SLABS) {              // table full -> dedicated bo
+    /* Empty slabs can be retired. Reuse their descriptor without moving
+     * any live slab: outstanding allocation handles point into this array. */
+    int vacant = -1;
+    for (int i = 0; i < g_nmm_nslabs; ++i)
+      if (!g_nmm_slabs[i].bo) { vacant = i; break; }
+    if (vacant < 0 && g_nmm_nslabs >= NMM_MAX_SLABS) {
       pthread_mutex_unlock(&g_nmm_mtx);
       free(allocation);
       return nmm_dedicated(cache, asz, bo, offset);
@@ -2864,25 +2908,25 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
       free(allocation);
       return nmm_dedicated(cache, asz, bo, offset);  // slab alloc failed -> dedicated
     }
-    s = &g_nmm_slabs[g_nmm_nslabs++];
+    s = &g_nmm_slabs[vacant >= 0 ? vacant : g_nmm_nslabs++];
     s->cache = cache;
     s->bo = nb;
     s->size = NMM_SLAB_BYTES;
     s->cur = 0;
+    s->live = 0;
     s->free_list = NULL;
   }
   uint64_t off = s->cur;
   s->cur += asz;
-  void *slab_bo = s->bo;
-  pthread_mutex_unlock(&g_nmm_mtx);
-
-  if (bo) nouveau_bo_ref(slab_bo, bo);   // *bo = slab_bo (refcount++), as stock does
+  ++s->live;
+  if (bo) nouveau_bo_ref(s->bo, bo);     // caller holds its own BO reference
   if (offset) *offset = (uint32_t)off;
 
   allocation->next = NULL;
   allocation->slab = s;
   allocation->offset = (uint32_t)off;
   allocation->size = asz;
+  pthread_mutex_unlock(&g_nmm_mtx);
   return allocation;
 }
 
@@ -2897,7 +2941,32 @@ void __wrap_nouveau_mm_free(void *handle) {
   }
   pthread_mutex_lock(&g_nmm_mtx);
   nmm_free_insert_locked(slab, allocation);
+  --slab->live;
+  void *retired_bo = NULL;
+  if (!slab->live) {
+    /* Keep one warm empty slab per native cache, not the entire match's
+     * high-water mark. Native free_work is already fence-deferred; only our
+     * pool reference is dropped, so other BO references stay valid. */
+    int have_warm = 0;
+    for (int i = 0; i < g_nmm_nslabs; ++i) {
+      const struct nmm_slab *other = &g_nmm_slabs[i];
+      if (other != slab && other->bo && other->cache == slab->cache && !other->live) {
+        have_warm = 1;
+        break;
+      }
+    }
+    if (have_warm) {
+      while (slab->free_list) {
+        struct nmm_alloc *next = slab->free_list->next;
+        free(slab->free_list);
+        slab->free_list = next;
+      }
+      retired_bo = slab->bo;
+      memset(slab, 0, sizeof(*slab));
+    }
+  }
   pthread_mutex_unlock(&g_nmm_mtx);
+  if (retired_bo) nouveau_bo_ref(NULL, &retired_bo);
 }
 
 // nouveau_mm_free_work is an intra-object alias that bypasses --wrap, so wrap it

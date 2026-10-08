@@ -36,7 +36,7 @@ static const char *league_ui_round(uint32_t round) {
 static int league_ui_next_teams(uint32_t *home,uint32_t *away) {
   const LeagueTournament *l=competition_frontend_league_tournament();
   uint32_t fixture=0,round=0,index=0;*home=*away=0;
-  if(!l || !league_tournament_next_human(l,&fixture,&round,&index))return 0;
+  if(!l || !league_tournament_upcoming_human(l,&fixture,NULL,&round,&index))return 0;
   if(l->phase==LEAGUE_PHASE_TABLE) {
     *home=l->fixtures[fixture].home;*away=l->fixtures[fixture].away;
   } else {
@@ -113,11 +113,12 @@ static void league_ui_slots(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   for(uint32_t i=0;i<3u;i++) {
     const float y=.190f+i*.245f;char title[32];snprintf(title,sizeof(title),"SLOT %02u",i+1u);
     const int used=competition_frontend_league_slot_valid(i),selected=competition_frontend_focus()==i;
+    const int occupied=strcmp(competition_frontend_item_value(i),"EMPTY")!=0;
     ml_ui_panel(ui,title,ML_HEADER_SAVE,.383f,y,.577f,.220f,selected,verts,quads);
-    cup_ui_text(ui,used ? competition_frontend_slot_competition(i) : "EMPTY SLOT",.402f,y+.104f,.357f,.031f,-2,verts,quads);
-    cup_ui_text(ui,used ? competition_frontend_slot_progress(i) : "NO SEASON SAVED",.402f,y+.166f,.350f,.025f,-3,verts,quads);
+    cup_ui_text(ui,occupied ? competition_frontend_slot_competition(i) : "EMPTY SLOT",.402f,y+.104f,.357f,.031f,-2,verts,quads);
+    cup_ui_text(ui,used ? competition_frontend_slot_progress(i) : occupied ? "UNREADABLE DATA" : "NO SEASON SAVED",.402f,y+.166f,.350f,.025f,-3,verts,quads);
     ml_ui_button(ui,.785f,y+.126f,.153f,.069f,selected,saving || used,verts,quads);
-    ml_ui_center_text(ui,saving ? used ? "OVERWRITE" : "SAVE" : "LOAD",.785f,y+.126f,.153f,.069f,.025f,0,-1,verts,quads);
+    ml_ui_center_text(ui,saving ? occupied ? "OVERWRITE" : "SAVE" : "LOAD",.785f,y+.126f,.153f,.069f,.025f,0,-1,verts,quads);
   }
 }
 static void league_ui_news(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
@@ -129,7 +130,11 @@ static void league_ui_news(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   if(story==1u) {
     uint32_t home=0,away=0;snprintf(tag,sizeof(tag),"MATCHDAY WATCH");
     if(league_ui_next_teams(&home,&away)) {
-      if(l->phase==LEAGUE_PHASE_TABLE)snprintf(headline,sizeof(headline),"MATCHDAY %u",l->active_matchday+1u);
+      if(l->phase==LEAGUE_PHASE_TABLE) {
+        uint32_t day=l->active_matchday;
+        league_tournament_upcoming_human(l,NULL,&day,NULL,NULL);
+        snprintf(headline,sizeof(headline),"MATCHDAY %u",day+1u);
+      }
       else snprintf(headline,sizeof(headline),"%s",league_ui_round(l->knockout.active_round));
       snprintf(detail,sizeof(detail),"%s vs %s",cup_ui_team(home),cup_ui_team(away));
     } else {
@@ -179,7 +184,9 @@ static void league_ui_next(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     cup_ui_badge(ui,champion,.664f,.317f,.185f,verts,quads);
     ml_ui_center_text(ui,cup_ui_team(champion),.65f,.601f,.295f,.044f,.031f,0,-2,verts,quads);
   } else if(next) {
-    char label[64];snprintf(label,sizeof(label),"MATCHDAY %u / %u",l->active_matchday+1u,l->matchday_count);
+    uint32_t day=l->active_matchday;
+    league_tournament_upcoming_human(l,NULL,&day,NULL,NULL);
+    char label[64];snprintf(label,sizeof(label),"MATCHDAY %u",day+1u);
     if(l->phase==LEAGUE_PHASE_KNOCKOUT) {
       uint32_t round=0,index=0;league_tournament_next_human(l,NULL,&round,&index);
       const CupFixture *f=cup_tournament_fixture(&l->knockout,round,index);
@@ -222,8 +229,9 @@ static void league_ui_teams(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const uint32_t focus=competition_frontend_league_team_slot_focus(),start=focus/8u*8u;
   char title[80];snprintf(title,sizeof(title),"PARTICIPANTS    /    %u OF %u",start/8u+1u,(d->team_count+7u)/8u);
   ml_ui_panel(ui,title,ML_HEADER_SQUAD,.04f,.190f,.92f,.710f,0,verts,quads);
-  const uint32_t rows=d->team_count-start<4u ? d->team_count-start : 4u;
-  const float step=.556f/(rows ? rows : 1u),rh=step-.019f,bh=fminf(.128f,rh-.036f);
+  /* Keep the four-row grid on partial pages too: paging must not resize
+   * badges, cards or move the same slot to a different vertical rhythm. */
+  const float step=.556f/4.f,rh=step-.019f,bh=fminf(.128f,rh-.036f);
   for(uint32_t i=start;i<d->team_count && i<start+8u;i++) {
     const float x=.06f+(i-start)/4u*.452f,y=.298f+(i-start)%4u*step,name_x=.026f+bh*screen_height/screen_width;
     ml_ui_frame(ui,x,y,.425f,rh,focus==i,verts,quads);
@@ -232,7 +240,8 @@ static void league_ui_teams(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     cup_ui_text(ui,d->teams[i] ? cup_ui_team(d->teams[i]) : "SELECT TEAM",x+name_x,y+(rh-.030f)*.5f,.343f-name_x,.030f,-2,verts,quads);
     cup_ui_player_badge(ui,d->owners[i],x+.350f,y+(rh-.038f)*.5f,.060f,.038f,verts,quads);
   }
-  if(d->team_count-start<=4u)league_ui_art(ui,0,.512f,.298f,.425f,.537f,verts,quads);
+  /* Unused grid slots stay empty, exactly as on a full participant page.
+   * Do not replace the right column with decorative artwork. */
   snprintf(title,sizeof(title),"%u / %u TEAMS ASSIGNED%s",competition_draft_assigned_count(d),d->team_count,
       competition_frontend_league_teams_editing() ? "" : "    /    LINE-UP LOCKED");
   cup_ui_text(ui,title,.061f,.861f,.87f,.025f,-3,verts,quads);
@@ -408,7 +417,9 @@ static void league_news_emit(MasterLeagueRender *ui,CompetitionFrontendState sta
   else if(page==LEAGUE_PAGE_BRACKET)league_ui_bracket(ui,verts,quads);
   else league_ui_home(ui,verts,quads);
   ml_ui_rect(ui,0,.925f,1,.075f,.025f,.10f,.28f,1,-1,0,1,verts,quads);ui->draws[ui->draw_count-1u].round.radius=0.f;
-  if(hub && !general && page!=LEAGUE_PAGE_HOME) {
+  if(competition_frontend_confirmation_active()) {
+    cup_ui_helper(ui,"A","SELECT",verts,quads);cup_ui_helper(ui,"B","CANCEL",verts,quads);
+  } else if(hub && !general && page!=LEAGUE_PAGE_HOME) {
     if(page==LEAGUE_PAGE_TEAMS && competition_frontend_league_teams_editing())cup_ui_helper(ui,"A","SELECT TEAM",verts,quads);
     cup_ui_helper(ui,"B","LEAGUE HUB",verts,quads);
     if(page==LEAGUE_PAGE_TEAMS) {
@@ -432,5 +443,6 @@ static void league_news_emit(MasterLeagueRender *ui,CompetitionFrontendState sta
       cup_ui_helper(ui,"L","PREV NEWS",verts,quads);cup_ui_helper(ui,"R","NEXT NEWS",verts,quads);
     }
   }
-  cup_ui_toast(ui,0,verts,quads);
+  if(!competition_frontend_confirmation_active())cup_ui_toast(ui,0,verts,quads);
+  competition_ui_confirmation(ui,verts,quads);
 }

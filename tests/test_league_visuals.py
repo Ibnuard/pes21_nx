@@ -29,7 +29,7 @@ class LeagueVisualTests(unittest.TestCase):
                     if p.stem!='provenance'}
 
     def test_flow_stays_within_native_vertex_and_draw_budgets(self):
-        self.assertEqual(len(self.frames),54)
+        self.assertEqual(len(self.frames),59)
         for name,draws in self.frames.items():
             with self.subTest(page=name):
                 self.assertLess(len(draws),384)
@@ -50,6 +50,26 @@ class LeagueVisualTests(unittest.TestCase):
                 for left,right in zip(labels,labels[1:]):self.assertLess(left[2],right[0]-.025)
         for name in ['17-match-centre','33-knockout-bracket','49-first-leg-result']:
             self.assertEqual(sum(d['kind']==2 and 20<=d['texture']<=37 for d in self.frames[name]),5)
+
+    def test_participant_cards_keep_four_row_geometry_on_partial_pages(self):
+        for name,count in [('08-participants',8),('44-three-participants',3),
+                           ('58-nineteen-participants',8),('59-participants-last-page',3)]:
+            cards=[bounds(d) for d in self.frames[name]
+                   if d['kind']==0 and d['color']==[.93,.96,.99,1]]
+            crests=[bounds(d) for d in self.frames[name] if d['kind']==2 and d['texture']==3]
+            with self.subTest(page=name):
+                self.assertEqual(len(cards),count)
+                self.assertEqual(len(crests),count)
+                # Partial pages are the same two-column grid, without the
+                # old stadium/news illustration filling the unused column.
+                self.assertFalse(any(d['kind']==2 and d['texture']==60
+                                     for d in self.frames[name]))
+                for i,(card,crest) in enumerate(zip(cards,crests)):
+                    self.assertAlmostEqual((card[0]+1)/2,.06+(i//4)*.452,delta=.001)
+                    self.assertAlmostEqual((card[2]-card[0])/2,.425,delta=.001)
+                    self.assertAlmostEqual((card[3]-card[1])/2,.120,delta=.001)
+                    self.assertAlmostEqual((1-card[3])/2,.298+(i%4)*.139,delta=.001)
+                    self.assertAlmostEqual((crest[3]-crest[1])/2,.084,delta=.001)
 
     def test_no_floating_text_in_gaps_and_header_preserves_aspect(self):
         for name,draws in self.frames.items():

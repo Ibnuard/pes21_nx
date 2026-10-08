@@ -67,6 +67,11 @@ int league_tournament_next_human(const LeagueTournament *league,
                                   uint32_t *fixture_index,
                                   uint32_t *knockout_round,
                                   uint32_t *knockout_index);
+/* Read-only card preview, including a later day when the human has a bye.
+ * Unlike advance, never simulates COM results or changes the saved season. */
+int league_tournament_upcoming_human(const LeagueTournament *league,
+    uint32_t *fixture_index, uint32_t *matchday,
+    uint32_t *knockout_round, uint32_t *knockout_index);
 int league_tournament_record(LeagueTournament *league,
                               uint32_t fixture_index,
                               uint32_t knockout_round,

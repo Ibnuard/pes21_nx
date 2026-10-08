@@ -1,5 +1,169 @@
 # Stadium / High diagnostic candidate — 2026-09-17
 
+## v6 decoded-light coverage follow-up — 2026-10-09
+
+Hardware feedback now confirms v5 at Night/High still shows green casts on
+players, varying by field side/view direction. The user accepts the pitch
+markings/textures. The screenshots do not identify a specific draw, UV defect
+or light; the v5 compensation is therefore not a confirmed solution.
+
+An audit of the same six local material families found two concrete coverage
+gaps: 57 reflection-only fragment variants were omitted by v5's SH/skylight
+eligibility test, and the static perimeter's directional-lightmap branch was
+not corrected. v6 allows all 250 audited fragment variants (132 normalized
+main fingerprints). Twelve variants reconstruct baked RGB by decoding its
+log luminance and direction; compensation now follows that reconstruction,
+before multiplying by diffuse material colour.
+
+Cubemap compensation now follows the common decoded radiance destination
+after both the tinted linear-RGB and RGBM branches. Previously it modified the
+encoded sample before sky tint or RGBM squaring. Cubemap alpha/encoding bytes
+are untouched. This changes coverage and insertion location, not the 1.05
+excess-green limit. Direct lighting, shadow comparisons, base textures, pitch
+shaders, Day and Low retain their prior behavior. No PAK change is required.
+
+Host tests exercise every audited variant, including all 57 previously
+excluded reflection-only bodies and all 12 lightmapped bodies. They verify
+the decoded destination, unchanged encoded samples, byte preservation outside
+insertions, disabled identity and refusal of unrecognized/pitch sources.
+This establishes source coverage, not which native permutation was used on
+the user's device or whether the cast is resolved. Compare v5/v6 in the same
+Night/High celebration/replay at both ends and camera directions, then Day/
+High and Night/Low. Keep the accepted original patch PAK for that comparison.
+
+Candidate: `local-debug/review-v6-production/pes21_nx.nro`, 82,781,087 bytes,
+SHA-256 `47a1dad98e2032e49dba180889c48d50b45a30a8e11114d210b7579f43e68144`.
+Production diagnostics/PerfTrace are off. Native build and embedded-icon
+verification passed; glslang compiled all 250 variants before/after patching
+with both RHI clip-space macro values (1,000 compiles). Hardware acceptance
+is pending. Only the NRO is replaced, with v5 retained for comparison.
+
+## v5 Night/High indirect-light candidate — 2026-10-09
+
+The new candidate is `local-debug/review-v5-production/pes21_nx.nro`:
+82,776,991 bytes, SHA-256
+`216e4870d32b5bfccbd143ac7f254407030c4c32560449bd0d60d45e19eb9385`.
+Diagnostics and PerfTrace are off. Keep the currently installed PAK; this
+candidate does not create or require another PAK, and does not combine the
+older day-shadow PAK control with a lighting experiment. The active runtime,
+OBB, LooseCpk, saves and original patch PAK were not overwritten.
+
+Read-only inspection of the owned Night/High level found a skylight using
+`ARSkyLightNF`, intensity 4 and indirect-light intensity 10. Its decoded cube
+has green-dominant lower/side faces; the downward face's mean RGB is about
+(47, 90, 15). The corresponding Low level lacks that extra skylight/light
+setup. High also contains green-tinted static spotlights; the separately
+identified green pointlights explicitly have `bAffectsWorld=false` and must
+not be cited as active lights. The perimeter diffuse texture is not neon.
+These are asset observations, not proof of which draw caused the screenshot.
+
+The audited perimeter and player material variants consume reconstructed
+indirect irradiance, skylight irradiance and environment cubemaps. Static
+lighting may be baked, so changing a serialized actor's colour alone does not
+establish a rebake; Unreal's [indirect-lighting documentation](https://dev.epicgames.com/documentation/en-us/unreal-engine/4.3---indirect-lighting?application_version=4.27)
+describes the lightmap/cache distinction. No light actors, material hex colours,
+baked maps or textures are changed here.
+
+`source/night_lighting_policy.h` is a bounded compatibility compensation, not
+a confirmed root-cause repair. It allows 106 whitespace-normalized fragment
+main fingerprints from six audited perimeter/people/face/body material
+families (193 cooked variants). After reconstructing indirect/environment RGB,
+it caps only excess green to 1.05 times the stronger red/blue channel. It never
+increases green. Direct lights, red/blue channels, diffuse material/kit colours,
+alpha, depth and shadow code are left intact. Main-pitch bodies are excluded.
+The `nxNightIndirect` uniform enables this only at Night with Graphics=High;
+Day and Low are identity paths. Unknown sources pass through unchanged.
+
+Both imported and dynamically resolved GL calls reach the same hooks. Program
+locations are cached, the Night uniform is updated on a value change, and
+delete/relink invalidates the cache. No render targets, texture decoding,
+per-frame file IO or readbacks are added. The existing High compositor stays
+unchanged. A diagnostic build can emit `night-light: indirect balance` when
+a material matches; production logs are disabled.
+
+Host checks cover the quality/time gate, disabled identity, bounded colour
+math, source refusal/idempotence, exact preservation outside insertion sites,
+and uniform updates on reused programs. glslang compiled all 193 variants both
+before and after rewriting, for both clip-space macro branches (772 compiles).
+The offline harness supplies the two RHI macros absent from cooked sources;
+this verifies syntax, not the Switch driver's output or visual correctness.
+Fixtures remain optional local user-owned data, never committed shader dumps.
+
+Hardware acceptance is still pending. Back up the installed NRO, replace only
+the NRO, then compare Night/High behind the goals and in replays/celebrations,
+including skin, white/coloured kits and perimeter brightness. Check Day/High,
+Night/Low, another stadium and repeated matches/menu returns. If the cast is
+unchanged or ambient lighting becomes too dark, retain the PAK and restore
+the prior NRO; do not stack another blind tint adjustment. The earlier Low+
+High slowdown report is separate and is not declared solved by this shader.
+
+## Latest hardware feedback and control handoff — 2026-10-09
+
+The latest user screenshots still show a neon-green perimeter behind the goal
+and green casts on players. The High-only lighting report is distinct from the
+persistent post-match slowdown, which the user also reproduces on Low and can
+clear only by restarting. The v4 NRO changes buffer-pool retention and HUD
+portrait ownership, not stadium material colours or High composition.
+
+The original external PAK path is no longer present locally. The canonical
+ignored checkpoint at `local-debug/day-shadow-material-v3/install/` was
+rehashed and matches the previously supplied PAK exactly (`d7b294b4...`). The
+control below was also rehashed (`0cf11f8f...`). Neither was overwritten.
+The control cancels only the two old day material colour edits. Night instances
+have a different parent and the perimeter bitmap is not neon, so a Night fix
+is not established. No global green suppression or guessed light hex edit is
+included in v4.
+
+Test v4 NRO with the current PAK first. Then fully close the game, back up the
+installed patch outside the mounted Paks folder, and compare the control at
+`PesMobile/Content/Paks/PesMobile-Android_ETC1_P.pak` with the same NRO, Night/
+High stadium, teams and replay camera. Mount only one `_P.pak`. Check Day too;
+restore the original if Night is unchanged or Day regresses. OBB, LooseCpk and
+saves are not part of this A/B. Hardware comparison is still pending.
+
+## Night/High neon-perimeter follow-up — 2026-10-08
+
+User reports neon green around the perimeter and green casts in replays,
+only with **High**, not Low. They recall the earlier yellow-to-green shadow
+colour edit. The supplied installed PAK is 3,613,319 bytes with SHA-256
+`d7b294b455c974ef8ad72c959ada4b7878450557a99d27aa6ddb7a1226b2543f`,
+exactly the accepted 31-member v19/day-shadow-material-v3 package below.
+The different 11-member PAK in this checkout's old `dist/` is NOT the user's
+installed baseline and must not be promoted.
+
+History confirms the colour edit in `eebc27c`: the day highlight changed from
+RGB (0.875554, 1, 0) to (0.60, 1, 0.29), with an additional green/blue grade.
+The highlight was disabled in `4bc72b5`, and the post-light grade removed in
+`5c11db0`. Current production source contains neither the old `nxGrass` nor
+`nxTint` grade. The two PAK day material `shadowColor` overrides remain:
+original (0.03125, 0.023696, 0, 1), green candidate approximately
+(0.01638846, 0.02731409, 0.00792109, 1).
+
+Read-only inspection of owned native material imports shows both Night
+instances parent `M_Pitch_Default_night`, not the patched day instances. Their
+own shadow colour is still the original. `M_field_ed` uses `st029_field_bsm`;
+the pitch-side people material uses `PitchSide_st029_bsm/nrm`. None of these
+materials or textures is overridden in the supplied PAK. Decoded perimeter
+turf is RGB 40–74 / 65–107 / 0–17, not a neon-green bitmap. Host shader tests
+verify that every available Night, Low-Night, perimeter-turf and pitch-side
+people variant refuses the day hue rewrite. These findings narrow the scope;
+they do not establish the runtime source of the High-only green cast.
+
+`tools/audit_stadium_perimeter.py` reproduces this local audit without writing
+the input. `tools/build_pitch_shadow_control.py` creates a diagnostic A/B:
+
+- Output: `local-debug/night-tint-control/PesMobile-Android_ETC1_P.pak`
+- SHA-256: `0cf11f8f0f5c5f8ebf71ef5d5bdd24169b63e00c1399987ac64225b24bf110a6`
+- All 31 members retained; 29 byte-identical. Only the two day `.uexp` colour
+  tuples are restored, yielding byte-identical native material exports.
+  Textures, custom stripes/grain, Night materials and all other bytes remain.
+- V8A/Zlib package unpack/compare verified. Original supplied PAK unchanged.
+- **Not a confirmed lighting fix.** Compare original/control using the same
+  NRO, teams, stadium and Night/High camera. Keep the original backup outside
+  the mounted Paks folder, and install only one `_P.pak` at a time. If Night
+  stays identical, do not widen the recolour; investigate High lighting and
+  composition with a device trace. Check Day too before retaining the control.
+
 ## Accepted High + shadow + pitch checkpoint
 
 User confirmed the v3 material result fits the pitch and requested commit/push

@@ -211,7 +211,7 @@ static void world_ui_tests(void) {
   int continental_simulated=0;
   while(ml_next_event(c,&e) && !ml_event_is_national(e.kind)) {
     if(e.kind==ML_EVENT_CONTINENTAL && e.home && e.away) {
-      office_go(0u,0u);press(DOWN);press(A);assert(view().modal.open);press(A);
+      office_go(0u,0u);press(DOWN);press(A);assert(view().modal.open);press(LEFT);press(A);
       assert(view().page==ML_PAGE_HUB && view().feed_index==1u);
       const CupFixture *f=&c->world.continental.fixtures[e.round][e.index];
       assert(view().story.result_kind==ML_EVENT_CONTINENTAL && view().story.result_day==e.day);
@@ -424,7 +424,12 @@ int main(void) {
   assert(view().story.has_result && view().story.home_badge && view().story.away_badge && view().story.history_count);
   assert(view().story.home_goals+view().story.away_goals==4u);
   press(B);
-  press(B);assert(ml_frontend_take_action()==ML_ACTION_EXIT);
+  press(B);assert(view().modal.open && view().modal.selected==1u);
+  assert(ml_frontend_take_action()==ML_ACTION_NONE);
+  press(A);assert(!view().modal.open && view().page==ML_PAGE_HUB);
+  press(B);press(LEFT);press(B|A);
+  assert(!view().modal.open && ml_frontend_take_action()==ML_ACTION_NONE);
+  press(B);press(LEFT);press(A);assert(ml_frontend_take_action()==ML_ACTION_EXIT);
   ml_frontend_open();press(DOWN);press(A);press(A);
   assert(view().page==ML_PAGE_HUB && ml_frontend_career()->league.active_matchday==day);
   assert(view().feed_index==1u && view().story.has_result && view().story.result_kind==ML_EVENT_LEAGUE);
@@ -448,7 +453,8 @@ int main(void) {
       assert(view().story.home_goals==1u && view().story.away_goals==1u);decided=1;break;
     }
     if(next.kind>=ML_EVENT_WINDOW)press(A);
-    else {press(DOWN);press(A);assert(view().modal.open && view().page==ML_PAGE_NEXT);press(A);}
+    else {press(DOWN);press(A);assert(view().modal.open && view().page==ML_PAGE_NEXT);
+      assert(view().modal.selected==1u);press(LEFT);press(A);}
     assert(view().page==ML_PAGE_HUB);
   }
   assert(decided && ml_valid(career));
@@ -456,6 +462,23 @@ int main(void) {
   assert(view().section==3u);
   office_ui_tests();
   world_ui_tests();
+  /* Season rollover is irreversible: cancel must preserve the completed season. */
+  MasterLeague *end_career=(MasterLeague *)ml_frontend_career();
+  MlEvent end_event={0};
+  for(unsigned i=0;i<512u;i++) {
+    assert(ml_next_event(end_career,&end_event));
+    if(end_event.kind==ML_EVENT_SEASON_END)break;
+    assert(ml_simulate_event(end_career,&end_event));
+  }
+  assert(end_event.kind==ML_EVENT_SEASON_END);
+  const uint32_t old_season=end_career->season,old_day=end_career->day;
+  office_go(0u,0u);press(A);
+  assert(view().modal.open && view().modal.selected==1u);
+  assert(strstr(view().modal.title,"NEXT SEASON"));
+  press(A);assert(!view().modal.open && view().page==ML_PAGE_NEXT);
+  assert(end_career->season==old_season && end_career->day==old_day);
+  press(A);press(LEFT);press(B);
+  assert(!view().modal.open && end_career->season==old_season && end_career->day==old_day);
   puts("career UI: profile, paged hub, feed, native context, save/continue OK");
   return 0;
 }

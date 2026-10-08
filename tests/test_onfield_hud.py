@@ -26,7 +26,6 @@ static uint32_t exhibition_home_team_id=106,exhibition_away_team_id=1589,member=
 static uint64_t now=100;
 static uint64_t armGetSystemTick(void) { return now; }
 static uint64_t armTicksToNs(uint64_t ticks) { return ticks; }
-static void match_hud_queue_portrait(uint32_t side,uint32_t order,uint32_t id) {}
 static const void *registry(void) { return (void *)1; }
 static const void *orders(const void *p,uint32_t side) { return (void *)2; }
 static uint32_t get_member(const void *p,uint32_t order) { return member; }
@@ -71,11 +70,17 @@ int main(void) {
     def test_hud_portraits_use_async_read_and_overlay_upload_queue(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()
         snapshot = function(hooks, 'pes_controller_stamina_bars')
-        queue = function(hooks, 'match_hud_queue_portrait')
-        self.assertIn('live_gameplan_poll_portraits();', snapshot)
+        queue = function(hooks, 'match_hud_process_portrait_requests')
+        self.assertNotIn('live_gameplan_poll_portraits();', snapshot)
+        self.assertIn('match_hud_process_portrait_requests();', function(hooks, 'cobra_pad_apply_input'))
         self.assertIn('live_gameplan_request_portrait(portrait_id);', queue)
-        self.assertIn('exhibition_gameplan_portrait_pending[side][order]', queue)
+        self.assertIn('exhibition_gameplan_portrait_pending[side][0]', queue)
         self.assertNotIn('prematch_gameplan_load_portrait(', queue)
+        producer = function(hooks, 'pes_controller_hud_request_portrait')
+        for forbidden in ('live_portrait_cache[', 'malloc(', 'free(', 'memcpy(', 'poll_portraits('):
+            self.assertNotIn(forbidden, producer)
+        overlay = (ROOT/'source/overlay.c').read_text()
+        self.assertIn('!gameplan_portrait_texture(stamina_bars[i].portrait_id)', overlay)
 
     def test_hud_refresh_uses_live_names_not_disabled_gauges(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text()

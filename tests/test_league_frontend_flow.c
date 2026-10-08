@@ -26,6 +26,8 @@ static void press(uint32_t button) {
   competition_frontend_pad_event(0u, 0u);
 }
 
+#include "competition_confirmation_checks.inc"
+
 static void focus_hub(uint32_t target) {
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
   if (competition_frontend_league_page() != LEAGUE_PAGE_HOME) press(BUTTON_B);
@@ -102,6 +104,7 @@ int main(void) {
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
   assert(competition_frontend_league_draft()->team_count == 2u);
   static LeagueSaveState retired_preset_save;
+  check_save_confirmations(0);
   assert(league_save_read(0u, &retired_preset_save));
   retired_preset_save.league_competition_id = 22u;
   assert(league_save_write(0u, &retired_preset_save));
@@ -133,6 +136,19 @@ int main(void) {
   assert(competition_frontend_league_match_teams(&home, &away));
   assert(home && away && home != away);
   assert(!competition_frontend_league_match_is_knockout());
+  competition_frontend_league_handoff_result(1);
+  /* Match Hub B: no result means the exact fixture remains available. */
+  const LeagueTournament before_abort = *competition_frontend_league_tournament();
+  const uint32_t abort_home = home, abort_away = away;
+  competition_frontend_league_restore_after_match();
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
+  assert(!competition_frontend_league_match_active());
+  assert(!memcmp(&before_abort, competition_frontend_league_tournament(), sizeof(before_abort)));
+  assert(competition_frontend_item_enabled(2u));
+  press(BUTTON_A);
+  assert(competition_frontend_take_action() == COMPETITION_ACTION_LEAGUE_FIXTURE);
+  assert(competition_frontend_league_match_teams(&home, &away));
+  assert(home == abort_home && away == abort_away);
   competition_frontend_league_handoff_result(1);
   competition_frontend_league_match_result(2u, 0u);
   competition_frontend_league_restore_after_match();
@@ -166,10 +182,14 @@ int main(void) {
   press(BUTTON_Y);
   assert(competition_frontend_league_page() == LEAGUE_PAGE_BRACKET);
   focus_hub(3u);press(BUTTON_A);press(BUTTON_A);
+  assert(competition_frontend_confirmation_active());
+  press(BUTTON_LEFT);press(BUTTON_A);
   LeagueSaveState completed;
   assert(league_save_read(0u,&completed));
   assert(completed.tournament.phase==LEAGUE_PHASE_COMPLETE);
   press(BUTTON_B);
+  assert(competition_frontend_confirmation_active() && !competition_frontend_closing());
+  press(BUTTON_LEFT);press(BUTTON_A);
   assert(competition_frontend_closing());
 
   competition_frontend_finish_close();

@@ -110,6 +110,9 @@ int main(void) {
   focus_hub(5);press(A);capture("17-match-centre");press(Y);capture("18-fixtures-page2");press(R);capture("19-next-matchday");press(X);capture("20-scorers-empty");press(B);
   focus_hub(1);press(A);capture("21-general-settings");for(int i=0;i<5;i++)press(DOWN);capture("22-general-settings-page2");press(B);
   focus_hub(3);press(A);capture("23-save-slots");press(A);preview_ticks+=200000000ull;capture("24-saved-toast");
+  press(A);press(A);assert(competition_frontend_confirmation_active());capture("55-overwrite-cancel");
+  press(LEFT);capture("56-overwrite-selected");press(B);press(B);
+  press(B);assert(competition_frontend_confirmation_active());capture("57-leave-unsaved-league");press(B);
   enter_league();press(DOWN);press(A);capture("25-continue-saved");press(A);capture("26-loaded-hub");
   focus_hub(2);press(A);assert(competition_frontend_take_action()==COMPETITION_ACTION_LEAGUE_FIXTURE);
   uint32_t home=0,away=0;assert(competition_frontend_league_match_teams(&home,&away));
@@ -141,6 +144,8 @@ int main(void) {
   focus_hub(4);press(A);press(Y);capture("47-knockout-home-away");play_match();capture("48-return-leg-hub");
   focus_hub(4);press(A);press(Y);capture("49-first-leg-result");play_match();
   focus_hub(4);press(A);press(Y);press(L);capture("50-aggregate-result");
+  custom_league(19,1,0,1);focus_hub(0);press(A);capture("58-nineteen-participants");
+  press(Y);press(Y);capture("59-participants-last-page");
   return 0;
 }
 '''
@@ -177,10 +182,10 @@ def main():
                 shared.rasterize(json.loads(path.read_text()),assets).save(output/path.with_suffix('.png').name)
             shutil.copy2(path,output/path.name)
         shared.write_gallery(output,frames)
-        html=(output/'index.html').read_text().replace('Cup · News carousel direction','League · Season broadcast').replace('FootballNX / Design review 06','FootballNX / League redesign').replace('Cup UI review','League UI review')
+        html=(output/'index.html').read_text(encoding='utf-8').replace('Cup · News carousel direction','League · Season broadcast').replace('FootballNX / Design review 06','FootballNX / League redesign').replace('Cup UI review','League UI review')
         html=re.sub(r'<nav aria-label="Flow utama">.*?</nav>','<nav aria-label="Flow utama"><button data-frame="0">New / Continue</button><button data-frame="3">Settings</button><button data-frame="10">League Hub</button><button data-frame="7">Participants</button><button data-frame="14">Standings</button><button data-frame="16">Match Centre</button><button data-frame="27">Top Scorers</button><button data-frame="32">Knockout</button><button data-frame="35">Champions</button></nav>',html)
         html=html.replace('</main>','<p class="meta">Logo liga dan portrait pemain mengikuti fallback native karena aset runtime tidak disertakan di Git. Preview memakai data musim sintetis dan save sementara.</p></main>')
-        (output/'index.html').write_text(html)
+        (output/'index.html').write_text(html,encoding='utf-8')
         (output/'provenance.json').write_text(json.dumps({'description':'Production League broadcast geometry, synthetic seasons, temporary saves; no game runtime or device capture','source_sha256':{n:hashlib.sha256((ROOT/'source'/n).read_bytes()).hexdigest() for n in ['overlay.c','league_overlay.inc','competition_frontend.c']},'runtime_assets':'Mapped LeagueLogos and player portraits unavailable; native fallback rendering used','frames':[p.with_suffix('.png').name for p in frames]},indent=2)+'\n')
     print(output)
 
