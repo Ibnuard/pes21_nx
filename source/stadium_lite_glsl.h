@@ -46,12 +46,14 @@ static const char stadium_lite_helpers_glsl[] =
   "  return nxNeutralLight(light)*mix(0.56,1.0,visibility);\n"
   "}\n"
   "highp vec3 nxPitchGrain(highp vec3 albedo,highp float grain) {\n"
-  "  if(nxDayStadium>0.5 && albedo.g>albedo.r*1.14 && albedo.g>albedo.b*1.3)\n"
-  "    return (albedo*vec3(0.82,1.18,0.74))*mix(0.84,1.16,clamp(grain,0.0,1.0));\n"
+  "  if(nxDayStadium>0.5 && albedo.g>albedo.r*1.14 && albedo.g>albedo.b*1.3) {\n"
+  "    highp float contrast=clamp(1.0+(albedo.g-0.09)*5.0,0.85,1.16);\n"
+  "    return (albedo*vec3(0.58,1.12,0.46))*(contrast*mix(0.84,1.16,clamp(grain,0.0,1.0)));\n"
+  "  }\n"
   "  return albedo;\n"
   "}\n"
   "highp vec3 nxPitchSheen(highp vec3 light,highp float visibility) {\n"
-  "  if(nxDayStadium>0.5) return nxNeutralLight(light)*(0.06*visibility);\n"
+  "  if(nxDayStadium>0.5) return nxNeutralLight(light)*(0.025*visibility);\n"
   "  return light;\n"
   "}\n";
 #endif

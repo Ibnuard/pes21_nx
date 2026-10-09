@@ -2,6 +2,47 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Stadium Lite v6: stronger Day turf contrast (2026-10-09)
+
+**Accepted checkpoint:** the user approved the Day pitch setting and requested
+commit/push on 2026-10-09. V6 is the new Day colour reference; retain accepted
+v5 Night behaviour and perimeter assets. No numerical FPS result was supplied.
+
+The follow-up review accepts v5 Night and player/roof lighting, but requests
+a stronger green Day pitch. This candidate changes only the High Day pitch
+albedo grade and grazing sheen in `source/stadium_lite_glsl.h`.
+
+Green turf receives RGB gains `(0.58, 1.12, 0.46)` and a bounded contrast factor
+`clamp(1 + (albedo.g - 0.09) * 5, 0.85, 1.16)` before the existing detail
+modulation. The pivot uses the decoded installed grass range rather than
+uniformly brightening the pitch. The neutral additive sheen falls from 6% to
+2.5%, reducing its washed-out appearance. White paint is excluded from the
+albedo grade. No texture read, depth pass, draw call or PAK is added.
+
+The roof geometry, player receiving, neutral-light helpers and shadow budget
+are unchanged. With the Day gate off, the two edited helpers are exact identity
+functions for all tested RGB/detail combinations. Night keeps the accepted v5
+NRO behaviour and perimeter PAK. Install the candidate NRO only over v5; retain
+the complete custom pitch, perimeter, realface and commentary files. V6 colour
+is user-approved; v5 remains a rollback reference.
+
+Stadium options, FL26 imports, asset packing and native controller features
+are audited separately in [STADIUM_AND_RUNTIME_FEATURES.md](STADIUM_AND_RUNTIME_FEATURES.md).
+Those proposals are not extra features in this colour-only candidate.
+
+Candidate: `local-debug/stadium-lite-v6/release/FootballNX-Stadium-Lite-v6.zip`
+(43,644,888 bytes), SHA-256
+`542327cc5ac117d79009d0c3568ec6bc91a3abd81bf7b2812ae4bbe83e88a3d3`.
+NRO SHA-256:
+`0b694cc1ed9d50bb2c6cea26cae9c2f0fcb9d2714ad1bda6849f3c7398825189`.
+Production build/icon, 14 focused tests with 878 subtests, 2,592 GLSL compiles
+and the 682-file public-tree audit pass. The production ELF matches the source
+helpers and accepted shadow caps, with diagnostics off and the same runtime
+pair. All staged sources match the working tree or their accepted private
+catalog overrides. ZIP contents and retained asset hashes are verified.
+The user accepted the colour after this candidate was supplied; the validation
+above does not establish a numerical FPS result or acceptance of new features.
+
 ## Stadium Lite v5: apply the accepted roof to runtime players (2026-10-09)
 
 **Accepted checkpoint:** the user approved v5's Day and Night appearance on
