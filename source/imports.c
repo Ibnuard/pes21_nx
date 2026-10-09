@@ -2143,7 +2143,7 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
       debugPrintf("night-light: restored v5 baseline shader=%u installed\n", shader);
     } else {
       debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
-      debugPrintf("pitch-shadow: day slope=0.85 native-uv-color additive-highlight=off shader=%u\n", shader);
+      debugPrintf("pitch-shadow: day static-roof=0.65 grass-albedo native-light additive-highlight=off shader=%u\n", shader);
     }
     free(patched);
   } else glShaderSource(shader, count, strings, lengths);

@@ -8,6 +8,17 @@ name lookup or player asset ownership.
 
 ## v8 playback correction
 
+**Accepted reference, 2026-10-09:** the user confirms Indonesia playback is
+fixed with the v8 decoder policy, retained by the Day-roof build. Keep the
+604,036-byte `Commentary/indonesia.nxcp` with SHA-256
+`762524358c15ccab63282aa6abf1031ad4dc5746bfb0badf69e5cc64006deed8`
+as the comparison for later commentary work. An ignored copy is retained in
+`local-checkpoints/accepted-2026-10-09/`. The acceptance supersedes the pending
+playback status below for the user's tested calls, without claiming coverage
+of all speakers or match contexts. New cues must preserve speaker/source
+identity and explicitly verify plaintext versus encrypted HCA handling; never
+apply the plaintext exception to an unaudited recording or all decoder instances.
+
 The user tested v7 on Switch and heard a brief distorted sound followed by
 silence when Indonesia was called. This supersedes v7's pending playback
 status below. The source recordings and the final embedded ACB both decode

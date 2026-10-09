@@ -112,19 +112,19 @@ fixed merely because a hook or overlay already exists.
   compensation for the near touchline. This is not a pixel-identical Stadium pose;
   far/near framing and tracking need hardware acceptance. The selected allowed
   preset survives rematch bootstrap.
-- The user confirms stable Day 60 FPS with V11, but rejects its shadow shape.
-  V12 retains roof always OFF/no toggle and zero Day CSM cascades, replacing
-  the forced Night board with each time's own native low-quality ShadowBoard.
-  Real Day lighting and custom pitch remain unchanged. Native CVar originals
-  are restored for Night/Top Menu. Shadow appearance and performance of this
-  revised combination remain unverified; no Night-only fallback is forced.
+- The user confirmed stable Day 60 FPS with V11, but rejected its shadow shape.
+  The 2026-10-09 candidate restores a static roof silhouette using the pitch's
+  native UV mask and neutral attenuation of the installed grass. Dynamic roof
+  casters stay filtered, Day CSM cascades stay at zero and players retain their
+  native low-quality ShadowBoard. Night/Top Menu restore owned native CVar
+  values. The new combination still needs device appearance/FPS verification.
 - The user narrowed frame glitching to **Game Speed** changes. V7 removes the
   wrapper's immediate and per-frame simulation-FPS forcing, leaving the
   native MatchMain timing handoff. Before-kickoff, resume and all five speeds
   need hardware validation; not every General Settings action is implicated.
 - V7 synchronizes both tmpdb's timezone rule and the renderer InitParam copy,
   and retains Hub COM/rules across bootstrap. Night/Legend -> Top Menu -> new
-  match needs verification. See `STADIUM_ROOF_CAMERA.md` for the current V12
+  match needs verification. See `STADIUM_ROOF_CAMERA.md` for the current static
   shadow policy, historical evidence and hardware test steps.
 - Radar now starts `OFF` in each exhibition match, matching the mobile screen's
   actual initial state. It can still be enabled from General Settings.

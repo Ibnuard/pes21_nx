@@ -1,6 +1,7 @@
 #ifndef PES_PITCH_SHADOW_POLICY_H
 #define PES_PITCH_SHADOW_POLICY_H
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +24,45 @@ static int pitch_day_shadow_body(const char *body) {
   for (unsigned i=0; i<sizeof(allowed)/sizeof(allowed[0]); ++i)
     if (hash == allowed[i]) return 1;
   return 0;
+}
+
+// Called only for an allowlisted Day body. Keep the unshadowed albedo from
+// the installed grass, including its native lightColor, and let the authored
+// static roof mask attenuate it. A separate additive shadowColor changes the
+// hue most strongly on dark mowing bands and can wash out the grass detail.
+// This adds no shadow render pass; Day CSM/player-shadow policy is separate.
+static char *pitch_roof_albedo_source(const char *source) {
+  const char *body = strstr(source, "void main()");
+  const char *key = "*Material_VectorExpressions[3].xyz)";
+  const char *at = body ? strstr(body, key) : NULL;
+  if (!at || strstr(at+strlen(key), key)) return NULL;
+  const char *line = at;
+  while (line > body && line[-1] != '\n') --line;
+  unsigned output, base, mask;
+  if (sscanf(line, " v%u.xyz = clamp(((v%u+(Material_VectorExpressions[1].xyz*v%u.xxx))",
+             &output, &base, &mask) != 3 || output > 999 || base > 999 || mask > 999)
+    return NULL;
+  char expected[512], replacement[256];
+  int old_len = snprintf(expected, sizeof(expected),
+      "v%u.xyz = clamp(((v%u+(Material_VectorExpressions[1].xyz*v%u.xxx))+"
+      "((vec3(1.000000e+00,1.000000e+00,1.000000e+00)+(-v%u.xxx))*"
+      "Material_VectorExpressions[3].xyz)),vec3(0.000000e+00,0.000000e+00,"
+      "0.000000e+00),vec3(1.000000e+00,1.000000e+00,1.000000e+00));",
+      output, base, mask, mask);
+  int new_len = snprintf(replacement, sizeof(replacement),
+      "v%u.xyz = (clamp((v%u+Material_VectorExpressions[1].xyz),vec3(0.0),"
+      "vec3(1.0))*mix(0.65,1.0,clamp(v%u.x,0.0,1.0)));", output, base, mask);
+  if (old_len <= 0 || (size_t)old_len >= sizeof(expected) || new_len <= 0 ||
+      (size_t)new_len >= sizeof(replacement)) return NULL;
+  at = strstr(body, expected);
+  if (!at || strstr(at+old_len, expected)) return NULL;
+  const size_t prefix = (size_t)(at-source), length = strlen(source);
+  char *result = (char *)malloc(length-(size_t)old_len+(size_t)new_len+1);
+  if (!result) return NULL;
+  memcpy(result, source, prefix);
+  memcpy(result+prefix, replacement, (size_t)new_len);
+  strcpy(result+prefix+(size_t)new_len, at+old_len);
+  return result;
 }
 
 static char *pitch_shadow_source(const char *source) {
@@ -74,10 +114,11 @@ static char *pitch_shadow_source(const char *source) {
   // Equal-length tokens preserve every other byte in the shader.
   memcpy(result+tint_offset, new_tint, strlen(new_tint));
 
-  // The previous post-light green/blue grass grade is intentionally removed:
-  // native pitch UV colour now passes through unchanged. Keep the independent
-  // roof-mask and additive-highlight fixes above.
-  return result;
+  // Apply roof shading before native lighting, with one scalar for all RGB
+  // channels. Refuse the entire edit if this audited statement is missing.
+  char *albedo = pitch_roof_albedo_source(result);
+  free(result);
+  return albedo;
 }
 
 // Called only after the day allowlist accepted the original shader.

@@ -69,7 +69,38 @@ class PitchShadowTests(unittest.TestCase):
                     expected = body.replace(old_tint, new_tint)
                     if is_v1:
                         expected = expected.replace(key+b';', key+b' * 0.85;')
+                    color = re.compile(rb'(v\d+)\.xyz = clamp\(\(\((v\d+)\+\(Material_VectorExpressions\[1\]\.xyz\*(v\d+)\.xxx\)\).*?;')
+                    matches = list(color.finditer(expected))
+                    self.assertEqual(len(matches), 1)
+                    dest, base, mask = matches[0].groups()
+                    albedo = (dest+b'.xyz = (clamp(('+base+b'+Material_VectorExpressions[1].xyz),vec3(0.0),'
+                              b'vec3(1.0))*mix(0.65,1.0,clamp('+mask+b'.x,0.0,1.0)));')
+                    expected = color.sub(lambda m: albedo, expected)
                     self.assertEqual(restored, expected)
+                    # Evaluate the emitted expression against many RGB inputs.
+                    # Shadow must reduce all channels equally, leave sunlight
+                    # intact, and never add the old fixed green shadow colour.
+                    import numpy as np
+                    expression = albedo.split(b' = ', 1)[1].rstrip(b';').decode()
+                    expression = expression.replace((base+b'').decode(), 'grass')
+                    expression = expression.replace('Material_VectorExpressions[1].xyz', 'light')
+                    expression = expression.replace((mask+b'.x').decode(), 'coverage')
+                    def evaluate(grass, light, coverage):
+                        return eval(expression, {'__builtins__': {}}, dict(
+                            grass=np.array(grass), light=np.array(light), coverage=coverage,
+                            vec3=lambda x: np.full(3, x), clamp=np.clip,
+                            mix=lambda a,b,t: a*(1-t)+b*t))
+                    for grass in ((.025,.075,.011),(.08,.14,.034),(.8,.8,.8),(0,0,0),(2,.3,.7)):
+                        light=(.005208,.002781,0.)
+                        sun=evaluate(grass,light,1.)
+                        np.testing.assert_allclose(sun,np.clip(np.array(grass)+light,0,1),atol=1e-12)
+                        previous=evaluate(grass,light,0.)
+                        np.testing.assert_allclose(previous,sun*.65,atol=1e-12)
+                        for coverage in (.1,.3,.6,1.):
+                            shade=evaluate(grass,light,coverage)
+                            self.assertTrue(np.all(shade>=previous) and np.all(shade<=sun))
+                            np.testing.assert_allclose(np.cross(sun,shade),0.,atol=1e-12)
+                            previous=shade
                     self.assertIsNone(transform(result))
                     self.assertIsNone(transform(body+b'//unknown variant'))
                     changed += 1

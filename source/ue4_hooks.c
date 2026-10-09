@@ -160,8 +160,10 @@ static void pes_stadium_shadow_filter(void *packet, const void *bounds,
   if (proxy) memcpy(&vtable, proxy, sizeof(vtable));
   const uint32_t tracked = vtable == stadium_roof_proxy_vtable &&
       stadium_roof_contains(&stadium_roof_proxies, (uintptr_t)proxy);
-  const uint32_t disabled = tracked && pes_controller_stadium_is_day() &&
-                           !pes_controller_roof_shadow_enabled();
+  // The visible Day roof silhouette comes from the static pitch mask. Keep
+  // native dynamic roof subjects filtered independently of that mask, so
+  // enabling its colour contribution cannot reactivate caster work.
+  const uint32_t disabled = tracked && pes_controller_stadium_is_day();
 #ifdef PERF_TRACE
   if (tracked) perf_match_roof(disabled);
 #endif
@@ -5086,8 +5088,9 @@ uint32_t pes_controller_night_lighting_balance_enabled(void) {
 }
 
 uint32_t pes_controller_roof_shadow_enabled(void) {
-  // Production policy for now: no UI/config path may turn roof shadows on.
-  return 0u;
+  // Day pitch uses its authored static roof mask. The zero-cascade budget
+  // and lightweight native player ShadowBoard remain independent.
+  return 1u;
 }
 
 #ifdef PERF_TRACE

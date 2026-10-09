@@ -2,6 +2,80 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Static roof mask with grass-matched shade — 2026-10-09
+
+The user accepted this build as a checkpoint on 2026-10-09. Device screenshots
+confirm Day shade on the pitch, with follow-up requests for a firmer edge,
+greener natural grass and matching shade on player bodies. The Night perimeter
+still appears neon green and needs a separate correction. This is not blanket
+acceptance of stadium lighting or a measured FPS result. The exact NRO ZIP is
+retained in the ignored asset-only `local-checkpoints/accepted-2026-10-09/`.
+
+The user requests Day roof shadows again and explicitly keeps the lightweight
+player-shadow route: the previous dynamic Day player shadows affected FPS.
+This supersedes the historical permanent-roof-OFF policy below. The new
+candidate does **not** restore directional cascades or dynamic player shadows.
+
+The owned native Day pitch material has a 256×256 `PF_G8` texture named
+`shadowmap`. Its authored silhouette is sampled through the second mesh UV set:
+the ES3 vertex shader packs UV0/UV1 into `in_TEXCOORD0.xy/zw`. Read-only export
+of `st029_pitch_2` confirms the left/right pitch sections and their UV1 layout.
+The mask is an existing material input; enabling its sample alone previously
+changed glow/colour and did not restore the separate CSM roof shadow.
+
+This candidate instead uses that static mask directly to shade the pitch. The
+original material adds different fixed RGB colours in light and shade. Those
+additions can shift a custom dark grass palette and weaken its grain. The
+replacement preserves the exact unshadowed albedo (`grass + lightColor`,
+clamped as before), then multiplies every channel by `0.65 + 0.35 * mask`.
+Thus a fully shaded pixel retains 65% of its linear albedo, with the same RGB
+ratios; the sunlit result stays unchanged. Native bilinear/mip sampling supplies
+the transition. White markings receive neutral shade, and the accepted pitch
+textures, stripes, lines and UVs are not edited. The additive grazing highlight
+remains disabled. The old PAK `shadowColor` overrides become unused in these
+rewritten Day bodies; no replacement PAK is needed.
+
+The edit is restricted to the existing 18 normalized Day-main fingerprints
+(20 owned compiled variants). Unknown, Night, perimeter and player materials
+pass through this Day policy. The roof accessor enables the mask; the separate
+Day budget still caps `r.Shadow.CSM.MaxCascades` at zero, and the exact native
+roof-caster filter stays enabled independently of the static mask. Existing native
+`AShadowBoardActorDay` player shadows and Night v8 lighting are retained. No new
+depth pass, render target, caster traversal or texture readback is introduced.
+One static mask fetch is active again; hardware FPS is not established here.
+This is a static pitch silhouette, not restored dynamic roof shadowing on
+players, stands or other scene geometry.
+
+Verification:
+
+- 15 focused tests and 250 Night shader subtests pass. Tests check preserved
+  sunlit colour, monotonic neutral shade, white/black/extreme albedo inputs,
+  exact source preservation outside allowed edits, unknown-source rejection,
+  program uniform handling, and Day/Night CVar ownership/restoration.
+- All 20 native/candidate Day variants compile with both clip-space macro
+  values using [Khronos glslang](https://github.com/KhronosGroup/glslang/releases/tag/16.6.0)
+  (80 compiles). The harness supplies `HLSLCC_DX11ClipSpace` and
+  `INTERFACE_LOCATION`; it does not establish Switch-driver appearance.
+- Production devkitPro build and embedded icon checks pass. The compiled ELF
+  independently retains the 512/512/0 shadow-limit table and the paired
+  full-loose dataset ID `e861c583ec78e9ae`. Diagnostics and PerfTrace are off.
+- The local material comparison uses the accepted grass and native mesh UV1
+  mask. It is an illustration at a common exposure, not a Switch screenshot
+  or full reproduction of scene lighting, grass detail shading and composition.
+
+Candidate: `local-debug/day-roof-grass-v1/build/pes21_nx.nro`. Keep the accepted
+31-member custom pitch PAK (`d7b294b4...`), current data and commentary; replace
+only the NRO with the game fully closed. Yamal/Raphinha asset candidates remain
+independent. Roll back to the v8 NRO for comparison. Active `dist/`, saves,
+OBBs, CPKs and PAKs are not modified. Switch verification remains pending for
+Day/High shade, both field halves and cameras, Night/Low regression and FPS.
+
+The NRO is 82,764,703 bytes, SHA-256
+`ee7ecb8e8e18311427da8c908a9535f0e48cdadc74ec93bffd6972e2a0e1eabc`.
+The local `release/FootballNX-DayRoof-Grass-v1.zip` includes the NRO, Indonesian
+install/rollback instructions, checksums and the labelled material comparison.
+ZIP SHA-256: `f0cd5c992490e81c7caf5fb5a714ac3d3f98daae26f272e11860bb571fba3450`.
+
 ## Native Day pitch colour restoration — 2026-09-20
 
 Hardware feedback rejected the added green/blue grass grade. The Day shader

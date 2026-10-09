@@ -12,6 +12,7 @@ Subsystem notes and historical implementation audits live here.
 - [PESDB runtime rosters](PESDB_RUNTIME_ROSTERS.md)
 - [PES21 player recreation analysis](PES21ReCreateOrderPlayerAnlisys.md)
 - [PES21 PC face transfer audit](PES21_PC_FACE_TRANSFER_AUDIT.md)
+- [Barcelona realface conversion and automation plan](REALFACE_BARCA_PLAN.md)
 - [eFootball10 player conversion](EFOOTBALL10_PLAYER_CONVERSION.md)
 - [Inter Miami original-ID experiment](INTER_MIAMI_ORIGINAL_ID_EXPERIMENT.md)
 
@@ -26,6 +27,7 @@ Subsystem notes and historical implementation audits live here.
 ## Runtime, controls, and UI
 
 - [Competition modes plan: Match, Cup, League, and Master League](COMPETITION_MODES_PLAN.md)
+- [MINI-GAME: Football Triple Triad and Mini Soccer concepts](MINI-GAME.md)
 - [NRO launcher icon and NSP forwarder notes](NRO_ICON.md)
 - [Loose CPK canary](LOOSE_CPK_CANARY.md)
 - [Full loose CPK runtime](LOOSE_CPK_FULL.md)

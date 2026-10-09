@@ -598,3 +598,148 @@ proportions, hair and skin tones), then a team, then larger batches. Measure
 Switch loading, memory, frame time and package size before a full roster.
 Automation can cover all *eligible available source faces*, not fabricate
 missing licensed assets or guarantee zero clipping without visual checks.
+
+### V19C full native reference and eyelid-relative eye correction (2026-10-09)
+
+**Device acceptance, 2026-10-09:** the user confirms Yamal V19C and Raphinha V1
+are fixed. Their exact PAK hashes below are the reference for subsequent
+realface work. Preserve Yamal's current-build skin4 override and Raphinha's
+native skin2, native-eye atlas and isolated gaze profile. The approval covers
+the user's tested appearances; it does not establish full-squad performance
+or every animation/kit combination. Earlier pending-device notes below describe
+the state before that report. A later changed asset needs its own comparison.
+
+The accepted combined package is retained locally in
+`local-checkpoints/accepted-2026-10-09/` together with the accepted Day-roof
+NRO package and Indonesia audio delta. This is an asset-only checkpoint, not
+a complete runtime or a replacement for newer roster data. Public recipes
+must continue to validate BaseId plus fingerprint and use per-player profiles;
+the two accepted eye corrections are not universal presets.
+
+The new candidate starts with accepted V18 and loads both the original native
+face and a complete native body (`001a01p`) before fitting. UE Viewer glTF
+positions were checked against the original 688-vertex face position buffer:
+the X/Z/Y-to-native conversion agrees within 0.000011 cm. The body reference
+has 1,167 vertices, 1,608 triangles and the same 29-bone hierarchy. Its exact
+correspondence to Barcelona's runtime collar variant has not been established.
+
+The lower face/chest follows nearest native triangles with barycentric skin
+weight interpolation and inverse weighted native/cooked bind compensation.
+Fitting affects 249 lower vertices, with maximum movement 0.72047 cm; 209
+vertices change skin weights. The upper face stays protected, and the native
+reference meshes/armatures are excluded from FBX and PAK output. This retains
+the converted FL26 geometry instead of replacing the head with a native donor.
+
+Two intermediate eye previews were rejected by the user: copying the accepted
+eye's world direction made the image-left pupil look farther inward; matching
+only horizontal aperture position still looked downward. V19C samples visible
+eye openings at pupil height/column by ray casting against the converted skin.
+It transfers the accepted image-right pupil's normalized aperture offset in
+both X and Z. The image-left pupil moves outward 0.07629 cm and upward
+0.13403 cm from V18, via a 9.4603-degree eyeball rotation. Its UVs are unchanged.
+All 193 vertices of the accepted eye are protected, including normals/weights.
+This is a per-profile eye correction, not a universal gaze default.
+
+FBX round-trip checks preserve topology, UVs and materials. Synthetic head,
+neck and shoulder poses reduce mean fitted-surface error from 0.4115 to 0.3276
+cm at rest and 0.8401 to 0.3417 cm in the celebration pose. These are synthetic
+bone rotations against an interpolated surface target, not native animation
+captures or exhaustive cloth-intersection tests. Device verification remains
+required for gaze, running, celebrations, kit variants, colour and performance.
+
+UE4.22 import completes with its existing FBX bind-pose warnings; ETC1 cook
+reports zero errors/warnings. The cooked 29-bone reference transforms agree
+with the established contract within 0.000653 per component. Only the face
+mesh pair changes relative to V18; all hair, eye/face texture and material
+assets are byte-identical. All 20 PAK entries pass integrity and extracted
+byte-hash comparison, with no shared skeleton/body reference packages.
+
+Skin4 is reapplied to the current `e861c583ec78e9ae` dataset. Registry identity
+plus the exact Yamal appearance-row hash ties it to the previous verified
+override despite the registry's older overall build. All 2,840 CPK members and
+TOC identities are compared: only appearance byte 473977 changes. Every other
+manifest entry remains identical; the source full loose runtime is verified.
+The NRO, dummy OBB, other CPKs and saves are not part of this partial update.
+
+Candidate hashes:
+
+- Detached face PAK, 741945 bytes:
+  `0723249555bf295b8c75c72af517268ffb8506c3c6b853ea182b5376a254cd5f`
+- Current-build skin4 dt200:
+  `92c17a7995f6ba2d326c2a90670034bab3ba17891f66d5db985c10ec1df00964`
+
+The ignored candidate is under `local-debug/realface-yamal-v19/release/` and is
+not promoted to the active runtime. Keep V18 and the user's current dt200 plus
+manifest for rollback; do not restore the old checkpoint's dt200 over newer
+rosters. `tools/realface_pipeline.py` provides prepared-input fitting and
+validation with identity checks, source-missing skips and hash-verified resume.
+End-to-end raw FL26 conversion and whole-Barcelona coverage are still pending.
+
+### Raphinha V1: own native eyes and isolated gaze correction (2026-10-09)
+
+The user selects Raphinha as the second Barcelona pilot. BaseId/native ID and
+face owner are `110644`, fingerprint `a127e8032d5e1bdff42a`. Current-runtime and
+FL26 database records independently agree on his name, nationality and position.
+His own face source is available in the local FL26 inputs. Native skin2 stays;
+Yamal's skin4 override is not applied to Raphinha or any donor slot.
+
+The FL26 face includes both the main head and the separate socket/skin mesh.
+Converted face skin has 2,373 vertices and 4,420 triangles; hair has 10,794
+vertices and 12,078 triangles. The separate source hair skin placeholder is
+collapsed to a sub-millimetre region and is excluded. Eye-occlusion, eyelashes
+and oral geometry are not enabled by this static-face pilot. It does not claim
+native facial-expression animation.
+
+Native face and complete `001a01p` body guide the neck fit. The per-player
+movement budget is 1.15 cm; 218 lower vertices move at most 1.13248 cm and 170
+change weights. Upper-head geometry stays protected. Synthetic mean target
+surface error changes from 0.18305 to 0.08464 cm at rest and 0.64309 to 0.09160
+cm in the celebration pose; this does not establish dynamic kit clearance.
+
+After user feedback, generic PC eyes are replaced by Raphinha's original
+PES21 eye geometry: 102 vertices, 80 triangles, head weights, native normals
+and UVs. Three UV-split islands per side form one eye, so two connected
+components and a (.5,.5) iris landmark are not valid assumptions for this atlas.
+The native selection uses explicit UV and native-space bounds plus expected
+counts and a check that both eyes belong to `sk_head`.
+
+The user accepts the image-left eye but finds the image-right gaze too far
+outward. Only the native-negative-X eye receives a -5-degree native-Z yaw
+around its audited globe pivot. This rigid rotation moves the pupil inward
+approximately 0.153 cm without scaling the eye or changing vertex heights.
+All 51 image-left vertices remain protected; skin meshes also remain fixed
+relative to the fitted candidate. FBX round-trip drift for protected positions
+is below 0.000017 cm and normal-vector drift below 0.000237. Eye UVs are exact.
+The optional yaw requires an explicit side/pivot/count and rejects angles over
+12 degrees; it is not a global preset or a new correction to Yamal V19C.
+
+UE4.22 face import reports the known bind-pose warnings; ETC1 cook completes
+with zero errors/warnings. Both face and hair retain the 29-bone contract,
+with maximum face transform-component drift 0.001553. An independent UE Viewer
+export reconstructs the cooked eye positions within 0.000052 cm of the final
+FBX, with unchanged UVs. Cooked skin's maximum nearest-position difference is
+0.01589 cm, including quantized skin weights. The eye export has 112 vertices
+after corner splitting but still exactly 80 triangles.
+
+The original native eye texture is cloned under `110644_eyes_tablet` using
+same-length package names and regenerated name hashes. Original `.uexp` and
+`.ubulk` stay byte-identical; an independent decoded RGBA comparison also
+matches exactly. This avoids recompressing the native atlas. Cooked face RGB
+is verified nonblack despite the FL26 packed alpha channel; hair keeps alpha.
+
+The detached PAK contains only the two meshes, three textures, eye material
+instance and marker (16 files). Original `face_110644` and shared hair material
+resolve from the base runtime; editor placeholders, body and skeleton are not
+packaged. All entries pass UnrealPak integrity and extracted-byte hash checks.
+
+- Raphinha V1 PAK, 374759 bytes:
+  `78fa514f9a6df19f6dd9cbf47fd661a5a6d87b730423c5892f9ddab6965c077b`
+- Combined Yamal V19C + Raphinha V1 test ZIP, 5353621 bytes:
+  `7176d6353bc3ad4253587272e131fec8e44cadc498dad4fe427801d737a74591`
+
+The ignored release directory is `local-debug/realface-raphinha-v1/release/`.
+Its four-file update retains the exact Yamal V19C PAK and current-build skin4
+dt200/manifest from the previous package. No active runtime files are replaced.
+Gaze, neck/kit clipping, colour, animation and two-player performance still
+require Switch testing. Public scripts cover fitting, native-eye transfer and
+UE preparation; the raw-source-to-full-squad pipeline remains incomplete.

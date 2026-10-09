@@ -13,8 +13,8 @@ typedef struct {
 } StadiumShadowLimit;
 
 // Resolution-only V7 still submits about 145 depth draws/frame in Day High.
-// Roof shadows are disabled. Do not build the directional cascade depth
-// passes; players use the independent native low-quality ShadowBoard path.
+// Roof shading uses the static pitch mask. Do not build directional cascade
+// depth passes; players use the independent native low-quality ShadowBoard.
 static const StadiumShadowLimit stadium_shadow_limits[] = {
   {"r.Shadow.MaxCSMResolution", 512},
   {"r.Shadow.MaxResolution", 512},

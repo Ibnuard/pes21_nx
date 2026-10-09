@@ -16,21 +16,31 @@ class RoofCasterTests(unittest.TestCase):
             self.skipTest('gcc unavailable')
         build_and_run(cc, '#include <assert.h>\n' + POLICY + text)
 
-    def test_roof_is_always_off_without_a_toggle(self):
+    def test_static_roof_is_enabled_without_reactivating_dynamic_cascades(self):
         self.run_c(function(SOURCE, 'pes_controller_roof_shadow_enabled') + r'''
 int main(void) {
-  assert(!pes_controller_roof_shadow_enabled());
   for (unsigned i=0;i<100;++i) {
-    assert(pes_controller_roof_shadow_enabled()==0);
+    assert(pes_controller_roof_shadow_enabled()==1);
   }
+}
+''')
+        self.run_c((ROOT/'source/stadium_shadow_budget.h').read_text() + r'''
+int main(void) {
+  unsigned found=0;
+  for(unsigned i=0;i<STADIUM_SHADOW_LIMIT_COUNT;i++) {
+    if(!strcmp(stadium_shadow_limits[i].name,"r.Shadow.CSM.MaxCascades")) {
+      assert(stadium_shadow_limits[i].cap==0); ++found;
+    }
+  }
+  assert(found==1);
 }
 ''')
         self.assertNotIn('uint32_t stadium_roof_shadow_enabled', SOURCE)
         overlay = (ROOT / 'source/overlay.c').read_text()
         self.assertNotIn('"ENABLE ROOF SHADOW"', overlay)
         self.assertNotIn('pes_controller_roof_shadow_enabled() ? "ON" : "OFF"', overlay)
-        self.assertIn('const uint32_t rows = 2u;',
-                      function(SOURCE, 'pes_controller_2p_prematch_hub_pad_event'))
+        self.assertNotIn('roof_shadow',
+                         function(SOURCE, 'pes_controller_2p_prematch_hub_pad_event'))
 
     def test_exact_asset_and_bounded_registry(self):
         self.run_c(r'''
@@ -62,7 +72,7 @@ int main(void) {
 }
 ''')
 
-    def test_live_day_only_filter_preserves_other_objects_and_reused_addresses(self):
+    def test_static_mask_does_not_reactivate_casters_and_other_objects_stay_native(self):
         self.run_c(r'''
 static StadiumRoofProxies stadium_roof_proxies;
 static uintptr_t stadium_roof_proxy_vtable=42;
@@ -91,7 +101,7 @@ int main(void) {
   for (day=0;day<2;++day) for (roof=0;roof<2;++roof) {
     calls=0;
     pes_stadium_shadow_filter((void*)1,(void*)2,0x8765432100000007ULL,(void*)3,&proxy);
-    assert(calls==(!day || roof));
+    assert(calls==!day); // static mask state never enables dynamic roof work
     calls=0;
     pes_stadium_shadow_filter((void*)1,(void*)2,0x8765432100000007ULL,(void*)3,&other);
     assert(calls==1); // even another static mesh stays native
