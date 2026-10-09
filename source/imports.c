@@ -58,8 +58,7 @@
 #include "overlay.h"
 #include "perf_trace.h"
 #include "perf_match.h"
-#include "pitch_shadow_policy.h"
-#include "night_lighting_policy.h"
+#include "stadium_lighting_policy.h"
 #include "ue4_hooks.h"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
@@ -363,8 +362,8 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
 }
 static __thread struct {
   GLuint program;
-  GLint location, night_location;
-  int valid, night_value;
+  GLint location, night_location, day_location;
+  int valid, night_value, day_value;
 } roof_uniforms[128];
 static void glUseProgram_c(GLuint p) {
   const int slot = mc_current_slot();
@@ -379,7 +378,9 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].program = p;
       roof_uniforms[index].location = glGetUniformLocation(p, "nxRoofDisabled");
       roof_uniforms[index].night_location = glGetUniformLocation(p, "nxNightIndirect");
+      roof_uniforms[index].day_location = glGetUniformLocation(p, "nxDayStadium");
       roof_uniforms[index].night_value = -1;
+      roof_uniforms[index].day_value = -1;
       roof_uniforms[index].valid = 1;
     }
     if (roof_uniforms[index].location >= 0)
@@ -390,6 +391,13 @@ static void glUseProgram_c(GLuint p) {
       if (enabled != roof_uniforms[index].night_value) {
         glUniform1f(roof_uniforms[index].night_location, (GLfloat)enabled);
         roof_uniforms[index].night_value = enabled;
+      }
+    }
+    if (roof_uniforms[index].day_location >= 0) {
+      const int enabled = pes_controller_day_stadium_lite_enabled();
+      if (enabled != roof_uniforms[index].day_value) {
+        glUniform1f(roof_uniforms[index].day_location, (GLfloat)enabled);
+        roof_uniforms[index].day_value = enabled;
       }
     }
   }
@@ -2114,9 +2122,9 @@ static void glSamplerParameteri_diag(GLuint sampler, GLenum pname, GLint param) 
 static void glShaderSource_pitch(GLuint shader, GLsizei count,
                                   const GLchar *const *strings,
                                   const GLint *lengths) {
-  // Fail open on segmented or unsupported input; no blanket shader rewrite.
+  // Audited Day roof/grain and Night lighting rewrites; unknown materials
+  // and the accepted Night pitch remain byte-exact.
   char *patched = NULL;
-  int night_lighting = 0;
   if (count == 1 && strings && strings[0]) {
     const size_t n = lengths && lengths[0] >= 0 ? (size_t)lengths[0] : strlen(strings[0]);
     if (n && n < 2u*1024u*1024u) {
@@ -2124,27 +2132,17 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
       if (copy) {
         memcpy(copy, strings[0], n); copy[n] = 0;
         if (strlen(copy) == n) {
-          patched = pitch_shadow_source(copy);
-          if (!patched) {
-            patched = night_lighting_source(copy);
-            night_lighting = patched != NULL;
-          }
+          patched = stadium_lighting_source(copy);
+          if (!patched) patched = night_lighting_source(copy);
         }
         free(copy);
       }
     }
   }
   if (patched) {
-    char *roof = night_lighting ? NULL : pitch_roof_source(patched);
-    if (roof) { free(patched); patched = roof; }
     const GLchar *source = patched;
     glShaderSource(shader, 1, &source, NULL);
-    if (night_lighting) {
-      debugPrintf("night-light: restored v5 baseline shader=%u installed\n", shader);
-    } else {
-      debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
-      debugPrintf("pitch-shadow: day static-roof=0.65 grass-albedo native-light additive-highlight=off shader=%u\n", shader);
-    }
+    debugPrintf("stadium-lite-v5: scoped lighting shader=%u installed\n", shader);
     free(patched);
   } else glShaderSource(shader, count, strings, lengths);
 }
@@ -2675,6 +2673,7 @@ static EGLBoolean eglMakeCurrent_dedup(EGLDisplay dpy, EGLSurface draw,
     if (ctx != EGL_NO_CONTEXT)
       gl_log_context_once(ctx);
     gl_state_cache_reset(); // context/surface changed -> GL state cache is stale
+    memset(roof_uniforms, 0, sizeof(roof_uniforms));
     if (slot < 0) slot = (freeslot >= 0) ? freeslot : 0;
     g_mc[slot].key = key; g_mc[slot].dpy = dpy;
     g_mc[slot].draw = real_draw; g_mc[slot].read = real_read;
@@ -2686,6 +2685,7 @@ static EGLBoolean eglMakeCurrent_dedup(EGLDisplay dpy, EGLSurface draw,
 }
 
 static EGLBoolean eglDestroyContext_cache(EGLDisplay dpy, EGLContext ctx) {
+  memset(roof_uniforms, 0, sizeof(roof_uniforms));
   for (int i = 0; i < MC_SLOTS; i++) {
     if (g_mc[i].ctx == ctx)
       memset(&g_mc[i], 0, sizeof(g_mc[i]));

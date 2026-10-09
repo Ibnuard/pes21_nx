@@ -52,29 +52,23 @@ static void run(uint32_t mode) {
 int main(void) {
   run(2); // Night must never lower its native settings.
   for(unsigned i=0;i<3;i++) assert(vars[i].writes==0);
-  run(1);
-  assert(vars[0].value==512 && vars[1].value==512 && vars[2].value==0);
-  for(unsigned i=0;i<3;i++) assert(vars[i].writes==1);
-  run(1); run(1); // no repeated setter calls during gameplay
-  for(unsigned i=0;i<3;i++) assert(vars[i].writes==1);
-  run(2); // same-session Night restores owned original values
-  assert(vars[0].value==2048 && vars[1].value==2048 && vars[2].value==4);
-  for(unsigned i=0;i<3;i++) assert(vars[i].writes==2);
-  run(1);
-  assert(vars[2].value==0); // actual depth work disabled, not just hidden
-  run(1); assert(vars[2].value==0);
-  run(2); assert(vars[2].value==4); // owned baseline must not become zero/one
-  vars[0].value=256; vars[2].value=0;
-  run(1); // Standard/low values never raised; no disabled cascade enabled
-  assert(vars[0].value==256 && vars[2].value==0 && vars[1].value==512);
-  vars[1].value=128; // external quality change while capped
-  run(0); assert(vars[1].value==128);
+  run(1);run(1);
+  assert(vars[0].value==2048 && vars[1].value==2048 && vars[2].value==0);
+  assert(vars[0].writes==0 && vars[1].writes==0 && vars[2].writes==1);
+  run(2); // restore native Night cascades
+  assert(vars[2].value==4 && vars[2].writes==2);
+  run(1);run(0); // returning to frontdoor also releases our override
+  assert(vars[2].value==4 && vars[2].writes==4);
+  // Preserve native Low/Standard, including an intentionally disabled cascade.
+  vars[0].value=256; vars[1].value=128; vars[2].value=0;
+  for(unsigned i=0;i<3;i++)vars[i].writes=0;
+  run(1);run(2);run(0);
+  assert(vars[0].value==256 && vars[1].value==128 && vars[2].value==0);
+  for(unsigned i=0;i<3;i++)assert(vars[i].writes==0);
   for(unsigned i=0;i<3;i++) {vars[i].value=2048;vars[i].vtable=10;}
-  run(1); // wrong/native reference type is not called as an int variable
-  for(unsigned i=0;i<3;i++) assert(vars[i].value==2048);
-  for(unsigned i=0;i<3;i++) vars[i].vtable=9;
-  run(1); run(0); // top-menu restoration
-  for(unsigned i=0;i<3;i++) assert(vars[i].value==2048);
+  run(1); // Wrong native CVar type remains untouched.
+  for(unsigned i=0;i<3;i++)assert(vars[i].value==2048 && vars[i].writes==0);
+
 }
 ''')
 

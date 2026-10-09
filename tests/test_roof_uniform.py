@@ -18,41 +18,46 @@ class RoofUniformTests(unittest.TestCase):
 typedef unsigned GLuint;
 typedef int GLint;
 typedef float GLfloat;
-static int glc_enabled=1, binds, queries, sets, night_sets, day=1, enabled=1, high=1;
-static float applied, night_applied;
+static int glc_enabled=1, binds, queries, sets, night_sets, day_sets, day=1, enabled=1, high=1;
+static float applied, night_applied, day_applied;
 static struct {int have_prog; GLuint prog;} glc;
 static struct {GLuint program;} g_mc[1];
-static struct {GLuint program; GLint location,night_location; int valid,night_value;} roof_uniforms[128];
+static struct {GLuint program; GLint location,night_location,day_location; int valid,night_value,day_value;} roof_uniforms[128];
 static int mc_current_slot(void) {return 0;}
 static int pes_controller_stadium_is_day(void) {return day;}
 static int pes_controller_roof_shadow_enabled(void) {return enabled;}
 static int pes_controller_night_lighting_balance_enabled(void) {return high && !day;}
+static int pes_controller_day_stadium_lite_enabled(void) {return high && day;}
 static void glUseProgram(GLuint p) {(void)p; ++binds;}
 static void glDeleteProgram(GLuint p) {(void)p;}
 static GLint glGetUniformLocation(GLuint p, const char *name) {
   ++queries;
   if(!strcmp(name,"nxRoofDisabled"))return p==7 ? 2 : -1;
+  if(!strcmp(name,"nxDayStadium"))return p==7 ? 4 : -1;
   assert(!strcmp(name,"nxNightIndirect")); return p==7 ? 3 : -1;
 }
 static void glUniform1f(GLint loc, float value) {
   if(loc==2) {++sets;applied=value;}
+  else if(loc==4) {++day_sets;day_applied=value;}
   else {assert(loc==3);++night_sets;night_applied=value;}
 }
 ''' + function(SOURCE,'glUseProgram_c') + function(SOURCE,'glDeleteProgram_c') + r'''
 int main(void) {
-  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==2);
+  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==3);
   assert(night_sets==1 && night_applied==0);
-  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==1 && queries==2);
+  assert(day_sets==1 && day_applied==1);
+  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==1 && queries==3);
   assert(night_sets==1);
-  day=0; glUseProgram_c(7); assert(applied==0 && binds==1 && queries==2);
+  day=0; glUseProgram_c(7); assert(applied==0 && binds==1 && queries==3);
   assert(night_sets==2 && night_applied==1);
+  assert(day_sets==2 && day_applied==0);
   day=1; enabled=1; glUseProgram_c(7); assert(applied==0);
   assert(night_sets==3 && night_applied==0);
   glUseProgram_c(9); assert(sets==4);
-  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==6 && night_sets==4);
+  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==9 && night_sets==4);
   high=0;day=0;glUseProgram_c(7);assert(night_applied==0 && night_sets==4);
   high=1;glUseProgram_c(7);assert(night_applied==1 && night_sets==5);
-  glUseProgram_c(0); assert(queries==6);
+  glUseProgram_c(0); assert(queries==9);
 }
 ''')
 
@@ -64,3 +69,5 @@ int main(void) {
             self.assertIn(f'!strcmp(name, "{api}")', resolver)
             self.assertIn(f'&{wrapper}', resolver)
             self.assertIn(f'{{ "{api}", (uintptr_t)&{wrapper} }}', SOURCE)
+        for reset in ('eglMakeCurrent_dedup','eglDestroyContext_cache'):
+            self.assertIn('memset(roof_uniforms, 0, sizeof(roof_uniforms))',function(SOURCE,reset))

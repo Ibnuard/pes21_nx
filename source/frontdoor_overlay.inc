@@ -637,7 +637,14 @@ static void fd_loading(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *ve
     }
     fd_center_text(ui,"VS",.455f,.474f,.09f,.054f,-2,verts,quads);
   }
-  fd_text(ui,"LOADING",.825f,fd_cap_top(.91f,.0278f),.10f,.0278f,-2,verts,quads);
+  /* Anchor the label to the spinner's outside edge. A fixed left anchor
+   * leaves a large hole after this short, proportional-font label. */
+  const float loading_h=.0278f;
+  const float loading_w=measure_efootball_line_mode("LOADING",7,
+      loading_h*screen_height,EFOOTBALL_FONT_BOLD,0)/screen_width;
+  const float loading_right=.95f-(.014f+.003f+.014f)*screen_height/screen_width;
+  fd_text(ui,"LOADING",loading_right-loading_w,fd_cap_top(.91f,loading_h),
+      loading_w,loading_h,-2,verts,quads);
   for(uint32_t i=0;i<8u;i++) {
     const float angle=(v->motion_phase*6.f+i/8.f)*6.2831853f;
     const float size=.006f,sw=size*screen_height/screen_width;

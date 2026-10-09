@@ -16,7 +16,7 @@ class RoofCasterTests(unittest.TestCase):
             self.skipTest('gcc unavailable')
         build_and_run(cc, '#include <assert.h>\n' + POLICY + text)
 
-    def test_static_roof_is_enabled_without_reactivating_dynamic_cascades(self):
+    def test_roof_is_enabled_with_analytic_cascade_replacement(self):
         self.run_c(function(SOURCE, 'pes_controller_roof_shadow_enabled') + r'''
 int main(void) {
   for (unsigned i=0;i<100;++i) {
@@ -72,13 +72,14 @@ int main(void) {
 }
 ''')
 
-    def test_static_mask_does_not_reactivate_casters_and_other_objects_stay_native(self):
+    def test_day_roof_casts_but_skeletal_bodies_only_receive(self):
         self.run_c(r'''
 static StadiumRoofProxies stadium_roof_proxies;
-static uintptr_t stadium_roof_proxy_vtable=42;
-static unsigned day,roof,calls,destroyed,deleted;
+static uintptr_t stadium_roof_proxy_vtable=42, stadium_player_proxy_vtable=99;
+static unsigned day,roof,high,calls,destroyed,deleted;
 static unsigned pes_controller_stadium_is_day(void) {return day;}
 static unsigned pes_controller_roof_shadow_enabled(void) {return roof;}
+static unsigned pes_controller_day_stadium_lite_enabled(void) {return high && day && roof;}
 static void pes_stadium_shadow_filter_original(void *packet,const void *bounds,
     uint64_t flags,void *info,const void *proxy) {
   assert(packet==(void*)1 && bounds==(void*)2 && flags==0x8765432100000007ULL);
@@ -98,13 +99,17 @@ static void (*stadium_mesh_delete_original)(void *)=delete_proxy;
 int main(void) {
   uintptr_t proxy=42,other=42;
   assert(stadium_roof_remember(&stadium_roof_proxies,(uintptr_t)&proxy));
-  for (day=0;day<2;++day) for (roof=0;roof<2;++roof) {
+  for (high=0;high<2;++high) for (day=0;day<2;++day) for (roof=0;roof<2;++roof) {
     calls=0;
     pes_stadium_shadow_filter((void*)1,(void*)2,0x8765432100000007ULL,(void*)3,&proxy);
-    assert(calls==!day); // static mask state never enables dynamic roof work
+    assert(calls==(!day || (roof && !high))); // High Day uses proxy receiver
     calls=0;
     pes_stadium_shadow_filter((void*)1,(void*)2,0x8765432100000007ULL,(void*)3,&other);
-    assert(calls==1); // even another static mesh stays native
+    assert(calls==1); // other static geometry stays native
+    uintptr_t player=99;
+    calls=0;
+    pes_stadium_shadow_filter((void*)1,(void*)2,0x8765432100000007ULL,(void*)3,&player);
+    assert(calls==!day); // receiver shader is untouched; only casting is skipped
   }
   day=1;roof=0;calls=0;proxy=43; // address reused by a different proxy class
   pes_stadium_shadow_filter((void*)1,(void*)2,0x8765432100000007ULL,(void*)3,&proxy);

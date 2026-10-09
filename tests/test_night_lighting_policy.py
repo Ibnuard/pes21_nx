@@ -74,6 +74,39 @@ int main(void) {
 }
 ''')
 
+    def test_production_match_refreshes_high_without_opening_video_settings(self):
+        source=(ROOT/'source/ue4_hooks.c').read_text()
+        entry=function(source,'pes_exhibition_match_setup_data_entry')
+        before_debug=entry.split('#ifdef',1)[0]
+        self.assertIn('stadium_refresh_saved_graphics_quality();',before_debug)
+        build_and_run(self.compiler, '#include <stdint.h>\n#include <assert.h>\n'
+            'static uint32_t main_menu_video_graphics=1,exhibition_settings_time_zone=1;\n'
+            'static uint32_t saved=2,calls;\n'
+            'static uint32_t get(void){++calls;return saved;}\n'
+            'static uint32_t (*main_menu_get_graphics_quality)(void)=get;\n'
+            +function(source,'stadium_refresh_saved_graphics_quality')
+            +function(source,'pes_controller_stadium_is_day')
+            +function(source,'pes_controller_night_lighting_balance_enabled')+r'''
+int main(void) {
+  assert(!pes_controller_night_lighting_balance_enabled());
+  stadium_refresh_saved_graphics_quality();
+  assert(calls==1 && main_menu_video_graphics==2);
+  assert(pes_controller_night_lighting_balance_enabled());
+  for(unsigned quality=0;quality<3;quality++) {
+    saved=quality;stadium_refresh_saved_graphics_quality();
+    assert(main_menu_video_graphics==quality);
+    for(unsigned time=0;time<2;time++) {
+      exhibition_settings_time_zone=time;
+      assert(pes_controller_night_lighting_balance_enabled()==(quality==2 && time==1));
+    }
+  }
+  saved=99;stadium_refresh_saved_graphics_quality();
+  assert(main_menu_video_graphics==2); // invalid native value cannot enable a wrong mode
+  main_menu_get_graphics_quality=0;stadium_refresh_saved_graphics_quality();
+  assert(main_menu_video_graphics==2);
+}
+''')
+
     def test_helper_bounds_and_disabled_identity(self):
         header=(ROOT/'source/night_lighting_policy.h').read_text()
         strings=header.split('static const char helper[]=',1)[1].split('const size_t n=',1)[0]
@@ -192,7 +225,7 @@ int main(void) {
     def test_both_shader_routes_use_the_guarded_hook(self):
         imports=(ROOT/'source/imports.c').read_text()
         self.assertIn('night_lighting_source(copy)',function(imports,'glShaderSource_pitch'))
-        self.assertIn('night_lighting ? NULL : pitch_roof_source(patched)',imports)
+        self.assertNotIn('pitch_roof_source',imports)
         self.assertIn('{ "glShaderSource", (uintptr_t)&glShaderSource_pitch }',imports)
         self.assertIn('&glShaderSource_pitch',function(imports,'eglGetProcAddress_diag'))
 

@@ -1,4 +1,4 @@
-"""Fixed FootballNX UI; roof OFF with no hub toggle."""
+"""Fixed FootballNX UI; native roof enabled with no hub toggle."""
 from pathlib import Path
 import shutil
 import unittest
@@ -34,7 +34,7 @@ int main(void) {
 }
 ''')
 
-    def test_hub_only_stadium_and_time_roof_always_off(self):
+    def test_hub_stadium_and_time_preserve_native_roof(self):
         body=function(SOURCE,'pes_controller_2p_prematch_hub_pad_event')
         body=body.split('  if (page == MAIN_MENU_2P_PREMATCH_PAGE_STADIUM) {',1)[1]
         body=body.split('\n  uint32_t focus = pes_controller_2p_prematch_hub_focus()',1)[0]
@@ -58,10 +58,10 @@ int main(void) {
     main_menu_2p_prematch_hub_page_focus=1;
     event(1u<<1); assert(!pes_controller_stadium_is_day() && written_time==1);
     event(1u<<13);
-    assert(pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled());
+    assert(pes_controller_stadium_is_day() && pes_controller_roof_shadow_enabled());
   }
   main_menu_2p_prematch_hub_page_focus=2; event(1u<<1);
-  assert(exhibition_settings_weather==1 && !pes_controller_roof_shadow_enabled());
+  assert(exhibition_settings_weather==1 && pes_controller_roof_shadow_enabled());
 }
 ''')
         setup=function(SOURCE,'pes_exhibition_match_setup_data_entry')

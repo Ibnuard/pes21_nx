@@ -26,91 +26,58 @@ def bodies(path):
 
 
 class PitchShadowTests(unittest.TestCase):
-    def test_native_allowlist_and_night_exclusion(self):
-        gcc = shutil.which('gcc')
-        if not gcc:
-            self.skipTest('gcc unavailable')
-        with tempfile.TemporaryDirectory() as tmp:
-            c = Path(tmp)/'policy.c'
-            c.write_text('#include "pitch_shadow_policy.h"\n#include <stdio.h>\n'
-                         'int main(void) {char s[131072]; size_t n=fread(s,1,sizeof(s)-1,stdin);'
-                         's[n]=0; char *p=pitch_shadow_source(s); if(!p)return 2;'
-                         'char *r=pitch_roof_source(p); if(!r){free(p);return 3;}'
-                         'fputs(r,stdout); free(r); free(p);return 0;}\n')
-            exe = Path(tmp)/'policy.exe'
-            subprocess.run([gcc, '-I', str(ROOT/'source'), str(c), '-o', str(exe)], check=True)
-            def transform(body):
-                result = subprocess.run([str(exe)], input=body, capture_output=True)
-                if result.returncode == 2:
-                    return None
-                self.assertEqual(result.returncode, 0, result.stderr)
-                return result.stdout.replace(b'\r\n', b'\n')
-            self.assertIsNone(transform(b'void main() { }'))
-            self.assertIsNone(transform(b'void main() { float x=MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition.w; }'))
-            native = ROOT/'local-debug/pitch-recreate/native/PesMobile/Content/Assets/bg_lighting_AM1/Materials'
-            if not native.exists():
-                self.skipTest('owned native shader fixtures unavailable; synthetic refusal checked')
-            changed = 0
-            key = b'MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition.w'
-            for body in bodies(native/'M_Pitch_Default.uexp'):
-                result = transform(body)
-                if b'texture(ps1,in_TEXCOORD0.zw)' in body:
-                    old_tint = b'vec3(8.755540e-01,1.000000e+00,0.000000e+00)'
-                    new_tint = b'vec3(0.000000e+00,0.000000e+00,0.000000e+00)'
-                    self.assertEqual(len(old_tint), len(new_tint))
-                    self.assertEqual(body.count(old_tint), 1)
-                    is_v1 = key+b';' in body
-                    self.assertNotIn(b'nxGrass', result)
-                    self.assertEqual(result.count(b'uniform highp float nxRoofDisabled;'), 1)
-                    self.assertEqual(result.count(b'(nxRoofDisabled > 0.5 ? vec4(1.0) : texture(ps1,in_TEXCOORD0.zw))'), 1)
-                    restored = result.replace(b'uniform highp float nxRoofDisabled;\n', b'').replace(
-                        b'(nxRoofDisabled > 0.5 ? vec4(1.0) : texture(ps1,in_TEXCOORD0.zw))',
-                        b'texture(ps1,in_TEXCOORD0.zw)')
-                    expected = body.replace(old_tint, new_tint)
-                    if is_v1:
-                        expected = expected.replace(key+b';', key+b' * 0.85;')
-                    color = re.compile(rb'(v\d+)\.xyz = clamp\(\(\((v\d+)\+\(Material_VectorExpressions\[1\]\.xyz\*(v\d+)\.xxx\)\).*?;')
-                    matches = list(color.finditer(expected))
-                    self.assertEqual(len(matches), 1)
-                    dest, base, mask = matches[0].groups()
-                    albedo = (dest+b'.xyz = (clamp(('+base+b'+Material_VectorExpressions[1].xyz),vec3(0.0),'
-                              b'vec3(1.0))*mix(0.65,1.0,clamp('+mask+b'.x,0.0,1.0)));')
-                    expected = color.sub(lambda m: albedo, expected)
-                    self.assertEqual(restored, expected)
-                    # Evaluate the emitted expression against many RGB inputs.
-                    # Shadow must reduce all channels equally, leave sunlight
-                    # intact, and never add the old fixed green shadow colour.
-                    import numpy as np
-                    expression = albedo.split(b' = ', 1)[1].rstrip(b';').decode()
-                    expression = expression.replace((base+b'').decode(), 'grass')
-                    expression = expression.replace('Material_VectorExpressions[1].xyz', 'light')
-                    expression = expression.replace((mask+b'.x').decode(), 'coverage')
-                    def evaluate(grass, light, coverage):
-                        return eval(expression, {'__builtins__': {}}, dict(
-                            grass=np.array(grass), light=np.array(light), coverage=coverage,
-                            vec3=lambda x: np.full(3, x), clamp=np.clip,
-                            mix=lambda a,b,t: a*(1-t)+b*t))
-                    for grass in ((.025,.075,.011),(.08,.14,.034),(.8,.8,.8),(0,0,0),(2,.3,.7)):
-                        light=(.005208,.002781,0.)
-                        sun=evaluate(grass,light,1.)
-                        np.testing.assert_allclose(sun,np.clip(np.array(grass)+light,0,1),atol=1e-12)
-                        previous=evaluate(grass,light,0.)
-                        np.testing.assert_allclose(previous,sun*.65,atol=1e-12)
-                        for coverage in (.1,.3,.6,1.):
-                            shade=evaluate(grass,light,coverage)
-                            self.assertTrue(np.all(shade>=previous) and np.all(shade<=sun))
-                            np.testing.assert_allclose(np.cross(sun,shade),0.,atol=1e-12)
-                            previous=shade
-                    self.assertIsNone(transform(result))
-                    self.assertIsNone(transform(body+b'//unknown variant'))
-                    changed += 1
-                else:
-                    self.assertIsNone(result)
-            self.assertEqual(changed, 20)
-            # The old hue patch must never leak into Night, perimeter turf or
-            # the pitch-side people material. Hash refusal is checked on every
-            # available cooked variant, not inferred from a filename alone.
-            for name in ('M_Pitch_Default_night', 'M_Pitch_Default_night_Low',
-                         'M_field_ed', 'M_PitchSide'):
-                for body in bodies(native/(name+'.uexp')):
-                    self.assertIsNone(transform(body))
+    def test_day_edits_are_scoped_and_night_pitch_reaches_gl_byte_exact(self):
+        # Exercise the production hook, not just a duplicate/no-op policy.
+        from test_result_flow import function
+        from test_night_lighting_policy import shader_sources
+        gcc=shutil.which('gcc')
+        if not gcc:self.skipTest('Host compiler unavailable')
+        native=ROOT/'local-debug/pitch-recreate/native/PesMobile/Content/Assets/bg_lighting_AM1/Materials'
+        paths=[native/(n+'.uexp') for n in ('M_Pitch_Default','M_Pitch_Default_night','M_Pitch_Default_night_Low')]
+        if not all(p.exists() for p in paths):self.skipTest('Owned native pitch material fixtures unavailable')
+        hook=function((ROOT/'source/imports.c').read_text(),'glShaderSource_pitch')
+        with tempfile.TemporaryDirectory(prefix='pesnx-native-pitch-') as temp:
+            c=Path(temp)/'check.c';exe=Path(temp)/'check.exe'
+            c.write_text('#include "stadium_lighting_policy.h"\n'
+                'typedef unsigned GLuint;typedef int GLsizei;typedef int GLint;typedef char GLchar;\n'
+                '#define debugPrintf(...) ((void)0)\n'
+                'static void glShaderSource(GLuint s,GLsizei n,const GLchar*const*t,const GLint*l) {'
+                '(void)s;for(int i=0;i<n;i++)fwrite(t[i],1,l&&l[i]>=0?(size_t)l[i]:strlen(t[i]),stdout); }\n'
+                +hook+'\nint main(int argc,char**argv){(void)argv;char s[262144];'
+                'size_t n=fread(s,1,sizeof(s)-1,stdin);s[n]=0;const char*p[2]={s,s+n/2};'
+                'int l[2]={(int)(n/2),(int)(n-n/2)};'
+                'if(argc>1)glShaderSource_pitch(1,2,p,l);'
+                'else {l[0]=(int)n;glShaderSource_pitch(1,1,p,l);}return 0;}')
+            subprocess.run([gcc,'-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'source'),str(c),'-o',str(exe)],check=True,capture_output=True)
+            total=0
+            for path in paths:
+                for source in shader_sources(path):
+                    total+=1
+                    for args in ([],['segmented']):
+                        result=subprocess.run([str(exe),*args],input=source,capture_output=True,check=True)
+                        result=result.stdout.replace(b'\r\n',b'\n')
+                        original=source.replace(b'\r\n',b'\n')
+                        if args or path.stem!='M_Pitch_Default':
+                            self.assertEqual(result,original)
+                            continue
+                        prefix,body=result.split(b'void main()',1)
+                        native_prefix,native_body=original.split(b'void main()',1)
+                        self.assertTrue(prefix.startswith(native_prefix))
+                        self.assertIn(b'nxPitchGrain',body)
+                        self.assertIn(b'nxPitchSheen',body)
+                        self.assertIn(b'nxRoofVisibility(in_TEXCOORD8.xyz-View_PreViewTranslation)',body)
+                        body=body.replace(b'\n\thighp float nxRoofLight=1.0;\n'
+                            b'\tif(nxDayStadium>0.5) nxRoofLight=nxRoofVisibility(in_TEXCOORD8.xyz-View_PreViewTranslation);\n',b'')
+                        body=re.sub(rb'\n\t(v\d+)\.xyz = nx(?:NeutralLight\(\1\.xyz|AmbientLight\(\1\.xyz,nxRoofLight|PitchSheen\(\1\.xyz,nxRoofLight|PitchGrain\(\1\.xyz,v\d+\.w)\);',b'',body)
+                        body=re.sub(rb'\n\tif\(nxDayStadium>0.5\) v\d+\.xyzw=vec4\(1.0\);',b'',body)
+                        body=re.sub(rb'\n\tif\(nxDayStadium>0.5\) v\d+\.xyz=clamp\(v\d+,vec3\(0.0\),vec3\(1.0\)\);',b'',body)
+                        for color,helper in ((b'MobileDirectionalLight_DirectionalLightColor.xyz',b'nxDirectLight'),
+                                  (b'View_SkyLightColor.xyz',b'nxNeutralLight'),
+                                  (b'View_IndirectLightingColorScale',b'nxAmbientLight')):
+                            body=body.replace(helper+b'('+color+(b'' if helper==b'nxNeutralLight' else b',nxRoofLight')+b')',color)
+                        body=body.replace(b'if (nxDayStadium<0.5 && (v2.z>0.000000e+00))',b'if ((v2.z>0.000000e+00))')
+                        self.assertEqual(body,native_body)
+            self.assertGreaterEqual(total,20)
+
+
+if __name__=='__main__':unittest.main()

@@ -1,5 +1,198 @@
 # Stadium / High diagnostic candidate — 2026-09-17
 
+## Stadium Lite v5: runtime material coverage and warm apron (2026-10-09)
+
+**Accepted checkpoint:** the user tested v5 and approved both Day and Night
+on 2026-10-09 ("day dan nightnya perfect sementara"). Preserve this NRO plus
+the separate perimeter PAK as the current visual reference. No numerical FPS
+measurement was supplied; acceptance is the user's visual/device assessment.
+
+The v4 device test accepts the roof pattern but rejects faded Day grass,
+unshaded players and the remaining green Night floor/skin. V4 is not an
+accepted lighting fix. This revision preserves its exact analytic roof
+geometry and the zero-cascade High Day budget.
+
+The new audit follows the native body mesh's actual material dependency:
+`BaseAssets/body_base`, not `TestPlayer/M_test_body`. The former has 84 lit
+fragment permutations; v4 covered only 42. `face_tablet_phone` has 84 and
+`hair_parts_tablet_ss` has 42 lit permutations, all previously missed.
+`body_base_low`'s 42 were already covered. This is a concrete coverage defect,
+not proof of which individual permutation rendered every supplied screenshot.
+It also explains why the accepted realface material could improve while
+generic faces and arms did not. The native skinned vertex shader supplies
+translated world position; subtracting `View_PreViewTranslation` gives the
+same roof coordinate system as the pitch, after bone/local-to-world transforms.
+
+The fingerprint allowlist now covers these four runtime families as well as
+the nine previously audited families: 276 unique character/perimeter body
+hashes, 628 lit variants, and 18 excluded masked depth variants. The actual
+hair shader's `v3` CSM branch also skips PCF during High Day; the prior policy
+only covered `v2`. Direct, sky, SH and decoded reflection light are corrected
+before albedo multiplication. Skin/kit/hair samples, normals, alpha, bones,
+UVs and animation are preserved. Night/Low/Standard gates are unchanged.
+
+Day pitch albedo has a green-only `(0.82, 1.18, 0.74)` RGB grade before its
+existing zero-centred detail modulation. This restores saturation lost when
+neutral light replaces the green/yellow irradiance. White paint is excluded;
+Night pitch remains byte-exact and the installed custom pitch PAK is untouched.
+
+The separate floor patch is deliberately texture-specific. The owned
+`st029_pitch_2` StaticMaterials array assigns `M_field_ed` to outer-apron
+section 0; sections 3/4 use `MI_Pitch_L/R`. `M_field_ed` references only the
+128x128 ETC1 `st029_field_bsm`. The crew atlas `PitchSide_st029_bsm` is unrelated
+and must not be recoloured. `tools/build_stadium_perimeter.py` converts all
+eight apron mips to restrained ochre at 80% of the original linear luminance,
+preserving grain, dimensions, format, bulk layout and every metadata byte.
+The decoded ETC1 luminance is 80.7–82.9% of native across mips; smallest solid
+mips quantize R/G equally but never favour green. A separate three-member PAK
+contains the unchanged header plus the two modified texture payload files.
+This affects the apron in both Day and Night/all qualities; it does not change
+the playing surface or prove that the floor physically caused bounced light.
+
+Install both the candidate NRO and `PesMobile-StadiumPerimeter-Android_ETC1_P.pak`;
+keep the existing full v3 pitch PAK. Roll back by restoring the previous NRO
+and removing only the new perimeter PAK. Accepted Yamal V19C/Raphinha V1 and
+Indonesia commentary remain pinned. Day/Night visuals are accepted for this
+checkpoint; future lighting changes should be compared against this version.
+
+Production v5 passes 55 focused tests / 1,198 subtests and 2,592 native/patched
+GLSL compiles (648 lit variants, both clip-space definitions). The 126 audited
+ES3 skinned vertex variants all supply translated world position. Binary checks
+confirm the new allowlist/helpers, zero Day cascades, production diagnostics
+off, accepted full-loose runtime pair, and byte-identical v4 roof geometry.
+The 681-file public-tree audit and `git diff --check` pass. The known broader
+legacy test failures recorded for v3 are not claimed fixed by this change.
+
+Accepted local build: `local-debug/stadium-lite-v5/release/FootballNX-Stadium-Lite-v5.zip`
+(43,652,700 bytes), SHA-256
+`efef1f8de14b4aca6a2a7edc1dcf3283b9b0d61a310670dd179f20e66f618d58`.
+NRO: `5c0d1d3a62ae7146eef1242261104d02eef01d3553dbc29e2a5c2aecdfe2b304`.
+Perimeter PAK: `b131aa9c33c7b1a873b43f7453796db648f3db44c58189889f7412de0031144e`.
+The ZIP is reopened and every member hash checked after packaging; accepted
+face/audio and the installed custom pitch hashes are unchanged.
+
+## Stadium Lite v4: neutral light and Day detail (2026-10-09)
+
+**Partially rejected on device; v5 retains only the accepted roof pattern.**
+
+User testing of native stadium v3 confirms the detailed Day roof returns but
+FPS drops and yellow light clashes with the custom grass. Night improves, yet
+hands/arms remain yellow-green. V3 is therefore not an accepted final fix.
+
+V4 removes the green-dominance threshold from the nine audited material
+families' light correction. Yellow-green light with R close to G could pass
+the old `G > max(R,B) * 1.08` test; neutralizing each decoded positive light
+term at equal luminance also covers that case. This is a scoped compensation,
+not proof that this was the only remaining on-device cause. Albedo, skin/kit
+textures, normals, RGBM encoding and alpha remain native. Accepted face and
+commentary files are unchanged. Night pitch shaders still pass byte-exact.
+
+High Day has a separate saved-quality/time gate. Its pitch shader retains
+the accepted diffuse/detail reads, UVs, mips, stripes and paint. The existing
+detail alpha supplies a zero-centred 16% albedo modulation only on green turf;
+white paint is excluded. No additional texture sample is needed. Two additive
+yellow material tints are bypassed, and the yellow grazing highlight becomes
+a weak neutral sheen (6% of its previous luminance), shaded by the roof.
+Direct, indirect and sky lighting are neutralized before albedo multiplication.
+The original soft roof mask no longer supplies the Day highlight silhouette.
+
+The same analytic roof visibility feeds direct and ambient light for pitch,
+skin, kits, hair, boots and supported pitch-side/perimeter materials. See
+[STADIUM_ROOF_CAMERA.md](STADIUM_ROOF_CAMERA.md) for geometry and cost scope.
+Native Low/Standard and Night retain their shadow path. This candidate changes
+no PAK/CPK/OBB payload and does not replace the visible stadium mesh.
+
+Unknown sources, segmented shader submissions and nine masked hair depth
+variants are refused by the rewrite. The 20 Day pitch variants plus 376
+character/perimeter variants compile under both clip-space settings before
+and after rewriting (1,584 compiles). Host tests undo only the allowed edits
+and compare the rest of each shader byte-for-byte. Numeric tests execute the
+emitted helper math, covering skylights, beams, receiver height, light/skin hue,
+paint exclusion and disabled identity. Hardware appearance and FPS are pending.
+
+## Native stadium v3: production quality gate (2026-10-09)
+
+**Superseded by v4 after the user's partial Night improvement / Day FPS report.**
+
+The latest Night screenshot still shows green skin; v2 is not an accepted
+lighting fix. A concrete production bug was found: `main_menu_video_graphics`
+starts at Standard (1). Saved High quality was refreshed only by opening Video
+Settings, or by a once-per-match block compiled under `PERF_TRACE`. Release
+builds can therefore render native High while leaving `nxNightIndirect=0`.
+This also explains why v2's High-only Day receiver could remain disabled.
+It is a verified code defect, not proof of the state in the supplied screenshot.
+
+`pes_exhibition_match_setup_data_entry` now refreshes the saved graphics quality
+on the game thread for every prepared match, independent of diagnostics and
+without opening settings. The getter is not called on the render thread or
+polled each frame. Invalid/missing getter results retain the last known value;
+Day and Low/Standard still disable Night compensation. The cold-start test
+reproduces Standard-in-memory / High-in-save and verifies activation, followed
+by all Day/Night/quality combinations.
+
+The Night candidate neutralizes only green-dominant positive light at equal
+luminance: reconstructed SH, sky irradiance, decoded lightmap/cubemap radiance,
+and later direct/sky/indirect colour multipliers. The 180 known material body
+fingerprints cover 376 owned character/perimeter fragment variants. Nine masked
+hair depth variants remain unchanged. Encoded RGBM, signed SH coefficients,
+albedo, skin/kit/grass texture reads, alpha and output geometry stay native.
+There is no floor recolouring, Day mask receiver, or added sampler. The native
+pitch materials pass through byte-exact. Host checks undo only the allowed
+light insertions and compare the complete remaining shader body to its source;
+actual emitted helper math preserves identity with the Night gate disabled.
+
+The 376 variants compile before/after under both clip-space macro settings
+(1,504 successful GLSL compiles). These checks verify the implementation;
+remaining green cast, final brightness and performance need Switch testing.
+Test a fresh launch with High already saved, entering a Night match directly
+without visiting Video Settings, then repeat after Day and Low/High changes.
+
+For original Day roof restoration and the two material entries restored in
+the complete custom pitch PAK, see [STADIUM_ROOF_CAMERA.md](STADIUM_ROOF_CAMERA.md).
+
+## Stadium review v2: neutral Night perimeter — 2026-10-09
+
+**Rejected on device; superseded by native stadium v3 above.**
+
+New device screenshots show a neon-green perimeter and green cameramen even
+with the restored v5/v8 lighting policy. The user requests neutral ground and
+white-looking illumination. This is a new candidate, not renewed acceptance
+of the previous cast correction.
+
+The audit found that 14 complete ground shader variants are byte-identical to
+test-face shaders. A material-body fingerprint alone cannot safely recolour
+their diffuse sample. The new floor treatment therefore additionally checks
+world-space height (within 20 cm of the ground) and position outside the
+105 x 68 m playing rectangle. Only those floor fragments receive a restrained
+warm-neutral albedo; raised faces and the pitch's own material are excluded.
+Camera/view position is removed through `View_PreViewTranslation`.
+
+The light treatment is separate from albedo. At Night/High, green-dominant
+lighting (G above 1.08 times max(R,B)) becomes neutral with the same luminance.
+Other light colours remain unchanged. It operates on positive reconstructed
+SH, decoded lightmap/cubemap radiance, sky irradiance and the subsequent
+sky/direct/indirect colour multipliers. Encoded RGBM, alpha, shadow depth,
+signed SH coefficients and kit/skin diffuse textures remain native. Correcting
+only the initial cube/SH sample allowed later green light multipliers to
+reintroduce colour. This is a bounded renderer compensation; the screenshots
+do not establish a physical UV defect or prove that ground albedo itself
+causes a runtime lighting bounce.
+
+The shared policy recognizes 180 normalized body fingerprints across 376
+owned ES3 variants of nine character/perimeter families. Nine hair depth-only
+variants and main-pitch shaders pass unchanged through this policy. Unknown
+sources are refused. Day and Low disable the Night colour correction; Day/High
+receivers have their own runtime gate. Public code contains hashes and authored
+rewrite logic, never the proprietary shader bodies.
+
+All 396 changed scene/pitch variants compile before/after with both clip-space
+settings (1,584 glslang compiles). Host tests exercise actual emitted helper
+math, projection, alpha preservation, scoped floor behaviour, texture-unit
+restoration and cache lifetime. These checks do not establish the active
+Switch permutation, final appearance or FPS. Compare Night/High at both
+corners and behind each goal, including cameramen and close-ups. Keep the
+accepted checkpoint for NRO-only rollback.
+
 ## v8 restores the v5 lighting baseline — 2026-10-09
 
 Device feedback rejects v6/v7's lighting expansion: at Night/High the area

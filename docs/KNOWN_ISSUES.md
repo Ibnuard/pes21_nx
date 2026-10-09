@@ -1,5 +1,32 @@
 # PES21 NX open issues and design notes
 
+## 2026-10-09 stadium review and accepted assets
+
+- Yamal V19C, Raphinha V1 and the v8 Indonesia commentary decoder/delta are
+  accepted by the user and pinned as references in the face/commentary audits.
+  Checkpoint `0136c19` was pushed before the following lighting/UI experiment.
+- Stadium review v2 was rejected: flat/bold Day masking and unchanged green
+  Night cast. Native stadium v3 restores original Day shader math, roof casting
+  and native CSM values; animated skeletal casting is excluded separately.
+  Only the two old Day MI colour edits are reverted in the complete custom PAK.
+- User testing of v3 restores the detailed roof but reports lower Day FPS and
+  yellow light; Night improves partially but hands remain green. Stadium Lite
+  v4 replaces High Day CSM with a shared analytic roof and reuses detail alpha
+  for grass grain. Night light neutralization now also covers yellow-green.
+  User testing accepts v4's roof shape, but rejects faded grass, players that
+  stay bright in shade, and the remaining green Night apron/skin. V5 adds the
+  missing runtime body/generic-face/hair shader families and preserves the
+  roof shape/budget. Day turf regains green saturation. A standalone texture
+  patch warms only the outer apron in both Day and Night/all qualities.
+- A release-only quality-state bug could leave Night compensation disabled for
+  saved High until Video Settings was opened. Match setup now refreshes that
+  state in production. Character correction changes lighting, not skin/kit
+  albedo. V5 needs its NRO plus the new perimeter PAK; installed custom pitch,
+  loading spacing and accepted face/audio assets remain. On 2026-10-09 the
+  user approved both Day and Night in v5 as the current checkpoint. Preserve
+  this visual baseline; the user did not supply a numerical FPS measurement.
+  See `STADIUM_ROOF_CAMERA.md` and `STADIUM_HIGH_REVIEW.md`.
+
 Last reviewed: 2026-09-18, against the V12 native Stadium-target candidate
 after the full mobile kit migration.
 

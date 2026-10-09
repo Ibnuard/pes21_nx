@@ -44,6 +44,13 @@ the former scrolls when needed.
 
 ## Boundaries
 
+The 2026-10-09 loading review anchors the LOADING label's measured right edge
+to the animated indicator, with a height-scaled 10 px gap at 720p. Loading and
+versus pages share this placement. Font cap alignment, animation timing,
+transition ownership and input are unchanged. The production-renderer preview
+verifies the compact grouping; the previous fixed label-left position left a
+large empty gap after this short proportional-font word.
+
 `frontdoor_snapshot` reads existing native/controller getters into a bounded
 value structure. `frontdoor_emit` consumes that structure without mutation.
 The rendering snapshot does not change native identity, roster, ready-state,

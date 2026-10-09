@@ -2,6 +2,206 @@
 
 Based on checkpoint `checkpoint-high-shadow-pitch-v19`.
 
+## Stadium Lite v5: apply the accepted roof to runtime players (2026-10-09)
+
+**Accepted checkpoint:** the user approved v5's Day and Night appearance on
+2026-10-09. Keep this roof, grass grade, player lighting and warm apron as the
+reference for subsequent stadium work.
+
+User testing accepts v4's roof openings but sees no response on player bodies.
+The actual runtime `body_base` High variants, `face_tablet_phone` and
+`hair_parts_tablet_ss` were absent from the previous shader allowlist. V5 adds
+their audited lit variants; the skinned world position already contains bone
+and local-to-world transforms, so the same elevated roof calculation can now
+reach them. Hair's CSM coordinate is `v3`, also handled by the Day PCF bypass.
+The geometry, its 36 m plane, openings, beams, edge filtering and 12%/56% light
+attenuation are unchanged. Dynamic player shadow casting remains suppressed;
+receiving this analytic roof does not add a depth pass or texture sample.
+
+Day grass receives a green-only albedo adjustment; Night grass stays unchanged.
+A small standalone texture PAK warms the outer apron independently of player
+lighting. See [STADIUM_HIGH_REVIEW.md](STADIUM_HIGH_REVIEW.md) for the dependency
+audit, exact scope and rollback. User device acceptance is recorded there;
+no numerical FPS measurement accompanies that report.
+
+## Stadium Lite v4: shared analytic roof proxy (2026-10-09)
+
+**Roof pattern accepted; player receiving and faded grass rejected in device
+testing. V5 addresses concrete gaps found in the runtime material audit.**
+
+The user's v3 test restores the original openings, but reports a frame-rate
+drop and unsuitable yellow lighting. This experiment replaces the expensive
+High Day shadow caster/receiver path with an authored mathematical roof.
+It is not a low-poly replacement for the visible stadium shell.
+
+The proxy has a rounded rectangular opening, two skylight bands, and supports
+spaced 6.5 m apart on a plane 36 m above the pitch. These are authored dimensions,
+not recovered native triangles. `source/stadium_lite_glsl.h` defines the geometry
+once for pitch and character materials. Each receiver intersects a ray toward
+the native sun with that plane. `in_TEXCOORD8.xyz - View_PreViewTranslation`
+recovers UE world centimetres, so moving the camera does not move the shadow;
+head/arm height changes the intersection correctly. Screen derivatives provide
+a narrow antialiased edge rather than blurring a low-resolution mask.
+
+Roof coverage attenuates direct light to 12% and ambient/reflection light to
+56% in solid shade, before multiplication by skin/kit/grass albedo. Openings
+retain full illumination. Those are initial tuning values, not device-approved
+brightness. Native low-cost player ShadowBoards remain for contact shadows.
+
+Only saved High + Day requests zero CSM cascades and excludes the two tracked
+roof proxies from native shadow gathering. Night, Low/Standard and frontdoor
+release the override, preserving native CVar priority/external changes. The
+receiver also bypasses native nine-tap PCF when the Day gate is active, covering
+reuse of an already-compiled CSM permutation. There are no extra depth passes,
+texture allocations/bindings, draw calls, or per-frame texture captures. GPU
+work shifts to bounded fragment math; actual FPS improvement is not measured.
+
+`tools/stadium_lite_preview.py --output <path.png>` executes the emitted geometry
+math in a host adapter and plots plan/ground/head projections. Its output is a
+mathematical diagnostic, never a screenshot or claim of the Switch result.
+GL uniform caches reset on real context changes/destruction and program
+relink/deletion. Saved quality is refreshed before preparing each match.
+
+Install the v4 NRO over the v3 setup; keep its complete custom pitch PAK and
+accepted Yamal V19C/Raphinha V1/Indonesia assets. No PAK is rebuilt by v4.
+Compare Day + High at the centre and both goals, players crossing roof edges
+and openings, then Night close-ups of arms/hands. Repeat Day/Night, High/Standard,
+rematch and pause/resume. Shader/host checks cannot replace these device tests.
+
+Candidate: `local-debug/stadium-lite-v4/release/FootballNX-Stadium-Lite-v4.zip`
+(43,644,207 bytes). ZIP SHA-256
+`e8407520da3fcc728ce42d036b7c59cb9243beef3552618c25a866caa5b975e6`;
+NRO SHA-256 `12f0fc6417e7c173bbac94fe80a8faa2cfa031d2043d972b0ebbb0d75a459a28`.
+The production ELF contains the emitted v4 helpers and caps `-1/-1/0`, with
+the accepted full-loose pair. Build/icon, 54 distinct focused tests and 946
+subtests, 1,584 GLSL compiles, and the 679-file public-tree audit pass. One
+obsolete native-cascade test expectation was corrected and its entire policy
+test file rerun. Broader legacy failures documented for v3 are not claimed
+fixed. Accepted face/audio and installed v3 pitch hashes are unchanged.
+No commit/push or device performance acceptance is implied by this package.
+
+## Native stadium v3: restore original Day shadows (2026-10-09)
+
+**Day rejected on device for FPS/yellow light; superseded by the v4 experiment.**
+
+Device feedback rejects v2: the pitch shadow is a broad flat shape, grass loses
+its original detail, and players still appear brightly lit inside it. The user
+requests the original Day roof/light path, including small openings in the
+stadium structure. V2's host tests did not establish on-device correctness.
+
+The Day shader rewrite is removed completely: no multiplicative 40/65% mask,
+forced mip 0, edge threshold, green albedo grade, reduced PCF slope or removed
+yellow grazing highlight. Native Day and Night pitch sources reach GL byte
+for byte unchanged. The experimental shared mask receiver and its per-draw
+GL texture/sampler overrides are removed.
+
+Native directional cascade count and resolution are no longer capped. The
+actual roof meshes once again enter native shadow gathering; this restores
+the renderer's roof geometry/shadow receiving path, rather than painting a
+silhouette on grass. The exact owned `FSkeletalMeshSceneProxy` class is excluded
+from Day shadow gathering so animated bodies can receive roof shadows without
+casting dynamic player shadows. Native `USkinnedMeshComponent::CreateSceneProxy`
+was checked to construct that class. The existing native low-quality Day
+ShadowBoard selector remains. Other static geometry and Night casting remain
+native. This does not guarantee the old FPS: roof cascade work itself is back,
+and final receiving/quality/performance must be checked on Switch.
+
+The package also restores ONLY `MI_Pitch_L.uexp` and `MI_Pitch_R.uexp`'s old
+shadowColor tuple to the owned native value `(0.03125, 0.023696, 0, 1)`.
+Both complete exports match the owned originals. All other 29 members of the
+accepted 31-member pitch PAK remain byte-identical, including grass/paint/detail
+textures. `tools/build_pitch_shadow_control.py` verifies the inverse edit,
+headers and complete unpack/repack. V2 itself shipped only an NRO; the two
+material colour edits predate v2. No original main PAK or OBB is replaced.
+The original yellow Day light is deliberately restored as part of the baseline;
+any later hue-only experiment must preserve native shadow geometry and grain.
+
+Night's production quality initialization fix is documented in
+[STADIUM_HIGH_REVIEW.md](STADIUM_HIGH_REVIEW.md). Loading spacing, Yamal V19C,
+Raphinha V1 and Indonesia commentary remain the accepted references.
+Candidate: `local-debug/stadium-native-v3/release/FootballNX-Native-Stadium-v3.zip`
+(47,203,405 bytes, local/ignored). SHA-256
+`eae811e9d2a4e28a19faf94785e19e9279e3eba31c59089385803d159da8ee19`.
+NRO SHA-256 `2375a686e2090476870f44957c76fd2c62a7762126a6e8ed19d072c715da0f70`;
+restored custom PAK `d29a765d758813514b52cf0e8fd644bd122a4f4bfdff53b499432cf7c734c0a6`.
+Install both files from `update/` into the existing runtime; back up the current
+NRO and patch PAK as a pair. Do not replace the main PAK, OBB, LooseCpk or saves.
+
+Validation: production build/icon and public-tree audit (676 files) pass;
+50 focused tests plus 946 subtests pass; all 1,504 shader compiles pass. The
+ELF contains native-pass-through caps `-1/-1/-1`, no synthetic receiver helper,
+and the correct `e861c583ec78e9ae` data pair. The wider related test selection
+has 85 passes, 19 subtests and one unavailable optional fixture. Six legacy
+result/selector/gameplan assertions also fail against checkpoint `0136c19`;
+they were reproduced in an isolated source snapshot and are not claimed green.
+The obsolete roof-OFF expectation in the camera test was updated and passes.
+The accepted Yamal/Raphinha/Indonesia payloads retain their recorded hashes.
+No commit/push is performed for this unaccepted candidate.
+
+## Stadium review v2: shared roof receivers — 2026-10-09
+
+**Rejected on device; superseded by native stadium v3 above.**
+
+Checkpoint `0136c19` preserves the accepted Day-roof v1, realface conversion
+tools and acceptance notes before this experiment. The user requests a firmer
+roof silhouette and shade on players, while keeping dynamic player shadows off.
+
+The Day pitch mask now samples mip 0 and uses `smoothstep(0.42,0.58,mask)`;
+fully shaded albedo retains 40% instead of 65%. A small green-selective albedo
+adjustment (R 0.94 / G 1.06 / B 1.02 at full weight) reduces the olive/yellow
+cast before native lighting. Neutral white paint is unchanged by that grade.
+It is not the previous post-light global green/blue tint.
+
+`stadium_lighting_policy.h` adds receiver shading to audited native face,
+body, hair, boot and pitch-side fragment bodies. World position is reconstructed
+from the existing translated-world varying minus `View_PreViewTranslation`.
+The native st029 pitch component has no additional transform. Its two UV1
+halves agree with the world-XY projection within 0.0006 UV (under 0.16 texel
+on the native 256px mask). Receiver height shifts the lookup along the native
+directional-light vector, so the boundary can cross a body instead of assigning
+one flat value to a whole player. Near-horizontal/invalid light directions
+retain a vertical projection. Receivers are bounded to the field area and
+-0.5 to 5 metres in height, excluding stands and distant geometry.
+
+`stadium_roof_receiver.h` captures the mask texture and sampler from a draw of
+the allowlisted Day pitch program. It reads the actual ps1 uniform assignment;
+ps1 is not assumed to mean texture unit 1. Receiver programs choose a free
+unit among the eight tracked native units and restore its texture, sampler and
+active-unit state after each draw. Binding snapshots query actual CPU-side GL
+state so wrapper UI/context changes cannot leave a stale tracker value in the
+restoration path. Missing/stale masks use unshaded native
+output. Context identity, program relink/deletion, texture deletion, sampler
+reassignment and frame expiry invalidate cached state. Imported and dynamically
+resolved array, indexed and instanced draws all run the same receiver path.
+
+The additional work is one mask sample per affected fragment plus scoped GL
+bindings; there is no new texture allocation, GPU readback, depth render target
+or shadow-caster pass. Day CSM remains zero, the exact dynamic roof casters stay
+filtered, and the native lightweight player ShadowBoard remains. Performance
+on Switch must still be measured; zero extra cost is not claimed.
+
+This remains an authored static roof silhouette, not full real-time stadium
+shadow geometry. Sharpening its edge does not invent roof-truss detail absent
+from the original mask. The projection is specific to the audited st029 field.
+Check both halves, a walk across the boundary, close-up/replay, rematch and
+Day/Night/High/Low transitions on hardware before accepting this candidate.
+
+Night/High uses the separate neutral-light correction described in
+[STADIUM_HIGH_REVIEW.md](STADIUM_HIGH_REVIEW.md). The candidate is NRO-only:
+retain the accepted pitch PAK, realface PAKs, Indonesia delta, current
+`e861c583ec78e9ae` loose-data pair and saves.
+
+Local package: `local-debug/stadium-review-v2/release/FootballNX-Stadium-Review-v2.zip`
+(44,270,250 bytes). ZIP SHA-256:
+`d9947baf53d7b67f935e483489b602d6d8ae2a1db30f7e3d0621359f64e3c92c`.
+The NRO is 82,776,991 bytes, SHA-256
+`d20702835a5c755510f887076489ed9e2c6664959a3694364d20bf25eff8ca57`.
+Production build, embedded icon, ELF shadow limits 512/512/0, 46 focused tests,
+820 shader/visual subtests and the 1,584 GLSL compiles pass. The final binding
+test also covers a deliberately stale native tracker. Accepted face, grass
+and Indonesia file hashes are unchanged. These are local checks; v2 device
+acceptance and FPS are pending.
+
 ## Static roof mask with grass-matched shade — 2026-10-09
 
 The user accepted this build as a checkpoint on 2026-10-09. Device screenshots

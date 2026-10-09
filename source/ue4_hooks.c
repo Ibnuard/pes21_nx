@@ -112,6 +112,7 @@ static void stadium_shadow_budget_tick(void);
 
 static StadiumRoofProxies stadium_roof_proxies;
 static uintptr_t stadium_roof_proxy_vtable;
+static uintptr_t stadium_player_proxy_vtable;
 static void *(*stadium_mesh_create_original)(void *component);
 static void (*stadium_mesh_destroy_original)(void *proxy);
 static void (*stadium_mesh_delete_original)(void *proxy);
@@ -160,10 +161,13 @@ static void pes_stadium_shadow_filter(void *packet, const void *bounds,
   if (proxy) memcpy(&vtable, proxy, sizeof(vtable));
   const uint32_t tracked = vtable == stadium_roof_proxy_vtable &&
       stadium_roof_contains(&stadium_roof_proxies, (uintptr_t)proxy);
-  // The visible Day roof silhouette comes from the static pitch mask. Keep
-  // native dynamic roof subjects filtered independently of that mask, so
-  // enabling its colour contribution cannot reactivate caster work.
-  const uint32_t disabled = tracked && pes_controller_stadium_is_day();
+  // High Day's authored roof proxy is evaluated by the receivers directly.
+  // Native low-quality ShadowBoard remains the player contact shadow.
+  const uint32_t player = stadium_player_proxy_vtable &&
+      vtable == stadium_player_proxy_vtable;
+  const uint32_t disabled = pes_controller_stadium_is_day() &&
+      (player || (tracked && (pes_controller_day_stadium_lite_enabled() ||
+                             !pes_controller_roof_shadow_enabled())));
 #ifdef PERF_TRACE
   if (tracked) perf_match_roof(disabled);
 #endif
@@ -3620,7 +3624,18 @@ static void exhibition_publish_prepared_matchplan(void) {
   }
 }
 
+// Read the saved quality on the game thread after profile loading. Production
+// builds must not rely on opening Video Settings (or enabling PERF_TRACE) to
+// initialize the render-thread lighting gate from its Standard default.
+static void stadium_refresh_saved_graphics_quality(void) {
+  if (!main_menu_get_graphics_quality) return;
+  const uint32_t quality = main_menu_get_graphics_quality();
+  if (quality <= 2u)
+    __atomic_store_n(&main_menu_video_graphics, quality, __ATOMIC_RELEASE);
+}
+
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
+  stadium_refresh_saved_graphics_quality();
   // MatchSetup is the lifetime boundary for presentation-only HUD state.
   // Replay, pause, and loading transitions occur inside this lifetime and
   // therefore must not replay the HUD entrance animation.
@@ -3635,7 +3650,7 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
                      __ATOMIC_RELEASE);
   }
   __atomic_store_n(&stadium_shadow_budget_requested,
-                   pes_controller_stadium_is_day() ? 1u : 2u, __ATOMIC_RELEASE);
+                   pes_controller_day_stadium_lite_enabled() ? 1u : 2u, __ATOMIC_RELEASE);
 #ifdef PERF_TRACE
   __atomic_fetch_add(&stadium_perf_match_id, 1u, __ATOMIC_RELAXED);
   __atomic_store_n(&stadium_perf_camera_tick, 0, __ATOMIC_RELEASE);
@@ -5088,10 +5103,15 @@ uint32_t pes_controller_night_lighting_balance_enabled(void) {
 }
 
 uint32_t pes_controller_roof_shadow_enabled(void) {
-  // Day pitch uses its authored static roof mask. The zero-cascade budget
-  // and lightweight native player ShadowBoard remain independent.
+  // High Day uses an analytic proxy; other presets retain native roof shading.
   return 1u;
 }
+
+uint32_t pes_controller_day_stadium_lite_enabled(void) {
+  return __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE) == 2u &&
+         pes_controller_stadium_is_day() && pes_controller_roof_shadow_enabled();
+}
+
 
 #ifdef PERF_TRACE
 // Render-thread snapshot: no native UObject calls or renderer readback.
@@ -17103,8 +17123,8 @@ static void stadium_shadow_budget_tick(void) {
       stadium_cvar_flags && stadium_int_cvar_vtable) {
     for (unsigned i = 0; i < STADIUM_SHADOW_LIMIT_COUNT; ++i) {
       const char *setting = stadium_shadow_limits[i].name;
-      // OFF removes the directional depth passes themselves. Player contact
-      // shadows use the independent native low board, not this coarse CSM.
+      // High Day replaces CSM with the shared analytic roof receiver.
+      // Negative caps leave native resolution alone; other modes restore CSM.
       const int cap = stadium_shadow_limits[i].cap;
       uint16_t name[48] = {0}, value[16] = {0};
       for (unsigned j = 0; setting[j]; ++j) name[j] = (uint8_t)setting[j];
@@ -17544,7 +17564,7 @@ void install_ue4_hooks(so_module *module) {
   install_native_pad_lab(module);
 
   // Keep native Day/Night board choice. Only the player-shadow quality decision
-  // uses the simple low-quality board instead of the disabled dynamic CSM.
+  // uses the simple low-quality board while dynamic player casting is filtered separately.
   // RenderManager's real time, lighting, quality, player LOD, ball and pitch
   // remain native. w20 after GetQuality is used solely for shadow visibility.
   // Native spawning, weak-object lifetime, transform and visibility are kept.
@@ -17552,8 +17572,8 @@ void install_ue4_hooks(so_module *module) {
   patch_checked_u32(player_tick + 0x1e4, 0x2a0003f4, 0x52800034,
                     "player contact shadow: native low-quality board visibility");
 
-  // Keep roof rendering visible, but exclude only audited roof proxies from
-  // directional shadow gathering under the fixed Day/Roof-OFF policy.
+  // Keep native roof casting. Exclude the audited skeletal proxy class only
+  // from Day directional shadow gathering, leaving its receiving unchanged.
   // Use virtual creation/destruction for lifetime-safe identity registration.
   stadium_console_manager = (void *)so_find_addr_rx(module, "_ZN15IConsoleManager9SingletonE");
   stadium_find_cvar = (void *)so_find_addr_rx(module, "_ZNK15FConsoleManager19FindConsoleVariableEPKDs");
@@ -17583,6 +17603,9 @@ void install_ue4_hooks(so_module *module) {
       "_ZNK18UObjectBaseUtility11GetPathNameEPK7UObjectR7FString");
   stadium_string_free = (void *)so_find_addr_rx(module, "_ZN7FMemory4FreeEPv");
   stadium_roof_proxy_vtable = so_find_addr_rx(module, "_ZTV21FStaticMeshSceneProxy") + 16;
+  const uintptr_t player_proxy = so_find_addr_rx(module, "_ZTV23FSkeletalMeshSceneProxy");
+  if (!player_proxy) fatal_error("Native skeletal shadow proxy class not found");
+  stadium_player_proxy_vtable = player_proxy + 16;
   stadium_mesh_create_original = (void *)mesh_create_runtime;
   stadium_mesh_destroy_original = (void *)mesh_destroy_runtime;
   stadium_mesh_delete_original = (void *)mesh_delete_runtime;
@@ -17600,7 +17623,7 @@ void install_ue4_hooks(so_module *module) {
     fatal_error("Unexpected stadium shadow filter entry");
   stadium_shadow_filter_resume = so_find_addr_rx(module, shadow_filter_symbol) + 16;
   hook_arm64(shadow_filter, (uintptr_t)&pes_stadium_shadow_filter);
-  debugPrintf("roof-caster-v4: installed directional caster filter; roof meshes only\n");
+  debugPrintf("roof-caster-v4: installed native roof / Day skeletal caster filter\n");
   // The offline bundle already seeds the profile, club, coach, and squad.
   // Retain ModeEntry's command handshake (states 0..2), then send its completed
   // state 5 directly to the normal "proceed" exit. This removes the obsolete

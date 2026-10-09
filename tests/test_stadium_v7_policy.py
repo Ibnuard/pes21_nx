@@ -21,11 +21,11 @@ class StadiumV7Tests(unittest.TestCase):
                    (ROOT / 'source/stadium_shadow_budget.h').read_text() + r'''
 int main(void) {
   assert(STADIUM_SHADOW_LIMIT_COUNT==3);
-  assert(stadium_shadow_limits[0].cap==512 && stadium_shadow_limits[1].cap==512);
+  assert(stadium_shadow_limits[0].cap==-1 && stadium_shadow_limits[1].cap==-1);
   assert(stadium_shadow_limits[2].cap==0);
   for(unsigned n=0;n<STADIUM_SHADOW_LIMIT_COUNT;n++) {
     StadiumShadowBudget b={0};
-    int cap=stadium_shadow_limits[n].cap, native=cap ? 4*cap : 4;
+    int cap=n==2 ? 0 : 512, native=cap ? 4*cap : 4; // retained ownership helper
     assert(stadium_shadow_budget_target(&b,0,native,0x1000000,cap)==native);
     assert(stadium_shadow_budget_target(&b,1,native,0x1000000,cap)==cap);
     stadium_shadow_budget_applied(&b,1,native,native,0x1000000,cap); // refused
@@ -285,14 +285,14 @@ static void (*stadium_cvar_set)(void*,const uint16_t*,uint32_t)=set;
 int main(void) {
   stadium_shadow_budget_tick(); assert(!writes); // idle
   stadium_shadow_budget_requested=1; tick+=500000000;
-  stadium_shadow_budget_tick(); assert(writes==3 && vars[0].value==512 && vars[1].value==512 && vars[2].value==0);
+  stadium_shadow_budget_tick(); assert(writes==1 && vars[0].value==2048 && vars[1].value==2048 && vars[2].value==0);
   stadium_shadow_budget_requested=2;
-  stadium_shadow_budget_tick(); assert(writes==3); // throttled
+  stadium_shadow_budget_tick(); assert(writes==1); // throttled
   tick+=500000000; stadium_shadow_budget_tick();
-  assert(writes==6 && vars[0].value==2048 && vars[1].value==2048 && vars[2].value==4);
+  assert(writes==2 && vars[0].value==2048 && vars[1].value==2048 && vars[2].value==4);
   stadium_shadow_budget_requested=1;
   vars[0].vtable=99; vars[1].value=256; vars[2].value=0; tick+=500000000;
-  stadium_shadow_budget_tick(); assert(writes==6 && vars[0].value==2048 && vars[1].value==256);
+  stadium_shadow_budget_tick(); assert(writes==2 && vars[0].value==2048 && vars[1].value==256);
 }
 ''')
 
