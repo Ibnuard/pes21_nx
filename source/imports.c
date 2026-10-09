@@ -2140,7 +2140,7 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
     const GLchar *source = patched;
     glShaderSource(shader, 1, &source, NULL);
     if (night_lighting) {
-      debugPrintf("night-light: decoded irradiance/reflection v6 shader=%u installed\n", shader);
+      debugPrintf("night-light: restored v5 baseline shader=%u installed\n", shader);
     } else {
       debugPrintf("stadium: roof uniform shader=%u installed=%u\n", shader, roof != NULL);
       debugPrintf("pitch-shadow: day slope=0.85 native-uv-color additive-highlight=off shader=%u\n", shader);

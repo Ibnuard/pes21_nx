@@ -1,4 +1,4 @@
-"""Scoped Night/High decoded-light compensation; owned shader fixtures optional."""
+"""Restored v5 Night/High compensation; owned shader fixtures optional."""
 from pathlib import Path
 import ast
 import os
@@ -120,17 +120,19 @@ int main(void) {
             for source in shader_sources(path):
                 source=source.replace(b'\r\n',b'\n')
                 body=source[source.index(b'void main()'):]
-                eligible=b'texture(' in body and b'samplerCube ' in source
+                reflection=(b'IndirectLightingSHCoefficients2.z;' not in body and
+                            b'View_SkyIrradianceEnvironmentMap[2]' not in body)
+                has_cube=b'texture(' in body and b'samplerCube ' in source
+                eligible=has_cube and not reflection
                 result=self.transform(source)
                 with self.subTest(material=path.stem, variant=altered):
                     if not eligible:
                         self.assertIsNone(result)
+                        if has_cube and reflection:
+                            reflection_only+=1
                         continue
                     self.assertIsNotNone(result)
                     altered+=1
-                    if (b'IndirectLightingSHCoefficients2.z;' not in body and
-                            b'View_SkyIrradianceEnvironmentMap[2]' not in body):
-                        reflection_only+=1
                     if b'PrecomputedLightingBuffer_LightMapAdd[1]' in body:
                         lightmapped+=1
                     self.assertIsNone(self.transform(result))
@@ -145,29 +147,21 @@ int main(void) {
                     self.assertLessEqual(len(insertions),3)
                     for edit in insertions:
                         preceding=patched_body[:edit.start()].split(b'\n')[-1]
-                        # Every insertion follows reconstructed irradiance or
-                        # decoded radiance, never diffuse, final RGB or alpha.
+                        # Preserve the device-tested v5 sites: SH/sky and the
+                        # sampled cubemap RGB. Never final RGB or alpha.
                         self.assertTrue(any(token in preceding for token in (
                             b'= max(vec3(0.000000e+00,0.000000e+00,0.000000e+00),',
                             b'.z = dot(View_SkyIrradianceEnvironmentMap[2],',
-                            b'*vec3((', b'}')),preceding)
+                            b'.xyzw = textureLod(')),preceding)
                     cube=re.search(rb'samplerCube (ps\d+);',source).group(1)
                     fetched=re.search(rb'(v\d+)\.xyzw = textureLod\('+cube+rb',',body).group(1)
-                    # Encoded RGBM/alpha is never modified; a single correction
-                    # follows the shared destination's sky and RGBM branches.
-                    self.assertNotIn(b'\n\t'+fetched+b'.xyz = nxNightLight(',result)
-                    decoded=[e for e in insertions if patched_body[:e.start()].rstrip().endswith(b'}')]
-                    self.assertEqual(len(decoded),1)
-                    target=decoded[0].group(1)
-                    branch_start=patched_body.rfind(b'if (bool(',0,decoded[0].start())
-                    branch=patched_body[branch_start:decoded[0].start()]
-                    self.assertEqual(branch.count(target+b'.xyz = '),2)
-                    self.assertIn(b'View_SkyLightColor.xyz',branch)
+                    sampled=[e for e in insertions if e.group(1)==fetched]
+                    self.assertEqual(len(sampled),1)
+                    self.assertIn(b'.xyzw = textureLod(',
+                                  patched_body[:sampled[0].start()].split(b'\n')[-1])
                     if b'PrecomputedLightingBuffer_LightMapAdd[1]' in body:
                         baked=[e for e in insertions if b'*vec3((' in patched_body[:e.start()].split(b'\n')[-1]]
-                        self.assertEqual(len(baked),1)
-                        self.assertGreater(baked[0].start(),patched_body.index(b'PrecomputedLightingBuffer_LightMapAdd[1]'))
-                        self.assertLess(baked[0].end(),patched_body.index(b'View_IndirectLightingColorScale'))
+                        self.assertEqual(len(baked),0)
                     restored=re.sub(rb'\n\t(v\d+)\.xyz = nxNightLight\(\1\.xyz\);',b'',patched_body)
                     self.assertEqual(before_prefix+b'void main()'+restored,source)
                     if validator:
@@ -183,9 +177,9 @@ int main(void) {
                                 frag.write_bytes(version+prologue+remaining)
                                 run=subprocess.run([validator,str(frag)],capture_output=True,timeout=15)
                                 self.assertEqual(run.returncode,0,run.stdout+run.stderr)
-        self.assertEqual(altered,250)
+        self.assertEqual(altered,193)
         self.assertEqual(reflection_only,57)
-        self.assertEqual(lightmapped,12)
+        self.assertEqual(lightmapped,6) # six others belong to the skipped reflection-only set
 
     def test_day_pitch_and_night_pitch_are_unchanged(self):
         root=ROOT/'local-debug/pitch-recreate/native/PesMobile/Content/Assets/bg_lighting_AM1/Materials'

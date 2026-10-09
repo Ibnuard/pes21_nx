@@ -32,14 +32,7 @@ static int night_lighting_body(const char *body) {
     0xcbb674a3u,0xd168e77au,0xd3488dc3u,0xd62bdc95u,0xdc9ad8c7u,
     0xe44a91cdu,0xe452a0bbu,0xe5a26a99u,0xe93fd577u,0xe94456d8u,
     0xedc5a146u,0xeef2c5ceu,0xeefff86fu,0xefe0424bu,0xf52da01au,
-    0xf6f5a785u,
-    /* Reflection-only permutations from the same six audited families. */
-    0x0aedcc06u,0x155db70bu,0x1f20d589u,0x2282ac3au,0x318b2b84u,
-    0x3c4fc533u,0x42e62112u,0x4848810fu,0x579e56bdu,0x5c61a8a3u,
-    0x6ea80755u,0x8c7a82ddu,0x98bd874cu,0x99a4abe0u,0xac8b27e8u,
-    0xb0a4b8b4u,0xb1457139u,0xbbd0b6a7u,0xc508fc81u,0xcc8f9888u,
-    0xcdba4b9eu,0xe0735b0fu,0xe40c47a1u,0xe4912243u,0xefdde814u,
-    0xf7c6efabu
+    0xf6f5a785u
   };
   uint32_t hash=2166136261u;
   for (const unsigned char *p=(const unsigned char *)body;*p;++p) {
@@ -64,41 +57,10 @@ static int night_lighting_site(const char *body,const char *at,
   return 1;
 }
 
-static const char *night_lighting_skip_space(const char *p) {
-  while (*p==' ' || *p=='\t' || *p=='\r' || *p=='\n') ++p;
-  return p;
-}
-
-/* Cubemaps are either tinted linear RGB or decoded RGBM. Balance the shared
- * decoded radiance after BOTH branches, before the BRDF/albedo multiply.
- * Editing the encoded fetch misses the sky tint and squares the green ratio
- * in the RGBM branch. Alpha remains encoding data and must not be touched. */
-static int night_lighting_cube_site(const char *body,const char *sample,
-                                    NightLightingSite *site) {
-  const char *tint=strstr(sample,".xyz = View_SkyLightColor.xyz;");
-  if (!tint || tint-sample>256) return 0;
-  const char *assignment=night_lighting_skip_space(strchr(tint,';')+1);
-  if (!night_lighting_site(body,assignment,site)) return 0;
-  const char *close=strchr(site->end,'}');
-  if (!close || close-site->end>64) return 0;
-  const char *otherwise=night_lighting_skip_space(close+1);
-  if (strncmp(otherwise,"else",4)) return 0;
-  const char *open=night_lighting_skip_space(otherwise+4);
-  if (*open!='{') return 0;
-  close=strchr(open,'}');
-  if (!close || close-open>768) return 0;
-  char target[40];
-  snprintf(target,sizeof(target),"%s.xyz = ",site->variable);
-  const char *decoded=strstr(open,target);
-  if (!decoded || decoded>close) return 0;
-  site->end=close+1;
-  return 1;
-}
-
 static char *night_lighting_source(const char *source) {
   const char *body=strstr(source,"void main()");
   if (!body || !night_lighting_body(body) || strstr(source,"nxNightIndirect")) return NULL;
-  NightLightingSite sites[4]; unsigned count=0;
+  NightLightingSite sites[3]; unsigned count=0;
 
   /* Balance reconstructed SH irradiance, NOT its signed coefficients or the
    * resulting albedo. Geometry, shadow comparisons and light direction stay. */
@@ -108,18 +70,6 @@ static char *night_lighting_source(const char *source) {
     if (!positive || positive-indirect>512 || !night_lighting_site(body,positive,&sites[count])) return NULL;
     ++count;
   }
-  /* Static meshes can use a directional lightmap instead of the dynamic
-   * SH cache. Correct only reconstructed RGB, after its log-luminance and
-   * direction decode, before multiplying by the diffuse texture. */
-  const char *lightmap=strstr(body,"PrecomputedLightingBuffer_LightMapAdd[1]");
-  if (lightmap) {
-    const char *reconstructed=strstr(lightmap,"*vec3((");
-    const char *scale=strstr(lightmap,"View_IndirectLightingColorScale");
-    if (!reconstructed || !scale || reconstructed>scale ||
-        reconstructed-lightmap>512 ||
-        !night_lighting_site(body,reconstructed,&sites[count])) return NULL;
-    ++count;
-  }
   const char *sky=strstr(body,".z = dot(View_SkyIrradianceEnvironmentMap[2],");
   if (sky) {
     if (strstr(sky+1,".z = dot(View_SkyIrradianceEnvironmentMap[2],") ||
@@ -127,7 +77,10 @@ static char *night_lighting_source(const char *source) {
     ++count;
   }
 
-  /* Include reflection-only permutations even without an SH/cache term. */
+  /* Restore the v5 scope and cubemap insertion used by the better on-device
+   * baseline. The v6 decoded/lightmap expansion regressed perimeter lighting.
+   * Keep reflection-only bodies and baked lightmaps outside this candidate. */
+  if (!count) return NULL;
   const char *cube=strstr(source,"samplerCube ");
   if (cube && cube<body) {
     char sampler[16]={0},token[40];
@@ -135,7 +88,7 @@ static char *night_lighting_source(const char *source) {
     snprintf(token,sizeof(token),"textureLod(%s,",sampler);
     const char *sample=strstr(body,token);
     if (sample) {
-      if (strstr(sample+1,token) || !night_lighting_cube_site(body,sample,&sites[count])) return NULL;
+      if (strstr(sample+1,token) || !night_lighting_site(body,sample,&sites[count])) return NULL;
       ++count;
     }
   }

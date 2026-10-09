@@ -24,6 +24,7 @@
 #include "perf_trace.h"
 #include "stadium_view_policy.h"
 #include "stadium_shadow_budget.h"
+#include "team_commentary_policy.h"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
 #endif
@@ -783,16 +784,151 @@ static uint32_t pes_use_commentary_enabled(void) {
   return 1;
 }
 
+static uint32_t team_commentary_indonesia_slot;
+static void (*sound_team_name_label_original)(
+    const void *, char *, const uint32_t *, const uint32_t *, const uint32_t *,
+    uint32_t, uint32_t, const uint32_t *, const uint32_t *);
+static int32_t (*sound_mount_data_original)(void *acb_data, uint32_t acb_size,
+    void *binder, const char *awb_path, uint16_t mount_flags,
+    uint16_t search_flags, int16_t *mount_id);
+static int32_t (*sound_unmount_data_original)(int16_t mount_id);
+static int32_t (*sound_hca_decode_header_original)(void *, const void *, int64_t,
+    const void *, int64_t, int64_t *);
+static int32_t (*sound_hca_set_decryption_table)(void *, const void *, int64_t);
+
+/* Only the commentary label ID changes. The native team/roster ID remains
+ * 1164. Missing context-specific Indonesia cues use the native missing-label
+ * path, never a fallback to an Israel recording. Edited name IDs are separate. */
+static void pes_sound_team_name_label(
+    const void *creator, char *label, const uint32_t *capacity,
+    const uint32_t *side, const uint32_t *team_id, uint32_t licensed,
+    uint32_t edited, const uint32_t *type, const uint32_t *variation) {
+  const uint32_t name_id = team_id
+      ? team_commentary_name_id(*team_id, team_commentary_indonesia_slot, edited)
+      : 0u;
+  sound_team_name_label_original(creator, label, capacity, side,
+      team_id && name_id != *team_id ? &name_id : team_id,
+      licensed, edited, type, variation);
+}
+
+/* CRI keeps writable work areas inside a mounted ACB. Each mount owns a fresh
+ * replacement until the native unmount succeeds, including overlapping loads. */
+typedef struct {
+  void *data;
+  int16_t id;
+  uint32_t state; /* 0=free, 1=reserved, 2=mounted */
+} TeamCommentaryMount;
+static TeamCommentaryMount team_commentary_mounts[4];
+
+/* The native HCA codec installs its global cipher before each DecodeHeader,
+ * even for ciph=0. DecodeHeader does not clear a custom table in that case.
+ * Clear only this voice's table for the two recognized plaintext recordings
+ * while our optional bank is mounted. Never change the global cipher. */
+static int32_t pes_sound_decode_hca_header(void *decoder,
+    const void *first, int64_t first_size, const void *second,
+    int64_t second_size, int64_t *consumed) {
+  if (team_commentary_indonesia_slot && decoder &&
+      team_commentary_plain_hca_header(first, first_size, second, second_size)) {
+    for (unsigned i = 0; i < 4; ++i) {
+      if (__atomic_load_n(&team_commentary_mounts[i].state,
+                          __ATOMIC_ACQUIRE) == 2u) {
+        sound_hca_set_decryption_table(decoder, NULL, 0);
+        break;
+      }
+    }
+  }
+  return sound_hca_decode_header_original(decoder, first, first_size,
+                                           second, second_size, consumed);
+}
+
+static int32_t pes_sound_mount_data(
+    void *acb_data, uint32_t acb_size, void *binder, const char *awb_path,
+    uint16_t mount_flags, uint16_t search_flags, int16_t *mount_id) {
+  void *const original_data = acb_data;
+  const uint32_t original_size = acb_size;
+  TeamCommentaryMount *slot = NULL;
+  if (team_commentary_indonesia_slot && mount_id &&
+      team_commentary_is_team_bank(awb_path)) {
+    for (unsigned i = 0; i < 4; ++i) {
+      uint32_t expected = 0;
+      if (__atomic_compare_exchange_n(&team_commentary_mounts[i].state,
+              &expected, 1u, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        slot = &team_commentary_mounts[i];
+        break;
+      }
+    }
+    if (slot) {
+      uint32_t patched_size = 0;
+      slot->data = team_commentary_load_delta(acb_data, acb_size,
+          "Commentary/indonesia.nxcp", &patched_size);
+      if (slot->data) {
+        acb_data = slot->data;
+        acb_size = patched_size;
+      } else {
+        __atomic_store_n(&slot->state, 0u, __ATOMIC_RELEASE);
+        slot = NULL;
+      }
+    }
+  }
+  int32_t result = sound_mount_data_original(acb_data, acb_size, binder,
+      awb_path, mount_flags, search_flags, mount_id);
+  if (slot) {
+    if (!result) {
+      slot->id = *mount_id;
+      __atomic_store_n(&slot->state, 2u, __ATOMIC_RELEASE);
+    } else {
+      free(slot->data);
+      slot->data = NULL;
+      __atomic_store_n(&slot->state, 0u, __ATOMIC_RELEASE);
+      /* An unavailable optional patch must not disable the original bank. */
+      result = sound_mount_data_original(original_data, original_size, binder,
+          awb_path, mount_flags, search_flags, mount_id);
+      acb_data = original_data;
+      acb_size = original_size;
+      slot = NULL;
+    }
+  }
+#ifdef DEBUG_LOG
+  debugPrintf("sound: MountData result=%d mount=%d acb=%p/%u awb=%s indonesia=%u\n",
+      result, mount_id ? *mount_id : -1, acb_data, acb_size,
+      awb_path ? awb_path : "(null)", slot != NULL);
+#endif
+  return result;
+}
+
+static int32_t pes_sound_unmount_data(int16_t mount_id) {
+  TeamCommentaryMount *owned = NULL;
+  /* Reserve the owner before native unmount makes the ID reusable. A new
+   * simultaneous mount with that ID must keep its own allocation. */
+  for (unsigned i = 0; i < 4; ++i) {
+    TeamCommentaryMount *slot = &team_commentary_mounts[i];
+    if (__atomic_load_n(&slot->state, __ATOMIC_ACQUIRE) != 2u ||
+        slot->id != mount_id)
+      continue;
+    uint32_t expected = 2u;
+    if (__atomic_compare_exchange_n(&slot->state, &expected, 1u, 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+      owned = slot;
+      break;
+    }
+  }
+  const int32_t result = sound_unmount_data_original(mount_id);
+  if (owned) {
+    if (!result) {
+      free(owned->data);
+      owned->data = NULL;
+      __atomic_store_n(&owned->state, 0u, __ATOMIC_RELEASE);
+    } else {
+      __atomic_store_n(&owned->state, 2u, __ATOMIC_RELEASE);
+    }
+  }
+  return result;
+}
+
 #ifdef DEBUG_LOG
 static int32_t (*sound_cinf_play_original)(const void *play_info,
                                            uint64_t *handle);
 static int32_t (*sound_music_set_event_original)(int32_t event_id);
-static int32_t (*sound_mount_data_original)(void *acb_data, uint32_t acb_size,
-                                            void *binder,
-                                            const char *awb_path,
-                                            uint16_t mount_flags,
-                                            uint16_t search_flags,
-                                            int16_t *mount_id);
 static int32_t (*sound_file_is_exist_original)(const char *path);
 static int32_t (*sound_set_game_option_volume_original)(uint32_t type,
                                                         float volume);
@@ -801,7 +937,6 @@ static int32_t (*sound_set_category_volume_original)(const char *category,
 static float (*sound_get_category_volume)(const char *category);
 static float (*sound_get_category_total_volume)(const char *category);
 static unsigned int sound_play_log_count;
-static unsigned int sound_mount_log_count;
 
 static int32_t pes_sound_cinf_play_diagnostic(const void *play_info,
                                               uint64_t *handle) {
@@ -826,21 +961,6 @@ static int32_t pes_sound_music_set_event_diagnostic(int32_t event_id) {
   const int32_t result = sound_music_set_event_original(event_id);
   debugPrintf("sound: MusicManager::SetEventId id=%d result=%d\n",
               event_id, result);
-  return result;
-}
-
-static int32_t pes_sound_mount_data_diagnostic(
-    void *acb_data, uint32_t acb_size, void *binder, const char *awb_path,
-    uint16_t mount_flags, uint16_t search_flags, int16_t *mount_id) {
-  const int32_t result = sound_mount_data_original(
-      acb_data, acb_size, binder, awb_path, mount_flags, search_flags,
-      mount_id);
-  if (sound_mount_log_count++ < 128) {
-    debugPrintf("sound: CInfBase::MountData result=%d mount=%d acb=%p/%u "
-                "binder=%p awb=%s flags=%u/%u\n",
-                result, mount_id ? *mount_id : -1, acb_data, acb_size, binder,
-                awb_path ? awb_path : "(null)", mount_flags, search_flags);
-  }
   return result;
 }
 
@@ -19930,6 +20050,52 @@ void install_ue4_hooks(so_module *module) {
                 (void *)sound_language_string3_plt,
                 (void *)use_commentary_plt);
   }
+  /* These four PLT entries are audited against the supported v5.3.0 ELF.
+   * Calling the unmodified symbol bodies avoids recursion through the PLT. */
+  const uintptr_t team_name_label_plt = (uintptr_t)module->load_base + 0x3935a10;
+  const uintptr_t mount_data_plt = (uintptr_t)module->load_base + 0x3890f90;
+  const uintptr_t unmount_data_plt = (uintptr_t)module->load_base + 0x38b9900;
+  const uintptr_t hca_decode_header_plt = (uintptr_t)module->load_base + 0x382fd10;
+  static const uint32_t expected_team_name_label_plt[4] = {
+      0xf002e110, 0xf947b211, 0x913d8210, 0xd61f0220,
+  };
+  static const uint32_t expected_mount_data_plt[4] = {
+      0xd002e3b0, 0xf9451211, 0x91288210, 0xd61f0220,
+  };
+  static const uint32_t expected_unmount_data_plt[4] = {
+      0xb002e310, 0xf9476e11, 0x913b6210, 0xd61f0220,
+  };
+  static const uint32_t expected_hca_decode_header_plt[4] = {
+      0xf002e530, 0xf9407211, 0x91038210, 0xd61f0220,
+  };
+  if (commentary_hooks_ok &&
+      !memcmp((void *)team_name_label_plt, expected_team_name_label_plt, 16) &&
+      !memcmp((void *)mount_data_plt, expected_mount_data_plt, 16) &&
+      !memcmp((void *)unmount_data_plt, expected_unmount_data_plt, 16) &&
+      !memcmp((void *)hca_decode_header_plt, expected_hca_decode_header_plt, 16)) {
+    sound_team_name_label_original = (void *)so_find_addr_rx(module,
+        "_ZNK5sound3app11ai_selector30DataLabelDBCreatorUnitTeamName19CreateTeamNameLabelEPcRKjRK8HomeAwayS5_bbRKNS1_12TeamNameTypeES5_");
+    sound_mount_data_original = (void *)so_find_addr_rx(module,
+        "_ZN2KS8CInfBase9MountDataEPvjS1_PKcttPs");
+    sound_unmount_data_original = (void *)so_find_addr_rx(module,
+        "_ZN2KS8CInfBase11UnmountDataEs");
+    sound_hca_decode_header_original = (void *)so_find_addr_rx(module,
+        "HCADecoder_DecodeHeader");
+    sound_hca_set_decryption_table = (void *)so_find_addr_rx(module,
+        "HCADecoder_SetDecryptionTable");
+    const ExhibitionTeamCatalogEntry *indonesia = exhibition_team_catalog_find(5750u);
+    team_commentary_indonesia_slot = indonesia &&
+        indonesia->physical_team_id == 1164u &&
+        exhibition_team_catalog_logical(1164u) == 5750u;
+    hook_arm64(team_name_label_plt, (uintptr_t)&pes_sound_team_name_label);
+    hook_arm64(mount_data_plt, (uintptr_t)&pes_sound_mount_data);
+    hook_arm64(unmount_data_plt, (uintptr_t)&pes_sound_unmount_data);
+    hook_arm64(hca_decode_header_plt, (uintptr_t)&pes_sound_decode_hca_header);
+    debugPrintf("sound: Indonesia commentary identity=%u optional delta=%s\n",
+        team_commentary_indonesia_slot, "Commentary/indonesia.nxcp");
+  } else {
+    debugPrintf("WARNING: team commentary PLT mismatch; hooks skipped\n");
+  }
   char loose_error[256];
   const int loose_enabled = pes_loose_cpk_init(
 #if PES_PLAYER_MIGRATION_CANARY
@@ -19962,9 +20128,6 @@ void install_ue4_hooks(so_module *module) {
   sound_music_set_event_original =
       (void *)so_find_addr_rx(
           module, "_ZN5sound3sys12MusicManager10SetEventIdEi");
-  sound_mount_data_original =
-      (void *)so_find_addr_rx(
-          module, "_ZN2KS8CInfBase9MountDataEPvjS1_PKcttPs");
   sound_file_is_exist_original =
       (void *)so_find_addr_rx(module, "_ZN3sys4File7IsExistEPKc");
   sound_set_game_option_volume_original =
@@ -19983,8 +20146,6 @@ void install_ue4_hooks(so_module *module) {
   const uintptr_t cinf_play_plt = (uintptr_t)module->load_base + 0x382c5c0;
   const uintptr_t music_set_event_plt =
       (uintptr_t)module->load_base + 0x38dac90;
-  const uintptr_t mount_data_plt =
-      (uintptr_t)module->load_base + 0x3890f90;
   const uintptr_t file_is_exist_plt =
       (uintptr_t)module->load_base + 0x390dc40;
   const uintptr_t set_game_option_volume_plt =
@@ -19998,9 +20159,6 @@ void install_ue4_hooks(so_module *module) {
   };
   static const uint32_t expected_music_set_event_plt[4] = {
       0xb002e290, 0xf9445211, 0x91228210, 0xd61f0220,
-  };
-  static const uint32_t expected_mount_data_plt[4] = {
-      0xd002e3b0, 0xf9451211, 0x91288210, 0xd61f0220,
   };
   static const uint32_t expected_file_is_exist_plt[4] = {
       0x9002e1d0, 0xf9403e11, 0x9101e210, 0xd61f0220,
@@ -20019,8 +20177,6 @@ void install_ue4_hooks(so_module *module) {
       memcmp((const void *)music_set_event_plt,
              expected_music_set_event_plt,
              sizeof(expected_music_set_event_plt)) != 0 ||
-      memcmp((const void *)mount_data_plt, expected_mount_data_plt,
-             sizeof(expected_mount_data_plt)) != 0 ||
       memcmp((const void *)file_is_exist_plt, expected_file_is_exist_plt,
              sizeof(expected_file_is_exist_plt)) != 0 ||
       memcmp((const void *)set_game_option_volume_plt,
@@ -20036,8 +20192,6 @@ void install_ue4_hooks(so_module *module) {
   hook_arm64(cinf_play_plt, (uintptr_t)&pes_sound_cinf_play_diagnostic);
   hook_arm64(music_set_event_plt,
              (uintptr_t)&pes_sound_music_set_event_diagnostic);
-  hook_arm64(mount_data_plt,
-             (uintptr_t)&pes_sound_mount_data_diagnostic);
   hook_arm64(file_is_exist_plt,
              (uintptr_t)&pes_sound_file_is_exist_diagnostic);
   hook_arm64(set_game_option_volume_plt,

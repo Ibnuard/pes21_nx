@@ -106,6 +106,11 @@ table does not provide a full MLS league; its current Switch North America
 selector contains Inter Miami plus four Mexican clubs, so relabeling that
 category as MLS would be inaccurate.
 
+Indonesia's reused storage slot also needs a separate commentary identity
+policy. See [Indonesia team commentary](TEAM_COMMENTARY.md) for the scoped
+5750 name lookup and optional local English audio delta; renaming Team.bin
+alone leaves the original slot's Israel recordings reachable.
+
 ## Release gates
 
 1. Review native tactics and formation assignments for the 18 mapped physical

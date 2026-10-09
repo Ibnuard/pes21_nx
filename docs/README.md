@@ -29,6 +29,7 @@ Subsystem notes and historical implementation audits live here.
 - [NRO launcher icon and NSP forwarder notes](NRO_ICON.md)
 - [Loose CPK canary](LOOSE_CPK_CANARY.md)
 - [Full loose CPK runtime](LOOSE_CPK_FULL.md)
+- [Indonesia team commentary](TEAM_COMMENTARY.md)
 - [Known issues](KNOWN_ISSUES.md)
 - [HUD render audit](HUD_RENDER_AUDIT.md)
 - [Stadium roof toggle, camera and performance](STADIUM_ROOF_CAMERA.md)

@@ -1,5 +1,42 @@
 # Stadium / High diagnostic candidate — 2026-09-17
 
+## v8 restores the v5 lighting baseline — 2026-10-09
+
+Device feedback rejects v6/v7's lighting expansion: at Night/High the area
+behind the goal becomes bright green again, including the cameramen. The
+user explicitly prefers the less-green v5 perimeter, while noting that v5
+still has some residual cast. Accepted pitch markings and the installed
+patch PAK remain the reference.
+
+v8 restores the v5 material scope and insertion sites: 106 normalized body
+fingerprints, 193 patched variants, cubemap RGB compensation immediately
+after sampling, SH/cache and sky compensation at their original sites.
+The 57 reflection-only variants pass through, and baked lightmaps receive
+no new correction. The Night/High gate, pitch policy and result UI remain.
+This is a rollback of the reported visual regression, not a claim that all
+remaining green cast has been eliminated or that an underlying UV defect
+has been identified.
+
+A local Unicorn audit executed `glShaderSource_pitch` from the retained v5
+ELF with host stubs for allocation/string calls and captured the GL input.
+For all 250 owned fragment variants in the six audited families, the restored
+source produces byte-identical output to that v5 binary (193 changed, 57
+unchanged). No proprietary shader bodies or disassembly are public fixtures.
+Focused tests retain unknown-source rejection, unchanged main-pitch bodies,
+disabled identity, source preservation, and uniform lifetime checks.
+
+The native packet-reader regression for Indonesia commentary is separate;
+see [TEAM_COMMENTARY.md](TEAM_COMMENTARY.md). Keep the installed PAK and
+compare v8 versus v5 under the same Night/High stadium and camera conditions.
+On-device visual acceptance is still required.
+
+Candidate: `local-debug/review-v8-production/pes21_nx.nro`, 82,781,087 bytes,
+SHA-256 `b02a4fa32e054610ebeceb90dc170133bd700813f8dc911376163b5beb68d251`.
+Production diagnostics/PerfTrace are off. Native build and embedded icon
+validation passed, as did 31 focused tests (250 shader subtests) and all
+772 glslang compiles for the 193 patched variants before/after rewriting
+with both clip-space macro values. The audio delta is byte-identical to v7.
+
 ## v6 decoded-light coverage follow-up — 2026-10-09
 
 Hardware feedback now confirms v5 at Night/High still shows green casts on
