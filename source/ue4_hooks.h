@@ -521,6 +521,8 @@ PesUniformPreviewPng *pes_controller_2p_take_uniform_preview_png(
     uint32_t side);
 int pes_controller_2p_native_uniform_preview_active(void);
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void);
+uint32_t pes_controller_stadium_catalog_count(void);
+uint32_t pes_controller_stadium_canary_active(void);
 uint32_t pes_controller_stadium_is_day(void);
 uint32_t pes_controller_night_lighting_balance_enabled(void);
 uint32_t pes_controller_stadium_weather(void);

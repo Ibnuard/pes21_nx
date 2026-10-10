@@ -14,7 +14,7 @@ class StadiumV7Tests(unittest.TestCase):
         cc = shutil.which('gcc')
         if not cc:
             self.skipTest('gcc unavailable')
-        build_and_run(cc, source)
+        build_and_run(cc, (ROOT/'source/match_environment.h').read_text()+source)
 
     def test_shadow_resolution_ownership_and_native_quality_changes(self):
         self.run_c('#include <assert.h>\n' +

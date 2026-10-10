@@ -107,6 +107,7 @@ void ml_frontend_view(MlView *view);
 uint32_t ml_frontend_take_action(void);
 const MasterLeague *ml_frontend_career(void);
 int ml_frontend_match_active(void);
+uint32_t ml_frontend_scoreboard(void);
 int ml_frontend_plan_editor(void);
 void ml_frontend_plan_error(void);
 int ml_frontend_match_is_cup(void);

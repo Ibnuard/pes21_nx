@@ -30,6 +30,11 @@
 #include "fl26_cup_catalog_generated.h"
 #include "fl26_league_catalog_generated.h"
 #include "overlay.h"
+#include "runtime_assets.h"
+#include "stadium_catalog.h"
+#include "match_environment.h"
+#include "frame_pacing_sample.h"
+#include "scene_runtime_log.h"
 #include "badge_atlas.h"
 #include "efootball_font_atlas.h"
 #include "font_atlas.h"
@@ -1405,28 +1410,13 @@ static void prepare_cup_logo_asset(int active) {
   char path[96];
   if (snprintf(path, sizeof(path), "CupLogos/%s", name) >= (int)sizeof(path))
     return;
-  FILE *stream = fopen(path, "rb");
-  if (!stream) {
+  size_t size = 0;
+  uint8_t *bytes = nx_asset_read(path, 2000000u, &size);
+  if (!bytes) {
     debugPrintf("[overlay] optional Cup logo unavailable: %s\n", path);
     return;
   }
-  if (fseek(stream, 0, SEEK_END) != 0) {
-    fclose(stream);
-    return;
-  }
-  const long size = ftell(stream);
-  if (size < 8 || size > 2000000L || fseek(stream, 0, SEEK_SET) != 0) {
-    fclose(stream);
-    return;
-  }
-  uint8_t *bytes = malloc((size_t)size);
-  if (!bytes) {
-    fclose(stream);
-    return;
-  }
-  const int complete = fread(bytes, 1, (size_t)size, stream) == (size_t)size;
-  fclose(stream);
-  if (complete) {
+  if (size >= 8) {
     GLint active_texture = GL_TEXTURE0, texture = 0, unpack = 4;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
     glActiveTexture(GL_TEXTURE0);
@@ -1467,28 +1457,13 @@ static void prepare_league_logo_index(uint32_t index) {
   char path[96];
   if (snprintf(path, sizeof(path), "LeagueLogos/%s", name) >= (int)sizeof(path))
     return;
-  FILE *stream = fopen(path, "rb");
-  if (!stream) {
+  size_t size = 0;
+  uint8_t *bytes = nx_asset_read(path, 2000000u, &size);
+  if (!bytes) {
     debugPrintf("[overlay] optional League logo unavailable: %s\n", path);
     return;
   }
-  if (fseek(stream, 0, SEEK_END) != 0) {
-    fclose(stream);
-    return;
-  }
-  const long size = ftell(stream);
-  if (size < 8 || size > 2000000L || fseek(stream, 0, SEEK_SET) != 0) {
-    fclose(stream);
-    return;
-  }
-  uint8_t *bytes = malloc((size_t)size);
-  if (!bytes) {
-    fclose(stream);
-    return;
-  }
-  const int complete = fread(bytes, 1, (size_t)size, stream) == (size_t)size;
-  fclose(stream);
-  if (complete) {
+  if (size >= 8) {
     GLint active_texture = GL_TEXTURE0, texture = 0, unpack = 4;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
     glActiveTexture(GL_TEXTURE0);
@@ -2161,6 +2136,31 @@ static const char *native_lab_setplay_name(uint32_t context) {
 
 #endif
 static void overlay_render(void) {
+  const int live_weather_view=pes_controller_match_hud_inplay();
+  const uint32_t weather_choice=pes_controller_stadium_weather();
+  const uint32_t weather_season=pes_controller_stadium_season()!=0;
+  static NxFramePacingSample pacing;
+  static int pacing_width,pacing_height;
+  if(live_weather_view) {
+    const uint32_t session=pes_controller_match_hud_session();
+    if(pacing.session!=session || pacing.weather!=weather_choice || pacing.season!=weather_season) {
+      memset(&pacing,0,sizeof(pacing));pacing.session=session;
+      pacing.weather=weather_choice;pacing.season=weather_season;
+    }
+    nx_frame_pacing_add(&pacing,armTicksToNs(armGetSystemTick()));
+  } else if(pacing.previous) {
+    pacing.previous=0;
+    if(pacing.frames>=120) {
+      char message[224];
+      snprintf(message,sizeof(message),"v14 session=%u weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
+          pacing.session,nx_weather_label(pacing.weather),pacing.season,pacing.frames,
+          (unsigned long long)(pacing.total/pacing.frames/1000u),
+          (unsigned long long)(pacing.worst/1000u),pacing.over20,pacing.over30,
+          pacing_width,pacing_height);
+      scene_runtime_note("frame pacing",message);
+      memset(&pacing,0,sizeof(pacing));
+    }
+  }
   if (config.show_fps) {
     const u64 now = armGetSystemTick();
     const u64 freq = armGetSystemTickFreq();
@@ -7430,15 +7430,11 @@ static void overlay_render(void) {
                    kit_number ? kit_number : 1u);
         value = kit_value;
       } else if (row == 0) {
-        static const char *const stadium_options[3] = {
-            "AUTO", "HOME", "AWAY"};
-        value = stadium_options[
-            pes_controller_2p_prematch_hub_stadium_index()];
+        value = stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index());
       } else if (row == 1) {
         value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
       } else if (row == 2) {
-        static const char *const weather_options[2] = {"FINE", "CLOUDY"};
-        value = weather_options[pes_controller_stadium_weather() & 1u];
+        value = nx_weather_label(pes_controller_stadium_weather());
       } else if (row == 3) {
         value = pes_controller_stadium_season() ? "WINTER" : "SUMMER";
       } else if (row == 4) {
@@ -7665,8 +7661,6 @@ static void overlay_render(void) {
       }
     } else {
       const char *stadium_title = "STADIUM";
-      static const char *const stadium_options[3] = {
-          "AUTO STADIUM", "HOME STADIUM", "AWAY STADIUM"};
       const uint32_t stadium_focus =
           pes_controller_2p_prematch_hub_stadium_index();
       line_quads = emit_efootball_line(
@@ -7688,10 +7682,10 @@ static void overlay_render(void) {
           EFOOTBALL_FONT_BOLD, verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
-      for (uint32_t option = 0; option < 3; option++) {
+      for (uint32_t option = 0; option < pes_controller_stadium_catalog_count(); option++) {
         if (option == stadium_focus)
           continue;
-        const char *stadium_value = stadium_options[option];
+        const char *stadium_value = stadium_catalog_label(option);
         const float value_width = measure_efootball_line(
             stadium_value, (int)strlen(stadium_value), title_gh,
             EFOOTBALL_FONT_STENCIL);
@@ -7761,11 +7755,9 @@ static void overlay_render(void) {
       custom_focus_text_quads += line_quads;
       quads += line_quads;
     } else if (page == PES_2P_PREMATCH_HUB_PAGE_STADIUM) {
-      static const char *const stadium_options[3] = {
-          "AUTO STADIUM", "HOME STADIUM", "AWAY STADIUM"};
       const uint32_t stadium_focus =
           pes_controller_2p_prematch_hub_stadium_index();
-      const char *stadium_value = stadium_options[stadium_focus];
+      const char *stadium_value = stadium_catalog_label(stadium_focus);
       const float stadium_width = measure_efootball_line(
           stadium_value, (int)strlen(stadium_value), title_gh,
           EFOOTBALL_FONT_STENCIL);
@@ -9890,6 +9882,7 @@ overlay_geometry_ready:
   glGetIntegerv(GL_ACTIVE_TEXTURE, &prev_active);
   glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prev_array_buf);
   glGetIntegerv(GL_VIEWPORT, prev_viewport);
+  pacing_width=prev_viewport[2];pacing_height=prev_viewport[3];
   glGetIntegerv(GL_BLEND_SRC_RGB, &bsrc_rgb);
   glGetIntegerv(GL_BLEND_DST_RGB, &bdst_rgb);
   glGetIntegerv(GL_BLEND_SRC_ALPHA, &bsrc_a);

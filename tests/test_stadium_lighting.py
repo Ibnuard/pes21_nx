@@ -90,6 +90,7 @@ class StadiumLightingTests(unittest.TestCase):
                     for coord in (b'v2',b'v3'):
                         body=body.replace(b'if (nxDayStadium<0.5 && ('+coord+b'.z>0.000000e+00))',
                                           b'if (('+coord+b'.z>0.000000e+00))')
+                    body=re.sub(rb'\n\thighp vec3 nxWeatherWorld=[^\n]+;\n(?:\tout_Target0.xyz=[^\n]+;\n)+',b'',body)
                     self.assertEqual(body, native_body)
                     # All texture reads, including encoded RGBM, remain original.
                     reads = lambda s: re.findall(rb'[^\n]*= (?:texture|clamp\(texture)[^\n]*', s)

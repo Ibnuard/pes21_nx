@@ -11,7 +11,8 @@ class FootballNXTests(unittest.TestCase):
     def run_c(self, body):
         cc=shutil.which('gcc')
         if not cc: self.skipTest('gcc unavailable')
-        build_and_run(cc, '#include <stdint.h>\n#include <assert.h>\n#include <stddef.h>\n'+body)
+        build_and_run(cc, '#include <stdint.h>\n#include <assert.h>\n#include <stddef.h>\n'+
+                      (ROOT/'source/match_environment.h').read_text()+body)
 
     def test_fixed_ui_and_stadium_custom_slider_isolation(self):
         self.run_c(r'''
@@ -47,10 +48,12 @@ static void *exhibition_settings_match;
 static unsigned char main_menu_2p_prematch_hub_input_armed[2];
 #define MAIN_MENU_2P_PREMATCH_PAGE_MAIN 0
 static void *exhibition_get_tmpdb_match(void) {return (void*)1;}
+static uint32_t pes_controller_stadium_catalog_count(void) {return 2;}
 static uint32_t written_time;
 static void write_time(void *m,uint32_t t) {assert(m==(void*)1);written_time=t;}
 static void (*exhibition_match_set_time_zone)(void*,uint32_t)=write_time;
 ''' + function(SOURCE,'pes_controller_stadium_is_day') +
+              function(SOURCE,'pes_controller_stadium_weather') +
               function(SOURCE,'pes_controller_roof_shadow_enabled') +
               'static void event(uint32_t pressed) {\n'+body+r'''
 int main(void) {
@@ -62,6 +65,12 @@ int main(void) {
   }
   main_menu_2p_prematch_hub_page_focus=2; event(1u<<1);
   assert(exhibition_settings_weather==1 && pes_controller_roof_shadow_enabled());
+  event(1u<<1);assert(exhibition_settings_weather==NX_WEATHER_RAIN);
+  event(1u<<1);assert(exhibition_settings_weather==NX_WEATHER_FINE);
+  event(1u<<12);assert(exhibition_settings_weather==NX_WEATHER_RAIN);
+  main_menu_2p_prematch_hub_page_focus=3;event(1u<<1);
+  assert(exhibition_settings_season==1 && exhibition_settings_weather==NX_WEATHER_RAIN);
+  event(1u<<1);assert(exhibition_settings_season==0 && exhibition_settings_weather==NX_WEATHER_RAIN);
 }
 ''')
         setup=function(SOURCE,'pes_exhibition_match_setup_data_entry')

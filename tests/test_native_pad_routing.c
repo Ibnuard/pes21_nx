@@ -25,6 +25,8 @@ static uintptr_t objects[97];
 static uint32_t history[5], history_p2[5];
 static void *accessor, *original_input_unit;
 static int calls, sample_calls, prime_calls;
+static uint32_t expected_previous = 61;
+static struct { uintptr_t vptr; uint32_t key; } live_objects[3];
 int cobra_pad_prime_native_port(uint32_t port) {
   assert(port <= 1);
   prime_calls++;
@@ -32,7 +34,7 @@ int cobra_pad_prime_native_port(uint32_t port) {
 }
 
 static void stock_list(void *p, const void *in, uint32_t previous, uint32_t context) {
-  assert(p == list && in == input && previous == 61 && context == 7);
+  assert(p == list && in == input && previous == expected_previous && context == 7);
   const uint32_t player = *(const uint32_t *)(input + 0x24);
   if (active && *(void **)(input + 0x18) &&
       (player < 11 || two_player))
@@ -60,6 +62,9 @@ static void setup(void) {
   native_lab_installed = 1;
   native_lab_action_hooks_installed = 1;
   calls = sample_calls = prime_calls = 0;
+  expected_previous = 61;
+  for (unsigned i = 0; i < 3; ++i)
+    native_lab_optional_live_units[i].vptr = 0;
   native_pad_lab_reset();
   native_lab_list_update_original = stock_list;
   native_lab_sample_original = stock_sample;
@@ -93,11 +98,75 @@ static void run(const uint32_t *entries, uint32_t n) {
   *(uint32_t *)list = n;
   memcpy(list+4, entries, n*4);
   memcpy(before, list, sizeof(list));
-  native_lab_list_update(list, input, 61, 7);
+  native_lab_list_update(list, input, expected_previous, 7);
   assert(calls == 1);
   assert(accessor == original_input_unit); // Scoped binding was restored.
 }
 static void unchanged(void) { assert(!memcmp(list, before, sizeof(list))); }
+
+static void enable_live_units(void) {
+  const uint32_t keys[3] = {16, 14, 11};
+  for (unsigned i = 0; i < 3; ++i) {
+    NativeLabUnit *u = &native_lab_optional_live_units[i];
+    u->vptr = live_objects[i].vptr = 1000 + u->kind;
+    live_objects[i].key = keys[i];
+    *(void **)(list + 0x3bf8 + u->kind * 8) = &live_objects[i];
+  }
+}
+
+static void test_live_controls(void) {
+  const uint32_t attack[] = {78,79,83,96};
+  const uint32_t defence[] = {85,86,87,88,89,96};
+  const uint32_t expected_attack[] = {24,3,0,1,2,10,96};
+  const uint32_t expected_feint[] = {24,23,3,0,1,2,10,96};
+  const uint32_t expected_defence[] = {24,8,5,6,9,7,11,96};
+  for (uint32_t pad = 0; pad < 2; ++pad) {
+    setup(); enable_live_units();
+    *(uint32_t *)(input + 0x24) = pad ? 15 : 4;
+    *(int32_t *)(cursor + 16) = (int32_t)pad;
+    run(attack, 4);
+    assert(*(uint32_t *)list == 7);
+    assert(!memcmp(list + 4, expected_attack, sizeof(expected_attack)));
+    for (uint32_t kick = 1; kick <= 3; kick += 2) {
+      setup(); enable_live_units(); expected_previous = kick;
+      *(uint32_t *)(input + 0x24) = pad ? 15 : 4;
+      *(int32_t *)(cursor + 16) = (int32_t)pad;
+      run(attack, 4);
+      assert(*(uint32_t *)list == 8);
+      assert(!memcmp(list + 4, expected_feint, sizeof(expected_feint)));
+    }
+    setup(); enable_live_units();
+    *(uint32_t *)(input + 0x24) = pad ? 15 : 4;
+    *(int32_t *)(cursor + 16) = (int32_t)pad;
+    run(defence, 6);
+    assert(*(uint32_t *)list == 8);
+    assert(!memcmp(list + 4, expected_defence, sizeof(expected_defence)));
+  }
+  // Wrong PadId or vtable disables only that optional action. Ordinary
+  // passing never becomes a feint; mixed possession never rushes the keeper.
+  setup(); enable_live_units(); live_objects[0].key = 12;
+  run(defence, 6);
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 8));
+  setup(); enable_live_units(); live_objects[1].vptr++;
+  expected_previous = 3; run(attack, 4);
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 23));
+  setup(); enable_live_units(); expected_previous = 0; run(attack, 4);
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 23));
+  setup(); enable_live_units();
+  const uint32_t mixed[] = {78,79,85,89}; run(mixed, 4);
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 8));
+  setup(); enable_live_units();
+  const uint32_t penalty[] = {92,85,89}; run(penalty, 3);
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 8));
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 24));
+  setup(); enable_live_units();
+  const uint32_t setplay[] = {90,95,78,79}; run(setplay, 4);
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 23));
+  assert(!native_lab_has_kind((uint32_t *)(list + 4), *(uint32_t *)list, 24));
+  setup(); enable_live_units(); active = 0; run(attack, 4); unchanged();
+  setup(); enable_live_units(); two_player = 0;
+  *(uint32_t *)(input + 0x24) = 15; run(defence, 6); unchanged();
+}
 
 static void setup_cursor_info(void) {
   memset(cursor_info, 0, sizeof(cursor_info));
@@ -169,6 +238,7 @@ static void test_single_stick_camera_routing(void) {
 }
 
 int main(void) {
+  test_live_controls();
   test_single_stick_camera_routing();
   setup();
   setup_cursor_info();
@@ -266,7 +336,7 @@ int main(void) {
                               PES_NATIVE_LAB_ROUTE_GOALKICK_SUPPORT |
                               PES_NATIVE_LAB_ROUTE_CAMERA_STICK |
                               PES_NATIVE_LAB_ROUTE_SETPLAY_GUIDE));
-  assert(debug.trajectory_enabled == 1);
+  assert(debug.trajectory_enabled == 0); // Goal kicks use the accepted no-arc preset.
   assert((debug.status & (32u|64u)) == (32u|64u));
   pes_controller_native_pad_lab_debug_input(0, 0x15u, -1234, 2345,
                                              3456, -4567, 1);

@@ -185,7 +185,8 @@ int main(void) {
   view.focus=0;capture("18-kits-home-editing");
   base(FD_STADIUM);view.row_count=view.total_rows=6;
   static const char *const labels[]={"STADIUM","MATCH TIME","WEATHER","SEASON","GRASS LENGTH","PITCH CONDITION"};
-  static const char *const values[]={"HOME","NIGHT","FINE","SUMMER","NORMAL","DRY"};
+  static const char *const values[]={"KONAMI STADIUM","NIGHT","FINE","SUMMER","NORMAL","DRY"};
+  fd_copy(view.status,sizeof(view.status),"GRASS / PITCH AFFECT BALL SURFACE; WINTER CHANGES SEASON");
   for(uint32_t i=0;i<6;i++) {
     fd_copy(view.rows[i].label,sizeof(view.rows[i].label),labels[i]);
     fd_copy(view.rows[i].value,sizeof(view.rows[i].value),values[i]);
@@ -286,6 +287,7 @@ int main(void) {
 def build_driver(source):
     # The common preview contains the exact ML draw helpers and GL recorder.
     base = shared.build_driver(source).split('static void capture(', 1)[0]
+    base = '#include "stadium_catalog.h"\n#include "match_environment.h"\n' + base
     base = base.replace('#include <assert.h>', '#include <assert.h>\n#undef assert\n#define assert(c) do { if(!(c)) { fprintf(stderr,"assertion: %s:%d: %s\\n",__FILE__,__LINE__,#c); _Exit(97); } } while(0)')
     catalog = json.loads((ROOT / 'data/exhibition_team_catalog.json').read_text())
     teams = catalog['teams']

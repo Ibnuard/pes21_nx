@@ -19,6 +19,7 @@
 #include "ue4_hooks.h"
 #include "util.h"
 #include "loose_cpk.h"
+#include "match_environment.h"
 #include "stadium_roof_policy.h"
 #include "perf_match.h"
 #include "perf_trace.h"
@@ -3017,8 +3018,10 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
                         ? exhibition_settings_match
                         : exhibition_get_tmpdb_match();
       if (row == 0) {
-        stadium = direction < 0 ? (stadium ? stadium - 1 : 2)
-                                : (stadium + 1) % 3;
+        const uint32_t count = pes_controller_stadium_catalog_count();
+        stadium = stadium < count ? stadium : 0;
+        stadium = direction < 0 ? (stadium ? stadium - 1 : count - 1)
+                                : (stadium + 1) % count;
       } else if (row == 1u) {
         const uint32_t value = !__atomic_load_n(
             &exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
@@ -3027,7 +3030,9 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
         __atomic_store_n(&exhibition_settings_time_zone, value,
                          __ATOMIC_RELEASE);
       } else if (row == 2u) {
-        uint32_t w = !__atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
+        uint32_t w = __atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
+        w = direction < 0 ? (w ? w - 1u : NX_WEATHER_COUNT - 1u)
+                          : (w + 1u) % NX_WEATHER_COUNT;
         __atomic_store_n(&exhibition_settings_weather, w, __ATOMIC_RELEASE);
       } else if (row == 3u) {
         uint32_t s = !__atomic_load_n(&exhibition_settings_season, __ATOMIC_ACQUIRE);
@@ -3218,25 +3223,23 @@ static void exhibition_apply_match_settings(void *match) {
   (void)stadium_zone;
   const uint32_t season = __atomic_load_n(&exhibition_settings_season, __ATOMIC_ACQUIRE);
   const uint32_t weather_choice = __atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
-  const uint32_t weather = (weather_choice ? 2u : 0u);
   const uint32_t turf_length = __atomic_load_n(&exhibition_settings_turf_length, __ATOMIC_ACQUIRE);
   const uint32_t pitch_cond = __atomic_load_n(&exhibition_settings_pitch_condition, __ATOMIC_ACQUIRE);
+  const NxMatchEnvironment environment = nx_match_environment(
+      weather_choice, season, turf_length, pitch_cond);
   if (exhibition_match_get_stadium_init && exhibition_match_set_stadium_init) {
     TmpdbStadiumInitParamValue init = exhibition_match_get_stadium_init(match);
-    memcpy((unsigned char *)&init + 8, &season, sizeof(season));
-    memcpy((unsigned char *)&init + 12, &weather, sizeof(weather));
-    memcpy((unsigned char *)&init + 0x78, &turf_length, sizeof(turf_length));
-    memcpy((unsigned char *)&init + 0x7c, &pitch_cond, sizeof(pitch_cond));
+    nx_environment_write_snapshot(&init, sizeof(init), environment);
     exhibition_match_set_stadium_init(match, &init);
   }
   if (exhibition_match_set_weather)
-    exhibition_match_set_weather(match, weather);
+    exhibition_match_set_weather(match, environment.weather);
   if (exhibition_match_set_season)
-    exhibition_match_set_season(match, season);
+    exhibition_match_set_season(match, environment.season);
   if (exhibition_match_set_turf_length)
-    exhibition_match_set_turf_length(match, turf_length);
+    exhibition_match_set_turf_length(match, environment.turf);
   if (exhibition_match_set_pitch_condition)
-    exhibition_match_set_pitch_condition(match, pitch_cond);
+    exhibition_match_set_pitch_condition(match, environment.condition);
   if (exhibition_match_set_match_time)
     exhibition_match_set_match_time(match, match_time);
   if (exhibition_match_set_ex)
@@ -5089,8 +5092,9 @@ int pes_controller_2p_native_uniform_preview_active(void) {
 }
 
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void) {
-  return __atomic_load_n(&main_menu_2p_prematch_stadium_index,
-                         __ATOMIC_ACQUIRE) % 3u;
+  const uint32_t index = __atomic_load_n(&main_menu_2p_prematch_stadium_index,
+                                        __ATOMIC_ACQUIRE);
+  return index < pes_controller_stadium_catalog_count() ? index : 0;
 }
 
 uint32_t pes_controller_stadium_is_day(void) {
@@ -17401,6 +17405,38 @@ extern void ue4_object_initializer_resize_hook(void);
 
 #include "friend_press.inc"
 #include "native_pad_lab.inc"
+#include "stadium_canary.inc"
+#include "native_weather.inc"
+static int referee_probe_scene_active(void) {
+  const uint32_t phase=match_result_current_phase();
+  if (phase>7u || phase==MATCH_PHASE_HALFTIME || phase==MATCH_PHASE_EX_TIME ||
+      phase==MATCH_PHASE_EX_INTERVAL) return 0;
+  // A visible out/foul/throw-in demo is still the same pitch. Do not despawn
+  // because its native skip button is active. Keep the last pose during replay
+  // and menus; clock/position resume without a teleport afterwards.
+  if (pes_controller_replay_active() ||
+      pes_controller_pause_skin_active() || pes_controller_pause_transition() ||
+      pes_controller_match_result_skin() || pes_controller_match_result_transition()) return 1;
+  const int cursor=pes_controller_virtual_cursor_context();
+  if (cursor!=PES_VIRTUAL_CURSOR_NONE && cursor!=PES_VIRTUAL_CURSOR_SET_PIECE_TAKER) return 1;
+  // Celebration is a visible scene, not a paused animation. Keep the referee
+  // returning towards halfway while the game owns the celebration camera.
+  if (pes_controller_goal_demo_active()) return 3;
+  return 2;
+}
+static int referee_probe_restart_active(void) {
+  switch (pes_controller_setplay_context()) {
+    case PES_SETPLAY_THROW_IN: return 2;
+    case PES_SETPLAY_GOAL_KICK: return 3;
+    case PES_SETPLAY_CORNER: return 4;
+    case PES_SETPLAY_FREE_KICK: return 5;
+    case PES_SETPLAY_PENALTY: return 6;
+    default: return 0;
+  }
+}
+#include "referee_probe.inc"
+/* Falling weather field retired in v12; native surface physics remains active. */
+#include "scoreboard_runtime.inc"
 
 static int match_gauge_project_to_overlay(float *x, float *y,
                                           float projection_w,
@@ -17562,6 +17598,12 @@ static void native_pad_lab_enable_exhibition(void) {
 void install_ue4_hooks(so_module *module) {
   install_friend_press_prototype(module);
   install_native_pad_lab(module);
+  install_stadium_canary(module);
+  install_native_weather(module);
+  install_referee_probe(module);
+  /* v12 uses stationary pitch weathering; no precipitation actor/tick hooks. */
+  scene_runtime_note("weather surface", "v14 scene lighting + pitch remnants; lens and falling particles disabled");
+  install_scoreboard_runtime(module);
 
   // Keep native Day/Night board choice. Only the player-shadow quality decision
   // uses the simple low-quality board while dynamic player casting is filtered separately.

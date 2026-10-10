@@ -230,6 +230,7 @@ static void world_ui_tests(void) {
   press(B);assert(view().page==ML_PAGE_HUB && view().badge==exhibition_team_catalog_badge(team) && !view().annual_budget[0]);
   press(A);press(A);press(A);assert(ml_frontend_take_action()==ML_ACTION_MATCH);
   uint32_t home,away;assert(ml_frontend_match_teams(&home,&away) && home==c->world.national_team);
+  assert(ml_frontend_scoreboard()==0u); /* national friendly, not club league */
   assert(ml_frontend_player_allowed(home,0u)==-1 && ml_frontend_player_allowed(away,123u)==-1);
   uint32_t ids[40],count;uint8_t shirts[40];assert(!ml_frontend_roster(home,ids,shirts,&count));
   assert(!ml_frontend_match_is_cup());
@@ -387,6 +388,7 @@ int main(void) {
   assert(ml_find_club(career,career->settings.club)->cash==match_cash);
   office_go(0u,0u);press(A);press(A);assert(ml_frontend_take_action()==ML_ACTION_MATCH);
   assert(ml_frontend_match_active());
+  assert(ml_frontend_scoreboard()==career->settings.competition_id);
   assert(!ml_frontend_plan_editor());
   GameplanPreset temporary=permanent;temporary.tactics=1u;
   assert(!ml_frontend_store_current_plan(&temporary));
@@ -442,6 +444,7 @@ int main(void) {
     if(next.kind==ML_EVENT_CUP && next.home && next.away) {
       press(A);assert(view().modal.open);press(A);assert(ml_frontend_take_action()==ML_ACTION_MATCH);
       assert(ml_frontend_match_teams(&home,&away) && home==career->settings.club);
+      assert(ml_frontend_scoreboard()==(career->settings.cup_id ? career->settings.cup_id : 1000u));
       const uint32_t round=career->cup.active_round;
       ml_frontend_result(1u,1u,NULL,0u);
       assert(career->cup.active_round==round); /* missing shootout must not guess */

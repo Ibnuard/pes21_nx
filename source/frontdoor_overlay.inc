@@ -151,24 +151,26 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
       s->kit_index=pes_controller_2p_prematch_hub_kit_index(side);
       s->kit_number=pes_controller_2p_prematch_hub_kit_number(side);
     }
-    static const char *const stadium[]={"AUTO STADIUM","HOME STADIUM","AWAY STADIUM"};
     snprintf(v->subtitle,sizeof(v->subtitle),"%s / %s / %s",
-        stadium[pes_controller_2p_prematch_hub_stadium_index()%3u],
+        stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
         pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
-        pes_controller_stadium_weather() ? "CLOUDY" : "FINE");
+        nx_weather_label(pes_controller_stadium_weather()));
   }
   if(page==FD_KITS)v->kit_editing=pes_controller_2p_prematch_kit_editing();
   if(page==FD_STADIUM) {
     static const char *const labels[]={"STADIUM","MATCH TIME","WEATHER","SEASON","GRASS LENGTH","PITCH CONDITION"};
-    static const char *const stadium[]={"AUTO","HOME","AWAY"};
     static const char *const grass[]={"SHORT","NORMAL","LONG"};
     static const char *const pitch[]={"DRY","NORMAL","WET"};
-    const char *values[]={stadium[pes_controller_2p_prematch_hub_stadium_index()%3u],
+    const char *values[]={stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
       pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
-      pes_controller_stadium_weather() ? "CLOUDY" : "FINE",
+      nx_weather_label(pes_controller_stadium_weather()),
       pes_controller_stadium_season() ? "WINTER" : "SUMMER",
       grass[pes_controller_stadium_turf_length()%3u],pitch[pes_controller_stadium_pitch_condition()%3u]};
     v->row_count=v->total_rows=6;
+    fd_copy(v->status,sizeof(v->status),
+        pes_controller_stadium_weather() >= NX_WEATHER_RAIN
+          ? (pes_controller_stadium_season() ? "WET SURFACE / THIN SNOW REMNANTS" : "WET SURFACE / DARK WATER PATCHES")
+          : "GRASS / PITCH AFFECT BALL SURFACE; WINTER CHANGES SEASON");
     for(uint32_t i=0;i<6u;i++) {
       fd_copy(v->rows[i].label,sizeof(v->rows[i].label),labels[i]);
       fd_copy(v->rows[i].value,sizeof(v->rows[i].value),values[i]);
@@ -616,6 +618,8 @@ static void fd_settings(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *v
     fd_rect(ui,.881f,y+.021f,.003f,track,.83f,.87f,.93f,verts,quads);
     fd_rect(ui,.881f,y+.021f+(track-thumb)*v->first_row/(v->total_rows-v->row_count),.003f,thumb,.04f,.36f,.80f,verts,quads);
   }
+  if(v->page==FD_STADIUM && v->status[0])
+    fd_center_text(ui,v->status,.12f,.852f,.76f,.023f,-3,verts,quads);
 }
 static void fd_info(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
   fd_header(ui,v->title[0] ? v->title : "CREDITS","FOOTBALLNX / ANDROSWITCH PROJECT",ML_HEADER_MESSAGES,verts,quads);

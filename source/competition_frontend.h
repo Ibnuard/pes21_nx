@@ -168,6 +168,9 @@ int competition_frontend_league_scorers_open(void);
 int competition_frontend_league_teams_editing(void);
 uint32_t competition_frontend_league_team_slot_focus(void);
 int competition_frontend_league_match_active(void);
+/* Active event wins over the clubs' domestic leagues. Mixed exhibitions use
+ * the default skin; no team ID is interpreted as a competition ID. */
+uint32_t competition_frontend_scoreboard(uint32_t home, uint32_t away);
 int competition_frontend_league_match_is_knockout(void);
 int competition_frontend_league_match_teams(uint32_t *home, uint32_t *away);
 int competition_frontend_league_team_is_human(uint32_t team);

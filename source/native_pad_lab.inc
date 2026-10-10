@@ -338,6 +338,29 @@ static NativeLabUnit native_lab_optional_penalty_units[] = {
    "_ZTVN5match3pad31ThinkUnitKeeperPenaltykickLayerE", 0},
 };
 
+// Dormant console actions in the owned 5.3.0 object table. Validate both
+// vtable and native PadId before scheduling; failure affects only this action.
+static NativeLabUnit native_lab_optional_live_units[] = {
+  {8, "_ZTVN5match3pad20ThinkUnitKeeperPressE", 0},
+  {23, "_ZTVN5match3pad18ThinkUnitKickFeintE", 0},
+  {24, "_ZTVN5match3pad20ThinkUnitSuperCancelE", 0},
+};
+
+static int native_lab_live_unit_matches(const void *list, uint32_t kind,
+                                        uint32_t pad_key) {
+  for (unsigned i = 0; i < sizeof(native_lab_optional_live_units) /
+                              sizeof(native_lab_optional_live_units[0]); ++i) {
+    const NativeLabUnit *expected = &native_lab_optional_live_units[i];
+    if (expected->kind != kind || !expected->vptr) continue;
+    const void *unit = *(void *const *)((const char *)list + 0x3bf8 + kind * 8);
+    if (!unit || *(const uintptr_t *)unit != expected->vptr) return 0;
+    uint32_t actual_key;
+    memcpy(&actual_key, (const char *)unit + 8, sizeof(actual_key));
+    return actual_key == pad_key;
+  }
+  return 0;
+}
+
 static void native_pad_lab_reset(void) {
   __atomic_store_n(&native_lab_status, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_context, PES_SETPLAY_NONE,
@@ -1620,6 +1643,38 @@ static void native_lab_list_update(void *list, const void *input,
   if (native_lab_has_kind(stock + 1, stock[0], 75))
     stock_mask |= PES_NATIVE_LAB_STOCK_FREEKICK_POSITION;
   uint32_t entries[97], count = 0, changed = 0;
+  const int live_attack = native_lab_has_kind(stock + 1, stock[0], 78) ||
+                          native_lab_has_kind(stock + 1, stock[0], 79);
+  const int live_defence = native_lab_has_kind(stock + 1, stock[0], 85) ||
+                           native_lab_has_kind(stock + 1, stock[0], 86);
+  const int live_play = !native_setplay && !native_penalty_kicker &&
+      !native_penalty_goalkeeper &&
+      !native_lab_has_kind(stock + 1, stock[0], 90) &&
+      !native_lab_has_kind(stock + 1, stock[0], 95) &&
+      !native_lab_has_kind(stock + 1, stock[0], 62) &&
+      (live_attack || live_defence ||
+      native_lab_has_kind(stock + 1, stock[0], 83) ||
+      native_lab_has_kind(stock + 1, stock[0], 89));
+  if (live_play) {
+    // First priority for the native two-button cancel chord. The native unit
+    // returns no command when the chord is absent; no synthetic key injection.
+    if (native_lab_live_unit_matches(list, 24, 11)) {
+      if (!native_lab_append(entries, &count, 24)) return;
+      changed++;
+    }
+    // B is a feint only during an existing shoot/lofted-pass action. Merely
+    // adding this unit to every possession list would steal ordinary passes.
+    if (live_attack && (previous == 3 || previous == 1) &&
+        native_lab_live_unit_matches(list, 23, 14)) {
+      if (!native_lab_append(entries, &count, 23)) return;
+      changed++;
+    }
+    if (live_defence && !live_attack &&
+        native_lab_live_unit_matches(list, 8, 16)) {
+      if (!native_lab_append(entries, &count, 8)) return;
+      changed++;
+    }
+  }
   const int route_setplay_guide =
       native_setplay && setplay_context != PES_SETPLAY_THROW_IN;
   const int route_throwin_aim =
@@ -2886,6 +2941,12 @@ static void install_native_pad_lab(so_module *module) {
     // Optional by design: zero leaves only the penalty route on its mobile
     // fallback and cannot fail native gameplay installation.
     native_lab_optional_penalty_units[i].vptr = vt ? vt + 16 : 0;
+  }
+  for (unsigned i = 0; i < sizeof(native_lab_optional_live_units) /
+                              sizeof(native_lab_optional_live_units[0]); ++i) {
+    const uintptr_t vt = so_try_find_addr_rx(
+        module, native_lab_optional_live_units[i].symbol);
+    native_lab_optional_live_units[i].vptr = vt ? vt + 16 : 0;
   }
   hook_arm64(list_plt, (uintptr_t)&native_lab_list_update);
   hook_arm64(sample_plt, (uintptr_t)&native_lab_sample);

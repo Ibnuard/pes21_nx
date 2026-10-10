@@ -34,6 +34,8 @@ Subsystem notes and historical implementation audits live here.
 - [Indonesia team commentary](TEAM_COMMENTARY.md)
 - [Known issues](KNOWN_ISSUES.md)
 - [HUD render audit](HUD_RENDER_AUDIT.md)
+- [Competition scoreboards and native weather audit](SCOREBOARD_WEATHER_AUDIT.md)
+- [Native weather and competition scoreboard implementation](NATIVE_WEATHER_SCOREBOARDS.md)
 - [Stadium roof toggle, camera and performance](STADIUM_ROOF_CAMERA.md)
 - [Native mapping baseline](NATIVE_MAPPING_BASELINE_V1.md)
 - [Native pad lab result](NATIVE_PAD_LAB_RESULT.md)

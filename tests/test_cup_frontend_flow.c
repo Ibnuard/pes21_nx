@@ -479,6 +479,8 @@ int main(void) {
          COMPETITION_ACTION_CUP_FIXTURE);
   competition_frontend_cup_handoff_result(1);
   competition_frontend_cup_match_result(2u, 0u);
+  /* Custom Cup wins even when both clubs belong to the Premier League. */
+  assert(competition_frontend_scoreboard(101u,107u)==1000u);
   competition_frontend_cup_restore_after_match();
   assert(competition_frontend_cup_tournament()->champion);
   assert(competition_frontend_cup_view_round() == 0u);

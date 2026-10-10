@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "runtime_assets.h"
 
 #define TEAM_COMMENTARY_MAX_BANK (8u * 1024u * 1024u)
 #define TEAM_COMMENTARY_MAX_PATCH (1024u * 1024u)
@@ -124,25 +125,11 @@ static inline void *team_commentary_load_delta(const void *base,
   if (!result_size)
     return NULL;
   *result_size = 0;
-  FILE *file = fopen(path, "rb");
-  if (!file)
-    return NULL;
-  void *result = NULL;
-  unsigned char *patch = NULL;
-  if (fseek(file, 0, SEEK_END))
-    goto done;
-  const long length = ftell(file);
-  if (length < 40 || length > TEAM_COMMENTARY_MAX_PATCH ||
-      fseek(file, 0, SEEK_SET))
-    goto done;
-  patch = malloc((size_t)length);
-  if (!patch || fread(patch, 1, (size_t)length, file) != (size_t)length)
-    goto done;
-  result = team_commentary_apply_delta(base, base_size, patch,
-                                       (uint32_t)length, result_size);
-done:
+  size_t length = 0;
+  unsigned char *patch = nx_asset_read(path, TEAM_COMMENTARY_MAX_PATCH, &length);
+  void *result = patch ? team_commentary_apply_delta(base, base_size, patch,
+                                       (uint32_t)length, result_size) : NULL;
   free(patch);
-  fclose(file);
   return result;
 }
 

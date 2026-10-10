@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from stage_indonesia_commentary import (HEADER, Utf, build_patch, cpk_member,
                                        fnv64, index_cpk, make_delta, memory_awb,
                                        mobile_index, read_awb_wave)
+from pack_runtime_assets import pack
 
 HOOKS = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
 HEADER_PATH = (ROOT / "source/team_commentary_policy.h").as_posix()
@@ -29,7 +30,7 @@ PATCH = make_delta(BASE, TARGET, [(4, 8), (24, 28), (64, 72)])
 
 
 class CommentaryPolicyTests(unittest.TestCase):
-    def run_c(self, body, wrappers=False):
+    def run_c(self, body, wrappers=False, archived=False):
         compiler = shutil.which("gcc")
         if not compiler:
             self.skipTest("gcc unavailable")
@@ -44,10 +45,26 @@ class CommentaryPolicyTests(unittest.TestCase):
             folder = Path(tmp)
             (folder / "Commentary").mkdir()
             (folder / "Commentary/indonesia.nxcp").write_bytes(PATCH)
+            if archived:
+                pack(folder, folder / 'FootballNX.assets')
+                (folder / 'Commentary/indonesia.nxcp').unlink()
+                (folder / 'Commentary').rmdir()
             (folder / "test.c").write_text(source)
             subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",
                             str(folder / "test.c"), "-o", str(folder / "test.exe")], check=True)
             subprocess.run([str(folder / "test.exe")], cwd=folder, check=True)
+
+    def test_archive_only_commentary_reconstructs_identical_bank(self):
+        self.run_c(r'''
+int main(void) {
+  uint32_t n=0;
+  void *result=team_commentary_load_delta(base,sizeof(base),"Commentary/indonesia.nxcp",&n);
+  assert(result && n==sizeof(target) && !memcmp(result,target,n));free(result);
+  base[24]=1;
+  assert(!team_commentary_load_delta(base,sizeof(base),"Commentary/indonesia.nxcp",&n));
+  assert(n==0);return 0;
+}
+''', archived=True)
 
     def test_delta_and_identity_scope(self):
         self.run_c(r'''

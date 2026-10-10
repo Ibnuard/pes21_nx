@@ -11,6 +11,7 @@
 #include "cup_save.h"
 #include "league_save.h"
 #include "master_league_frontend.h"
+#include "scoreboard_theme.h"
 
 #define COMPETITION_MAX_PLAYER_SLOTS 8u
 #define COMPETITION_SAVE_SLOT_COUNT 3u
@@ -2281,6 +2282,22 @@ int competition_frontend_league_penalty(void) {
   return competition_frontend_league_extra_time();
 }
 int competition_frontend_cup_match_active(void) { return cup_match_active != 0; }
+uint32_t competition_frontend_scoreboard(uint32_t home, uint32_t away) {
+  if (ml_frontend_match_active()) return ml_frontend_scoreboard();
+  if (cup_match_active) return nx_score_key(1, competition_cup_entry()->competition_id);
+  if (league_match_active) return nx_score_key(0, competition_league_entry()->competition_id);
+  if (!home || !away) return NX_SCORE_DEFAULT;
+  for (uint32_t i=0; i<FL26_LEAGUE_CATALOG_COUNT; ++i) {
+    const Fl26LeagueCatalogEntry *e=&fl26_league_catalog[i];
+    if (!e->competition_id) continue;
+    int h=0, a=0;
+    for (uint32_t j=0; j<e->pool_count; ++j) {
+      h |= e->team_ids[j]==home; a |= e->team_ids[j]==away;
+    }
+    if (h && a) return e->competition_id;
+  }
+  return NX_SCORE_DEFAULT;
+}
 
 int competition_frontend_cup_take_champion_presentation(void) {
   if (frontend_state != COMPETITION_FRONTEND_CUP_BRACKET ||

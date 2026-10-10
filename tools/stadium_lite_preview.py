@@ -38,8 +38,12 @@ struct vec2 {
  float x,y; vec2(float v):x(v),y(v){} vec2(float a,float b):x(a),y(b){}
  vec2 operator+(vec2 b)const{return vec2(x+b.x,y+b.y);}
  vec2 operator-(vec2 b)const{return vec2(x-b.x,y-b.y);}
+ vec2 operator*(vec2 b)const{return vec2(x*b.x,y*b.y);}
  vec2 operator*(float s)const{return vec2(x*s,y*s);}
 };
+static vec2 fract(vec2 v){return vec2(fract(v.x),fract(v.y));}
+static vec2 floor(vec2 v){return vec2(floorf(v.x),floorf(v.y));}
+static float dot(vec2 a,vec2 b){return a.x*b.x+a.y*b.y;}
 static vec2 abs(vec2 v){return vec2(fabsf(v.x),fabsf(v.y));}
 static vec2 max(vec2 a,vec2 b){return vec2(max(a.x,b.x),max(a.y,b.y));}
 static float length(vec2 v){return sqrtf(v.x*v.x+v.y*v.y);}
@@ -47,11 +51,17 @@ struct vec3 {
  union {struct {float x,y,z;};struct {float r,g,b;};}; vec2 xy;
  vec3(float v):x(v),y(v),z(v),xy(v){}
  vec3(float a,float b,float c):x(a),y(b),z(c),xy(a,b){}
+ vec3 operator+(vec3 b)const{return vec3(x+b.x,y+b.y,z+b.z);}
  vec3 operator*(float s)const{return vec3(x*s,y*s,z*s);}
  vec3 operator*(vec3 b)const{return vec3(x*b.x,y*b.y,z*b.z);}
 };
+static vec3 mix(vec3 a,vec3 b,float t){return vec3(mix(a.x,b.x,t),mix(a.y,b.y,t),mix(a.z,b.z,t));}
 static vec3 max(vec3 a,vec3 b){return vec3(max(a.x,b.x),max(a.y,b.y),max(a.z,b.z));}
 static float dot(vec3 a,vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+struct vec4 {
+ float x,y,z,w;
+ vec4(float a=0,float b=0,float c=0,float d=0):x(a),y(b),z(c),w(d){}
+};
 static vec3 nxSun(.4013,.4488,.798);
 static struct {vec3 xyz;} MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition={nxSun};
 ''' + shader_math().replace('highp ', '').replace('uniform ', '')

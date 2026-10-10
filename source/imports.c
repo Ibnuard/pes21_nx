@@ -59,7 +59,9 @@
 #include "perf_trace.h"
 #include "perf_match.h"
 #include "stadium_lighting_policy.h"
+#include "stadium_environment.h"
 #include "ue4_hooks.h"
+#include "scene_runtime_log.h"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
 static void stadium_diag_forget(GLuint program);
@@ -146,6 +148,9 @@ static int clock_gettime_android(int clock_id, struct timespec *ts) {
 }
 
 static void game_termination_trace(const char *kind, int status) {
+  char note[96];
+  snprintf(note,sizeof(note),"%s(%d)",kind,status);
+  scene_runtime_note("native termination",note);
   debugPrintf("game %s(%d): tls=%p\n", kind, status, mc_thread_key());
   const uintptr_t stack_start = (uintptr_t)__builtin_frame_address(0);
   uintptr_t frame = stack_start;
@@ -340,7 +345,10 @@ static void glColorMask_c(GLboolean r, GLboolean g, GLboolean b, GLboolean a) {
 }
 static void glActiveTexture_c(GLenum unit) {
   const int slot = mc_current_slot();
-  if (slot >= 0 && unit >= GL_TEXTURE0 && unit < GL_TEXTURE0 + 8)
+  // Remember units outside our eight-slot compose tracker as well. Otherwise
+  // binding on unit 8+ overwrites the record for the previous (often scene)
+  // unit, and the compositor can sample an unrelated texture.
+  if (slot >= 0 && unit >= GL_TEXTURE0)
     g_mc[slot].active_texture = (unsigned int)(unit - GL_TEXTURE0);
   if (glc_enabled && glc.have_active && glc.active == unit) return;
   glc.have_active = 1; glc.active = unit;
@@ -351,27 +359,31 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
   if (slot >= 0 && target == GL_TEXTURE_2D &&
       g_mc[slot].active_texture < 8)
     g_mc[slot].texture2d[g_mc[slot].active_texture] = tex;
-  if (glc_enabled && target == GL_TEXTURE_2D && glc.have_active) {
-    unsigned idx = (unsigned)(glc.active - GL_TEXTURE0);
-    if (idx < 8) {
-      if (glc.have_tex2d[idx] && glc.tex2d[idx] == tex) return;
-      glc.have_tex2d[idx] = 1; glc.tex2d[idx] = tex;
-    }
-  }
+  // A repeated bind acquires changes from UE's shared upload context. A name
+  // can also be deleted/reused there while this context holds the old object.
+  // Numeric equality is therefore insufficient to suppress this GL call.
   glBindTexture(target, tex);
 }
 static __thread struct {
   GLuint program;
-  GLint location, night_location, day_location;
-  int valid, night_value, day_value;
+  GLint location, night_location, day_location, climate_location, profile_location;
+  int profile_value;
+  int valid, roof_value, night_value, day_value;
+  uint32_t climate_key;
 } roof_uniforms[128];
+static volatile uint64_t gl_program_generation;
+static __thread uint64_t roof_uniform_generation;
 static void glUseProgram_c(GLuint p) {
+  const uint64_t generation=__atomic_load_n(&gl_program_generation,__ATOMIC_ACQUIRE);
+  if (generation!=roof_uniform_generation) {
+    memset(roof_uniforms,0,sizeof(roof_uniforms));
+    roof_uniform_generation=generation;
+  }
   const int slot = mc_current_slot();
   if (slot >= 0)
     g_mc[slot].program = p;
-  const int already_bound = glc_enabled && glc.have_prog && glc.prog == p;
   glc.have_prog = 1; glc.prog = p;
-  if (!already_bound) glUseProgram(p);
+  glUseProgram(p); // Also acquire shared program updates/relinks.
   if (p) {
     const unsigned index = p % 128u;
     if (!roof_uniforms[index].valid || roof_uniforms[index].program != p) {
@@ -379,13 +391,22 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].location = glGetUniformLocation(p, "nxRoofDisabled");
       roof_uniforms[index].night_location = glGetUniformLocation(p, "nxNightIndirect");
       roof_uniforms[index].day_location = glGetUniformLocation(p, "nxDayStadium");
+      roof_uniforms[index].climate_location = glGetUniformLocation(p, "nxStadiumClimate");
+      roof_uniforms[index].profile_location = glGetUniformLocation(p, "nxStadiumProfile");
+      roof_uniforms[index].profile_value = -1;
+      roof_uniforms[index].climate_key = UINT32_MAX;
       roof_uniforms[index].night_value = -1;
+      roof_uniforms[index].roof_value = -1;
       roof_uniforms[index].day_value = -1;
       roof_uniforms[index].valid = 1;
     }
-    if (roof_uniforms[index].location >= 0)
-      glUniform1f(roof_uniforms[index].location,
-          pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled() ? 1.0f : 0.0f);
+    if (roof_uniforms[index].location >= 0) {
+      const int disabled = pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled();
+      if (disabled != roof_uniforms[index].roof_value) {
+        glUniform1f(roof_uniforms[index].location, (GLfloat)disabled);
+        roof_uniforms[index].roof_value = disabled;
+      }
+    }
     if (roof_uniforms[index].night_location >= 0) {
       const int enabled = pes_controller_night_lighting_balance_enabled();
       if (enabled != roof_uniforms[index].night_value) {
@@ -398,6 +419,24 @@ static void glUseProgram_c(GLuint p) {
       if (enabled != roof_uniforms[index].day_value) {
         glUniform1f(roof_uniforms[index].day_location, (GLfloat)enabled);
         roof_uniforms[index].day_value = enabled;
+      }
+    }
+    if (roof_uniforms[index].profile_location >= 0) {
+      const int profile = (int)pes_controller_stadium_canary_active();
+      if (profile != roof_uniforms[index].profile_value) {
+        glUniform1f(roof_uniforms[index].profile_location, (GLfloat)profile);
+        roof_uniforms[index].profile_value = profile;
+      }
+    }
+    if (roof_uniforms[index].climate_location >= 0) {
+      const uint32_t key = stadium_environment_key(
+          pes_controller_stadium_weather(), pes_controller_stadium_season(),
+          pes_controller_stadium_turf_length(), pes_controller_stadium_pitch_condition());
+      if (key != roof_uniforms[index].climate_key) {
+        float value[4];
+        stadium_environment_uniform(key, value);
+        glUniform4fv(roof_uniforms[index].climate_location, 1, value);
+        roof_uniforms[index].climate_key = key;
       }
     }
   }
@@ -413,6 +452,7 @@ static void glDeleteProgram_c(GLuint p) {
   roof_uniforms[p % 128u].valid = 0;
   if (glc.have_prog && glc.prog == p) glc.have_prog = 0;
   glDeleteProgram(p);
+  __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
 }
 
 static volatile uint64_t gl_diag_draw_arrays;
@@ -2123,7 +2163,7 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
                                   const GLchar *const *strings,
                                   const GLint *lengths) {
   // Audited Day roof/grain and Night lighting rewrites; unknown materials
-  // and the accepted Night pitch remain byte-exact.
+  // remain scoped; Night pitch weather returns its accepted colour in Fine.
   char *patched = NULL;
   if (count == 1 && strings && strings[0]) {
     const size_t n = lengths && lengths[0] >= 0 ? (size_t)lengths[0] : strlen(strings[0]);
@@ -2148,9 +2188,34 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
 }
 
 static void glLinkProgram_diag(GLuint program);
+static void glCompileShader_diag(GLuint shader);
+static __eglMustCastToProperFunctionPointerType gl_cached_state_proc(const char *name) {
+  // UE materials and the Fox character renderer can obtain core entry points
+  // by different routes. Bypassing one setter leaves the redundant-state
+  // cache stale: a later restore may then be suppressed (including kit draws).
+  if (!name) return NULL;
+#define CACHED_GL(api, wrapper) if (!strcmp(name, #api)) \
+    return (__eglMustCastToProperFunctionPointerType)&wrapper
+  CACHED_GL(glEnable, glEnable_c);
+  CACHED_GL(glDisable, glDisable_c);
+  CACHED_GL(glBlendFunc, glBlendFunc_c);
+  CACHED_GL(glBlendFuncSeparate, glBlendFuncSeparate_c);
+  CACHED_GL(glDepthFunc, glDepthFunc_c);
+  CACHED_GL(glDepthMask, glDepthMask_c);
+  CACHED_GL(glCullFace, glCullFace_c);
+  CACHED_GL(glFrontFace, glFrontFace_c);
+  CACHED_GL(glColorMask, glColorMask_c);
+  CACHED_GL(glActiveTexture, glActiveTexture_c);
+  CACHED_GL(glBindTexture, glBindTexture_c);
+  CACHED_GL(glDeleteTextures, glDeleteTextures_c);
+#undef CACHED_GL
+  return NULL;
+}
 static __eglMustCastToProperFunctionPointerType
 eglGetProcAddress_diag(const char *name) {
   __eglMustCastToProperFunctionPointerType proc = eglGetProcAddress(name);
+  const __eglMustCastToProperFunctionPointerType cached = gl_cached_state_proc(name);
+  if (proc && cached) return cached;
 #ifdef DEBUG_LOG
   static volatile uint32_t getproc_count;
   const uint32_t request =
@@ -2161,6 +2226,8 @@ eglGetProcAddress_diag(const char *name) {
 #endif
   if (name && !strcmp(name, "glShaderSource") && proc)
     return (__eglMustCastToProperFunctionPointerType)&glShaderSource_pitch;
+  if (name && !strcmp(name, "glCompileShader") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glCompileShader_diag;
   if (name && !strcmp(name, "glUseProgram") && proc)
     return (__eglMustCastToProperFunctionPointerType)&glUseProgram_c;
   if (name && !strcmp(name, "glLinkProgram") && proc)
@@ -2224,14 +2291,18 @@ eglGetProcAddress_diag(const char *name) {
 
 static void glCompileShader_diag(GLuint shader) {
   glCompileShader(shader);
-#ifdef DEBUG_LOG
   GLint status = GL_FALSE;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
   if (status == GL_TRUE) {
+#ifdef DEBUG_LOG
     __atomic_fetch_add(&gl_diag_compile_ok, 1, __ATOMIC_RELAXED);
+#endif
     return;
   }
-
+  char reason[1024] = {0};
+  glGetShaderInfoLog(shader, sizeof(reason), NULL, reason);
+  scene_runtime_note("GL compile failed",reason);
+#ifdef DEBUG_LOG
   __atomic_fetch_add(&gl_diag_compile_fail, 1, __ATOMIC_RELAXED);
   GLint type = 0;
   GLsizei length = 0;
@@ -2303,7 +2374,10 @@ static void glLinkProgram_diag(GLuint program) {
     char reason[1024] = {0};
     glGetProgramInfoLog(program, sizeof(reason), NULL, reason);
     if (gl_complete_vertex_only_program(program, reason)) status = GL_TRUE;
+    else scene_runtime_note("GL link failed",reason);
   }
+  // The upload context can relink a name already cached by the draw thread.
+  __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
 #ifdef DEBUG_LOG
   if (status == GL_TRUE) {
     __atomic_fetch_add(&gl_diag_link_ok, 1, __ATOMIC_RELAXED);
@@ -2978,7 +3052,7 @@ void __wrap_nouveau_mm_free_work(void *handle) {
 // The world load creates thousands of buffers/textures without presenting, so
 // mesa never flushes; force a periodic submit to bound the nouveau bo-list.
 static void gl_load_drain(void) {
-  static unsigned n = 0;
+  static __thread unsigned n = 0;
   if ((++n & 0x1ff) == 0) glFlush();
 }
 
@@ -3031,7 +3105,20 @@ FILE *stderr_fake = (FILE *)&fake_sF[2];
 extern ALCcontext *alcCreateContextHook(ALCdevice *dev, const ALCint *unused);
 extern ALCdevice *alcOpenDeviceHook(const char *name);
 
+static void native_error_note(int priority,const char *tag,const char *message) {
+  if (priority<6) return; // Android ERROR/FATAL only; no per-frame info logging.
+  static uint32_t counts[2];
+  const unsigned fatal=priority>=7;
+  if (__atomic_fetch_add(&counts[fatal],1,__ATOMIC_RELAXED)>=8) return;
+  char note[1152];
+  snprintf(note,sizeof(note),"%.64s: %.1024s",tag?tag:"",message?message:"");
+  scene_runtime_note(fatal?"native fatal":"native error",note);
+}
+
 void __assert2(const char *file, int line, const char *func, const char *expr) {
+  char note[1024];
+  snprintf(note,sizeof(note),"%s:%d (%s): %s",file,line,func,expr);
+  native_error_note(7,"assert",note);
   debugPrintf("assertion failed:\n%s:%d (%s): %s\n", file, line, func, expr);
   assert(0);
 }
@@ -3047,35 +3134,37 @@ void __android_log_assert(const char *cond, const char *tag, const char *fmt, ..
   } else {
     snprintf(string, sizeof(string), "assertion \"%s\" failed", cond ? cond : "");
   }
+  native_error_note(7,tag,string);
   debugPrintf("FATAL %s: %s\n", tag ? tag : "", string);
   abort();
 }
 
-int __android_log_print(int prio, const char *tag, const char *fmt, ...) {
-#ifdef DEBUG_LOG
-  va_list list;
-  static char string[0x1000];
-
-  va_start(list, fmt);
-  vsnprintf(string, sizeof(string), fmt, list);
-  va_end(list);
-
-  debugPrintf("%s: %s\n", tag, string);
+static void android_log_message(int prio,const char *tag,const char *fmt,va_list list) {
+#ifndef DEBUG_LOG
+  if (prio<6) return;
 #endif
+  char string[0x400]; // Per-call storage: UE loading and render threads both log.
+  vsnprintf(string,sizeof(string),fmt?fmt:"",list);
+  native_error_note(prio,tag,string);
+  debugPrintf("%s: %s\n",tag?tag:"",string);
+}
+
+int __android_log_print(int prio, const char *tag, const char *fmt, ...) {
+  va_list list;
+  va_start(list, fmt);
+  android_log_message(prio,tag,fmt,list);
+  va_end(list);
   return 0;
 }
 
 int __android_log_write(int prio, const char *tag, const char *text) {
+  native_error_note(prio,tag,text);
   debugPrintf("%s: %s\n", tag, text);
   return 0;
 }
 
 int __android_log_vprint(int prio, const char *tag, const char *fmt, va_list va) {
-#ifdef DEBUG_LOG
-  static char string[0x1000];
-  vsnprintf(string, sizeof(string), fmt, va);
-  debugPrintf("%s: %s\n", tag, string);
-#endif
+  android_log_message(prio,tag,fmt,va);
   return 0;
 }
 

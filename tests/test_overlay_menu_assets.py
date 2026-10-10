@@ -84,10 +84,10 @@ class OverlayMenuAssetsTests(unittest.TestCase):
             "                  GL_LINEAR_MIPMAP_LINEAR);",
             atlas,
         )
-        uniform = OVERLAY[
-            OVERLAY.index("static void prepare_uniform_thumbnail_preview("):
-            OVERLAY.index("static void league_emit_text(")
-        ]
+        uniform = re.search(
+            r"static void prepare_uniform_thumbnail_preview\(int active\) \{.*?\n\}",
+            OVERLAY, re.S,
+        ).group(0)
         self.assertIn("use_mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR", uniform)
 
     def test_cup_and_league_settings_keep_full_height_scrollable_rows(self):

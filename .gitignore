@@ -29,6 +29,8 @@
 *.odex
 *.vdex
 *.bin
+*.nxra
+*.assets
 
 !data/silent.bin
 !data/badge_atlas.bin

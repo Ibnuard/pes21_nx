@@ -39,6 +39,9 @@ static void focus_hub(uint32_t target) {
 }
 
 int main(void) {
+  assert(competition_frontend_scoreboard(101u,107u)==9u);
+  assert(competition_frontend_scoreboard(101u,108u)==0u);
+  assert(competition_frontend_scoreboard(0u,107u)==0u);
   competition_frontend_open_modes();
   competition_frontend_pad_event(0u, 0u);
   press(BUTTON_DOWN);
@@ -137,6 +140,7 @@ int main(void) {
   assert(home && away && home != away);
   assert(!competition_frontend_league_match_is_knockout());
   competition_frontend_league_handoff_result(1);
+  assert(competition_frontend_scoreboard(101u,107u)==1001u);
   /* Match Hub B: no result means the exact fixture remains available. */
   const LeagueTournament before_abort = *competition_frontend_league_tournament();
   const uint32_t abort_home = home, abort_away = away;

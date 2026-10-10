@@ -57,12 +57,20 @@ class PitchShadowTests(unittest.TestCase):
                         result=subprocess.run([str(exe),*args],input=source,capture_output=True,check=True)
                         result=result.stdout.replace(b'\r\n',b'\n')
                         original=source.replace(b'\r\n',b'\n')
-                        if args or path.stem!='M_Pitch_Default':
+                        if args:
                             self.assertEqual(result,original)
                             continue
                         prefix,body=result.split(b'void main()',1)
                         native_prefix,native_body=original.split(b'void main()',1)
                         self.assertTrue(prefix.startswith(native_prefix))
+                        if path.stem!='M_Pitch_Default':
+                            if result==original:
+                                self.assertNotIn(b'View_BufferSizeAndInvSize',original)
+                                continue
+                            self.assertIn(b'nxPitchWeather',body)
+                            restored=re.sub(rb'\n\thighp vec3 nxWeatherWorld=[^\n]+;\n(?:\tout_Target0.xyz=[^\n]+;\n)+',b'',body)
+                            self.assertEqual(restored,native_body)
+                            continue
                         self.assertIn(b'nxPitchGrain',body)
                         self.assertIn(b'nxPitchSheen',body)
                         self.assertIn(b'nxRoofVisibility(in_TEXCOORD8.xyz-View_PreViewTranslation)',body)
@@ -76,6 +84,7 @@ class PitchShadowTests(unittest.TestCase):
                                   (b'View_IndirectLightingColorScale',b'nxAmbientLight')):
                             body=body.replace(helper+b'('+color+(b'' if helper==b'nxNeutralLight' else b',nxRoofLight')+b')',color)
                         body=body.replace(b'if (nxDayStadium<0.5 && (v2.z>0.000000e+00))',b'if ((v2.z>0.000000e+00))')
+                        body=re.sub(rb'\n\thighp vec3 nxWeatherWorld=[^\n]+;\n(?:\tout_Target0.xyz=[^\n]+;\n)+',b'',body)
                         self.assertEqual(body,native_body)
             self.assertGreaterEqual(total,20)
 

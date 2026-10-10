@@ -85,7 +85,7 @@ $allowedPlaceholders = @(
   "runtime-template/savedata/.donotdelete"
 )
 $forbiddenExtensions = @(
-  ".apk", ".obb", ".so", ".pak", ".cpk",
+  ".apk", ".xapk", ".obb", ".so", ".pak", ".cpk", ".nxra", ".assets",
   ".nro", ".elf", ".nacp", ".nso", ".nsp", ".npdm",
   ".o", ".a", ".map", ".log", ".p12", ".pfx",
   ".dex", ".odex", ".vdex", ".zip", ".7z", ".rar",

@@ -3,6 +3,7 @@
 #include "exhibition_team_catalog.h"
 #include "fl26_league_catalog_generated.h"
 #include "fl26_cup_catalog_generated.h"
+#include "scoreboard_theme.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -496,6 +497,22 @@ void ml_frontend_pad(uint32_t pressed) {
 }
 
 int ml_frontend_match_active(void) { return match_active!=0u; }
+uint32_t ml_frontend_scoreboard(void) {
+  if (!match_active || plan_editor) return NX_SCORE_DEFAULT;
+  switch (pending.kind) {
+    case ML_EVENT_LEAGUE: return nx_score_key(0, career.settings.competition_id);
+    case ML_EVENT_CUP: return nx_score_key(1, career.settings.cup_id);
+    case ML_EVENT_CONTINENTAL: return NX_SCORE_CONTINENTAL;
+    case ML_EVENT_REGIONAL: {
+      const uint32_t region=career.world.national_region;
+      if (!region || region>EXHIBITION_TEAM_CATEGORY_COUNT) return NX_SCORE_CUP;
+      const char *label=exhibition_team_categories[region-1u].label;
+      return strstr(label,"EUROPE") ? 33u : strstr(label,"ASIA") ? 35u : NX_SCORE_CUP;
+    }
+    case ML_EVENT_QUALIFIER: case ML_EVENT_WORLD_CUP: return 27u;
+    default: return NX_SCORE_DEFAULT;
+  }
+}
 int ml_frontend_plan_editor(void) { return match_active && plan_editor; }
 void ml_frontend_plan_error(void) { ml_message("SQUAD EDITOR COULD NOT OPEN - PLEASE RETRY"); }
 int ml_frontend_match_is_cup(void) { return match_active && !plan_editor && ml_event_is_knockout(pending.kind); }

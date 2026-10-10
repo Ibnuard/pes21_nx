@@ -3,12 +3,13 @@
 #include "night_lighting_policy.h"
 #include "stadium_lite_glsl.h"
 
-/* Audited character/perimeter and Day pitch shaders only. Shared material
- * hashes never authorize skin/kit recolouring. All changes have runtime gates;
- * Night pitch and unknown shaders are outside this policy. */
+/* Audited native shaders only. Pitch weathering never authorizes skin/kit
+ * recolouring. Night pitch receives weather colour only, gated to Rainy.
+ * Unknown shaders remain outside this policy. */
 static unsigned stadium_lighting_scope(const char *body) {
   static const struct { uint32_t hash; unsigned scope; } known[] = {
 #include "stadium_lighting_fingerprints.inc"
+#include "stadium_weather_fingerprints.inc"
     {0x038325c5u,8},{0x284db1fau,8},{0x2ba923ebu,8},{0x2d9e5957u,8},
     {0x37966a69u,8},{0x3e3879b5u,8},{0x523e5f8cu,8},{0x536331a8u,8},
     {0x713d2026u,8},{0x7e2c0da5u,8},{0x97e96ba6u,8},{0x9e0b3576u,8},
@@ -45,6 +46,22 @@ static char *stadium_lighting_source(const char *source) {
      !strstr(source,"View_PreViewTranslation"))return NULL;
   StadiumLightEdit edits[32];unsigned count=0;
   const char *begin=strchr(body,'{');if(!begin)return NULL;
+  /* Colour only, after native shading. Never alter alpha/depth, samplers or
+   * native texture ownership. Night receives no Day lighting rewrite. */
+  const char *output=strstr(body,"out_Target0.xyzw = ");
+  if((scope&24u) && output && strstr(source,"View_WorldCameraOrigin") &&
+      strstr(source,"View_BufferSizeAndInvSize")) {
+    const char *end=strchr(output,';');if(!end)return NULL;
+    edits[count].at=end+1;edits[count].length=0;
+    snprintf(edits[count++].text,768,
+        "\n\thighp vec3 nxWeatherWorld=in_TEXCOORD8.xyz-View_PreViewTranslation;\n"
+        "\tout_Target0.xyz=nxPitchWeather(out_Target0.xyz%s,nxWeatherWorld);\n",
+        scope==16u ? "*nxRainLightScale()" : "");
+  }
+  if(scope==16u) {
+    if(!strstr(source,"MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition"))return NULL;
+    goto finish_edits;
+  }
   edits[count].at=begin+1;edits[count].length=0;
   strcpy(edits[count++].text,"\n\thighp float nxRoofLight=1.0;\n"
       "\tif(nxDayStadium>0.5) nxRoofLight=nxRoofVisibility(in_TEXCOORD8.xyz-View_PreViewTranslation);\n");
@@ -135,6 +152,7 @@ static char *stadium_lighting_source(const char *source) {
     edits[count].at=tint.end;edits[count].length=0;
     snprintf(edits[count++].text,768,"\n\tif(nxDayStadium>0.5) %s.xyz=clamp(%s,vec3(0.0),vec3(1.0));",tint.variable,base);
   }
+finish_edits:
   if(!count)return NULL;
   for(unsigned i=0;i<count;++i)for(unsigned j=i+1;j<count;++j)
     if(edits[j].at<edits[i].at){StadiumLightEdit tmp=edits[i];edits[i]=edits[j];edits[j]=tmp;}
