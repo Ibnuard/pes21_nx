@@ -23,10 +23,11 @@ typedef unsigned GLuint;
 typedef int GLint;
 typedef float GLfloat;
 static int binds, queries, sets, night_sets, day_sets, day=1, enabled=1, high=1;
-static int climate_sets, profile_sets, profile;
+static int climate_sets, profile_sets, profile, light_sets;
 static unsigned weather, season, turf=1, condition=1;
 static float applied, night_applied, day_applied;
 static float climate_applied[4], profile_applied;
+static float light_applied[12];
 static struct {int have_prog; GLuint prog;} glc;
 static struct {GLuint program;} g_mc[1];
 ''' + CACHE + r'''
@@ -48,6 +49,7 @@ static GLint glGetUniformLocation(GLuint p, const char *name) {
   if(!strcmp(name,"nxDayStadium"))return p==7 ? 4 : -1;
   if(!strcmp(name,"nxStadiumClimate"))return p==7 ? 5 : -1;
   if(!strcmp(name,"nxStadiumProfile"))return p==7 ? 6 : -1;
+  if(!strcmp(name,"nxStadiumLight[0]"))return (p==7 || p==135) ? 7 : -1;
   assert(!strcmp(name,"nxNightIndirect")); return p==7 ? 3 : -1;
 }
 static void glUniform1f(GLint loc, float value) {
@@ -57,27 +59,34 @@ static void glUniform1f(GLint loc, float value) {
   else {assert(loc==3);++night_sets;night_applied=value;}
 }
 static void glUniform4fv(GLint loc, int count, const GLfloat *value) {
+  if(loc==7) {
+    assert(count==3);++light_sets;memcpy(light_applied,value,sizeof(light_applied));return;
+  }
   assert(loc==5 && count==1);++climate_sets;
   memcpy(climate_applied,value,sizeof(climate_applied));
 }
 ''' + function(SOURCE,'glUseProgram_c') + function(SOURCE,'glDeleteProgram_c') + r'''
 int main(void) {
-  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==5);
+  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==6);
+  assert(light_sets==1 && light_applied[0]==1 && light_applied[6]==1);
   assert(night_sets==1 && night_applied==0);
   assert(day_sets==1 && day_applied==1);
   assert(climate_sets==1 && profile_sets==1 && profile_applied==0);
   for(int i=0;i<4;i++)assert(climate_applied[i]==0);
-  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==2 && queries==5);
+  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==2 && queries==6);
   assert(night_sets==1);
-  day=0; glUseProgram_c(7); assert(applied==0 && binds==3 && queries==5);
+  day=0; glUseProgram_c(7); assert(applied==0 && binds==3 && queries==6);
+  assert(light_sets==2); // time change uploads even with identical climate key
   assert(night_sets==2 && night_applied==1);
   assert(day_sets==2 && day_applied==0);
   day=1; enabled=1; glUseProgram_c(7); assert(applied==0);
   assert(night_sets==3 && night_applied==0);
   glUseProgram_c(9); assert(sets==3);
+  const int stable_light_sets=light_sets;
   for(int n=0;n<1000;n++)glUseProgram_c(7);
   assert(sets==3); // unchanged roof setting never resubmitted per draw
-  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==15 && night_sets==4);
+  assert(light_sets==stable_light_sets);
+  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==18 && night_sets==4);
   high=0;day=0;glUseProgram_c(7);assert(night_applied==0 && night_sets==4);
   high=1;glUseProgram_c(7);assert(night_applied==1 && night_sets==5);
   assert(climate_sets==2 && profile_sets==2);
@@ -86,14 +95,16 @@ int main(void) {
   assert(climate_sets==3 && profile_sets==3 && profile_applied==1);
   assert(climate_applied[0]==1 && climate_applied[1]==1);
   assert(climate_applied[2]==-1 && climate_applied[3]==1);
-  glUseProgram_c(7);assert(climate_sets==3 && profile_sets==3 && queries==15);
+  glUseProgram_c(7);assert(climate_sets==3 && profile_sets==3 && queries==18);
+  float expected_light[12];stadium_environment_light_uniform(climate_applied,high && day,expected_light);
+  assert(!memcmp(expected_light,light_applied,sizeof(expected_light)));
   weather=season=0;turf=condition=1;profile=0;
   glUseProgram_c(7);assert(climate_sets==4 && profile_sets==4);
   for(int i=0;i<4;i++)assert(climate_applied[i]==0);
-  glUseProgram_c(0); assert(queries==15);
+  glUseProgram_c(0); assert(queries==18);
   // Relink/delete on the upload context invalidates this thread's locations.
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
-  glUseProgram_c(7); assert(queries==20 && climate_sets==5);
+  glUseProgram_c(7); assert(queries==24 && climate_sets==5);
   // Reused program distinguishes Rainy from Cloudy, even with Wet selected.
   weather=NX_WEATHER_RAIN;season=1;condition=2;
   glUseProgram_c(7);assert(climate_sets==6 && climate_applied[0]==2);
@@ -103,6 +114,27 @@ int main(void) {
   weather=NX_WEATHER_FINE;
   glUseProgram_c(7);assert(climate_sets==8 && climate_applied[0]==0);
   assert(climate_applied[3]==1); // wet Fine never implies haze/snow
+  // Programs sharing a bucket must not keep querying and uploading on every
+  // switch. This reproduces the old direct-mapped cache's collision pattern.
+  const unsigned colliding[4]={7,135,263,391};
+  for(unsigned i=0;i<4;i++)glUseProgram_c(colliding[i]);
+  const int warm_queries=queries,warm_lights=light_sets,warm_climate=climate_sets;
+  const int warm_binds=binds;
+  for(unsigned i=0;i<4000;i++)glUseProgram_c(colliding[i%4]);
+  assert(queries==warm_queries && light_sets==warm_lights && climate_sets==warm_climate);
+  assert(binds==warm_binds+4000); // acquire native shared-program updates every time
+  // A program can retain only precomputed light after GLSL optimization.
+  weather=NX_WEATHER_RAIN;season=0;day=1;glUseProgram_c(135);
+  assert(light_sets==warm_lights+1 && climate_sets==warm_climate);
+  assert(light_applied[0]<.53f && light_applied[4]>.92f);
+  day=0;glUseProgram_c(135);assert(light_sets==warm_lights+2);
+  assert(light_applied[0]==.84f && light_applied[4]==.84f);
+  // Fifth collision may evict an entry, but reacquiring it re-uploads current
+  // values. Deletion/relink invalidation still crosses shared contexts.
+  glUseProgram_c(519);glUseProgram_c(7);
+  assert(queries>warm_queries && climate_sets==warm_climate+1);
+  glDeleteProgram_c(135);glUseProgram_c(135);
+  assert(light_applied[0]==.84f);
 }
 ''')
 

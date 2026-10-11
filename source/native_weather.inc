@@ -33,8 +33,8 @@ static void weather_apply_native(void *env, const void *match) {
   __atomic_store_n(&weather_scene_kind, e.raining ? e.weather : 0u, __ATOMIC_RELEASE);
   weather_ball_logged = 0;
   char detail[160];
-  snprintf(detail, sizeof(detail), "%s season=%u turf=%u pitch=%u rain=%u change=%u",
-      nx_weather_label(choice), e.season, weather_get_turf(env),
+  snprintf(detail, sizeof(detail), "%s time=%s season=%u turf=%u pitch=%u rain=%u change=%u",
+      nx_weather_label(choice), pes_controller_stadium_is_day()?"DAY":"NIGHT", e.season, weather_get_turf(env),
       weather_get_pitch(env), weather_get_rain(env), e.change);
   scene_runtime_note("native weather", detail);
 }

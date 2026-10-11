@@ -109,6 +109,8 @@ static uint32_t (*stadium_cvar_flags)(void *);
 static void (*stadium_cvar_set)(void *, const uint16_t *, uint32_t);
 static uintptr_t stadium_int_cvar_vtable;
 static _Alignas(4) uint32_t stadium_shadow_budget_requested;
+/* Updated by the existing game-thread CVar check. No render-thread query. */
+static _Alignas(4) uint32_t stadium_shadow_observed = UINT32_MAX;
 static void stadium_shadow_budget_tick(void);
 
 static StadiumRoofProxies stadium_roof_proxies;
@@ -5124,6 +5126,12 @@ uint32_t pes_controller_roof_shadow_enabled(void) {
 uint32_t pes_controller_day_stadium_lite_enabled(void) {
   return __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE) == 2u &&
          pes_controller_stadium_is_day() && pes_controller_roof_shadow_enabled();
+}
+
+int32_t pes_controller_stadium_shadow_cascades(void) {
+  const uint32_t observed = __atomic_load_n(&stadium_shadow_observed, __ATOMIC_ACQUIRE);
+  const uint32_t mode = __atomic_load_n(&stadium_shadow_budget_requested, __ATOMIC_ACQUIRE);
+  return (observed >> 16) == mode ? (int32_t)(observed & 0xffffu) - 2 : -1;
 }
 
 
@@ -17345,6 +17353,7 @@ static void stadium_shadow_budget_tick(void) {
   const uint32_t mode = __atomic_load_n(&stadium_shadow_budget_requested,
                                        __ATOMIC_ACQUIRE);
   const int day = mode == 1u;
+  int observed_cascades = -1;
   static StadiumShadowBudget budgets[STADIUM_SHADOW_LIMIT_COUNT];
   static uint32_t observed_match[STADIUM_SHADOW_LIMIT_COUNT];
   static uint32_t unavailable;
@@ -17363,6 +17372,7 @@ static void stadium_shadow_budget_tick(void) {
       if (cvar) memcpy(&vtable, cvar, sizeof(vtable));
       // Do not call FConsoleVariable<int> methods on a reference/float CVar.
       if (vtable != stadium_int_cvar_vtable) {
+        if (cap == 0) observed_cascades = -2;
 #ifdef PERF_TRACE
         if (!(unavailable & (1u << i))) {
           char line[128];
@@ -17374,6 +17384,7 @@ static void stadium_shadow_budget_tick(void) {
         continue;
       }
       const int before = stadium_cvar_int(cvar);
+      if (cap == 0) observed_cascades = before;
       const uint32_t priority = stadium_cvar_flags(cvar) & 0xff000000u;
       const int target = stadium_shadow_budget_target(&budgets[i], day, before, priority, cap);
 #ifdef PERF_TRACE
@@ -17394,6 +17405,7 @@ static void stadium_shadow_budget_tick(void) {
       for (unsigned j = 0; digits[j]; ++j) value[j] = (uint8_t)digits[j];
       stadium_cvar_set(cvar, value, priority);
       const int after = stadium_cvar_int(cvar);
+      if (cap == 0) observed_cascades = after;
       stadium_shadow_budget_applied(&budgets[i], day, before, after, priority, cap);
 #ifdef PERF_TRACE
       char line[192];
@@ -17405,6 +17417,11 @@ static void stadium_shadow_budget_tick(void) {
   }
   (void)unavailable;
   (void)observed_match;
+  /* -1 = unavailable/not yet observed, -2 = wrong native CVar type. Include
+   * mode so a Day observation cannot be reported as a new Night setting. */
+  const uint32_t observed_value = observed_cascades >= -2 && observed_cascades < 65533
+      ? (uint32_t)(observed_cascades + 2) : 1u;
+  __atomic_store_n(&stadium_shadow_observed, (mode << 16) | observed_value, __ATOMIC_RELEASE);
 #ifdef PERF_TRACE
   // Refresh labels once per prepared match, after native SaveData exists.
   // Its quality getter takes a mutex and reads JSON; never poll it at boot

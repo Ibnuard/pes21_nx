@@ -367,12 +367,33 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
 static __thread struct {
   GLuint program;
   GLint location, night_location, day_location, climate_location, profile_location;
+  GLint light_location;
+  int light_day_value;
   int profile_value;
   int valid, roof_value, night_value, day_value;
   uint32_t climate_key;
-} roof_uniforms[128];
+  uint64_t last_used;
+} roof_uniforms[128 * 4];
 static volatile uint64_t gl_program_generation;
 static __thread uint64_t roof_uniform_generation;
+static __thread uint64_t roof_uniform_clock;
+/* Four entries per hash bucket prevent alternating native programs from
+ * re-querying every location and resubmitting unchanged climate uniforms.
+ * Cache only locations/values: every native glUseProgram still runs. */
+static unsigned roof_uniform_slot(GLuint program) {
+  const unsigned first = (program % 128u) * 4u;
+  unsigned oldest = first;
+  for (unsigned i = first; i < first + 4u; ++i) {
+    if (roof_uniforms[i].valid && roof_uniforms[i].program == program) {
+      roof_uniforms[i].last_used = ++roof_uniform_clock;
+      return i;
+    }
+    if (!roof_uniforms[i].valid || roof_uniforms[i].last_used < roof_uniforms[oldest].last_used)
+      oldest = i;
+  }
+  roof_uniforms[oldest].last_used = ++roof_uniform_clock;
+  return oldest;
+}
 static void glUseProgram_c(GLuint p) {
   const uint64_t generation=__atomic_load_n(&gl_program_generation,__ATOMIC_ACQUIRE);
   if (generation!=roof_uniform_generation) {
@@ -385,7 +406,7 @@ static void glUseProgram_c(GLuint p) {
   glc.have_prog = 1; glc.prog = p;
   glUseProgram(p); // Also acquire shared program updates/relinks.
   if (p) {
-    const unsigned index = p % 128u;
+    const unsigned index = roof_uniform_slot(p);
     if (!roof_uniforms[index].valid || roof_uniforms[index].program != p) {
       roof_uniforms[index].program = p;
       roof_uniforms[index].location = glGetUniformLocation(p, "nxRoofDisabled");
@@ -393,6 +414,8 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].day_location = glGetUniformLocation(p, "nxDayStadium");
       roof_uniforms[index].climate_location = glGetUniformLocation(p, "nxStadiumClimate");
       roof_uniforms[index].profile_location = glGetUniformLocation(p, "nxStadiumProfile");
+      roof_uniforms[index].light_location = glGetUniformLocation(p, "nxStadiumLight[0]");
+      roof_uniforms[index].light_day_value = -1;
       roof_uniforms[index].profile_value = -1;
       roof_uniforms[index].climate_key = UINT32_MAX;
       roof_uniforms[index].night_value = -1;
@@ -428,15 +451,23 @@ static void glUseProgram_c(GLuint p) {
         roof_uniforms[index].profile_value = profile;
       }
     }
-    if (roof_uniforms[index].climate_location >= 0) {
+    if (roof_uniforms[index].climate_location >= 0 || roof_uniforms[index].light_location >= 0) {
       const uint32_t key = stadium_environment_key(
           pes_controller_stadium_weather(), pes_controller_stadium_season(),
           pes_controller_stadium_turf_length(), pes_controller_stadium_pitch_condition());
-      if (key != roof_uniforms[index].climate_key) {
+      const int light_day = pes_controller_day_stadium_lite_enabled();
+      if (key != roof_uniforms[index].climate_key || light_day != roof_uniforms[index].light_day_value) {
         float value[4];
         stadium_environment_uniform(key, value);
-        glUniform4fv(roof_uniforms[index].climate_location, 1, value);
+        if (roof_uniforms[index].climate_location >= 0 && key != roof_uniforms[index].climate_key)
+          glUniform4fv(roof_uniforms[index].climate_location, 1, value);
+        if (roof_uniforms[index].light_location >= 0) {
+          float light[12];
+          stadium_environment_light_uniform(value, light_day, light);
+          glUniform4fv(roof_uniforms[index].light_location, 3, light);
+        }
         roof_uniforms[index].climate_key = key;
+        roof_uniforms[index].light_day_value = light_day;
       }
     }
   }
@@ -449,7 +480,6 @@ static void glDeleteProgram_c(GLuint p) {
 #ifdef DEBUG_LOG
   stadium_diag_forget(p);
 #endif
-  roof_uniforms[p % 128u].valid = 0;
   if (glc.have_prog && glc.prog == p) glc.have_prog = 0;
   glDeleteProgram(p);
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);

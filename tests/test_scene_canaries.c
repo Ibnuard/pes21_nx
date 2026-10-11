@@ -4,6 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 typedef struct { void *data; int32_t num,max; } Ue4Array;
 static uint32_t selected;
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void) { return selected; }
@@ -122,11 +128,13 @@ static int referee_probe_restart_active(void) { return 0; }
 #include "referee_animation_fixture.h"
 static unsigned char human[22][0x820], animation[22][0x940];
 static unsigned char registry_data[0x500], move_data[22][0x580];
-static int faded,flow_calls,demo_calls;
+static int warp_complete,flow_calls,demo_calls;
+static unsigned char flow_object[0xce0];
 static unsigned char demo_object[0xcf0];
 static void *demo_actors[257];
-static void reset_flow(void *flow,uint32_t kind) {assert(flow==(void*)7);(void)kind;++flow_calls;}
-static int match_faded(const void *info) {assert(info==&faded);return faded;}
+static int position_warp(void *flow,const void *context) {
+  assert(flow==flow_object && context==(void*)7);++flow_calls;return warp_complete;
+}
 static void demo_transform(void *self,float *p,float *q,uint32_t human,
     uint8_t frame_index,uint8_t mode,float time,float blend) {
   assert(self==demo_object && frame_index==1 && mode==2 && time==.3f && blend==.5f);
@@ -136,11 +144,59 @@ static void demo_transform(void *self,float *p,float *q,uint32_t human,
 }
 static float ball_data[3]={35,0,5};
 static _Alignas(16) RefereeBonePose bone_storage[20];
+static unsigned char vision_storage[0xe8], render_storage[0x340], ue_storage[16];
+static unsigned native_quality=2,queued,loaded_ue,rendered,render_lookups;
+static unsigned quality_during_load,quality_during_render;
+static int in_draw;
+static int test_render_isolation;
+#ifdef _WIN32
+static DWORD WINAPI quality_peer_thread(void *unused) {
+#else
+static void *quality_peer_thread(void *unused) {
+#endif
+  (void)unused;assert(!referee_render_scope && !referee_queue_scope);
+  assert(referee_probe_quality()==native_quality);
+  return 0;
+}
+static void *vision_manager(void) {return (void*)9;}
+static void *render_model(void *manager,uint32_t key) {
+  assert(manager==(void*)9 && key==42 && !in_draw);++render_lookups;return render_storage;
+}
+static uint32_t quality_original(void) {return native_quality;}
+static void queue_player(void *manager,void *model) {
+  assert(manager==(void*)9 && model==ue_storage);
+  assert(referee_owned_ue==(uintptr_t)model);++queued;
+}
+static void load_player(void *model) {
+  assert(model);quality_during_load=referee_probe_quality();++loaded_ue;
+  if(test_render_isolation && model==ue_storage) {
+    referee_probe_load_player(vision_storage);assert(quality_during_load==2);
+    assert(referee_probe_quality()==1 && !referee_queue_scope);
+    quality_during_load=referee_probe_quality();
+  }
+}
+static int render_update(void *model) {
+  assert(model);quality_during_render=referee_probe_quality();++rendered;
+  if(model==render_storage && !queued)referee_probe_queue_player((void*)9,ue_storage);
+  if(test_render_isolation && model==render_storage) {
+    assert(referee_probe_render_update(vision_storage)==17 && quality_during_render==2);
+    assert(referee_probe_quality()==1 && referee_queue_scope);
+#ifdef _WIN32
+    HANDLE thread=CreateThread(NULL,0,quality_peer_thread,NULL,0,NULL);assert(thread);
+    assert(WaitForSingleObject(thread,5000)==WAIT_OBJECT_0);CloseHandle(thread);
+#else
+    pthread_t thread;assert(!pthread_create(&thread,NULL,quality_peer_thread,NULL));
+    assert(!pthread_join(thread,NULL));
+#endif
+    quality_during_render=referee_probe_quality();
+  }
+  return 17;
+}
 static int registry_available=1;
 static RefereeProbeVector last_position;
 static int creations,deleted,drawn,updates,displayed,ready=1,released,display_calls;
 static int published, load_groups_alive=1;
-static int in_draw, native_loaded=1, player_creates, original_result=1,uniform_busy;
+static int native_loaded=1, player_creates, original_result=1,uniform_busy;
 static unsigned sound_calls;
 static void sound_original(const void *self,uint64_t handle,const uint8_t *command,
                            uint32_t arg,const void *registry,uint32_t player) {
@@ -153,10 +209,13 @@ static RefereeProbeLoadId load_id(uint32_t k,uint32_t id,uint32_t w,uint32_t s) 
 static uint32_t get_id(void *m,uint32_t i) {assert(m==(void*)1 && i==0);return 0;}
 static void *allocate(size_t n) {assert(n==0x448);creations++;return calloc(1,n);}
 static void constructor(void *p,uint32_t k,const RefereeProbeLoadId *id) {assert(p && k==2 && id && !in_draw);}
-static void destroy(void *p) {assert(!referee_probe_model && load_groups_alive);deleted++;free(p);}
+static void destroy(void *p) {
+  assert(!referee_probe_model && !referee_owned_render && !referee_owned_ue && load_groups_alive);
+  deleted++;free(p);
+}
 static int init(void *p) {
   assert(!in_draw);
-  if(ready) {*(void**)((char*)p+0x440)=(void*)1;*(void**)((char*)p+0x418)=bone_storage;*(void**)((char*)p+0x420)=bone_storage+20;}
+  if(ready) {*(void**)((char*)p+0x440)=vision_storage;*(void**)((char*)p+0x418)=bone_storage;*(void**)((char*)p+0x420)=bone_storage+20;}
   return ready;
 }
 static float root_scale(const void *p) {assert(p==(char*)referee_probe_model+0x10);return 1.0f;}
@@ -183,7 +242,7 @@ static void release(void *p) {assert(!referee_probe_model);(void)p;released++;}
 static void release_animation(void) {assert(!referee_probe_model);load_groups_alive=0;}
 static int create_manager(void) {load_groups_alive=1;return 1;}
 static void publish(void *v,const void *b) {
-  assert(v==(void*)1 && b==(char*)referee_probe_model+0x410);published++;
+  assert(v==vision_storage && b==(char*)referee_probe_model+0x410);published++;
   assert(bone_storage[19].rotation[3]==1 && bone_storage[19].position[3]==1);
 }
 static void *get_registry(void) {return registry_available?registry_data:NULL;}
@@ -220,7 +279,10 @@ static void referee_test(void) {
   referee_registry=get_registry;referee_player_move=player_move;
   referee_ball_trans=ball_trans;referee_frame_stamp=frame_stamp;
   referee_publish_bones=publish;
-  referee_reset_flow_original=reset_flow;referee_match_faded=match_faded;
+  referee_position_warp_original=position_warp;
+  referee_vision_manager=vision_manager;referee_render_model=render_model;
+  referee_render_update_original=render_update;referee_queue_player_original=queue_player;
+  referee_load_player_original=load_player;referee_quality_original=quality_original;
   referee_demo_transform_original=demo_transform;
   referee_animation_release_original=release_animation;
   referee_manager_create_original=create_manager;
@@ -228,7 +290,7 @@ static void referee_test(void) {
   size_t animation_size;unsigned char *animation_data=referee_animation_fixture_count(&animation_size,8);
   assert(referee_animation_bind(&referee_animation_bank,animation_data,animation_size));
   *(void**)(registry_data+0x90)=ball_data;
-  *(void**)(registry_data+0x4f0)=&faded;
+  *(uint32_t*)(vision_storage+0x30)=42;
   for(int i=0;i<22;i++) {
     *(uint32_t*)(human[i]+0x18)=(uint32_t)i;
     *(void**)(human[i]+0x7e0)=animation[i];
@@ -248,6 +310,28 @@ static void referee_test(void) {
   frame();assert(!published && !updates && referee_probe_pending);
   assert(!referee_probe_all_loaded((void*)1));native_loaded=1;
   assert(referee_probe_all_loaded((void*)1) && !referee_probe_pending);
+  assert(referee_owned_render==(uintptr_t)render_storage && render_lookups==1);
+  assert(referee_probe_render_update(render_storage)==17 && quality_during_render==1 && queued==1);
+  assert(!referee_render_scope && referee_probe_quality()==2 && native_quality==2);
+  /* LoadImpl runs later on the native load queue, outside the render scope. */
+  referee_probe_load_player(ue_storage);
+  assert(quality_during_load==1 && referee_low_loads==1 && !referee_render_scope);
+  for(unsigned i=0;i<22;i++) {
+    assert(referee_probe_render_update(human[i])==17 && quality_during_render==2);
+    referee_probe_load_player(human[i]);assert(quality_during_load==2);
+  }
+  assert(referee_render_samples==1 && loaded_ue==23 && rendered==23);
+  for(native_quality=0;native_quality<4;native_quality++) {
+    assert(referee_probe_render_update(render_storage)==17);
+    assert(quality_during_render==(native_quality==2?1:native_quality));
+    assert(!referee_render_scope && referee_probe_quality()==native_quality);
+  }
+  native_quality=2;
+  test_render_isolation=1;
+  assert(referee_probe_render_update(render_storage)==17 && quality_during_render==1);
+  referee_probe_load_player(ue_storage);assert(quality_during_load==1);
+  assert(!referee_render_scope && !referee_queue_scope && referee_probe_quality()==2);
+  test_render_isolation=0;
   unsigned char players_before[sizeof(human)];memcpy(players_before,human,sizeof(human));
   for(int i=0;i<300;i++)frame();
   assert(!memcmp(players_before,human,sizeof(human))); // Referee cannot mutate players.
@@ -401,18 +485,42 @@ static void referee_test(void) {
   assert(creations==6 && deleted==5);
   ticks+=150000000;frame();
   assert(hypotf(last_position.x-12,last_position.z-4)<.581f); // Stale demo expires without teleport.
-  // A goal reset is applied once, only behind the native completed fade.
-  referee_probe_reset_flow((void*)7,3);assert(flow_calls==1 && referee_kickoff_pending);
-  frame();assert(referee_kickoff_pending && !referee_kickoff_ready && last_position.x>10);
-  faded=1;frame();assert(!referee_kickoff_pending && referee_kickoff_ready==1);
-  assert(last_position.x==0 && last_position.z==10 && displayed);
-  faded=0;ball_data[0]=ball_data[2]=0;frame();assert(referee_kickoff_ready==2);
+  // No draw occurs during the fade. Only a successful native player warp arms
+  // placement; the first resumed draw publishes the ready pose before display.
+  *(uint32_t*)(flow_object+0xcd4)=3;
+  assert(!referee_probe_position_warp(flow_object,(void*)7) && !referee_kickoff_pending);
+  frame();assert(!referee_kickoff_ready && last_position.x>10);
+  warp_complete=1;inplay=0;
+  assert(referee_probe_position_warp(flow_object,(void*)7) && referee_kickoff_pending);
+  ticks+=1000000000; // Native draw listener is stopped throughout black.
+  ball_data[0]=ball_data[2]=0;inplay=2;frame();
+  assert(!referee_kickoff_pending && referee_kickoff_ready==2 && referee_kickoff_applied==1);
+  assert(last_position.x==0 && last_position.z==10.75f && displayed);
   for(int i=0;i<10;i++)frame();
-  assert(last_position.x==0 && last_position.z==10 && creations==6 && deleted==5);
+  assert(last_position.x==0 && last_position.z==10.75f && creations==6 && deleted==5);
   ball_data[0]=3;frame();assert(!referee_kickoff_ready);
-  referee_probe_reset_flow((void*)7,5);assert(flow_calls==2 && !referee_kickoff_pending);
+  *(uint32_t*)(flow_object+0xcd4)=5;
+  assert(referee_probe_position_warp(flow_object,(void*)7) && !referee_kickoff_pending);
+  /* Half-start and fifty subsequent goals reuse the same model/bone buffer. */
+  *(uint32_t*)(flow_object+0xcd4)=2;
+  assert(referee_probe_position_warp(flow_object,(void*)7));
+  ball_data[0]=0;frame();assert(referee_kickoff_ready==2);
+  *(uint32_t*)(flow_object+0xcd4)=3;
+  for(unsigned i=0;i<50;i++) {
+    referee_motion.position=(RefereePoint){35,-20};
+    assert(referee_probe_position_warp(flow_object,(void*)7));
+    frame();assert(last_position.x==0 && last_position.z==10.75f && displayed);
+    assert(creations==6 && deleted==5 && referee_kickoff_ready==2);
+  }
+  assert(referee_kickoff_applied==52);
+  /* A fast pass before the first resumed draw must not trap the ready stance. */
+  assert(referee_probe_position_warp(flow_object,(void*)7));
+  ball_data[0]=5;frame();assert(!referee_kickoff_ready && last_position.z==10.75f);
   referee_probe_animation_release();referee_probe_release(NULL);
   assert(deleted==6 && !referee_kickoff_ready && !referee_demo_tick);
+  assert(!referee_owned_render && !referee_owned_ue);
+  assert(referee_probe_render_update(render_storage)==17 && quality_during_render==2);
+  referee_probe_load_player(ue_storage);assert(quality_during_load==2);
   // A stuck optional uniform preflight must not strand a native-ready match.
   referee_probe_manager_create();referee_probe_loaded_scene(NULL);
   uniform_busy=1;preload();assert(creations==6);

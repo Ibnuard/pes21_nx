@@ -8,6 +8,58 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class WeatherCameraTests(unittest.TestCase):
+    def test_break_log_keeps_live_time_stadium_and_cascade_observation(self):
+        cc=shutil.which('gcc')
+        if not cc:self.skipTest('Host C compiler unavailable')
+        overlay=(ROOT/'source/overlay.c').read_text()
+        render=function(overlay,'overlay_render')
+        # Compile the production timing block without the unrelated UI renderer.
+        timing=render[:render.index('  if (config.show_fps)')]+'}\n'
+        build_and_run(cc,'#include "'+(ROOT/'source/frame_pacing_sample.h').as_posix()+'"\n'+r'''
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+static unsigned live=1,day=1,stadium=1,day_lite=1,notes;
+static int cascades;
+static uint64_t now=1;
+static char logged[320];
+static unsigned pes_controller_match_hud_inplay(void){return live;}
+static unsigned pes_controller_stadium_weather(void){return 0;}
+static unsigned pes_controller_stadium_season(void){return 0;}
+static unsigned pes_controller_match_hud_session(void){return 1;}
+static unsigned pes_controller_stadium_is_day(void){return day;}
+static unsigned pes_controller_stadium_canary_active(void){return stadium;}
+static unsigned pes_controller_day_stadium_lite_enabled(void){return day_lite;}
+static int pes_controller_stadium_shadow_cascades(void){return cascades;}
+static uint64_t armGetSystemTick(void){return now;}
+static uint64_t armTicksToNs(uint64_t value){return value;}
+static const char *nx_weather_label(unsigned value){(void)value;return "FINE";}
+static void pes_controller_referee_performance_note(void){}
+static void scene_runtime_note(const char *area,const char *message){
+ assert(!live && !strcmp(area,"frame pacing"));++notes;
+ snprintf(logged,sizeof(logged),"%s",message);
+}
+''' + timing + r'''
+int main(){
+ for(unsigned i=0;i<181;i++){overlay_render();now+=16666667;}
+ assert(!notes); // no filesystem output during the sampled live segment
+ live=0;day=0;stadium=0;day_lite=0;cascades=4;overlay_render();
+ assert(notes==1 && strstr(logged,"time=DAY stadium=1 day_lite=1 csm=0"));
+ assert(strstr(logged,"frames=180 avg_us=16666") && strstr(logged,"over20ms=0"));
+ now+=60000000000ull;live=1;
+ for(unsigned i=0;i<181;i++){overlay_render();now+=20000001;}
+ live=0;overlay_render();
+ assert(notes==2 && strstr(logged,"time=NIGHT stadium=0 day_lite=0 csm=4"));
+ assert(strstr(logged,"frames=180 avg_us=20000") && strstr(logged,"over20ms=180"));
+ // Time changes inside the same session also start a new sample.
+ live=1;for(unsigned i=0;i<20;i++){overlay_render();now+=16666667;}
+ day=1;day_lite=1;cascades=-2;
+ for(unsigned i=0;i<121;i++){overlay_render();now+=16666667;}
+ live=0;overlay_render();assert(notes==3);
+ assert(strstr(logged,"time=DAY") && strstr(logged,"csm=-2") && strstr(logged,"frames=120"));
+}
+''')
+
     def test_timing_accumulator_counts_stalls_without_mixing_sessions(self):
         cc=shutil.which('gcc')
         if not cc:self.skipTest('Host C compiler unavailable')

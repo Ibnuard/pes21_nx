@@ -21,26 +21,32 @@ int main(){
  nxDayStadium=1;nxNightIndirect=0;
  const vec3 lamp(1.0);
  nxStadiumClimate=vec4(0,0,0,0);
+ nxUpdateLightUniforms();
  vec3 fine=nxDirectLight(lamp,1)*.65+nxAmbientLight(lamp,1)*.35;
  nxStadiumClimate.x=1;
+ nxUpdateLightUniforms();
  vec3 cloud=nxDirectLight(lamp,1)*.65+nxAmbientLight(lamp,1)*.35;
  for(int repeat=0;repeat<100;repeat++){
   nxStadiumClimate=vec4(2,0,0,1);
+  nxUpdateLightUniforms();
   vec3 rain=nxDirectLight(lamp,1)*.65+nxAmbientLight(lamp,1)*.35;
   assert(lum(rain)<lum(cloud)*.9);
   nxStadiumClimate.y=1;
+  nxUpdateLightUniforms();
   vec3 snow=nxDirectLight(lamp,1)*.65+nxAmbientLight(lamp,1)*.35;
   assert(lum(snow)>lum(fine)*.90 && lum(snow)<lum(fine)*1.05);
   assert(snow.b>snow.g && snow.g>snow.r);
   nxStadiumClimate=vec4(0,0,0,0);
+  nxUpdateLightUniforms();
   assert(nxDirectLight(lamp,1).g==1.0);
  }
  nxDayStadium=0;nxNightIndirect=1;
- nxStadiumClimate=vec4(2,0,0,1);assert(nxRainLightScale().g<1);
- nxStadiumClimate.y=1;vec3 night=nxRainLightScale();
+ nxStadiumClimate=vec4(2,0,0,1);nxUpdateLightUniforms();assert(nxRainLightScale().g<1);
+ nxStadiumClimate.y=1;nxUpdateLightUniforms();vec3 night=nxRainLightScale();
  assert(night.b>night.g && night.g>night.r);
  for(int w=0;w<2;w++)for(int season=0;season<2;season++){
   nxStadiumClimate=vec4(w,season,0,0);
+  nxUpdateLightUniforms();
   vec3 scale=nxRainLightScale();assert(scale.r==1 && scale.g==1 && scale.b==1);
  }
 }
@@ -55,6 +61,7 @@ int main(){
 static void set(unsigned w,unsigned s,unsigned t,unsigned p){
  float v[4];stadium_environment_uniform(stadium_environment_key(w,s,t,p),v);
  nxStadiumClimate=vec4(v[0],v[1],v[2],v[3]);
+ nxUpdateLightUniforms();
 }
 static float luminance(vec3 v){return dot(v,vec3(.2126,.7152,.0722));}
 int main(){

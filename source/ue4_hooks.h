@@ -536,6 +536,7 @@ uint32_t pes_controller_stadium_turf_length(void);
 uint32_t pes_controller_stadium_pitch_condition(void);
 uint32_t pes_controller_roof_shadow_enabled(void);
 uint32_t pes_controller_day_stadium_lite_enabled(void);
+int32_t pes_controller_stadium_shadow_cascades(void);
 #ifdef PERF_TRACE
 uint64_t pes_controller_stadium_perf_key(void);
 #endif

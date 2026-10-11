@@ -60,11 +60,21 @@ static vec3 max(vec3 a,vec3 b){return vec3(max(a.x,b.x),max(a.y,b.y),max(a.z,b.z
 static float dot(vec3 a,vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 struct vec4 {
  float x,y,z,w;
- vec4(float a=0,float b=0,float c=0,float d=0):x(a),y(b),z(c),w(d){}
+ vec3 xyz;
+ vec4(float a=0,float b=0,float c=0,float d=0):x(a),y(b),z(c),w(d),xyz(a,b,c){}
 };
 static vec3 nxSun(.4013,.4488,.798);
 static struct {vec3 xyz;} MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition={nxSun};
-''' + shader_math().replace('highp ', '').replace('uniform ', '')
+''' + shader_math().replace('highp ', '').replace('uniform ', '') + '\n#include "' + (ROOT/'source/stadium_environment.h').as_posix() + '"\n' + r'''
+// Model the same CPU upload as glUseProgram_c. Tests refresh after changing
+// settings; the emitted lighting/geometry functions above remain unmodified.
+static void nxUpdateLightUniforms(){
+ float climate[4]={nxStadiumClimate.x,nxStadiumClimate.y,nxStadiumClimate.z,nxStadiumClimate.w};
+ float values[12];stadium_environment_light_uniform(climate,nxDayStadium>.5f,values);
+ for(int i=0;i<3;i++)nxStadiumLight[i]=vec4(values[4*i],values[4*i+1],values[4*i+2],values[4*i+3]);
+}
+static const int nxInitialLightUniforms=(nxUpdateLightUniforms(),0);
+'''
 
 
 def preview(output):

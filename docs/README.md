@@ -26,6 +26,9 @@ Subsystem notes and historical implementation audits live here.
 
 ## Runtime, controls, and UI
 
+- [Accepted roof shadow v20 checkpoint: cheaper flat regions with the same player shading](ROOF_SHADOW_COST_V20.md)
+- [Day frame pacing v19: cached weather lighting and shader uniforms](DAY_FRAME_PACING_V19.md)
+- [Referee v18: owned Low renderer and native kickoff placement](MATCH_REVIEW_V18.md)
 - [Match review v17: preset flow, Anfield camera clearance and referee cost](MATCH_REVIEW_V17.md)
 - [Match review v16: Game Plan, stadium, referee and local rematch](MATCH_REVIEW_V16.md)
 - [Competition modes plan: Match, Cup, League, and Master League](COMPETITION_MODES_PLAN.md)

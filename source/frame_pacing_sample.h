@@ -4,6 +4,8 @@
 typedef struct {
   uint64_t previous, total, worst;
   uint32_t frames, over20, over30, session, weather, season;
+  uint32_t day, stadium, day_lite;
+  int32_t cascades;
 } NxFramePacingSample;
 /* Presentation intervals, NOT GPU time or simulation FPS. No I/O in play. */
 static inline void nx_frame_pacing_add(NxFramePacingSample *s,uint64_t now) {

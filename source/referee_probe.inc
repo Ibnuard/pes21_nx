@@ -38,9 +38,21 @@ static void *(*referee_registry)(void);
 static const void *(*referee_player_move)(const void *, uint32_t);
 static const float *(*referee_ball_trans)(const void *);
 static uint64_t (*referee_frame_stamp)(void);
-static void (*referee_reset_flow_original)(void *,uint32_t);
+static int (*referee_position_warp_original)(void *,const void *);
 static void (*referee_demo_transform_original)(void *,float *,float *,uint32_t,uint8_t,uint8_t,float,float);
-static int (*referee_match_faded)(const void *);
+static void *(*referee_vision_manager)(void);
+static void *(*referee_render_model)(void *,uint32_t);
+static int (*referee_render_update_original)(void *);
+static void (*referee_queue_player_original)(void *,void *);
+static void (*referee_load_player_original)(void *);
+static uint32_t (*referee_quality_original)(void);
+/* Only the owned renderer is identified here. Native players/demos keep their
+ * quality. These pointers are cleared before the native deleting destructor. */
+static uintptr_t referee_owned_render,referee_owned_ue;
+static __thread unsigned referee_render_scope;
+static __thread unsigned referee_queue_scope;
+static uint64_t referee_render_samples,referee_render_ns,referee_render_worst_ns;
+static uint32_t referee_low_loads,referee_model_creations,referee_kickoff_applied;
 static uint32_t referee_kickoff_pending;
 static uint32_t referee_kickoff_ready;
 static uint32_t referee_demo_sequence;
@@ -109,12 +121,19 @@ void pes_controller_referee_performance_note(void) {
   __atomic_thread_fence(__ATOMIC_ACQUIRE);
   if(sequence!=__atomic_load_n(&referee_perf_sequence,__ATOMIC_RELAXED))return;
   last=sequence;
-  char text[320];
-  snprintf(text,sizeof(text),"v17 samples=%llu follow_avg_us=%llu pose_avg_us=%llu publish_avg_us=%llu update_avg_us=%llu cpu_worst_us=%llu player_reads=%llu offscreen=%llu whistles=%u (CPU only; excludes native draw/GPU)",
+  char text[512];
+  const uint64_t render_samples=__atomic_load_n(&referee_render_samples,__ATOMIC_ACQUIRE);
+  const uint64_t render_ns=__atomic_load_n(&referee_render_ns,__ATOMIC_RELAXED);
+  snprintf(text,sizeof(text),"v18 samples=%llu follow_avg_us=%llu pose_avg_us=%llu publish_avg_us=%llu update_avg_us=%llu cpu_worst_us=%llu player_reads=%llu offscreen=%llu whistles=%u render_samples=%llu render_avg_us=%llu render_worst_us=%llu low_loads=%u creates=%u kickoff=%u (CPU only; excludes GPU)",
       (unsigned long long)values[0],(unsigned long long)values[1],(unsigned long long)values[2],
       (unsigned long long)values[3],(unsigned long long)values[4],(unsigned long long)values[5],
       (unsigned long long)values[6],(unsigned long long)values[7],
-      __atomic_load_n(&referee_probe_whistle_serial,__ATOMIC_ACQUIRE));
+      __atomic_load_n(&referee_probe_whistle_serial,__ATOMIC_ACQUIRE),
+      (unsigned long long)render_samples,(unsigned long long)(render_samples?render_ns/render_samples/1000:0),
+      (unsigned long long)(__atomic_load_n(&referee_render_worst_ns,__ATOMIC_RELAXED)/1000),
+      __atomic_load_n(&referee_low_loads,__ATOMIC_RELAXED),
+      __atomic_load_n(&referee_model_creations,__ATOMIC_RELAXED),
+      __atomic_load_n(&referee_kickoff_applied,__ATOMIC_RELAXED));
   scene_runtime_note("referee perf",text);
 }
 static void referee_perf_flush(void) {
@@ -160,6 +179,8 @@ static void referee_probe_note(const char *text) {
 }
 static void referee_probe_clear(void) {
   referee_perf_flush();
+  __atomic_store_n(&referee_owned_render,0,__ATOMIC_RELEASE);
+  __atomic_store_n(&referee_owned_ue,0,__ATOMIC_RELEASE);
   __atomic_store_n(&referee_screen_sample,0,__ATOMIC_RELEASE);
   __atomic_store_n(&referee_world_tick,0,__ATOMIC_RELEASE);
   referee_using_demo=0;
@@ -193,10 +214,68 @@ static void referee_probe_clear(void) {
   __atomic_store_n(&referee_probe_event_key,0,__ATOMIC_RELEASE);
   referee_motion_reset(&referee_motion);
 }
-static void referee_probe_reset_flow(void *flow,uint32_t kind) {
-  referee_reset_flow_original(flow,kind);
-  /* InitKickOffFlow calls ResetFlow(3), then queues the native fade-out. */
-  __atomic_store_n(&referee_kickoff_pending,kind==3u,__ATOMIC_RELEASE);
+static int referee_probe_position_warp(void *flow,const void *context) {
+  const int complete=referee_position_warp_original(flow,context);
+  if(complete && flow && referee_probe_enabled && !referee_probe_teardown) {
+    uint32_t kind;memcpy(&kind,(const char *)flow+0xcd4,sizeof(kind));
+    /* ExecPositionWarp returns true only after the native player-position
+     * acknowledgement. HalfStart(2) and KickOff(3) precede the fade-in.
+     * Queue a scalar request even when ObjectList::Draw is stopped in black. */
+    if(kind==2u || kind==3u)__atomic_store_n(&referee_kickoff_pending,1,__ATOMIC_RELEASE);
+  }
+  return complete;
+}
+static uint32_t referee_probe_quality(void) {
+  const uint32_t native=referee_quality_original();
+  /* Native 0/3 = lowest, 1 = low, 2 = high. Never upgrade a low setting or
+   * mutate the global option. The override lives on this callback's thread. */
+  return referee_render_scope && native==2u?1u:native;
+}
+static void referee_probe_queue_player(void *manager,void *model) {
+  if(referee_queue_scope && model)
+    __atomic_store_n(&referee_owned_ue,(uintptr_t)model,__ATOMIC_RELEASE);
+  /* Publish identity before the original queue makes LoadImpl runnable. */
+  referee_queue_player_original(manager,model);
+}
+static void referee_probe_load_player(void *model) {
+  const unsigned previous=referee_render_scope,previous_queue=referee_queue_scope;
+  const int owned=model && (uintptr_t)model==__atomic_load_n(&referee_owned_ue,__ATOMIC_ACQUIRE);
+  referee_render_scope=owned;referee_queue_scope=0;
+  referee_load_player_original(model);
+  if(owned && referee_quality_original()==2u)
+    __atomic_add_fetch(&referee_low_loads,1,__ATOMIC_RELAXED);
+  referee_render_scope=previous;referee_queue_scope=previous_queue;
+}
+static int referee_probe_render_update(void *model) {
+  const int owned=model && (uintptr_t)model==__atomic_load_n(&referee_owned_render,__ATOMIC_ACQUIRE);
+  if(!owned && !referee_render_scope)return referee_render_update_original(model);
+  const unsigned previous=referee_render_scope,previous_queue=referee_queue_scope;
+  referee_render_scope=referee_queue_scope=owned;
+  const uint64_t start=armGetSystemTick();
+  const int result=referee_render_update_original(model);
+  referee_render_scope=previous;referee_queue_scope=previous_queue;
+  if(!owned)return result;
+  const uint64_t cost=referee_elapsed_ns(start,armGetSystemTick());
+  __atomic_add_fetch(&referee_render_ns,cost,__ATOMIC_RELAXED);
+  __atomic_add_fetch(&referee_render_samples,1,__ATOMIC_RELEASE);
+  uint64_t worst=__atomic_load_n(&referee_render_worst_ns,__ATOMIC_RELAXED);
+  if(cost>worst)__atomic_compare_exchange_n(&referee_render_worst_ns,&worst,cost,0,__ATOMIC_RELAXED,__ATOMIC_RELAXED);
+  return result;
+}
+static void referee_probe_capture_render(void) {
+  if(!referee_probe_model || !referee_vision_manager || !referee_render_model ||
+      __atomic_load_n(&referee_owned_render,__ATOMIC_ACQUIRE))return;
+  void *vision=NULL;memcpy(&vision,(const char *)referee_probe_model+0x440,sizeof(vision));
+  if(!vision)return;
+  uint32_t key;memcpy(&key,(const char *)vision+0x30,sizeof(key));
+  void *manager=referee_vision_manager();
+  void *model=manager?referee_render_model(manager,key):NULL;
+  if(!model)return;
+  /* GetPlayerModel performs the native manager lock. Resolve once during the
+   * loading barrier, never lock or scan that manager in a live draw. */
+  uintptr_t ue=0;memcpy(&ue,(const char *)model+0xb0,sizeof(ue));
+  if(ue)__atomic_store_n(&referee_owned_ue,ue,__ATOMIC_RELEASE);
+  __atomic_store_n(&referee_owned_render,(uintptr_t)model,__ATOMIC_RELEASE);
 }
 static void referee_probe_demo_transform(void *self,float *position,float *rotation,
     uint32_t human,uint8_t frame,uint8_t mode,float time,float blend) {
@@ -230,19 +309,17 @@ static void referee_probe_demo_transform(void *self,float *position,float *rotat
   __atomic_store_n(&referee_demo_sequence,sequence+2,__ATOMIC_RELEASE);
 }
 static void referee_probe_hidden_kickoff(void) {
-  if(!__atomic_load_n(&referee_kickoff_pending,__ATOMIC_ACQUIRE) || !referee_match_faded)return;
-  const void *registry=referee_registry(),*info=NULL;
-  if(registry)memcpy(&info,(const char *)registry+0x4f0,sizeof(info));
-  /* Native ExecFadeOut sets this only after its countdown finishes. */
-  if(!info || !referee_match_faded(info))return;
+  if(!__atomic_exchange_n(&referee_kickoff_pending,0,__ATOMIC_ACQ_REL))return;
   referee_motion_reset(&referee_motion);
-  referee_motion.position=(RefereePoint){0,10};referee_motion.heading=3.141592654f;
-  referee_kickoff_ready=1;
+  referee_motion.position=(RefereePoint){0,10.75f};referee_motion.heading=3.141592654f;
+  /* Native warp already placed the ball at centre. A fast kickoff may have
+   * moved it before our next draw, so don't wait for a centre sample forever. */
+  referee_kickoff_ready=2;
   referee_animation_clock=(RefereeAnimationClock){0};referee_gesture=(RefereeGesture){0};
   referee_probe_tick=0;referee_probe_dt=0;referee_player_snapshot_valid=0;
   __atomic_store_n(&referee_demo_tick,0,__ATOMIC_RELEASE);
-  __atomic_store_n(&referee_kickoff_pending,0,__ATOMIC_RELEASE);
-  scene_runtime_note("referee","kickoff ready position applied behind completed native fade");
+  __atomic_add_fetch(&referee_kickoff_applied,1,__ATOMIC_RELAXED);
+  /* No SD-card write at the transition; the count goes in the break summary. */
 }
 static void referee_probe_release(void *manager) {
   scene_runtime_note("referee","human manager release begin");
@@ -270,7 +347,7 @@ static int referee_probe_manager_create(void) {
   if (ready) {
     const int notify=referee_probe_teardown || !referee_probe_scene_ready;
     referee_probe_teardown=0;
-    if(notify)referee_probe_note("Referee v17 native model manager available.");
+    if(notify)referee_probe_note("Referee v18 native model manager available.");
   }
   return ready;
 }
@@ -476,6 +553,7 @@ static int referee_probe_all_loaded(void *manager) {
         else {
           referee_ctor(referee_probe_model,2,&load);
           referee_set_lod(referee_probe_model,2,0,0); // Native match model policy.
+          __atomic_add_fetch(&referee_model_creations,1,__ATOMIC_RELAXED);
           referee_probe_load_tick=armGetSystemTick();
           referee_probe_note("Referee v11 queued after native player and uniform loads drained.");
         }
@@ -483,6 +561,7 @@ static int referee_probe_all_loaded(void *manager) {
     }
     if (referee_probe_model) {
       referee_probe_loaded=referee_init(referee_probe_model)!=0;
+      referee_probe_capture_render();
       referee_probe_set_display(0);
       const uint64_t now=armGetSystemTick();
       if (!referee_probe_loaded && now>=referee_probe_load_tick &&
@@ -630,13 +709,24 @@ static void install_referee_probe(so_module *module) {
   if (*(const uint32_t *)(observer+0x64)!=0x52800481 ||
       *(const uint32_t *)(observer+0x80)!=0x91005280) return;
   const char *demo_symbol="_ZN11FixDemoMain20GetUpdateHumanPosRotERN4math7Vector3ERNS0_10QuaternionEjhhff";
-  const char *fade_symbol="_ZNK5match8registry9MatchInfo12GetIsFadeOutEv";
-  if(!so_try_find_addr_rx(module,demo_symbol) || !so_try_find_addr_rx(module,fade_symbol))return;
-  const uintptr_t demo=so_find_addr(module,demo_symbol),fade=so_find_addr(module,fade_symbol);
+  const char *flow_symbol="_ZN5match4Flow9ResetFlowENS_8FlowKindE";
+  const char *warp_symbol="_ZN5match4Flow16ExecPositionWarpEPKN5cobra4game7ContextE";
+  const char *render_symbol="_ZN6render11PlayerModel6UpdateEv";
+  const char *load_symbol="_ZN13UEPlayerModel8LoadImplEv";
+  const char *vision_symbol="_ZN18VisionModelManager11VisionModelC2Ejj";
+  if(!so_try_find_addr_rx(module,demo_symbol) || !so_try_find_addr_rx(module,flow_symbol) ||
+      !so_try_find_addr_rx(module,warp_symbol) || !so_try_find_addr_rx(module,render_symbol) ||
+      !so_try_find_addr_rx(module,load_symbol) || !so_try_find_addr_rx(module,vision_symbol))return;
+  const uintptr_t demo=so_find_addr(module,demo_symbol),flow=so_find_addr(module,flow_symbol),
+      warp=so_find_addr(module,warp_symbol),render=so_find_addr(module,render_symbol),
+      load=so_find_addr(module,load_symbol),vision=so_find_addr(module,vision_symbol);
   if(*(const uint32_t *)(demo+0x7c)!=0xf94676ea ||
       *(const uint32_t *)(demo+0x80)!=0xf94672e8 ||
-      *(const uint32_t *)fade!=0x5282ed08 ||
-      *(const uint32_t *)(fade+4)!=0x38686800)return;
+      *(const uint32_t *)(flow+0xc)!=0xb90cd401 ||
+      *(const uint32_t *)(warp+0xc)!=0x39754808 ||
+      *(const uint32_t *)(render+0x44)!=0xf9005a60 ||
+      *(const uint32_t *)load!=0xd102c3ff ||
+      *(const uint32_t *)(vision+0x18)!=0xb9003001)return;
   const uintptr_t draw_plt = (uintptr_t)module->load_base + 0x38a0b50;
   const uintptr_t create_plt = (uintptr_t)module->load_base + 0x38948e0;
   const uintptr_t loaded_plt = (uintptr_t)module->load_base + 0x3804970;
@@ -648,8 +738,12 @@ static void install_referee_probe(so_module *module) {
   const uintptr_t scene_loaded_plt = (uintptr_t)module->load_base + 0x38c3dc0;
   const uintptr_t out_plt = (uintptr_t)module->load_base + 0x37ed030;
   const uintptr_t sound_plt = (uintptr_t)module->load_base + 0x381c230;
-  const uintptr_t flow_plt = (uintptr_t)module->load_base + 0x3887240;
+  const uintptr_t warp_plt = (uintptr_t)module->load_base + 0x38bd6c0;
   const uintptr_t demo_plt = (uintptr_t)module->load_base + 0x3845dd0;
+  const uintptr_t render_plt = (uintptr_t)module->load_base + 0x391e900;
+  const uintptr_t queue_player_plt = (uintptr_t)module->load_base + 0x384ebc0;
+  const uintptr_t load_player_plt = (uintptr_t)module->load_base + 0x3884f40;
+  const uintptr_t quality_plt = (uintptr_t)module->load_base + 0x3860db0;
   const uint32_t draw_words[] = {0xd002e370,0xf9440211,0x91200210,0xd61f0220};
   const uint32_t create_words[] = {0x9002e3b0,0xf9436611,0x911b2210,0xd61f0220};
   const uint32_t loaded_words[] = {0x9002e5f0,0xf9438a11,0x911c4210,0xd61f0220};
@@ -661,8 +755,12 @@ static void install_referee_probe(so_module *module) {
   const uint32_t scene_loaded_words[] = {0xb002e2f0,0xf9409e11,0x9104e210,0xd61f0220};
   const uint32_t out_words[] = {0xf002e630,0xf9453a11,0x9129c210,0xd61f0220};
   const uint32_t sound_words[] = {0x9002e590,0xf941ba11,0x910dc210,0xd61f0220};
-  const uint32_t flow_words[] = {0xd002e3d0,0xf945be11,0x912de210,0xd61f0220};
+  const uint32_t warp_words[] = {0xf002e2f0,0xf946de11,0x9136e210,0xd61f0220};
   const uint32_t demo_words[] = {0x9002e4f0,0xf940a211,0x91050210,0xd61f0220};
+  const uint32_t render_words[] = {0xf002e170,0xf9436e11,0x911b6210,0xd61f0220};
+  const uint32_t queue_player_words[] = {0xf002e4b0,0xf9441e11,0x9120e210,0xd61f0220};
+  const uint32_t load_player_words[] = {0x9002e3f0,0xf944fe11,0x9127e210,0xd61f0220};
+  const uint32_t quality_words[] = {0xd002e470,0xf9449a11,0x9124c210,0xd61f0220};
   if (memcmp((void *)draw_plt, draw_words, 16) ||
       memcmp((void *)create_plt, create_words, 16) ||
       memcmp((void *)loaded_plt, loaded_words, 16) ||
@@ -674,8 +772,12 @@ static void install_referee_probe(so_module *module) {
       (!stadium_canary_installed && memcmp((void *)scene_loaded_plt, scene_loaded_words, 16)) ||
       memcmp((void *)out_plt, out_words, 16) ||
       memcmp((void *)sound_plt, sound_words, 16) ||
-      memcmp((void *)flow_plt, flow_words, 16) ||
-      memcmp((void *)demo_plt, demo_words, 16)) return;
+      memcmp((void *)warp_plt, warp_words, 16) ||
+      memcmp((void *)demo_plt, demo_words, 16) ||
+      memcmp((void *)render_plt,render_words,16) ||
+      memcmp((void *)queue_player_plt,queue_player_words,16) ||
+      memcmp((void *)load_player_plt,load_player_words,16) ||
+      memcmp((void *)quality_plt,quality_words,16)) return;
 #define REFEREE_BIND(target, symbol) do { \
   target = (void *)so_try_find_addr_rx(module, symbol); \
   if (!target) return; \
@@ -707,9 +809,14 @@ static void install_referee_probe(so_module *module) {
   REFEREE_BIND(referee_player_move, "_ZNK5match8registry14GlobalRegistry13GetPlayerMoveE8PlayerNo");
   REFEREE_BIND(referee_ball_trans, "_ZNK5match8registry8BallInfo8GetTransEv");
   REFEREE_BIND(referee_frame_stamp, "_ZN5cobra2rs5Async9FramePool17GetWriteTimestampEv");
-  REFEREE_BIND(referee_reset_flow_original, "_ZN5match4Flow9ResetFlowENS_8FlowKindE");
+  REFEREE_BIND(referee_position_warp_original, "_ZN5match4Flow16ExecPositionWarpEPKN5cobra4game7ContextE");
   REFEREE_BIND(referee_demo_transform_original, "_ZN11FixDemoMain20GetUpdateHumanPosRotERN4math7Vector3ERNS0_10QuaternionEjhhff");
-  REFEREE_BIND(referee_match_faded, "_ZNK5match8registry9MatchInfo12GetIsFadeOutEv");
+  REFEREE_BIND(referee_vision_manager,"_Z29GetVisionModelManagerInstancev");
+  REFEREE_BIND(referee_render_model,"_ZN18VisionModelManager14GetPlayerModelEj");
+  REFEREE_BIND(referee_render_update_original,"_ZN6render11PlayerModel6UpdateEv");
+  REFEREE_BIND(referee_queue_player_original,"_ZN13RenderManager13SetLoadPlayerEP13UEPlayerModel");
+  REFEREE_BIND(referee_load_player_original,"_ZN13UEPlayerModel8LoadImplEv");
+  REFEREE_BIND(referee_quality_original,"_ZN8UESystem3Env10GetQualityEv");
 #undef REFEREE_BIND
   if (stadium_canary_installed) referee_loaded_original=stadium_loaded_canary;
   size_t animation_size=0;
@@ -730,9 +837,13 @@ static void install_referee_probe(so_module *module) {
   hook_arm64(scene_loaded_plt, (uintptr_t)referee_probe_loaded_scene);
   hook_arm64(out_plt, (uintptr_t)referee_probe_out_of_play);
   hook_arm64(sound_plt, (uintptr_t)referee_probe_sound);
-  hook_arm64(flow_plt, (uintptr_t)referee_probe_reset_flow);
+  hook_arm64(warp_plt, (uintptr_t)referee_probe_position_warp);
   hook_arm64(demo_plt, (uintptr_t)referee_probe_demo_transform);
+  hook_arm64(render_plt,(uintptr_t)referee_probe_render_update);
+  hook_arm64(queue_player_plt,(uintptr_t)referee_probe_queue_player);
+  hook_arm64(load_player_plt,(uintptr_t)referee_probe_load_player);
+  hook_arm64(quality_plt,(uintptr_t)referee_probe_quality);
   referee_probe_enabled = 1;
-  referee_probe_note("Referee follower v17 armed; padded native-camera culling, full-rate visible pose, deferred CPU summaries.");
+  referee_probe_note("Referee follower v18 armed; owned low-detail native renderer, position-warp kickoff, full-rate pose.");
 }
 #endif

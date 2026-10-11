@@ -261,6 +261,7 @@ static void *manager=(void*)123;
 static void **stadium_console_manager=&manager;
 static uintptr_t stadium_int_cvar_vtable=42;
 static uint32_t stadium_shadow_budget_requested;
+static uint32_t stadium_shadow_observed=UINT32_MAX;
 static unsigned writes;
 static void *find_var(void *m,const uint16_t *n) {
   assert(m==manager); char name[48]={0};

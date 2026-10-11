@@ -25,6 +25,7 @@ static CVar vars[3]={{9,2048,0x1000000,0},{9,2048,0x1000000,0},{9,4,0x1000000,0}
 static void *manager=(void*)1, **stadium_console_manager=&manager;
 static uintptr_t stadium_int_cvar_vtable=9;
 static uint32_t stadium_shadow_budget_requested;
+static uint32_t stadium_shadow_observed=UINT32_MAX;
 static uint64_t tick;
 static uint64_t armGetSystemTick(void) {return tick;}
 static uint64_t armTicksToNs(uint64_t n) {return n;}
@@ -45,17 +46,22 @@ static void *(*stadium_find_cvar)(void*,const uint16_t*)=find;
 static int (*stadium_cvar_int)(void*)=get;
 static uint32_t (*stadium_cvar_flags)(void*)=flags;
 static void (*stadium_cvar_set)(void*,const uint16_t*,uint32_t)=set;
-''' + function(source, 'stadium_shadow_budget_tick') + r'''
+''' + function(source, 'stadium_shadow_budget_tick') +
+        function(source, 'pes_controller_stadium_shadow_cascades') + r'''
 static void run(uint32_t mode) {
   tick+=500000000; stadium_shadow_budget_requested=mode; stadium_shadow_budget_tick();
 }
 int main(void) {
+  assert(pes_controller_stadium_shadow_cascades()==-1);
   run(2); // Night must never lower its native settings.
+  assert(pes_controller_stadium_shadow_cascades()==4);
   for(unsigned i=0;i<3;i++) assert(vars[i].writes==0);
   run(1);run(1);
+  assert(pes_controller_stadium_shadow_cascades()==0);
   assert(vars[0].value==2048 && vars[1].value==2048 && vars[2].value==0);
   assert(vars[0].writes==0 && vars[1].writes==0 && vars[2].writes==1);
   run(2); // restore native Night cascades
+  assert(pes_controller_stadium_shadow_cascades()==4);
   assert(vars[2].value==4 && vars[2].writes==2);
   run(1);run(0); // returning to frontdoor also releases our override
   assert(vars[2].value==4 && vars[2].writes==4);
@@ -67,8 +73,11 @@ int main(void) {
   for(unsigned i=0;i<3;i++)assert(vars[i].writes==0);
   for(unsigned i=0;i<3;i++) {vars[i].value=2048;vars[i].vtable=10;}
   run(1); // Wrong native CVar type remains untouched.
+  assert(pes_controller_stadium_shadow_cascades()==-2);
   for(unsigned i=0;i<3;i++)assert(vars[i].value==2048 && vars[i].writes==0);
-
+  stadium_shadow_budget_requested=2; // no stale Day result labelled Night
+  assert(pes_controller_stadium_shadow_cascades()==-1);
+  manager=NULL;run(2);assert(pes_controller_stadium_shadow_cascades()==-1);
 }
 ''')
 

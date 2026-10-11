@@ -2148,17 +2148,24 @@ static void overlay_render(void) {
   static int pacing_width,pacing_height;
   if(live_weather_view) {
     const uint32_t session=pes_controller_match_hud_session();
-    if(pacing.session!=session || pacing.weather!=weather_choice || pacing.season!=weather_season) {
+    const uint32_t day=pes_controller_stadium_is_day();
+    const uint32_t stadium=pes_controller_stadium_canary_active();
+    const uint32_t day_lite=pes_controller_day_stadium_lite_enabled();
+    if(pacing.session!=session || pacing.weather!=weather_choice || pacing.season!=weather_season ||
+        pacing.day!=day || pacing.stadium!=stadium || pacing.day_lite!=day_lite) {
       memset(&pacing,0,sizeof(pacing));pacing.session=session;
       pacing.weather=weather_choice;pacing.season=weather_season;
+      pacing.day=day;pacing.stadium=stadium;pacing.day_lite=day_lite;
     }
+    pacing.cascades=pes_controller_stadium_shadow_cascades();
     nx_frame_pacing_add(&pacing,armTicksToNs(armGetSystemTick()));
   } else if(pacing.previous) {
     pacing.previous=0;
     if(pacing.frames>=120) {
-      char message[224];
-      snprintf(message,sizeof(message),"v17 session=%u weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
-          pacing.session,nx_weather_label(pacing.weather),pacing.season,pacing.frames,
+      char message[320];
+      snprintf(message,sizeof(message),"v20 session=%u time=%s stadium=%u day_lite=%u csm=%d weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
+          pacing.session,pacing.day?"DAY":"NIGHT",pacing.stadium,pacing.day_lite,pacing.cascades,
+          nx_weather_label(pacing.weather),pacing.season,pacing.frames,
           (unsigned long long)(pacing.total/pacing.frames/1000u),
           (unsigned long long)(pacing.worst/1000u),pacing.over20,pacing.over30,
           pacing_width,pacing_height);

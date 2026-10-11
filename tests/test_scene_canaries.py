@@ -38,7 +38,9 @@ class SceneCanaryTests(unittest.TestCase):
                 if feature == 'referee':
                     scenarios += ['bad-retire-plt', 'bad-preload-plt',
                                   'bad-frame-plt', 'bad-event-plt', 'bad-event-layout', 'bad-sound-plt',
-                                  'bad-flow-plt', 'bad-demo-plt', 'bad-demo-layout', 'bad-fade-layout', 'missing-animation']
+                                  'bad-warp-plt', 'bad-demo-plt', 'bad-demo-layout', 'bad-flow-layout',
+                                  'bad-warp-layout', 'bad-render-layout', 'bad-load-layout', 'bad-vision-layout',
+                                  'bad-render-plt', 'bad-queue-plt', 'bad-load-plt', 'bad-quality-plt', 'missing-animation']
                 for scenario in scenarios:
                     with self.subTest(feature=feature, scenario=scenario):
                         run = root / (feature + '-' + scenario)
@@ -75,7 +77,7 @@ class SceneCanaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='pesnx-scene-') as temp:
             exe = Path(temp) / 'scene.exe'
             build = subprocess.run([compiler, '-std=c11', '-Wall', '-Wextra', '-Werror',
-                (ROOT / 'tests/test_scene_canaries.c').as_posix(), '-lm', '-o', exe.as_posix()],
+                (ROOT / 'tests/test_scene_canaries.c').as_posix(), '-pthread', '-lm', '-o', exe.as_posix()],
                 capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             test = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
