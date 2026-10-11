@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from patch_player_skin import patch_skin
+from patch_player_skin import patch_skin, patch_profiles
 from convert_efootball10_players import encode_pes21_wesys
 from pesdb import decode_wesys
 
@@ -60,6 +60,31 @@ def test_idempotent_same_skin():
     raw, registry, digest = fixture()
     out, report = patch_skin(raw, registry, 99, 'verified', digest, 1)
     assert out == raw and report['changed_byte_offsets'] == []
+
+
+def test_batch_reapply_and_identity_change_rejected():
+    raw, registry, digest = fixture()
+    patched, single = patch_skin(raw, registry, 99, 'verified', digest, 4)
+    profile = dict(base_id=99, native_player_id=20, fingerprint='verified', skin=4,
+                   accepted_row_sha256=[digest, single['row_sha256_after']])
+    policy = dict(schema_version=1, players=[profile])
+    assert patch_profiles(raw, registry, policy)[0] == patched
+    assert patch_profiles(patched, registry, policy)[0] == patched
+    changed = bytearray(raw)
+    changed[100] ^= 1  # An unrelated appearance attribute requires a new audit.
+    with pytest.raises(ValueError, match='re-audit'):
+        patch_profiles(bytes(changed), registry, policy)
+    profile['native_player_id'] = 30
+    with pytest.raises(ValueError, match='owner changed'):
+        patch_profiles(raw, registry, policy)
+
+
+def test_batch_rejects_duplicate_identity():
+    raw, registry, digest = fixture()
+    profile = dict(base_id=99, native_player_id=20, fingerprint='verified', skin=4,
+                   accepted_row_sha256=[digest])
+    with pytest.raises(ValueError, match='Duplicate'):
+        patch_profiles(raw, registry, dict(schema_version=1, players=[profile, profile]))
 
 
 @pytest.mark.parametrize('wrapped', [False, True])

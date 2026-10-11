@@ -25,12 +25,17 @@ static const char model_symbol[] =
     "_ZN5match5Human11CreateModelERKN4draw4load11HumanLoadIdE";
 static const char observer_symbol[] =
     "_ZN5match6record17ObserverOutOfPlay4ExecERNS_8registry11RecordEventERKNS0_13ObserverInputE";
+static const char demo_symbol[] =
+    "_ZN11FixDemoMain20GetUpdateHumanPosRotERN4math7Vector3ERNS0_10QuaternionEjhhff";
+static const char fade_symbol[] = "_ZNK5match8registry9MatchInfo12GetIsFadeOutEv";
 
 static size_t symbol_offset(const char *symbol) {
   if (!strcmp(symbol, root_symbol)) return 0x100;
   if (!strcmp(symbol, mesh_symbol)) return 0x400;
   if (!strcmp(symbol, model_symbol)) return 0x700;
   if (!strcmp(symbol, observer_symbol)) return 0x900;
+  if (!strcmp(symbol, demo_symbol)) return 0xa00;
+  if (!strcmp(symbol, fade_symbol)) return 0xb00;
   return 0x1000;
 }
 uintptr_t so_find_addr(so_module *module, const char *symbol) {
@@ -98,6 +103,10 @@ int main(int argc, char **argv) {
   word(&module, 0x700 + 164, 0x52808900);
   word(&module, 0x900 + 0x64, 0x52800481);
   word(&module, 0x900 + 0x80, 0x91005280);
+  word(&module, 0xa00 + 0x7c, 0xf94676ea);
+  word(&module, 0xa00 + 0x80, 0xf94672e8);
+  word(&module, 0xb00, 0x5282ed08);
+  word(&module, 0xb00 + 4, 0x38686800);
   const uint32_t stadium_words[] = {0xb002e2f0,0xf9409e11,0x9104e210,0xd61f0220};
   const uint32_t draw_words[] = {0xd002e370,0xf9440211,0x91200210,0xd61f0220};
   const uint32_t create_words[] = {0x9002e3b0,0xf9436611,0x911b2210,0xd61f0220};
@@ -120,6 +129,10 @@ int main(int argc, char **argv) {
   plt(&module, 0x37ed030, out_words);
   const uint32_t sound_words[] = {0x9002e590,0xf941ba11,0x910dc210,0xd61f0220};
   plt(&module, 0x381c230, sound_words);
+  const uint32_t flow_words[] = {0xd002e3d0,0xf945be11,0x912de210,0xd61f0220};
+  const uint32_t demo_words[] = {0x9002e4f0,0xf940a211,0x91050210,0xd61f0220};
+  plt(&module, 0x3887240, flow_words);
+  plt(&module, 0x3845dd0, demo_words);
   const uint32_t tick_words[] = {0x9002e170,0xf9425211,0x91128210,0xd61f0220};
   plt(&module, 0x3924490, tick_words);
   const uint32_t render_words[] = {0xf002e3f0,0xf9407611,0x9103a210,0xd61f0220};
@@ -138,6 +151,10 @@ int main(int argc, char **argv) {
     word(&module, 0x37ed030, 0);
   if (!strcmp(scenario, "bad-sound-plt"))
     word(&module, 0x381c230, 0);
+  if (!strcmp(scenario, "bad-flow-plt"))word(&module, 0x3887240, 0);
+  if (!strcmp(scenario, "bad-demo-plt"))word(&module, 0x3845dd0, 0);
+  if (!strcmp(scenario, "bad-demo-layout"))word(&module, 0xa00 + 0x80, 0);
+  if (!strcmp(scenario, "bad-fade-layout"))word(&module, 0xb00 + 4, 0);
   if (!strcmp(scenario, "bad-event-layout"))
     word(&module, 0x900 + 0x80, 0);
   if (!strcmp(scenario, "bad-preload-plt"))
@@ -155,7 +172,7 @@ int main(int argc, char **argv) {
     const unsigned has_stadium=!strcmp(scenario,"stadium")||!strcmp(scenario,"both");
     const unsigned has_referee=!strcmp(scenario,"referee")||!strcmp(scenario,"both");
     assert(stadium_canary_installed==has_stadium&&referee_probe_enabled==has_referee);
-    assert(hooks==has_stadium+11*has_referee+4);
+    assert(hooks==has_stadium+13*has_referee+4);
     assert(hook_targets[hooks-4]==(uintptr_t)weather_scene_loaded);
     /* Renderer setup must stay native in the crash-recovery build. */
     assert(!memcmp((char *)module.load_base+0x387fd20,render_words,16));
@@ -171,7 +188,7 @@ int main(int argc, char **argv) {
   if (stadium) install_stadium_canary(&module);
   else install_referee_probe(&module);
   const int expected = !strcmp(scenario, "enabled");
-  assert(hooks == (expected ? (stadium ? 1u : 11u) : 0u));
+  assert(hooks == (expected ? (stadium ? 1u : 13u) : 0u));
   assert((stadium ? stadium_canary_installed : referee_probe_enabled) == (unsigned)expected);
   if (expected) {
     /* Bind eventual native calls to RX, but only inspect/patch backing now. */

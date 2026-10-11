@@ -1,0 +1,171 @@
+{
+  "image": "icons-v1.png",
+  "size": [
+    1254,
+    1254
+  ],
+  "generator": "built-in imagegen",
+  "reference": "art/master-league/header-icons-v8.png",
+  "sprites": [
+    {
+      "id": 0,
+      "name": "captain",
+      "bounds": [
+        39,
+        105,
+        305,
+        303
+      ]
+    },
+    {
+      "id": 1,
+      "name": "right-corner",
+      "bounds": [
+        410,
+        67,
+        604,
+        310
+      ]
+    },
+    {
+      "id": 2,
+      "name": "left-corner",
+      "bounds": [
+        663,
+        67,
+        858,
+        310
+      ]
+    },
+    {
+      "id": 3,
+      "name": "free-kick",
+      "bounds": [
+        947,
+        76,
+        1237,
+        332
+      ]
+    },
+    {
+      "id": 4,
+      "name": "penalty",
+      "bounds": [
+        32,
+        388,
+        310,
+        620
+      ]
+    },
+    {
+      "id": 5,
+      "name": "attack",
+      "bounds": [
+        348,
+        399,
+        623,
+        610
+      ]
+    },
+    {
+      "id": 6,
+      "name": "defence",
+      "bounds": [
+        660,
+        361,
+        893,
+        620
+      ]
+    },
+    {
+      "id": 7,
+      "name": "offside",
+      "bounds": [
+        970,
+        350,
+        1193,
+        624
+      ]
+    },
+    {
+      "id": 8,
+      "name": "substitute",
+      "bounds": [
+        41,
+        661,
+        287,
+        885
+      ]
+    },
+    {
+      "id": 9,
+      "name": "save-lineup",
+      "bounds": [
+        354,
+        633,
+        612,
+        900
+      ]
+    },
+    {
+      "id": 10,
+      "name": "load-lineup",
+      "bounds": [
+        653,
+        673,
+        918,
+        903
+      ]
+    },
+    {
+      "id": 11,
+      "name": "tactics",
+      "bounds": [
+        954,
+        666,
+        1225,
+        875
+      ]
+    },
+    {
+      "id": 12,
+      "name": "left-foot",
+      "bounds": [
+        68,
+        917,
+        219,
+        1205
+      ]
+    },
+    {
+      "id": 13,
+      "name": "right-foot",
+      "bounds": [
+        406,
+        917,
+        557,
+        1205
+      ]
+    },
+    {
+      "id": 14,
+      "name": "assigned",
+      "bounds": [
+        658,
+        945,
+        896,
+        1183
+      ]
+    },
+    {
+      "id": 15,
+      "name": "portrait-fallback",
+      "bounds": [
+        969,
+        938,
+        1225,
+        1192
+      ]
+    }
+  ]
+}

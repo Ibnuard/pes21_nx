@@ -355,7 +355,7 @@ static void wait_control(void *w, uint32_t on) { assert(w==(void *)123 && on==1)
 static void match_pause_go_top_menu(void *w) { assert(w==(void *)123); ++pause_calls; }
 /* Cup score capture is tested in its own frontend path; this isolated
  * result handshake harness exercises the non-Cup native footer route. */
-static void match_result_record_cup_score(void) {}
+static void match_result_record_competition_score(void) {}
 static void match_result_dispatch_event(void *w, const char *event) {
   assert(w==(void *)123 && !strcmp(event,"plan")); ++event_calls;
 }
@@ -367,6 +367,7 @@ static void reset(void) {
   match_result_exit_requested=0; match_result_handoff_tick=0;
   match_result_surface_focus=0; match_result_skin_ready=1;
   match_result_final_seen=0; pause_top_menu_transition_tick=0;
+  local_rematch_valid=local_rematch_request=local_rematch_menu_ready=0;
 }
 '''
         body = r'''
@@ -391,6 +392,20 @@ int main(void) {
         match_result_process_controller_input((void *)123);
         assert(footer_calls==1); // no double activation during handoff
       }
+  for(uint32_t focus=0;focus<2;focus++) {
+    reset(); local_rematch_valid=1; stub_phase=MATCH_PHASE_END;
+    match_result_final_seen=1; match_result_page=MATCH_RESULT_PAGE_FINAL;
+    match_result_surface=MATCH_RESULT_SURFACE_FULL_MENU;
+    match_result_surface_focus=focus; virtual_cursor_context=PES_VIRTUAL_CURSOR_FULL_TIME;
+    match_result_input_action=PES_PAUSE_INPUT_DECIDE;
+    match_result_process_controller_input((void *)123);
+    assert(footer_calls==1 && !pause_calls && !wait_calls);
+    assert(local_rematch_request==(focus?LOCAL_REMATCH_SELECT:LOCAL_REMATCH_PLAY));
+    assert(!local_rematch_menu_ready && match_result_exit_requested);
+    match_result_input_action=PES_PAUSE_INPUT_DECIDE;
+    match_result_process_controller_input((void *)123);
+    assert(footer_calls==1); // rematch/selector also wait for native teardown
+  }
   reset(); stub_phase=MATCH_PHASE_HALFTIME;
   match_result_page=MATCH_RESULT_PAGE_INTERVAL;
   match_result_surface=MATCH_RESULT_SURFACE_HALF_MENU;

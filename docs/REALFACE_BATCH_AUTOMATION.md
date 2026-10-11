@@ -108,6 +108,10 @@ animasi atau performa di perangkat. Pilihan skin runtime tidak diganti sebagai
 preset seluruh tim. Acuan body `001a01p` dipakai untuk fitting, bukan bukti
 bahwa semua kit memakai kerah yang sama.
 
+Kandidat berikutnya menambahkan kebijakan palet tubuh per identitas untuk
+20 wajah gabungan. Lihat [match review v16](MATCH_REVIEW_V16.md#realfacebody-palette-matching)
+untuk pengukuran warna, validasi BaseId/fingerprint dan batas pengujiannya.
+
 UE4.22 membuang influence <=1% saat impor dan mengkuantisasi bobot vertex
 Android ke delapan bit. Pemeriksaan cook membandingkan terhadap aturan itu,
 tetap memeriksa posisi bind, UV dan cakupan sumber. Reference skeleton/body

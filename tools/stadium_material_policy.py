@@ -1,0 +1,61 @@
+"""Authored shader policies for the optional stadium shell (no game assets)."""
+
+CROWD_FRAMES = 16
+CROWD_FPS = 8
+CROWD_PERIOD = CROWD_FRAMES / CROWD_FPS
+
+# The owned sheet contains sixteen vertical animation frames, not sixteen
+# different crowd rows. Existing geometry used an 8:1 still; one new frame is
+# 16:1, so halve its U span. Sample inside each 64-pixel frame to avoid bleeding.
+CROWD_UV = r'''
+float frame = floor(Clock * 8.0);
+frame = frame - floor(frame / 16.0) * 16.0;
+return float2(UV.x * 0.5, (frame + lerp(0.5 / 64.0, 63.5 / 64.0, saturate(UV.y))) / 16.0);
+'''
+
+# Camera-to-player clearance for the imported shell only, in UE centimetres.
+# The protected box covers the pitch and celebration apron (not the stands).
+# A shell fragment is hidden when its camera ray reaches this box AFTER the
+# fragment. Shell behind the box stays visible. Unlike a fixed lens radius,
+# this also clears a wall between a distant/high camera and a corner player.
+# No camera-height gate, world-side exception, translucency or extra pass.
+CAMERA_BOX_MIN = (-5800., -4000., -50.)
+CAMERA_BOX_MAX = (5800., 4000., 260.)
+CAMERA_MASK = r'''
+float3 ray = World - Camera;
+// Clear the surrounding foreground wall too, not only a player-shaped hole.
+// Height does not inflate this radius: a high aerial view keeps its bowl.
+float2 outside = max(abs(Camera.xy) - float2(5250.0, 3400.0), 0.0);
+float lensRadius = length(outside) + 600.0;
+if (dot(ray, ray) < lensRadius * lensRadius) return 0.0;
+float3 safeRay = float3(abs(ray.x) < 0.001 ? 0.001 : ray.x,
+                       abs(ray.y) < 0.001 ? 0.001 : ray.y,
+                       abs(ray.z) < 0.001 ? 0.001 : ray.z);
+float3 a = (float3(-5800.0, -4000.0, -50.0) - Camera) / safeRay;
+float3 b = (float3(5800.0, 4000.0, 260.0) - Camera) / safeRay;
+float3 lo = min(a, b), hi = max(a, b);
+float entry = max(lo.x, max(lo.y, lo.z));
+float leave = min(hi.x, min(hi.y, hi.z));
+return leave >= max(1.0, entry) ? 0.0 : 1.0;
+'''
+
+
+def crowd_uv(u, v, seconds):
+    import math
+    frame = math.floor((seconds % CROWD_PERIOD) * CROWD_FPS) % CROWD_FRAMES
+    return u * .5, (frame + (.5 + 63 * max(0., min(1., v))) / 64) / CROWD_FRAMES
+
+
+def camera_visible(world, camera):
+    import math
+    ray = [w-c for w, c in zip(world, camera)]
+    outside = [max(abs(c)-bound, 0.) for c, bound in zip(camera[:2], (5250., 3400.))]
+    lens_radius = math.hypot(*outside)+600
+    if sum(d*d for d in ray) < lens_radius*lens_radius:
+        return False
+    ray = [d if abs(d) >= .001 else .001 for d in ray]
+    a = [(lo-c)/d for lo, c, d in zip(CAMERA_BOX_MIN, camera, ray)]
+    b = [(hi-c)/d for hi, c, d in zip(CAMERA_BOX_MAX, camera, ray)]
+    entry = max(min(x, y) for x, y in zip(a, b))
+    leave = min(max(x, y) for x, y in zip(a, b))
+    return leave < max(1., entry)

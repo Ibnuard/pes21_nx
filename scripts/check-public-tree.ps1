@@ -37,6 +37,7 @@ $allowedBinaries = @(
   "data/frontdoor_flat_v2.bin",
   "data/frontdoor_flat_v3.bin",
   "data/frontdoor_panels_v2.bin",
+  "data/gameplan_icons_v1.bin",
   "data/main_menu_brand.bin",
   "data/main_menu_button_a.bin",
   "data/main_menu_button_b.bin",

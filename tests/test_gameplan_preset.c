@@ -39,6 +39,22 @@ int main(void) {
   assert(gameplan_preset_read(108u, 2u, &loaded));
   assert(loaded.formation[0][0] == 24u);
   assert(!gameplan_preset_write(108u, 3u, &preset));
+  uint32_t canonical=99;
+  assert(gameplan_preset_slot_present(108u,0u));
+  assert(gameplan_preset_read_scoped(108u,0u,&loaded,"0123456789abcdef",&canonical) && !canonical);
+  assert(!gameplan_preset_slot_present(108u,1u));
+  assert(gameplan_preset_write_scoped(108u,1u,&preset,"0123456789abcdef"));
+  assert(gameplan_preset_read_scoped(108u,1u,&loaded,"0123456789abcdef",&canonical) && canonical);
+  assert(!memcmp(&preset,&loaded,sizeof(preset)));
+  assert(!gameplan_preset_read_scoped(108u,1u,&loaded,"fedcba9876543210",&canonical));
+  assert(gameplan_preset_slot_present(108u,1u)); // foreign/corrupt slots still require overwrite confirmation
+  assert(!gameplan_preset_read(108u,1u,&loaded));
+  preset.formation[0][0]=31u;
+  assert(gameplan_preset_write_scoped(108u,1u,&preset,"0123456789abcdef"));
+  stream=fopen("SaveData/footballnx_plan_108_2_b.bin","r+b");assert(stream);
+  assert(fputc(0,stream)!=EOF && !fclose(stream));
+  assert(gameplan_preset_read_scoped(108u,1u,&loaded,"0123456789abcdef",&canonical) && canonical);
+  assert(loaded.formation[0][0]==24u);
   preset.players[1].order_no = 0u;
   assert(!gameplan_preset_valid(&preset));
   assert(!gameplan_preset_write(108u, 1u, &preset));

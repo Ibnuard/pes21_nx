@@ -63,6 +63,7 @@ static struct {
   GLuint main_menu_background_tex;
   GLuint frontdoor_flat_tex;
   GLuint frontdoor_panels_tex;
+  GLuint gameplan_icons_tex;
   GLuint cup_hub_stadium_tex;
   GLuint cup_news_tex, cup_pearl_tex;
   GLuint league_news_tex, league_pearl_tex, competition_actions_tex, league_header_tex;
@@ -257,6 +258,7 @@ static int gl_init(void) {
   glGenTextures(1, &gl.main_menu_background_tex);
   glGenTextures(1, &gl.frontdoor_flat_tex);
   glGenTextures(1, &gl.frontdoor_panels_tex);
+  glGenTextures(1, &gl.gameplan_icons_tex);
   glGenTextures(1, &gl.cup_hub_stadium_tex);
   glGenTextures(1, &gl.cup_news_tex);
   glGenTextures(1, &gl.cup_pearl_tex);
@@ -1341,6 +1343,8 @@ static void prepare_main_menu_assets(int active) {
       main_menu_background_bin_end);
   uploaded &= upload_main_menu_png(gl.frontdoor_flat_tex,
       frontdoor_flat_v3_bin, frontdoor_flat_v3_bin_end);
+  uploaded &= upload_main_menu_png(gl.gameplan_icons_tex,
+      gameplan_icons_v1_bin, gameplan_icons_v1_bin_end);
   uploaded &= upload_main_menu_png(gl.frontdoor_panels_tex,
       frontdoor_panels_v2_bin, frontdoor_panels_v2_bin_end);
   uploaded &= upload_main_menu_png(gl.cup_news_tex, cup_news_v1_bin, cup_news_v1_bin_end);
@@ -1837,6 +1841,7 @@ static int emit_gameplan_condition_arrow(float cx, float cy, float size,
 #include "cup_overlay.inc"
 #include "league_overlay.inc"
 #include "frontdoor_overlay.inc"
+#include "gameplan_panels.inc"
 
 // The source mask is supersampled and downscaled offline. Drawing it as one
 // linearly filtered quad gives the small Switch UI stars clean edges; u_limit
@@ -2152,12 +2157,13 @@ static void overlay_render(void) {
     pacing.previous=0;
     if(pacing.frames>=120) {
       char message[224];
-      snprintf(message,sizeof(message),"v15 session=%u weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
+      snprintf(message,sizeof(message),"v17 session=%u weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
           pacing.session,nx_weather_label(pacing.weather),pacing.season,pacing.frames,
           (unsigned long long)(pacing.total/pacing.frames/1000u),
           (unsigned long long)(pacing.worst/1000u),pacing.over20,pacing.over30,
           pacing_width,pacing_height);
       scene_runtime_note("frame pacing",message);
+      pes_controller_referee_performance_note();
       memset(&pacing,0,sizeof(pacing));
     }
   }
@@ -2621,7 +2627,7 @@ static void overlay_render(void) {
   if (!gl_init())
     return;
   prepare_uniform_thumbnail_preview(custom_hub_kits_page);
-  prepare_gameplan_portraits(custom_gameplan || stamina_bar_count ||
+  prepare_gameplan_portraits(custom_gameplan || set_piece_selector || stamina_bar_count ||
       (custom_competition &&
        (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB ||
         competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE)));
@@ -2656,6 +2662,8 @@ static void overlay_render(void) {
   static GLfloat verts[4096 * 24];
   int quads = 0;
   static MasterLeagueRender frontdoor_ui;
+  static MasterLeagueRender editor_ui;
+  memset(&editor_ui,0,sizeof(editor_ui));
   static FrontdoorMenuMotion frontdoor_menu_motion;
   fd_menu_motion_step(&frontdoor_menu_motion,frontdoor_page==FD_MENU,
       custom_main_menu_row,armTicksToNs(armGetSystemTick()));
@@ -2674,6 +2682,12 @@ static void overlay_render(void) {
     frontdoor_emit(&frontdoor_ui,&view,verts,&quads);
     /* Do not emit the old full-screen geometry underneath the new one. This
      * bounds the existing 4096-quad VBO and avoids drawing either UI twice. */
+    goto overlay_geometry_ready;
+  }
+  if(set_piece_selector) {
+    EditorPanel view;editor_snapshot(&view,0,1);editor_request_portraits(&view,0);
+    ml_ui_rect(&editor_ui,0,0,1,1,.015f,.04f,.09f,.46f,-1,0,1,verts,&quads);
+    editor_panel_emit(&editor_ui,&view,0,verts,&quads);
     goto overlay_geometry_ready;
   }
   // Controller legends use one optical text size across every custom page.
@@ -3277,7 +3291,7 @@ static void overlay_render(void) {
 
     for (uint32_t side = 0; side < 2; side++) {
       const uint32_t page =
-          pes_controller_custom_prematch_gameplan_page(side);
+          editor_legacy_page(side);
       const int waiting =
           pes_controller_custom_prematch_gameplan_waiting(side);
       const float pitch_x = half_x[side] + pitch_x_offset;
@@ -3770,7 +3784,7 @@ static void overlay_render(void) {
     // is drawn separately with the matching native player texture.
     for (uint32_t side = 0; side < 2; side++) {
       const uint32_t page =
-          pes_controller_custom_prematch_gameplan_page(side);
+          editor_legacy_page(side);
       const int waiting =
           pes_controller_custom_prematch_gameplan_waiting(side);
       if (!waiting &&
@@ -3803,7 +3817,7 @@ static void overlay_render(void) {
     // role and OVR directly below each portrait.
     for (uint32_t side = 0; side < 2; side++) {
       const uint32_t page =
-          pes_controller_custom_prematch_gameplan_page(side);
+          editor_legacy_page(side);
       if (pes_controller_custom_prematch_gameplan_waiting(side) ||
           (page != PES_PREMATCH_GAMEPLAN_PAGE_ROOT &&
            page != PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE))
@@ -3838,7 +3852,7 @@ static void overlay_render(void) {
       prematch_gameplan_role_plate_first_quad[role_band] = quads;
       for (uint32_t side = 0; side < 2; side++) {
         const uint32_t page =
-            pes_controller_custom_prematch_gameplan_page(side);
+            editor_legacy_page(side);
         if (pes_controller_custom_prematch_gameplan_waiting(side))
           continue;
         if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
@@ -3904,7 +3918,7 @@ static void overlay_render(void) {
     for (uint32_t side = 0; side < 2; side++) {
       prematch_gameplan_picker_foot_first_quad[side] = quads;
       if (pes_controller_custom_prematch_gameplan_waiting(side) ||
-          pes_controller_custom_prematch_gameplan_page(side) !=
+          editor_legacy_page(side) !=
               PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS ||
           !pes_controller_custom_prematch_gameplan_position_picker_active(
               side))
@@ -3953,7 +3967,7 @@ static void overlay_render(void) {
     prematch_gameplan_white_text_first_quad = quads;
     for (uint32_t side = 0; side < 2; side++) {
       const uint32_t page =
-          pes_controller_custom_prematch_gameplan_page(side);
+          editor_legacy_page(side);
       const uint32_t root_focus =
           pes_controller_custom_prematch_gameplan_root_focus(side);
       const float pitch_x = half_x[side] + pitch_x_offset;
@@ -4492,7 +4506,7 @@ static void overlay_render(void) {
     const float role_gh = (float)screen_height / 48.0f;
     for (uint32_t side = 0; side < 2; side++) {
       const uint32_t page =
-          pes_controller_custom_prematch_gameplan_page(side);
+          editor_legacy_page(side);
       if (pes_controller_custom_prematch_gameplan_waiting(side))
         continue;
       if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT ||
@@ -4556,7 +4570,7 @@ static void overlay_render(void) {
         if (!pes_controller_custom_prematch_gameplan_condition_mode(side) ||
             pes_controller_custom_prematch_gameplan_waiting(side)) continue;
         const uint32_t page =
-            pes_controller_custom_prematch_gameplan_page(side);
+            editor_legacy_page(side);
         if (page != PES_PREMATCH_GAMEPLAN_PAGE_ROOT &&
             page != PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) continue;
         uint32_t field_count =
@@ -4661,7 +4675,7 @@ static void overlay_render(void) {
           context_labels[side] = drag == 1 ? "DROP PLAYER" : "HOLD TO MOVE";
         }
       } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_PRESET) {
-        footer_labels[side][0] = "SELECT";
+        footer_labels[side][0] = pes_controller_custom_prematch_gameplan_preset_step(side) >= 3u ? "OK" : "SELECT";
         footer_labels[side][1] = pes_controller_custom_prematch_gameplan_preset_step(side) == 2u
                                    ? "CANCEL" : "BACK";
       } else {
@@ -9864,6 +9878,13 @@ static void overlay_render(void) {
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += main_menu_helper_quads;
   }
+  if(custom_gameplan) {
+    for(uint32_t side=0;side<2u;side++) {
+      EditorPanel view;editor_snapshot(&view,side,0);editor_request_portraits(&view,side);
+      editor_panel_emit(&editor_ui,&view,side,verts,&quads);
+    }
+  }
+
 overlay_geometry_ready:
   if (!quads)
     return;
@@ -9957,6 +9978,10 @@ overlay_geometry_ready:
   glUniform1f(gl.loc_cursor_border, 0.0f);
   if (frontdoor_page!=FD_NONE) {
     master_league_draw(&frontdoor_ui);
+    goto overlay_restore;
+  }
+  if(set_piece_selector) {
+    master_league_draw(&editor_ui);
     goto overlay_restore;
   }
   if (stamina_bar_count) {
@@ -11585,6 +11610,7 @@ overlay_geometry_ready:
                  result_helper_text_quads * 6);
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
+  if(custom_gameplan && editor_ui.draw_count) master_league_draw(&editor_ui);
   // Draw all helper glyphs after custom full-page backgrounds and text, but
   // before transition covers/confirmation modals that intentionally hide
   // their underlying controls.

@@ -16,6 +16,11 @@ static uint32_t match_result_final_seen, exhibition_settings_extra_time;
 static uint32_t exhibition_settings_penalties, match_result_extra_time_started;
 static uint32_t match_result_half_menu_seen;
 static uint32_t home, away, stub_phase, stub_leg;
+static uint32_t local_rematch_valid, cup, league, career;
+static uint32_t local_rematch_request, local_rematch_menu_ready;
+static int competition_frontend_cup_match_active(void) { return cup; }
+static int competition_frontend_league_match_active(void) { return league; }
+static int ml_frontend_match_active(void) { return career; }
 static uint8_t first_home, first_away;
 static int pes_controller_pause_score(uint32_t side, uint32_t *out) {
   *out = side ? away : home; return 1;
@@ -30,9 +35,11 @@ static uint32_t match_result_current_phase(void) { return stub_phase; }
 
 def harness(hooks, body):
     enums = "\n".join(re.findall(
-        r"enum\s*\{\s*(?:MATCH_RESULT_(?:SURFACE|ACTION|PAGE)_|MATCH_PHASE_)"
+        r"enum\s*\{\s*(?:MATCH_RESULT_(?:SURFACE|ACTION|PAGE)_|MATCH_PHASE_|LOCAL_REMATCH_)"
         r".*?\};", hooks, re.S))
     return (PRELUDE + enums + "\n"
+            + function(hooks, "local_rematch_allowed")
+            + function(hooks, "match_result_finished_actions")
             + function(hooks, "match_result_action_list")
             + function(hooks, "match_result_interval_surface")
             + body)
@@ -53,6 +60,34 @@ class ResultFlowTests(unittest.TestCase):
         if not self.compiler:
             self.skipTest("gcc unavailable")
         self.hooks = (ROOT / "source/ue4_hooks.c").read_text()
+
+    def test_local_rematch_is_only_offered_after_complete_match(self):
+        body = r"""
+int main(void) {
+  uint32_t a[4];
+  local_rematch_valid=1;
+  for (int mode=0; mode<4; ++mode) {
+    cup=mode==1; league=mode==2; career=mode==3;
+    stub_phase=MATCH_PHASE_END;
+    assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==(mode?1:3));
+    if (!mode) {
+      assert(a[0]==MATCH_RESULT_ACTION_REMATCH);
+      assert(a[1]==MATCH_RESULT_ACTION_SELECT_TEAM);
+      assert(a[2]==MATCH_RESULT_ACTION_BACK_TO_MENU);
+    } else assert(a[0]==MATCH_RESULT_ACTION_BACK_TO_MENU);
+    stub_phase=MATCH_PHASE_EX_TIME;
+    assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==3);
+    assert(a[1]==MATCH_RESULT_ACTION_OVERTIME);
+    stub_phase=MATCH_PHASE_PREV_PKMATCH;
+    assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==2);
+    assert(a[0]==MATCH_RESULT_ACTION_PENALTIES);
+    assert(match_result_action_list(MATCH_RESULT_SURFACE_HALF_MENU,a)==3);
+    assert(a[1]==MATCH_RESULT_ACTION_NEXT);
+  }
+  return 0;
+}
+"""
+        build_and_run(self.compiler, harness(self.hooks, body))
 
     def test_phase_actions(self):
         body = r"""

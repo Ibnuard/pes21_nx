@@ -26,3 +26,6 @@ extern const uint8_t main_menu_portrait_settings_bin[];
 extern const uint8_t main_menu_portrait_settings_bin_end[];
 extern const uint8_t main_menu_portrait_credits_bin[];
 extern const uint8_t main_menu_portrait_credits_bin_end[];
+
+extern const uint8_t gameplan_icons_v1_bin[];
+extern const uint8_t gameplan_icons_v1_bin_end[];

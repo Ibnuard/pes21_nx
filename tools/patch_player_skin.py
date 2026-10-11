@@ -52,24 +52,61 @@ def patch_skin(raw: bytes, registry: dict, base_id: int, fingerprint: str,
     }
 
 
+def patch_profiles(raw: bytes, registry: dict, policy: dict) -> tuple[bytes, dict]:
+    """Apply a reviewed batch by identity, accepting only audited row revisions."""
+    profiles = policy.get('players', [])
+    if policy.get('schema_version') != 1 or not profiles:
+        raise ValueError('Expected a nonempty version 1 skin policy')
+    ids = [p['base_id'] for p in profiles]
+    if len(ids) != len(set(ids)):
+        raise ValueError('Duplicate BaseId in skin policy')
+    result, reports = raw, []
+    for profile in profiles:
+        owners = [p for p in registry['players'] if p['ef_base_id'] == profile['base_id']]
+        if len(owners) != 1 or owners[0]['native_player_id'] != profile['native_player_id']:
+            raise ValueError('Skin policy native owner changed')
+        rows = [result[o:o+60] for o in range(0, len(result), 60)
+                if len(result[o:o+60]) == 60 and
+                struct.unpack_from('<I', result, o)[0] == profile['native_player_id']]
+        if len(rows) != 1:
+            raise ValueError('Expected one appearance row per policy player')
+        digest = hashlib.sha256(rows[0]).hexdigest()
+        if digest not in profile['accepted_row_sha256']:
+            raise ValueError(f"Appearance changed for BaseId {profile['base_id']}; re-audit")
+        result, report = patch_skin(result, registry, profile['base_id'],
+            profile['fingerprint'], digest, profile['skin'])
+        reports.append(report)
+    return result, {'players': reports, 'hardware_tested': False}
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--input', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--registry', type=Path, required=True)
-    p.add_argument('--base-id', type=int, required=True)
-    p.add_argument('--fingerprint', required=True)
-    p.add_argument('--expect-row-sha256', required=True)
-    p.add_argument('--skin', type=int, required=True)
+    p.add_argument('--base-id', type=int)
+    p.add_argument('--fingerprint')
+    p.add_argument('--expect-row-sha256')
+    p.add_argument('--skin', type=int)
+    p.add_argument('--profiles', type=Path, help='Reviewed batch policy; mutually exclusive with single-player fields')
     a = p.parse_args()
+    single = [a.base_id, a.fingerprint, a.expect_row_sha256, a.skin]
+    if a.profiles and any(v is not None for v in single):
+        p.error('--profiles cannot be combined with single-player fields')
+    if not a.profiles and any(v is None for v in single):
+        p.error('Provide --profiles or all four single-player fields')
     report = a.output.with_suffix('.skin-report.json')
     if a.output.exists() or report.exists():
         raise ValueError('Refusing to overwrite an existing output/report')
     source = a.input.read_bytes()
     wrapped = source[3:8] == b'WESYS'
     raw = decode_wesys(a.input) if wrapped else source
-    patched, audit = patch_skin(raw, json.loads(a.registry.read_text()),
-                               a.base_id, a.fingerprint, a.expect_row_sha256, a.skin)
+    registry = json.loads(a.registry.read_text())
+    if a.profiles:
+        patched, audit = patch_profiles(raw, registry, json.loads(a.profiles.read_text()))
+    else:
+        patched, audit = patch_skin(raw, registry,
+                                   a.base_id, a.fingerprint, a.expect_row_sha256, a.skin)
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_bytes(encode_pes21_wesys(patched) if wrapped else patched)
     check = decode_wesys(a.output) if wrapped else a.output.read_bytes()

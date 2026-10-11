@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "build_id": "e861c583ec78e9ae",
+  "hardware_tested": false,
+  "selection_method": "sRGB D65 Lab delta E76; unshadowed native body swatch vs face neck swatch; preserve accepted pilots and current palette within 3 delta E of nearest",
+  "players": [
+    {
+      "base_id": 40937,
+      "native_player_id": 40937,
+      "fingerprint": "4a57f21ee1471154dd89",
+      "name": "Wojciech Szcz\u0119sny",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "fe72e31ff8046c95c7769bb9707c76f4a35322b648b3fb4b35bf0fbbc19e5b8c",
+        "aa3d06352193890d3c4befc785426bd8c3cab32b5f72caa4dacd2d6c6b3bfeee"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending",
+      "identity_reconciliation": {
+        "face_inventory_height": 195,
+        "registry_height": 196,
+        "base_native_name_country_foot_verified": true
+      }
+    },
+    {
+      "base_id": 47787,
+      "native_player_id": 47787,
+      "fingerprint": "555b5561987775c165df",
+      "name": "Jo\u00e3o Cancelo",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "dea00910b44e319595eadc0613e4278ff7fbf05a00a22eb7d5694bf731021d08",
+        "9db0751dde62de989b6469ceecd89833a24ba34300ebcf550bc93f33e5edf47d"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 103845,
+      "native_player_id": 103845,
+      "fingerprint": "94faf76b3a339d1d7f22",
+      "name": "Andreas Christensen",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "17a9b7a31cc9710ed1b599988afa9617b03489a94a252a02eab97fe836999828",
+        "cbe5068fc0f6ff4d5f76e72d2cb89e58c80dbccde09dbaffb6f9f7a2fe1ad907"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 108200,
+      "native_player_id": 108200,
+      "fingerprint": "67b04ede69a04e05e4c9",
+      "name": "Gabriel Jesus",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "d04d777e027719c19c64dc233a8dfd1ea7a6c0f06a4fbf7ff5b0a90382461325",
+        "fd656286bf172a14c36109133bc0e763397afe1b185d1c327e41e6515b60a456"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 108662,
+      "native_player_id": 108662,
+      "fingerprint": "668798207b40b8ae6a57",
+      "name": "Frenkie de Jong",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "56d73417f0b444402e5c09f0088f1137fe2fb9ab9d9a0a3619faf502f6ef6ef4",
+        "b2fca499c9ea06f8abee0219727e928ee438b0ddc56b0a735cd16121fb23091e"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 110644,
+      "native_player_id": 110644,
+      "fingerprint": "a127e8032d5e1bdff42a",
+      "name": "Raphinha",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "5a8ea95e7c363fab697c448245c792e974455640c1a64975efba2542fac308f5"
+      ],
+      "reason": "preserve accepted player-specific selection"
+    },
+    {
+      "base_id": 110784,
+      "native_player_id": 110784,
+      "fingerprint": "b899f078afc7e160c950",
+      "name": "Jules Kound\u00e9",
+      "skin": 4,
+      "accepted_row_sha256": [
+        "601dfe2fd48a1d029ff75d7ed0acd67cb29c908330d1963bec99e89df40e6e6e"
+      ],
+      "reason": "retain current palette; measured alternatives too close"
+    },
+    {
+      "base_id": 110815,
+      "native_player_id": 110815,
+      "fingerprint": "157739e89622cf41523c",
+      "name": "Rodri",
+      "skin": 3,
+      "accepted_row_sha256": [
+        "a5ccdf260cff867ca9458b8820d7595e42f91dd19f720421fbe5e74ca2997b29"
+      ],
+      "reason": "retain current palette; measured alternatives too close"
+    },
+    {
+      "base_id": 113596,
+      "native_player_id": 113596,
+      "fingerprint": "67546e998380a6f0134e",
+      "name": "Dominik Livakovi\u0107",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "59a47b0bd8c0f7349e8505449729ae3d7b465274b01fa36def8f63d4616b53c0",
+        "afd7166ff405063d435caf1df49b6d031c624ef1caa2cab8e41678c8d51c7d20"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 119835,
+      "native_player_id": 119835,
+      "fingerprint": "dd32226e1d4c91771174",
+      "name": "Anthony Gordon",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "0827717a0ba3e68f2919292c4f92161a7f98d5ec6ef1d69244eaf296c5c97f16",
+        "4c0070e74cddec1391609573241e8010b08e9e308a579582213c85730d44a7da"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 126337,
+      "native_player_id": 126337,
+      "fingerprint": "084cf2315011e4d8baf5",
+      "name": "Eric Garc\u00eda",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "f1e482b3623d6a94ddb1e773c4447cf196467e8cab9eb566c992bcbaeb7779a2",
+        "096dbbde72b1d8b986f495937048461286c6f09c7689ca1d9a2e157cadaf8ab8"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 133157,
+      "native_player_id": 133157,
+      "fingerprint": "d203cb16980e1d7ae965",
+      "name": "Pedri",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "b31c94f690d8ce804fb676d9c46773bb42548bdaf8a04f8c9b045faf04b906e9",
+        "0afe7fe340f3cd32a9ee5680389a9de29b47248fcfff9b9755cf6f99a30e5b7d"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 138183,
+      "native_player_id": 34493,
+      "fingerprint": "0d89aadaf8d7b559ce96",
+      "name": "Gerard Mart\u00edn",
+      "skin": 3,
+      "accepted_row_sha256": [
+        "557519a277983efcb0fe16af49646c21f3dded0adf27a2674aa5363af35cb790",
+        "c595e6a9b08e820e36b242d1b8d244e86517b484c673bec4264c450d8ca1d85b"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 141038,
+      "native_player_id": 141038,
+      "fingerprint": "03e1da7e0109b5faf094",
+      "name": "Joan Garc\u00eda",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "cc0556ece53baea1c1f3db3aca9e58339ea837cf150bd9f7780c1481fbc5ff1d",
+        "207996d316042cd7b0a4008b15b7aafc03e190f431f7efdd7f6145e9f5d5ae79"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending",
+      "identity_reconciliation": {
+        "face_inventory_height": 193,
+        "registry_height": 191,
+        "base_native_name_country_foot_verified": true
+      }
+    },
+    {
+      "base_id": 144438,
+      "native_player_id": 138566,
+      "fingerprint": "04b52fb0a73cdd071303",
+      "name": "Karim Adeyemi",
+      "skin": 3,
+      "accepted_row_sha256": [
+        "063b88f120f7331fb22d86a96a57a965dca4f5610ad44f38bbee3de233a9bf9f",
+        "3c14ecd58c7c74cf6ceef028c473eafdcfdb78077c05be607a20082a540aa572"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 147235,
+      "native_player_id": 147235,
+      "fingerprint": "a9a7a93c245f00498aa7",
+      "name": "Gavi",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "e40a9b1bfb857583ae83f7cc3f822ad922f3429d56c924453d34c5540282489a",
+        "c98f86d81a891ca823baf9a9c600cef8a9694bc9f2989cf8214da994b58b9d3b"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending",
+      "identity_reconciliation": {
+        "face_inventory_height": 174,
+        "registry_height": 173,
+        "base_native_name_country_foot_verified": true
+      }
+    },
+    {
+      "base_id": 161548,
+      "native_player_id": 558,
+      "fingerprint": "ab34368b928f7c47eeed",
+      "name": "Ferm\u00edn L\u00f3pez",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "3278f8213ab3619b4ca502e6c0df6f4b6f974966ddf7a07efc6598dbe24eeb00",
+        "e04c23d2a48a19a766831376cb54e300eba7e5993016c36331120dd45a0d5c68"
+      ],
+      "reason": "closest native palette from neck swatch; console confirmation pending"
+    },
+    {
+      "base_id": 162114,
+      "native_player_id": 162114,
+      "fingerprint": "a7ded89f5960baa40983",
+      "name": "Lamine Yamal",
+      "skin": 4,
+      "accepted_row_sha256": [
+        "0a4fa431c2ceb25ddcf1ffe55533497e7ef5d2a5d59983a15399384b59bf6fd0",
+        "26fbe05caf0043d2327fd75e51f6aaa6dd5a489adae1078b8edd8931a31bae02"
+      ],
+      "reason": "preserve accepted player-specific selection"
+    },
+    {
+      "base_id": 165696,
+      "native_player_id": 4412,
+      "fingerprint": "6314b906c4bddc7e4f9a",
+      "name": "Pau Cubars\u00ed",
+      "skin": 3,
+      "accepted_row_sha256": [
+        "4c79c4fc38738cff2c2ecdb48daf01759208fa9033dfe5965919315cbf6d3b63"
+      ],
+      "reason": "retain current palette; measured alternatives too close"
+    },
+    {
+      "base_id": 171610,
+      "native_player_id": 171610,
+      "fingerprint": "675c482a16cb9113cad1",
+      "name": "Marc Bernal",
+      "skin": 2,
+      "accepted_row_sha256": [
+        "c3948a98a8cf191379b432a911b5c265840674f1bf939d6c64155cb27e264925"
+      ],
+      "reason": "retain current palette; measured alternatives too close"
+    }
+  ]
+}

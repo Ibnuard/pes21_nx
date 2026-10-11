@@ -29,7 +29,7 @@ static inline void scene_runtime_note(const char *area, const char *message) {
 static inline void scene_runtime_begin(void) {
 #if !defined(PESNX_STADIUM_CANARY_HOST_TEST) && !defined(PESNX_REFEREE_PROBE_HOST_TEST)
   FILE *file=fopen("scene-runtime.log","wb");
-  if (file) {fputs("FootballNX scene v15 session\n",file);fclose(file);}
+  if (file) {fputs("FootballNX scene v17 session\n",file);fclose(file);}
 #endif
 }
 #endif

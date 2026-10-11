@@ -121,7 +121,19 @@ static int referee_probe_restart_active(void) { return 0; }
 #include "../source/referee_probe.inc"
 #include "referee_animation_fixture.h"
 static unsigned char human[22][0x820], animation[22][0x940];
-static unsigned char registry_data[0xa0], move_data[22][0x580];
+static unsigned char registry_data[0x500], move_data[22][0x580];
+static int faded,flow_calls,demo_calls;
+static unsigned char demo_object[0xcf0];
+static void *demo_actors[257];
+static void reset_flow(void *flow,uint32_t kind) {assert(flow==(void*)7);(void)kind;++flow_calls;}
+static int match_faded(const void *info) {assert(info==&faded);return faded;}
+static void demo_transform(void *self,float *p,float *q,uint32_t human,
+    uint8_t frame_index,uint8_t mode,float time,float blend) {
+  assert(self==demo_object && frame_index==1 && mode==2 && time==.3f && blend==.5f);
+  (void)human;++demo_calls;
+  if(p){p[0]=12;p[1]=0;p[2]=4;}
+  if(q){q[0]=q[1]=q[2]=0;q[3]=1;}
+}
 static float ball_data[3]={35,0,5};
 static _Alignas(16) RefereeBonePose bone_storage[20];
 static int registry_available=1;
@@ -208,12 +220,15 @@ static void referee_test(void) {
   referee_registry=get_registry;referee_player_move=player_move;
   referee_ball_trans=ball_trans;referee_frame_stamp=frame_stamp;
   referee_publish_bones=publish;
+  referee_reset_flow_original=reset_flow;referee_match_faded=match_faded;
+  referee_demo_transform_original=demo_transform;
   referee_animation_release_original=release_animation;
   referee_manager_create_original=create_manager;
   referee_destroy_loader_original=release;
   size_t animation_size;unsigned char *animation_data=referee_animation_fixture_count(&animation_size,8);
   assert(referee_animation_bind(&referee_animation_bank,animation_data,animation_size));
   *(void**)(registry_data+0x90)=ball_data;
+  *(void**)(registry_data+0x4f0)=&faded;
   for(int i=0;i<22;i++) {
     *(uint32_t*)(human[i]+0x18)=(uint32_t)i;
     *(void**)(human[i]+0x7e0)=animation[i];
@@ -248,6 +263,30 @@ static void referee_test(void) {
   }
   assert(published==poses_before+120 && updates==transforms_before+120);
   assert(referee_perf.player_reads-reads_before==30u*22u);
+  // Native-camera observations only cull beyond a generous screen margin.
+  // Movement continues while native skin/pose/transform uploads are absent.
+  const int before_cull=published,before_cull_updates=updates;
+  const float distance_before=referee_motion.distance;
+  for(int i=0;i<120;i++) {
+    ++stamp;ticks+=16666667;
+    __atomic_store_n(&referee_screen_sample,(ticks<<1)|1u,__ATOMIC_RELEASE);
+    referee_probe_draw(human);referee_probe_draw(human);
+  }
+  assert(published==before_cull && updates==before_cull_updates && !displayed);
+  assert(referee_motion.distance>=distance_before && referee_perf.culled==120);
+  assert(referee_world_tick && referee_perf_sequence);
+  pes_controller_referee_performance_note();
+  pes_controller_referee_performance_note(); // Same snapshot isn't logged twice.
+  // Stale/missing camera data restores a complete fresh pose, once.
+  ++stamp;ticks+=60000000;referee_probe_draw(human);
+  assert(displayed && published==before_cull+1 && updates==before_cull_updates+1);
+  assert(!referee_probe_offscreen(2,ticks));
+  referee_screen_sample=(ticks<<1)|1u;
+  assert(referee_probe_offscreen(2,ticks));
+  assert(!referee_probe_offscreen(3,ticks));
+  referee_using_demo=1;assert(!referee_probe_offscreen(2,ticks));referee_using_demo=0;
+  referee_kickoff_ready=1;assert(!referee_probe_offscreen(2,ticks));referee_kickoff_ready=0;
+  referee_screen_sample=0;
   assert(last_position.x>18 && referee_motion.distance>15 && referee_probe_moved);
   const RefereeProbeVector before=last_position;
   int old_published=published,old_updates=updates;
@@ -346,8 +385,34 @@ static void referee_test(void) {
   assert(displayed && published==goal_frames+90 && referee_motion.distance>goal_distance+.1f);
   assert(creations==6 && deleted==5 && referee_motion.restart==8);
   inplay=2;
+  // Observe only a centre referee that really exists in the native demo.
+  float demo_p[3]={0},demo_q[4]={0};
+  *(void**)(demo_object+0xce0)=demo_actors;
+  *(void**)(demo_object+0xce8)=demo_actors+257;
+  referee_probe_demo_transform(demo_object,demo_p,demo_q,0x100,1,2,.3f,.5f);
+  assert(demo_calls==1 && !referee_demo_tick); // Valid caller outputs alone are insufficient.
+  demo_actors[256]=(void*)11;
+  referee_probe_demo_transform(demo_object,demo_p,demo_q,0,1,2,.3f,.5f);
+  assert(demo_calls==2 && !referee_demo_tick); // Never borrow player placement.
+  referee_probe_demo_transform(demo_object,demo_p,demo_q,0x100,1,2,.3f,.5f);
+  assert(demo_calls==3 && referee_demo_tick==ticks && !(referee_demo_sequence&1));
+  frame();assert(fabsf(last_position.x-12)<.0001f && fabsf(last_position.z-4)<.0001f && displayed);
+  assert(!referee_motion.velocity.x && !referee_motion.velocity.z); // A cut is not a running stride.
+  assert(creations==6 && deleted==5);
+  ticks+=150000000;frame();
+  assert(hypotf(last_position.x-12,last_position.z-4)<.581f); // Stale demo expires without teleport.
+  // A goal reset is applied once, only behind the native completed fade.
+  referee_probe_reset_flow((void*)7,3);assert(flow_calls==1 && referee_kickoff_pending);
+  frame();assert(referee_kickoff_pending && !referee_kickoff_ready && last_position.x>10);
+  faded=1;frame();assert(!referee_kickoff_pending && referee_kickoff_ready==1);
+  assert(last_position.x==0 && last_position.z==10 && displayed);
+  faded=0;ball_data[0]=ball_data[2]=0;frame();assert(referee_kickoff_ready==2);
+  for(int i=0;i<10;i++)frame();
+  assert(last_position.x==0 && last_position.z==10 && creations==6 && deleted==5);
+  ball_data[0]=3;frame();assert(!referee_kickoff_ready);
+  referee_probe_reset_flow((void*)7,5);assert(flow_calls==2 && !referee_kickoff_pending);
   referee_probe_animation_release();referee_probe_release(NULL);
-  assert(deleted==6);
+  assert(deleted==6 && !referee_kickoff_ready && !referee_demo_tick);
   // A stuck optional uniform preflight must not strand a native-ready match.
   referee_probe_manager_create();referee_probe_loaded_scene(NULL);
   uniform_busy=1;preload();assert(creations==6);

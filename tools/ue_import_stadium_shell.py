@@ -6,6 +6,9 @@ Only /Game/FootballNX/Stadiums/Anfield is packaged; no engine assets replaced.
 import json
 import os
 import unreal
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from stadium_material_policy import CROWD_UV, CROWD_PERIOD, CAMERA_MASK
 
 profile_path = os.environ['PESNX_STADIUM_PROFILE']
 with open(profile_path, 'r') as stream:
@@ -37,17 +40,19 @@ for name in profile['material_slots']:
         raise RuntimeError('Use a fresh conversion project: ' + name)
     material.set_editor_property('shading_model', unreal.MaterialShadingModel.MSM_UNLIT)
     material.set_editor_property('two_sided', True)
-    texture_path = os.path.join(profile.get('texture_root', os.path.join(work, 'textures')), name[2:] + '.png')
+    texture_path = profile.get('texture_files', {}).get(name) or os.path.join(profile.get('texture_root', os.path.join(work, 'textures')), name[2:] + '.png')
     if os.path.isfile(texture_path):
+        animated_crowd = name == 'M_crowd_seated' and profile.get('crowd_flipbook', False)
+        texture_name = 'T_crowd_flipbook_v16' if animated_crowd else 'T_' + name[2:]
         task = unreal.AssetImportTask()
         for k, v in {'filename': texture_path, 'destination_path': destination,
-                      'destination_name': 'T_' + name[2:], 'automated': True,
+                      'destination_name': texture_name, 'automated': True,
                       'save': True, 'replace_existing': False}.items():
             task.set_editor_property(k, v)
-        texture = unreal.load_asset(destination + '/T_' + name[2:]) if resume else None
+        texture = unreal.load_asset(destination + '/' + texture_name) if resume else None
         if texture is None:
             assets.import_asset_tasks([task])
-            texture = unreal.load_asset(destination + '/T_' + name[2:])
+            texture = unreal.load_asset(destination + '/' + texture_name)
         texture.set_editor_property('max_texture_size',
             profile.get('textures', {}).get(name[2:], {}).get('max_texture_size', 512))
         texture.set_editor_property('srgb', True)
@@ -59,35 +64,24 @@ for name in profile['material_slots']:
             material.set_editor_property('opacity_mask_clip_value', 0.4)
         color = expression(material, unreal.MaterialExpressionTextureSample)
         color.set_editor_property('texture', texture)
-        if name == 'M_crowd_seated':
-            # Animate the existing atlas without extra geometry, textures or
-            # draw calls. Different seated people sway/bob out of phase; UV.y=1
-            # is the feet after FBX's V flip, so the bottom edge stays pinned.
+        if animated_crowd:
             uv = expression(material, unreal.MaterialExpressionTextureCoordinate)
             time = expression(material, unreal.MaterialExpressionTime)
-            # Keep mobile mediump time precise in long sessions. Both rates
-            # complete an integer number of cycles across this ten-second wrap.
             time.set_editor_property('override_period', True)
-            time.set_editor_property('period', 10.0)
+            time.set_editor_property('period', CROWD_PERIOD)
             motion = expression(material, unreal.MaterialExpressionCustom)
             motion.set_editor_property('output_type', unreal.CustomMaterialOutputType.CMOT_FLOAT2)
-            motion.set_editor_property('description', 'FootballNX seated crowd motion')
+            motion.set_editor_property('description', 'Native sixteen-frame crowd atlas')
             inputs = []
             for input_name in ('UV', 'Clock'):
                 item = unreal.CustomInput()
                 item.set_editor_property('input_name', input_name)
                 inputs.append(item)
             motion.set_editor_property('inputs', inputs)
-            motion.set_editor_property('code', '''
-float upper = 1.0 - saturate(UV.y);
-float phase = floor(UV.x * 32.0) * 2.399963;
-float sway = sin(Clock * 3.7699111843 + phase) * 0.0025 * upper * upper;
-float bob = sin(Clock * 4.3982297150 + phase * 1.3) * 0.009 * upper;
-return float2(UV.x + sway, saturate(UV.y + bob));
-''')
+            motion.set_editor_property('code', CROWD_UV)
             connect(uv, '', motion, 'UV')
             connect(time, '', motion, 'Clock')
-            connect(motion, '', color, '')  # Texture sample's first input: UVs.
+            connect(motion, '', color, '')
         if alpha:
             if not lib.connect_material_property(color, 'A', unreal.MaterialProperty.MP_OPACITY_MASK):
                 raise RuntimeError('Opacity output connection failed: ' + name)
@@ -97,6 +91,26 @@ return float2(UV.x + sway, saturate(UV.y + bob));
         color = expression(material, unreal.MaterialExpressionConstant3Vector)
         color.set_editor_property('constant', unreal.LinearColor(0.32, 0.32, 0.30, 1))
         color_pin = ''
+    if profile.get('close_camera_cutaway', False):
+        material.set_editor_property('blend_mode', unreal.BlendMode.BLEND_MASKED)
+        material.set_editor_property('opacity_mask_clip_value', 0.4)
+        camera = expression(material, unreal.MaterialExpressionCameraPositionWS)
+        world = expression(material, unreal.MaterialExpressionWorldPosition)
+        mask = expression(material, unreal.MaterialExpressionCustom)
+        mask.set_editor_property('output_type', unreal.CustomMaterialOutputType.CMOT_FLOAT1)
+        mask.set_editor_property('description', 'Close camera shell cutaway')
+        inputs=[]
+        for input_name in ('World', 'Camera'):
+            item=unreal.CustomInput();item.set_editor_property('input_name', input_name);inputs.append(item)
+        mask.set_editor_property('inputs', inputs)
+        mask.set_editor_property('code', CAMERA_MASK)
+        connect(world, '', mask, 'World');connect(camera, '', mask, 'Camera')
+        if os.path.isfile(texture_path) and alpha:
+            combined=expression(material, unreal.MaterialExpressionMultiply)
+            connect(mask, '', combined, 'A');connect(color, 'A', combined, 'B')
+            mask=combined
+        if not lib.connect_material_property(mask, '', unreal.MaterialProperty.MP_OPACITY_MASK):
+            raise RuntimeError('Camera mask connection failed: ' + name)
     # Authored constant hemisphere shading: keeps PC shell readable with no
     # additional shadow map, reflection capture, or dynamic light count.
     normal = expression(material, unreal.MaterialExpressionVertexNormalWS)
@@ -157,7 +171,8 @@ bounds = mesh.get_bounds()
 extent = bounds.box_extent
 origin = bounds.origin
 report = {'mesh': mesh.get_path_name(), 'materials': len(slots),
-          'crowd_animation': 'GPU atlas sway/bob, feet pinned, no additional draws',
+          'crowd_animation': 'native 16-frame sheet at 8 fps, no vertex motion' if profile.get('crowd_flipbook') else 'static',
+          'close_camera_cutaway': profile.get('close_camera_cutaway', False),
           'extent_cm': [extent.x, extent.y, extent.z],
           'origin_cm': [origin.x, origin.y, origin.z]}
 if not (10000 < extent.x < 20000 and 7000 < extent.y < 11000 and 1700 < extent.z < 2500):

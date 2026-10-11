@@ -95,6 +95,7 @@ typedef struct {
   char name[48];
 } PesStaminaBarSnapshot;
 int pes_controller_match_hud_inplay(void);
+void pes_controller_referee_performance_note(void);
 uint32_t pes_controller_match_hud_session(void);
 #ifdef DEBUG_LOG
 void pes_controller_hud_diagnostic(uint32_t overlay_blockers, uint32_t cards,
@@ -295,6 +296,8 @@ const char *pes_controller_set_piece_selector_foot_at(uint32_t index);
 const char *pes_controller_set_piece_selector_position_at(uint32_t index);
 int pes_controller_set_piece_selector_current_at(uint32_t index);
 uint32_t pes_controller_set_piece_selector_ability_at(uint32_t index);
+uint32_t pes_controller_set_piece_selector_portrait_at(uint32_t index);
+void pes_controller_editor_request_portrait(uint32_t side, uint32_t slot, uint32_t id);
 void pes_controller_set_piece_selector_move(int direction);
 void pes_controller_set_piece_selector_input(uint32_t action);
 void pes_controller_pause_back_request(void);
@@ -407,6 +410,8 @@ const char *pes_controller_custom_prematch_gameplan_position_label(
     uint32_t row);
 const char *pes_controller_custom_prematch_gameplan_position_value(
     uint32_t pad, uint32_t row);
+uint32_t pes_controller_custom_prematch_gameplan_position_portrait_id(uint32_t pad, uint32_t row);
+const char *pes_controller_custom_prematch_gameplan_position_role(uint32_t pad, uint32_t row);
 int pes_controller_custom_prematch_gameplan_position_picker_active(
     uint32_t pad);
 int pes_controller_custom_prematch_gameplan_waiting(uint32_t pad);

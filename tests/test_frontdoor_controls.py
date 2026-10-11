@@ -22,7 +22,7 @@ class FrontdoorControlTests(unittest.TestCase):
                             '-I', str(ROOT / 'source'), str(path), '-o', str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
-    def test_preset_save_and_load_require_explicit_confirmation_per_side(self):
+    def test_existing_preset_confirmation_and_success_return_per_side(self):
         hooks = (ROOT / 'source/ue4_hooks.c').read_text(encoding='utf-8')
         header = (ROOT / 'source/ue4_hooks.h').read_text(encoding='utf-8')
         definitions = '\n'.join(line for line in header.splitlines()
@@ -35,6 +35,7 @@ class FrontdoorControlTests(unittest.TestCase):
 #include "gameplan_preset.h"
 typedef struct {
   uint32_t page, preset_step, preset_action, preset_focus, preset_target_slot;
+  uint32_t preset_exists[GAMEPLAN_PRESET_SLOTS];
   char preset_status[48];
 } PrematchGameplanSide;
 static PrematchGameplanSide exhibition_gameplan_sides[2];
@@ -48,13 +49,15 @@ static int prematch_gameplan_load_preset(uint32_t side,uint32_t slot) {
 }
 static void prematch_gameplan_refresh_preset_slots(uint32_t side) {(void)side;refreshes++;}
 '''
-        code += definitions + '\n' + function(hooks, 'prematch_gameplan_process_preset')
+        code += definitions + '\n' + function(hooks, 'prematch_gameplan_finish_preset')
+        code += '\n' + function(hooks, 'prematch_gameplan_process_preset')
         code += r'''
 int main(void) {
   for(unsigned side=0;side<2;side++)for(unsigned load=0;load<2;load++) {
     PrematchGameplanSide *s=&exhibition_gameplan_sides[side];
     memset(s,0,sizeof(*s));s->page=PES_PREMATCH_GAMEPLAN_PAGE_PRESET;
     s->preset_step=1;s->preset_action=load;s->preset_focus=2;
+    s->preset_exists[2]=1;
     const unsigned before=saves+loads, refreshed=refreshes;
     prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_DECIDE);
     assert(s->preset_step==2 && s->preset_focus==1 && s->preset_target_slot==2);
@@ -69,12 +72,12 @@ int main(void) {
     prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_LEFT);
     prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_DECIDE);
     assert(saves+loads==before+1 && last_side==side && last_slot==2 && refreshes==refreshed+1);
-    assert(s->preset_step==1 && s->preset_focus==2);
-    /* Further A opens a fresh safe modal, never repeats the write. */
+    assert(s->preset_step==3 && s->preset_focus==0);
+    /* A dismisses success to Save/Load, never repeats the write. */
     prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_DECIDE);
-    assert(s->preset_focus==1 && saves+loads==before+1);
-    prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_BACK);
+    assert(s->preset_step==0 && s->preset_focus==load && saves+loads==before+1);
     live_gameplan_window=(void*)1;
+    prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_DECIDE);
     prematch_gameplan_process_preset(side,PES_PAUSE_INPUT_DECIDE);
     assert(s->preset_step==1 && saves+loads==before+1);
     live_gameplan_window=0;

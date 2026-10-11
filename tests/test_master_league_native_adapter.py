@@ -49,11 +49,11 @@ int ml_frontend_preset_write(uint32_t team,uint32_t slot,const GameplanPreset *p
   assert(team==101u && slot<3u); saved=*p;saved_current=0;return 1;
 }
 int ml_frontend_store_current_plan(const GameplanPreset *p) { saved=*p;saved_current=1;return 1; }
-int gameplan_preset_read(uint32_t team,uint32_t slot,GameplanPreset *out) {
-  (void)team;(void)slot;*out=saved;base_reads++;return 1;
+int gameplan_preset_read_scoped(uint32_t team,uint32_t slot,GameplanPreset *out,const char *scope,uint32_t *canonical) {
+  (void)team;(void)slot;assert(strlen(scope)==16);*out=saved;*canonical=1;base_reads++;return 1;
 }
-int gameplan_preset_write(uint32_t team,uint32_t slot,const GameplanPreset *p) {
-  (void)team;(void)slot;(void)p;base_writes++;return 1;
+int gameplan_preset_write_scoped(uint32_t team,uint32_t slot,const GameplanPreset *p,const char *scope) {
+  (void)team;(void)slot;assert(strlen(scope)==16);saved=*p;base_writes++;return 1;
 }
 static void populate(uint8_t nonce) {
   PrematchGameplanSide *s=&exhibition_gameplan_sides[0];
@@ -92,6 +92,10 @@ int main(void) {
   live_gameplan_window=NULL;active=0;populate(0xa9u);
   assert(prematch_gameplan_read_preset(0u,1u,&restored) && base_reads==1);
   assert(prematch_gameplan_save_preset(0u,1u) && base_writes==1);
+  crypt_key=0x543210feu;populate(0x44u);
+  assert(prematch_gameplan_read_preset(0u,1u,&restored) && base_reads==2);
+  for(uint32_t i=0;i<40u;i++)
+    assert(!memcmp(restored.players[i].player_id,exhibition_gameplan_sides[0].players[i].player_id,16u));
   puts("career native adapter: canonical IDs, match rekey, tactics, base isolation OK");
   return 0;
 }
@@ -99,8 +103,10 @@ int main(void) {
         code = '\n'.join([declarations,
             *[struct(hooks, name) for name in ('TmpdbFormationValue',
                'TmpdbMatchPlanSettingsValue', 'PrematchGameplanPlayer', 'PrematchGameplanSide')],
-            stubs, *[function(hooks, name) for name in (
-                'prematch_gameplan_team_id', 'prematch_gameplan_read_preset',
+            stubs, function((ROOT/'source/gameplan_preset.c').read_text(), 'gameplan_preset_valid'),
+            *[function(hooks, name) for name in (
+                'prematch_gameplan_team_id', 'prematch_gameplan_identity_scope', 'prematch_gameplan_read_preset',
+                'prematch_gameplan_snapshot',
                 'prematch_gameplan_save_preset')], cases])
         with tempfile.TemporaryDirectory(prefix='pes-career-adapter-') as temp:
             path=Path(temp)/'adapter.c';path.write_text(code,encoding='utf-8')

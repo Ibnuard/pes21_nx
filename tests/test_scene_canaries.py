@@ -37,7 +37,8 @@ class SceneCanaryTests(unittest.TestCase):
                              'bad-opcode', 'bad-plt']
                 if feature == 'referee':
                     scenarios += ['bad-retire-plt', 'bad-preload-plt',
-                                  'bad-frame-plt', 'bad-event-plt', 'bad-event-layout', 'bad-sound-plt', 'missing-animation']
+                                  'bad-frame-plt', 'bad-event-plt', 'bad-event-layout', 'bad-sound-plt',
+                                  'bad-flow-plt', 'bad-demo-plt', 'bad-demo-layout', 'bad-fade-layout', 'missing-animation']
                 for scenario in scenarios:
                     with self.subTest(feature=feature, scenario=scenario):
                         run = root / (feature + '-' + scenario)
