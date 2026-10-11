@@ -4,8 +4,13 @@ Tanggal: 9 Oktober 2026
 Status: Yamal V19C dan Raphinha V1 diterima pengguna di Switch pada 9 Oktober
 2026 dan menjadi referensi realface berikutnya. Hash serta batas penerimaannya
 dicatat di [audit konversi](PES21_PC_FACE_TRANSFER_AUDIT.md). Batch seluruh
-Barcelona dan otomatisasi dari sumber mentah belum selesai. Runtime lokal
-aktif belum diganti.
+Barcelona sedang divalidasi dari roster build `e861c583ec78e9ae`: 21 sumber
+baru cocok, dua pilot dipertahankan, dan enam pemain belum mempunyai sumber
+yang terverifikasi. Pemeriksaan mata otomatis dan temuan susunan file Eric
+dicatat di [audit batch](REALFACE_BATCH_AUTOMATION.md). Runtime lokal aktif
+belum diganti. Paket gabungan v2 menyatukan 18 kandidat batch yang lolos cook
+dan aset pilot Yamal/Raphinha menjadi satu PAK untuk 20 wajah; payload pilot
+dipertahankan byte-for-byte. Paket ini belum diuji di Switch.
 
 Targetnya adalah realface untuk seluruh skuad Barcelona dalam dataset game yang
 dipakai, dengan sambungan wajah–leher–baju yang rapi dan warna kulit yang selaras.

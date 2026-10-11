@@ -2152,7 +2152,7 @@ static void overlay_render(void) {
     pacing.previous=0;
     if(pacing.frames>=120) {
       char message[224];
-      snprintf(message,sizeof(message),"v14 session=%u weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
+      snprintf(message,sizeof(message),"v15 session=%u weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
           pacing.session,nx_weather_label(pacing.weather),pacing.season,pacing.frames,
           (unsigned long long)(pacing.total/pacing.frames/1000u),
           (unsigned long long)(pacing.worst/1000u),pacing.over20,pacing.over30,

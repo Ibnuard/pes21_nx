@@ -89,7 +89,9 @@ for part in ('face','hair'):
     assigned={}
     for slot in slots:
         original=str(slot.get_editor_property('imported_material_slot_name'))
-        if part=='hair' and original in profile['hair_materials']:
+        if part=='hair' and original in profile.get('hair_skin_materials',[]):
+            material=skin
+        elif part=='hair' and original in profile['hair_materials']:
             material=hair_material
         elif part=='face' and original==profile['eye_material']:
             material=eye

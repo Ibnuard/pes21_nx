@@ -166,6 +166,15 @@ def _mobile_bone_name(source_name: str, targets: set[str]) -> str:
         "dsk_clavicle_r": "sk_shoulder_r",
         "dsk_neckback": "sk_neck",
         "dsk_scm": "sk_neck",
+        "dsk_collar_l": "sk_shoulder_l",
+        "dsk_collar_r": "sk_shoulder_r",
+        "dsk_ear_b_l": "sk_head",
+        "dsk_ear_b_r": "sk_head",
+        "dsk_ear_t_l": "sk_head",
+        "dsk_ear_t_r": "sk_head",
+        "dsk_earlobe_l": "sk_head",
+        "dsk_earlobe_r": "sk_head",
+        "dsk_hair": "sk_head",
     }
     target = aliases.get(source_name)
     if target in targets:

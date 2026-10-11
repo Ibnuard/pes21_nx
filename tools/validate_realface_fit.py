@@ -84,6 +84,8 @@ def validate(profile, candidate):
              ('celebration',[('sk_shoulder_l','Y',-25),('sk_shoulder_r','Y',25),('sk_neck','X',-10)])]
     pose_report = []
     for label, actions in poses:
+        if not samples:
+            break
         posed = {n:m.copy() for n,m in native.items()}
         for joint, axis, degrees in actions:
             pivot = posed[joint].translation
@@ -105,7 +107,9 @@ def validate(profile, candidate):
         pose_report.append(dict(pose=label,mean_surface_error_before_cm=sum(errors_old)/len(errors_old),
                                 mean_surface_error_after_cm=sum(errors_new)/len(errors_new),
                                 max_surface_error_before_cm=max(errors_old),max_surface_error_after_cm=max(errors_new)))
-    report = dict(meshes=rows,poses=pose_report,pose_test_scope='Synthetic bone rotations, not captured native animations; Switch validation required')
+    report = dict(meshes=rows,poses=pose_report,neck_sample_count=len(samples),
+                  pose_test_scope=('Synthetic bone rotations, not captured native animations; Switch validation required'
+                                   if samples else 'No lower-neck vertices in this part; round-trip only. Audit the adjoining part separately.'))
     (candidate/'roundtrip-pose-report.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(report,indent=2))
     return report

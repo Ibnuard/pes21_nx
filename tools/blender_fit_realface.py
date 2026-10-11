@@ -249,6 +249,11 @@ def fit(profile):
                 signed = (target-q).dot(n)
                 if d < .8 and signed > -clearance and q.z < full:
                     target -= n*min(clearance+signed, cap/2)*amount
+                # Surface fitting and shirt clearance share a movement budget.
+                # Their vectors may reinforce each other on a sloping collar.
+                combined = target-p
+                if combined.length > cap+clearance:
+                    target = p+combined.normalized()*(cap+clearance)
                 if (target-p).length > cap+clearance+1e-5:
                     raise ValueError(f"{obj.name} vertex {v.index}: fitting move {(target-p).length:.6f} cm exceeds {cap+clearance:.6f} cm budget")
                 new_m = runtime_matrix(obj, weights, native, cooked)

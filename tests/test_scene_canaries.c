@@ -237,12 +237,23 @@ static void referee_test(void) {
   for(int i=0;i<300;i++)frame();
   assert(!memcmp(players_before,human,sizeof(human))); // Referee cannot mutate players.
   assert(creations==1 && published==300 && updates==300 && displayed);
+  assert(referee_perf.samples==300 && referee_perf.player_reads==150u*22u);
   assert(display_calls==2); // One hide at load, one show: no per-frame queue churn.
+  // 60 Hz keeps every pose/transform but reads avoidance neighbours at 15 Hz.
+  const uint64_t reads_before=referee_perf.player_reads;
+  const int poses_before=published, transforms_before=updates;
+  for(int i=0;i<120;i++) {
+    ++stamp;ticks+=16666667;
+    referee_probe_draw(human);referee_probe_draw(human);
+  }
+  assert(published==poses_before+120 && updates==transforms_before+120);
+  assert(referee_perf.player_reads-reads_before==30u*22u);
   assert(last_position.x>18 && referee_motion.distance>15 && referee_probe_moved);
   const RefereeProbeVector before=last_position;
   int old_published=published,old_updates=updates;
   const int visible_commands=display_calls;
   inplay=0;for(int i=0;i<100;i++)frame();
+  assert(!referee_player_snapshot_valid && !referee_perf.samples);
   assert(display_calls==visible_commands+1);
   assert(!displayed && old_published==published && old_updates==updates);
   inplay=2;frame();assert(fabsf(last_position.x-before.x)<0.0001f);

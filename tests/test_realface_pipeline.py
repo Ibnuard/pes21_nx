@@ -62,3 +62,20 @@ def test_reference_binary_change_invalidates_cache(tmp_path):
     assert before==cache_key(dict(profile,output='ignored-destination'))
     binary.write_bytes(b'after')
     assert before!=cache_key(profile)
+
+
+def test_auto_eye_cache_requires_reports_mesh_and_blend(tmp_path):
+    candidate=tmp_path/'candidate';candidate.mkdir()
+    names=('face.fbx','fit-report.json','roundtrip-pose-report.json','motion-samples.json','reference-fit.blend')
+    for name in names:(candidate/name).write_bytes(name.encode())
+    saved=dict(cache_key='key',outputs={n:sha(candidate/n) for n in names})
+    (tmp_path/'complete.json').write_text(json.dumps(saved))
+    assert not cached_outputs_valid(tmp_path,'key',True)
+    eyes=tmp_path/'eye-preparation';eyes.mkdir()
+    eye_names=('face.fbx','face.blend','face.eyes.json')
+    for name in eye_names:(eyes/name).write_bytes(name.encode())
+    saved['eye_outputs']={n:sha(eyes/n) for n in eye_names}
+    (tmp_path/'complete.json').write_text(json.dumps(saved))
+    assert cached_outputs_valid(tmp_path,'key',True)
+    (eyes/'face.eyes.json').write_bytes(b'changed optical fit')
+    assert not cached_outputs_valid(tmp_path,'key',True)

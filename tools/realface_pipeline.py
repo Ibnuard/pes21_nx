@@ -1,7 +1,7 @@
 """Run identity-checked native-reference fits from a prepared local manifest.
 
-Version 1 covers fitting, FBX round-trip, synthetic poses and resumable batch
-reports. Source extraction, UE cooking and device acceptance remain explicit
+Version 2 covers optional automatic eye placement, neck fitting, FBX round-trip,
+synthetic poses and resumable batch reports. Source extraction, UE cooking and device acceptance remain explicit
 steps. Missing FL26 sources are recorded as skips, without substituting faces.
 Use: python tools/realface_pipeline.py plan|run --manifest local.json [--player ID] [--resume]
 """
@@ -16,7 +16,9 @@ import subprocess
 HERE = Path(__file__).resolve().parent
 INPUTS = ('face_fbx', 'native_rig', 'cooked_rig', 'native_face', 'native_body')
 CODE = ('realface_pipeline.py', 'blender_fit_realface.py', 'realface_reference.py',
-        'blender_export_ue_fbx.py', 'validate_realface_fit.py')
+        'blender_export_ue_fbx.py', 'validate_realface_fit.py',
+        'blender_fit_eye_sockets.py', 'realface_eye_fit.py')
+EYE_OUTPUTS = ('face.fbx', 'face.blend', 'face.eyes.json')
 
 
 def sha(path):
@@ -41,10 +43,12 @@ def identify(profile, registry):
 def cache_key(profile):
     recipe = {k:v for k,v in profile.items() if k != 'output'}
     files = {str(HERE/name):sha(HERE/name) for name in CODE}
-    for key in INPUTS:
-        path = Path(profile[key]).resolve()
+    paths = [Path(profile[key]).resolve() for key in INPUTS]
+    eye = profile.get('eye_preparation', {})
+    paths.extend(Path(eye[key]).resolve() for key in ('eyelid_rim','own_native_face') if eye.get(key))
+    for path in paths:
         files[str(path)] = sha(path)
-        if key in ('native_face', 'native_body'):
+        if path.suffix == '.gltf':
             doc = json.loads(path.read_text(encoding='utf-8'))
             for buffer in doc['buffers']:
                 binary = (path.parent/buffer['uri']).resolve()
@@ -70,18 +74,26 @@ def plan(manifest):
             raise ValueError('Explicit source_status available/missing is required')
         else:
             missing = [key for key in INPUTS if not Path(profile.get(key, '')).is_file()]
+            eye = profile.get('eye_preparation')
+            if eye:
+                for key in ('eyelid_rim','own_native_face'):
+                    if (key=='eyelid_rim' or eye.get(key)) and not Path(eye.get(key,'')).is_file():
+                        missing.append('eye_preparation.'+key)
             record.update(status='needs_inputs' if missing else 'ready',missing_inputs=missing)
         records.append(record)
     return records
 
 
-def cached_outputs_valid(folder, key):
+def cached_outputs_valid(folder, key, require_eyes=False):
     report = folder/'complete.json'
     if not report.is_file():
         return False
     saved = json.loads(report.read_text())
     expected = {'face.fbx','fit-report.json','roundtrip-pose-report.json','motion-samples.json','reference-fit.blend'}
-    return (saved.get('cache_key') == key and set(saved.get('outputs',{})) == expected and
+    eyes_valid = (not require_eyes or (set(saved.get('eye_outputs',{})) == set(EYE_OUTPUTS) and
+        all((folder/'eye-preparation'/name).is_file() and sha(folder/'eye-preparation'/name)==digest
+            for name,digest in saved['eye_outputs'].items())))
+    return (eyes_valid and saved.get('cache_key') == key and set(saved.get('outputs',{})) == expected and
             all((folder/'candidate'/name).is_file() and sha(folder/'candidate'/name) == digest
                 for name,digest in saved['outputs'].items()))
 
@@ -106,13 +118,36 @@ def run(manifest, selected=None, resume=False):
                 raise ValueError('Existing job requires --resume')
             folder.mkdir(exist_ok=True)
             record['output'] = str(folder/'candidate')
-            if resume and cached_outputs_valid(folder,key):
+            if resume and cached_outputs_valid(folder,key,bool(profile.get('eye_preparation'))):
                 record['status'] = 'validated_cached'
                 continue
             if (folder/'complete.json').exists():
                 raise ValueError('Cached output changed; use a fresh work_dir for rebuilding')
             candidate = folder/'candidate'
             recipe = dict(profile,output=str(candidate))
+            eye_outputs = {}
+            if profile.get('eye_preparation'):
+                eye_folder=folder/'eye-preparation'
+                eye_recipe=dict(profile['eye_preparation'],base_id=profile['base_id'],
+                    face_fbx=profile['face_fbx'],native_rig=profile['native_rig'],
+                    cooked_rig=profile['cooked_rig'],output=str(eye_folder/'face.fbx'))
+                eye_config=folder/'eye-profile.json'
+                eye_config.write_text(json.dumps(eye_recipe,indent=2)+'\n',encoding='utf-8')
+                stamp=folder/'eye-complete.json'
+                if eye_folder.exists():
+                    cached=json.loads(stamp.read_text()) if stamp.is_file() else {}
+                    if (cached.get('cache_key')!=key or set(cached.get('outputs',{}))!=set(EYE_OUTPUTS) or
+                        not all((eye_folder/name).is_file() and sha(eye_folder/name)==digest
+                                for name,digest in cached.get('outputs',{}).items())):
+                        raise ValueError('Incomplete or changed automatic eye fit requires a fresh work_dir')
+                else:
+                    with (folder/'eye.log').open('w',encoding='utf-8') as log:
+                        subprocess.run([str(blender),'--background','--python-exit-code','1','--python',
+                            str(HERE/'blender_fit_eye_sockets.py'),'--','--profile',str(eye_config)],
+                            check=True,stdout=log,stderr=subprocess.STDOUT)
+                    stamp.write_text(json.dumps(dict(cache_key=key,outputs={name:sha(eye_folder/name) for name in EYE_OUTPUTS}),indent=2)+'\n')
+                eye_outputs={name:sha(eye_folder/name) for name in EYE_OUTPUTS}
+                recipe['face_fbx']=str(eye_folder/'face.fbx')
             config = folder/'profile.json'
             config.write_text(json.dumps(recipe,indent=2)+'\n',encoding='utf-8')
             commands = []
@@ -126,7 +161,7 @@ def run(manifest, selected=None, resume=False):
                     subprocess.run([str(blender),'--background','--python-exit-code','1',
                                     '--python',str(script),'--',*args],check=True,stdout=log,stderr=subprocess.STDOUT)
             outputs = {name:sha(candidate/name) for name in ('face.fbx','fit-report.json','roundtrip-pose-report.json','motion-samples.json','reference-fit.blend')}
-            (folder/'complete.json').write_text(json.dumps(dict(cache_key=key,outputs=outputs,hardware_accepted=False),indent=2)+'\n')
+            (folder/'complete.json').write_text(json.dumps(dict(cache_key=key,outputs=outputs,eye_outputs=eye_outputs,hardware_accepted=False),indent=2)+'\n')
             record['status'] = 'validated_pending_device'
         except (ValueError, OSError, subprocess.CalledProcessError) as error:
             record.update(status='needs_review',reason=str(error))

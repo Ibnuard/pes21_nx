@@ -31,8 +31,9 @@ static inline void referee_separation(RefereePoint position, RefereePoint obstac
                                       float radius, float force, RefereePoint *v) {
   if (!referee_point_valid(obstacle)) return;
   float dx=position.x-obstacle.x, dz=position.z-obstacle.z;
-  const float d=hypotf(dx,dz);
-  if (d>=radius) return;
+  const float distance_squared=dx*dx+dz*dz;
+  if (distance_squared>=radius*radius) return;
+  const float d=sqrtf(distance_squared);
   // Exact overlap has a deterministic exit, not a divide-by-zero.
   if (d<0.01f) { dx=0; dz=1; }
   else { dx/=d; dz/=d; }
@@ -78,8 +79,8 @@ static inline int referee_motion_step_mode(RefereeMotion *m, RefereePoint ball,
   m->last_ball=ball;m->has_ball=1;
   const unsigned steps=(unsigned)ceilf(dt*120.0f);
   const float h=dt/(float)steps;
+  const float tracking=1.0f-expf(-h*3.0f);
   for (unsigned i=0; i<steps; ++i) {
-    const float tracking=1.0f-expf(-h*3.0f);
     m->ball_velocity.x+=(observed.x-m->ball_velocity.x)*tracking;
     m->ball_velocity.z+=(observed.z-m->ball_velocity.z)*tracking;
     const RefereePoint predicted={ball.x+(restart?0:m->ball_velocity.x*0.3f),
