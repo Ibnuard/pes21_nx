@@ -75,7 +75,7 @@ def rotation_between(before, after):
     return np.eye(3)+skew+skew@skew/(1+cosine),math.degrees(math.acos(cosine))
 
 
-def fit_socket(points, pupil, rim):
+def fit_socket(points, pupil, rim, *, skin_surface=False, edge_outlier_fallback=False):
     points=np.asarray(points,dtype=float);rim=np.asarray(rim,dtype=float)
     center,radius,rms=sphere(points)
     if rim.ndim!=2 or rim.shape[1]!=3 or len(rim)<8 or not np.isfinite(rim).all():
@@ -94,7 +94,38 @@ def fit_socket(points, pupil, rim):
     depths=rim[:,1]-np.sqrt(target_radius**2-radial)
     target[1]=np.median(depths)
     depth_rms=float(np.sqrt(np.mean((depths-target[1])**2)))
+    raw_depth_rms=depth_rms;discarded=[]
+    if depth_rms>.32 and skin_surface and edge_outlier_fallback:
+        # The tear-duct wall is skin, but not part of a spherical globe. Only
+        # isolated depth outliers at the lateral ends can leave the depth fit.
+        # Retain the FULL bounds/radius and optical aperture; never trim the
+        # rendered mesh, enlarge it further or waive noisy central samples.
+        edge=(rim[:,0]<low[0]+width*.2)|(rim[:,0]>high[0]-width*.2)
+        bad=np.abs(depths-target[1])>.65
+        discarded=np.flatnonzero(bad).tolist()
+        if (not discarded or np.any(bad & ~edge) or bad.sum()>len(rim)*.15):
+            raise ValueError('Unstable skin depth is not limited to isolated tear-duct samples')
+        support=rim[~bad]
+        measured_center=(support.min(0)+support.max(0))/2
+        if np.linalg.norm(measured_center[[0,2]]-target[[0,2]])>.25:
+            raise ValueError('Tear-duct cleanup shifts the measured socket too far')
+        target[[0,2]]=measured_center[[0,2]]
+        support_radial=(support[:,0]-target[0])**2+(support[:,2]-target[2])**2
+        if np.max(support_radial)>=target_radius**2:
+            raise ValueError('Cleaned skin support exceeds the unchanged globe radius')
+        depths=support[:,1]-np.sqrt(target_radius**2-support_radial)
+        target[1]=np.median(depths)
+        depth_rms=float(np.sqrt(np.mean((depths-target[1])**2)))
     if depth_rms>.32:raise ValueError('Eyelid rim does not support a stable globe depth')
+    median_depth=float(target[1])
+    if skin_surface:
+        # A skin rim encloses the globe; fitting through its median can put
+        # half of the globe boundary in front of the lower eyelid. Use the
+        # conservative measured depth, tolerating a few noisy rim samples.
+        # This is a surface constraint, not a fixed per-player translation.
+        target[1]=float(np.quantile(depths,.15))
+        if median_depth-target[1]>.45:
+            raise ValueError('Skin rim needs excessive eye depth clearance')
     translation=float(np.linalg.norm(target-center))
     if translation>1.5:raise ValueError('Eye placement differs too far from source')
     # Rest gaze is straight forward through the centre of this eyelid opening.
@@ -106,6 +137,54 @@ def fit_socket(points, pupil, rim):
         raise ValueError('Pupil failed to centre in the eyelid')
     return fitted,rotation,dict(method='source_eyelid_rim',sphere_fit_rms_cm=rms,
         rim_depth_rms_cm=depth_rms,source_center_cm=center.tolist(),target_center_cm=target.tolist(),
+        raw_rim_depth_rms_cm=raw_depth_rms,excluded_tear_duct_samples=discarded,
         scale=scale,translation_cm=translation,gaze_degrees=degrees,
+        depth_policy='skin_enclosure_quantile_15' if skin_surface else 'helper_median',
+        depth_clearance_cm=median_depth-float(target[1]),
+        final_rim_depth_rms_cm=float(np.sqrt(np.mean((depths-target[1])**2))),
         opening_width_cm=float(width),opening_height_cm=float(height),
         pupil_after_cm=fitted_pupil.tolist())
+
+
+def verified_source_pair(source):
+    """A complete, nearly spherical anatomical source pair can size a template.
+
+    This evidence is stronger than extrapolating a sphere from sparse eyelids.
+    It never authorizes enlarged eyes from a guide or a single source globe.
+    """
+    if set(source)!={'negative_x','positive_x'}:return False
+    try:
+        a,ra,ea=sphere(source['negative_x']);b,rb,eb=sphere(source['positive_x'])
+    except ValueError:return False
+    return bool(-4.8<a[0]<-1.5 and 1.5<b[0]<4.8 and 4<b[0]-a[0]<8.5
+                and all(8<p[1]<19 and 165<p[2]<175 for p in (a,b))
+                and abs(a[1]-b[1])<.6 and abs(a[2]-b[2])<.4
+                and .95<min(ra,rb) and max(ra,rb)<1.8 and max(ra,rb)/min(ra,rb)<1.12
+                and max(ea,eb)<.03)
+
+
+def fit_source_globe(points, pupil, source, *, measured_pair=False):
+    """Use this player's actual source eyeball when an occlusion guide is absent.
+
+    The neutral atlas remains explicit. Both globe shapes must pass the sphere
+    contract; visible-aperture ray tests still run after this registration.
+    """
+    points = np.asarray(points, dtype=float)
+    center, radius, rms = sphere(points)
+    target, target_radius, target_rms = sphere(source)
+    if not (1.5 < abs(target[0]) < 4.8 and 8 < target[1] < 19 and 165 < target[2] < 175):
+        raise ValueError('Source eyeball lies outside the head contract')
+    scale = target_radius / radius
+    if not .8 < scale < (1.5 if measured_pair and target_rms<.03 and .95<target_radius<1.8 else 1.25):
+        raise ValueError('Source eyeball requires excessive template scale')
+    rotation, degrees = rotation_between(np.asarray(pupil)-center, [0,1,0])
+    if degrees > 15:
+        raise ValueError('Source pupil gaze exceeds automatic correction limit')
+    fitted = (points-center) @ rotation.T * scale + target
+    fitted_pupil = (np.asarray(pupil)-center) @ rotation.T * scale + target
+    return fitted, rotation, dict(method='own_source_eyeball_geometry',
+        sphere_fit_rms_cm=rms, target_sphere_fit_rms_cm=target_rms,
+        source_pair_size_verified=measured_pair,
+        source_center_cm=center.tolist(), target_center_cm=target.tolist(),
+        scale=scale, translation_cm=float(np.linalg.norm(target-center)),
+        gaze_degrees=degrees, pupil_after_cm=fitted_pupil.tolist())

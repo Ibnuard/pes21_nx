@@ -6,7 +6,28 @@ import numpy as np
 import pytest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from realface_eye_fit import sphere,fit_socket,pupil_position,rotation_between,radial_atlas_pupil
+from realface_eye_fit import sphere,fit_socket,fit_source_globe,pupil_position,rotation_between,radial_atlas_pupil,verified_source_pair
+
+
+def test_source_globe_fallback_uses_measured_geometry_and_rejects_bad_reference():
+    points=globe();pupil=np.array([3,15.45,170])
+    source=globe(center=(3.1,14.2,170.4),radius=1.4)
+    fitted,rotation,report=fit_source_globe(points,pupil,source)
+    center,radius,_=sphere(fitted)
+    assert center==pytest.approx([3.1,14.2,170.4])
+    assert radius==pytest.approx(1.4)
+    assert report['method']=='own_source_eyeball_geometry'
+    with pytest.raises(ValueError,match='outside the head'):
+        fit_source_globe(points,pupil,globe(center=(3,5,170)))
+
+
+def test_explicit_source_control_aliases_do_not_accept_unknown_roots():
+    targets={'sk_head','sk_neck'}
+    assert _mobile_bone_name('RightLowMiddleEyebrow',targets)=='sk_head'
+    assert _mobile_bone_name('RightLowEyelid',targets)=='sk_head'
+    assert _mobile_bone_name('d_scm_02_l',targets)=='sk_neck'
+    with pytest.raises(ValueError,match='no mobile skeleton mapping'):
+        _mobile_bone_name('Group',targets)
 from extract_team_realfaces import safe_member,write_once
 from export_pes_fmdl_gltf import _mobile_bone_name
 
@@ -15,6 +36,20 @@ def globe(center=(3,14,170),radius=1.45):
     return np.asarray([np.asarray(center)+radius*np.array([
         math.sin(a)*math.cos(b),math.cos(a),math.sin(a)*math.sin(b)])
         for a in np.linspace(.05,2.5,15) for b in np.linspace(0,2*math.pi,24,endpoint=False)])
+
+
+def test_source_pair_can_size_small_template_but_single_or_oversized_globe_cannot():
+    pair=dict(negative_x=globe((-3.3,13.8,170),1.6),positive_x=globe((3.35,13.4,170),1.74))
+    assert verified_source_pair(pair)
+    small=globe((3,14,170),1.3);pupil=np.array([3,15.3,170])
+    with pytest.raises(ValueError,match='excessive template'):
+        fit_source_globe(small,pupil,pair['positive_x'])
+    result,_,report=fit_source_globe(small,pupil,pair['positive_x'],measured_pair=verified_source_pair(pair))
+    assert sphere(result)[1]==pytest.approx(1.74)
+    assert report['source_pair_size_verified']
+    assert not verified_source_pair(dict(positive_x=pair['positive_x']))
+    assert not verified_source_pair(dict(pair,positive_x=globe((3.35,13.4,170),1.95)))
+    assert not verified_source_pair(dict(pair,positive_x=globe((3.35,13.4,172),1.74)))
 
 
 def rim(center,radius=1.45):
@@ -45,12 +80,50 @@ def test_asymmetric_eye_positions_are_not_mirrored_blindly():
         assert report['target_center_cm']==pytest.approx(target)
 
 
+def test_measured_skin_depth_keeps_globe_inside_uneven_lid_without_rescaling():
+    opening=np.asarray(rim([3,14,170]))
+    opening[:6,1]-=.3
+    points=globe();pupil=[3,15.45,170]
+    _,_,helper=fit_socket(points,pupil,opening)
+    fitted,_,skin=fit_socket(points,pupil,opening,skin_surface=True)
+    assert skin['target_center_cm'][1]==pytest.approx(13.7)
+    assert helper['target_center_cm'][1]==pytest.approx(14.)
+    assert skin['depth_clearance_cm']==pytest.approx(.3)
+    assert sphere(fitted)[1]==pytest.approx(1.45)
+    assert skin['pupil_after_cm'][0]==pytest.approx(3.)
+    assert skin['pupil_after_cm'][2]==pytest.approx(170.)
+    assert skin['depth_policy']=='skin_enclosure_quantile_15'
+
+
+def test_skin_clearance_rejects_excessive_or_unstable_depth():
+    opening=np.asarray(rim([3,14,170]));opening[:6,1]-=.5
+    with pytest.raises(ValueError,match='excessive eye depth clearance'):
+        fit_socket(globe(),[3,15.45,170],opening,skin_surface=True)
+    opening[:6,1]-=.5
+    with pytest.raises(ValueError,match='stable globe depth'):
+        fit_socket(globe(),[3,15.45,170],opening,skin_surface=True)
+
+
 def test_outliers_do_not_silently_produce_candidates():
     p=globe();pupil=[3,15.45,170]
     with pytest.raises(ValueError,match='too far'):fit_socket(p,pupil,rim([3,14,174]))
     with pytest.raises(ValueError,match='non-finite'):fit_socket(p,pupil,[[math.nan,0,0]]*8)
     with pytest.raises(ValueError,match='gaze'):fit_socket(p,[4,15,170],rim([3,14,170]))
     with pytest.raises(ValueError,match='degenerate'):sphere([[i,0,0] for i in range(15)])
+
+
+def test_isolated_tear_duct_depth_fallback_preserves_globe_size():
+    opening=np.asarray(rim([3,14,170]));opening[[0,12],1]-=1.5
+    with pytest.raises(ValueError,match='stable globe depth'):
+        fit_socket(globe(),[3,15.45,170],opening,skin_surface=True)
+    fitted,_,report=fit_socket(globe(),[3,15.45,170],opening,skin_surface=True,edge_outlier_fallback=True)
+    assert report['excluded_tear_duct_samples']==[0,12]
+    assert sphere(fitted)[1]==pytest.approx(1.45)
+    assert report['rim_depth_rms_cm']<.01
+    for indices in ([6,18],[0,1,2,12]):
+        bad=np.asarray(rim([3,14,170]));bad[indices,1]-=1.5
+        with pytest.raises(ValueError,match='isolated tear-duct'):
+            fit_socket(globe(),[3,15.45,170],bad,skin_surface=True,edge_outlier_fallback=True)
 
 
 def test_uv_atlas_requires_explicit_frontmost_policy():

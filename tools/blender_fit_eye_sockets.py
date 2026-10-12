@@ -6,6 +6,7 @@ inputs. Every result is checked through an FBX round-trip.
 """
 import argparse
 import json
+import itertools
 from pathlib import Path
 import sys
 
@@ -18,7 +19,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from blender_export_ue_fbx import rig_globals
 from blender_fit_realface import runtime_matrix,vertex_weights
 from realface_reference import load_reference
-from realface_eye_fit import fit_socket,pupil_position,radial_atlas_pupil,rotation_between
+from realface_eye_fit import fit_socket,fit_source_globe,pupil_position,radial_atlas_pupil,rotation_between,verified_source_pair
+from realface_eye_registration import register_pair
+from realface_eye_boundary import opening_from_depth,rim_variants
 
 
 def repair_undefined_normals(eye_material):
@@ -34,7 +37,9 @@ def repair_undefined_normals(eye_material):
         normals=[n.vector.copy() for n in obj.data.corner_normals]
         missing={i for i,n in enumerate(normals) if n.length<.5}
         if not missing:continue
-        if len(missing)>max(6,len(normals)//1000):
+        obj.data.calc_loop_triangles()
+        degenerate={i for tri in obj.data.loop_triangles if tri.area<1e-10 for i in tri.loops}
+        if len(missing-degenerate)>max(6,len(normals)//1000):
             raise ValueError('Too many undefined source normals for local repair')
         repaired=[]
         for polygon in obj.data.polygons:
@@ -51,7 +56,7 @@ def protected_snapshot(eye_material,native,cooked):
     for obj in bpy.context.scene.objects:
         if obj.type!='MESH' or eye_material in [m.name for m in obj.data.materials]:continue
         obj.data.calc_loop_triangles()
-        degenerate={i for tri in obj.data.loop_triangles if tri.area<1e-8 for i in tri.loops}
+        degenerate={i for tri in obj.data.loop_triangles if tri.area<1e-10 for i in tri.loops}
         result[obj.name]=dict(
             points=np.asarray([tuple(runtime_matrix(obj,vertex_weights(obj,v),native,cooked)@v.co) for v in obj.data.vertices]),
             uv=[[tuple(v.uv) for v in layer.data] for layer in obj.data.uv_layers],
@@ -77,7 +82,8 @@ def verify_protected(before,after):
         undefined=set(np.flatnonzero(np.linalg.norm(old_normals,axis=1)<.5))
         if not undefined<=old['degenerate_normal_corners']:
             raise ValueError('Source has undefined normals on nondegenerate protected faces')
-        normal=float(max((e for i,e in enumerate(normal_errors) if i not in undefined),default=0))
+        meaningless=old['degenerate_normal_corners'] & new['degenerate_normal_corners']
+        normal=float(max((e for i,e in enumerate(normal_errors) if i not in (undefined|meaningless)),default=0))
         if drift>.001 or weight>1e-5 or normal>.002:
             raise ValueError('Eye replacement moved protected geometry, weights or normals: '+
                              str(dict(mesh=name,position_cm=drift,weights=weight,normals=normal,
@@ -127,7 +133,7 @@ def center_visible_pupil(points,faces,pupil,center,rim,skin_tree):
         if dx*dx+dz*dz>=radius*radius:raise ValueError('Visible opening is unreachable by iris rotation')
         direction=np.asarray([dx,np.sqrt(radius*radius-dx*dx-dz*dz),dz])
         rotation,degrees=rotation_between(old,direction)
-        if degrees>12:raise ValueError('Optical pupil correction exceeds 12 degrees')
+        if degrees>12:raise ValueError('Optical pupil correction exceeds 12 degrees: '+str(dict(degrees=degrees,center=center.tolist(),horizontal=horizontal,vertical=vertical)))
         p=(p-center)@rotation.T+center;pupil=(pupil-center)@rotation.T+center;total=rotation@total
     raise ValueError('Optical pupil centering failed to converge')
 
@@ -138,6 +144,7 @@ def fit(profile):
     native=rig_globals(json.loads(Path(profile['native_rig']).read_text()))
     cooked=rig_globals(json.loads(Path(profile['cooked_rig']).read_text()))
     guide=json.loads(Path(profile['eyelid_rim']).read_text())
+    source_globes=json.loads(Path(profile['source_globes']).read_text()) if profile.get('source_globes') else {}
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.unit_settings.system='METRIC';bpy.context.scene.unit_settings.scale_length=.01
     bpy.ops.import_scene.fbx(filepath=str(Path(profile['face_fbx']).resolve()),use_anim=False)
@@ -187,19 +194,79 @@ def fit(profile):
         # Reconstructed points are reflected from the exported FBX frame.
         if transforms[0].determinant()<0:faces=[tuple(reversed(f)) for f in faces]
         landmark=profile['template_pupil_uv']
-    points=np.asarray(points);fitted=points.copy();normals=np.asarray(normals);reports=[]
-    for sign,side in [(-1,'negative_x'),(1,'positive_x')]:
-        ids=[i for i,p in enumerate(points) if p[0]*sign>0];mapping={i:j for j,i in enumerate(ids)}
-        fs=[tuple(mapping[i] for i in f) for f in faces if all(i in mapping for i in f)]
-        if not fs:raise ValueError('Missing eye hemisphere')
-        pupil=(radial_atlas_pupil(points[ids],[uv[i] for i in ids]) if native_source
-               else pupil_position(points[ids],[uv[i] for i in ids],fs,landmark))
-        result,rotation,report=fit_socket(points[ids],pupil,guide[side])
-        result,optical,pupil_after,audit=center_visible_pupil(result,fs,report['pupil_after_cm'],report['target_center_cm'],guide[side],skin_tree)
-        rotation=optical@rotation;report['pupil_after_cm']=pupil_after.tolist();report['optical_alignment']=audit
-        fitted[ids]=result;normals[ids]=normals[ids]@rotation.T
-        reports.append(dict(side=side,vertices=len(ids),triangles=len(fs),
-            pupil_landmark='radial_atlas_pole' if native_source else 'template_uv_center',**report))
+    original_points=np.asarray(points);original_normals=np.asarray(normals)
+    attempts=[];failures=[]
+    attempts.append(('source_helpers',guide,source_globes,guide,{}))
+    if profile.get('skin_boundary_fallback'):
+        try:
+            boundary={};variants={}
+            for sign,side in ((-1,'negative_x'),(1,'positive_x')):
+                xs=np.linspace(.8,5.6,81)*sign;zs=np.linspace(166,174,135);depth=[]
+                for z in zs:
+                    line=[]
+                    for x in xs:
+                        hit,_,_,_=skin_tree.ray_cast(Vector((x,40,z)),Vector((0,-1,0)))
+                        line.append(float(hit.y) if hit is not None else -100.)
+                    depth.append(line)
+                variants[side]=rim_variants(xs,zs,depth)
+                if not variants[side]:raise ValueError('No enclosed orbital recess on '+side)
+            combinations=list(itertools.product(variants['negative_x'],variants['positive_x']))
+            combinations.sort(key=lambda pair:sum(('shallow' in v['name'])*2+('central' in v['name']) for v in pair))
+            for pair in combinations:
+                rim={s:v['rim'] for s,v in zip(('negative_x','positive_x'),pair)}
+                bounds={s:v['bounds'] for s,v in zip(('negative_x','positive_x'),pair)}
+                labels={s:v['name'] for s,v in zip(('negative_x','positive_x'),pair)}
+                attempts.append(('actual_skin_recess',rim,{},bounds,labels))
+            attempts.extend(('actual_skin_recess_robust_edges',rim,{},bounds,labels)
+                            for method,rim,globes,bounds,labels in list(attempts) if method=='actual_skin_recess')
+        except ValueError as error:
+            failures.append(dict(method='actual_skin_recess',reason=str(error)))
+    # The visible skin is the final occluder. PC helper meshes can sit in
+    # front of the actual lid and expose a globe through the cheek. Prefer
+    # an enclosed, measured skin socket; retain helpers as a fallback.
+    attempts.sort(key=lambda item: 0 if item[0]=='actual_skin_recess' else
+                  1 if item[0]=='actual_skin_recess_robust_edges' else 2)
+    for method,candidate_guide,candidate_globes,aperture_bounds,variant_labels in attempts:
+        points=original_points.copy();normals=original_normals.copy()
+        try:
+            registration=None
+            if profile.get('register_eye_pair'):
+                try:
+                    delta,registration=register_pair(points,candidate_guide,
+                        skin_surface=method.startswith('actual_skin_recess'),edge_outlier_fallback=method.endswith('robust_edges'))
+                    points=points+delta
+                except ValueError as error:
+                    # Keep the original local fitter/source-globe fallback. A bad
+                    # guide cannot silently authorize a guessed head translation.
+                    registration=dict(applied=False,reason=str(error))
+            fitted=points.copy();normals=np.asarray(normals);reports=[]
+            for sign,side in [(-1,'negative_x'),(1,'positive_x')]:
+                ids=[i for i,p in enumerate(points) if p[0]*sign>0];mapping={i:j for j,i in enumerate(ids)}
+                fs=[tuple(mapping[i] for i in f) for f in faces if all(i in mapping for i in f)]
+                if not fs:raise ValueError('Missing eye hemisphere')
+                pupil=(radial_atlas_pupil(points[ids],[uv[i] for i in ids]) if native_source
+                       else pupil_position(points[ids],[uv[i] for i in ids],fs,landmark))
+                bounds=aperture_bounds[side]
+                try:
+                    result,rotation,report=fit_socket(points[ids],pupil,candidate_guide[side],
+                        skin_surface=method.startswith('actual_skin_recess'),edge_outlier_fallback=method.endswith('robust_edges'))
+                    if variant_labels:report['rim_measurement']=variant_labels[side]
+                except ValueError as error:
+                    if not candidate_globes.get(side):
+                        raise
+                    result,rotation,report=fit_source_globe(points[ids],pupil,candidate_globes[side],measured_pair=verified_source_pair(candidate_globes))
+                    report['occlusion_guide_failure']=str(error)
+                    bounds=candidate_globes[side]
+                result,optical,pupil_after,audit=center_visible_pupil(result,fs,report['pupil_after_cm'],report['target_center_cm'],bounds,skin_tree)
+                rotation=optical@rotation;report['pupil_after_cm']=pupil_after.tolist();report['optical_alignment']=audit
+                fitted[ids]=result;normals[ids]=normals[ids]@rotation.T
+                reports.append(dict(side=side,vertices=len(ids),triangles=len(fs),
+                    pupil_landmark='radial_atlas_pole' if native_source else 'template_uv_center',**report))
+            break
+        except ValueError as error:
+            failures.append(dict(method=method,variants=variant_labels,reason=str(error),registration=registration))
+    else:
+        raise ValueError('Eye fitting paths exhausted: '+str(failures))
     bpy.data.objects.remove(old,do_unlink=True)
     mesh=bpy.data.meshes.new('fitted_eye_geometry');mesh.from_pydata(fitted.tolist(),[],faces);mesh.update()
     obj=bpy.data.objects.new('player_fitted_eyes',mesh);bpy.context.scene.collection.objects.link(obj)
@@ -238,7 +305,8 @@ def fit(profile):
     report=dict(base_id=profile['base_id'],source_policy=profile['source_policy'],eyes=reports,
                 position_roundtrip_drift_cm=drift,uv_roundtrip_drift=uv_drift,
                 vertices=len(points),triangles=len(faces),protected_meshes=protection,
-                source_normal_repairs=normal_repairs,hardware_accepted=False)
+                source_normal_repairs=normal_repairs,pair_registration=registration,
+                fitting_reference=method,failed_fitting_paths=failures,hardware_accepted=False)
     output.with_suffix('.eyes.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))
 

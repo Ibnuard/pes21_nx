@@ -175,6 +175,15 @@ def _mobile_bone_name(source_name: str, targets: set[str]) -> str:
         "dsk_earlobe_l": "sk_head",
         "dsk_earlobe_r": "sk_head",
         "dsk_hair": "sk_head",
+        "Head": "sk_head",
+        "d_scm_01_l": "sk_neck", "d_scm_01_r": "sk_neck",
+        "d_scm_02_l": "sk_neck", "d_scm_02_r": "sk_neck",
+        # These source facial controls have the same rigid head fallback as
+        # skf_* joints; the mobile rig has no corresponding facial controls.
+        "RightLowMiddleEyebrow": "sk_head",
+        "RightLowEyelid": "sk_head",
+        "LeftLowMiddleEyebrow": "sk_head",
+        "LeftLowEyelid": "sk_head",
     }
     target = aliases.get(source_name)
     if target in targets:
@@ -358,6 +367,8 @@ def export_model(
     copied_textures: dict[Path, int] = {}
 
     def texture_index(texture) -> int | None:
+        if not texture.filename:
+            return None
         source_filename = Path(texture.filename).with_suffix(".png").name.casefold()
         source = lookup.get(source_filename)
         if source is None:

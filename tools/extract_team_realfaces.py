@@ -32,7 +32,7 @@ def write_once(path, data):
     return hashlib.sha256(data).hexdigest()
 
 
-def extract(inventory, work, parser_root):
+def extract(inventory, work, parser_root, *, all_textures=False):
     work = work.resolve()
     sys.path.insert(0, str(parser_root))
     from pes_file_tools import fpk, ftex
@@ -49,8 +49,9 @@ def extract(inventory, work, parser_root):
         folder = work/str(player['base_id'])/'source'
         files = []
         for name, member in player['source_members'].items():
-            if not name.endswith(('/face.fpk', '/face_bsm_alp.ftex',
-                    '/hair_parts_bsm_alp.ftex', '/eye_sclera_bsm.ftex')):
+            if not (name.endswith(('/face.fpk', '/face_bsm_alp.ftex',
+                    '/hair_parts_bsm_alp.ftex', '/eye_sclera_bsm.ftex')) or
+                    (all_textures and name.endswith('.ftex'))):
                 continue
             if member['extracted_size'] != member['size']:
                 raise ValueError('Compressed CPK member needs an explicit decoder: '+name)

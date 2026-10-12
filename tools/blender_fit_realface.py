@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from realface_neck_support import supported_seam_moves
 import math
 from pathlib import Path
 import sys
@@ -34,13 +35,77 @@ def vertex_weights(obj, vertex):
     return {n: w/total for n, w in weights.items()}
 
 
+_bind_cache = None
+
+
+def weighted_bind_matrix(weights, native, cooked):
+    # The two rest rigs are immutable during a fit/audit. Keep strong references
+    # so a later Blender stage cannot reuse their object IDs accidentally.
+    # Most head vertices share the same weights; avoid 16 matrix inversions per
+    # influence per vertex without rounding weights or changing arithmetic.
+    global _bind_cache
+    if _bind_cache is None or _bind_cache[0] is not native or _bind_cache[1] is not cooked:
+        _bind_cache = (native, cooked,
+                       {n: native[n] @ cooked[n].inverted() for n in native}, {})
+    transforms, blends = _bind_cache[2:]
+    key = tuple(weights.items())
+    blend = blends.get(key)
+    if blend is None:
+        blend = Matrix([[sum(transforms[n][r][c] * w for n, w in weights.items())
+                         for c in range(4)] for r in range(4)])
+        if len(blends) >= 4096:
+            blends.clear()
+        blends[key] = blend
+    return blend
+
+
 def runtime_matrix(obj, weights, native, cooked):
-    blend = Matrix([[sum((native[n] @ cooked[n].inverted())[r][c] * w
-                         for n, w in weights.items()) for c in range(4)] for r in range(4)])
+    blend = weighted_bind_matrix(weights, native, cooked)
     result = blend @ Matrix.Diagonal((1., -1., 1., 1.)) @ obj.matrix_world
     if abs(result.determinant()) < 1e-8:
         raise ValueError("Singular weighted bind transform")
     return result
+
+
+def body_enclosure_auditor(native_rows, native, cooked, body):
+    """Keep buried lower skin unchanged only after six posed enclosure checks.
+
+    Sixteen outward rays avoid the exact centre seam of the shirt mesh. This
+    is a bounded synthetic audit, not proof for every native match animation.
+    Trees are constructed lazily, once per fit, only for distant lower skin.
+    """
+    parents={b['name']:native_rows[b['parent']]['name'] if b['parent']>=0 else None for b in native_rows}
+    def descendant(name,ancestor):
+        while name:
+            if name==ancestor:return True
+            name=parents[name]
+        return False
+    trees=[]
+    actions=[[],[('sk_head','Z',35)],[('sk_head','Z',-35)],[('sk_neck','X',25)],
+             [('sk_neck','X',-20)],[('sk_shoulder_l','Y',-25),('sk_shoulder_r','Y',25),('sk_neck','X',-10)]]
+    def enclosed(point,weights):
+        if not trees:
+            for pose in actions:
+                posed={n:m.copy() for n,m in native.items()}
+                for joint,axis,degrees in pose:
+                    pivot=posed[joint].translation
+                    change=Matrix.Translation(pivot)@Matrix.Rotation(math.radians(degrees),4,axis)@Matrix.Translation(-pivot)
+                    for n in posed:
+                        if descendant(n,joint):posed[n]=change@posed[n]
+                transforms={n:posed[n]@native[n].inverted() for n in native}
+                vertices=[sum((transforms[n]@Vector(p)*w for n,w in weights.items()),Vector())
+                          for p,weights in zip(body['vertices'],body['weights'])]
+                trees.append((BVHTree.FromPolygons(vertices,body['faces'],all_triangles=True),
+                              {n:posed[n]@cooked[n].inverted() for n in native}))
+        local=weighted_bind_matrix(weights,native,cooked).inverted()@point
+        for tree,transforms in trees:
+            p=sum((transforms[n]@local*w for n,w in weights.items()),Vector())
+            for i in range(16):
+                angle=math.radians(11.25+i*22.5);direction=Vector((math.cos(angle),math.sin(angle),0))
+                hit,normal,_,distance=tree.ray_cast(p,direction)
+                if hit is None or distance<=.06 or normal.dot(direction)<=.01:return False
+        return True
+    return enclosed
 
 
 def components(mesh):
@@ -165,7 +230,8 @@ def fit(profile):
     output = Path(profile["output"]).resolve()
     if output.exists():
         raise ValueError("Refusing to overwrite a candidate directory")
-    native = rig_globals(json.loads(Path(profile["native_rig"]).read_text()))
+    native_rows=json.loads(Path(profile["native_rig"]).read_text())
+    native = rig_globals(native_rows)
     cooked = rig_globals(json.loads(Path(profile["cooked_rig"]).read_text()))
     if set(native) != set(cooked):
         raise ValueError("Native and cooked rig bones differ")
@@ -181,7 +247,9 @@ def fit(profile):
     ref_vertices = [Vector(p) for p in surface["vertices"]]
     faces = [f for f in surface["faces"] if min(ref_vertices[i].z for i in f) < stop]
     tree = BVHTree.FromPolygons(ref_vertices, faces, all_triangles=True)
-    body_tree = BVHTree.FromPolygons([Vector(p) for p in body["vertices"]], body["faces"], all_triangles=True)
+    body_vertices = [Vector(p) for p in body["vertices"]]
+    body_tree = BVHTree.FromPolygons(body_vertices, body["faces"], all_triangles=True)
+    enclosed=body_enclosure_auditor(native_rows,native,cooked,body)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.unit_settings.system = 'METRIC'
     bpy.context.scene.unit_settings.scale_length = .01
@@ -219,6 +287,7 @@ def fit(profile):
         before_normals = [n.vector.copy() for n in obj.data.corner_normals]
         materials = [m.name.split('.')[0] for m in obj.data.materials]
         changed, weight_changes, distances = set(), 0, []
+        preserved_head=[];preserved_covered=[];unsupported=[];support_repairs=[]
         if profile.get("eye") and profile["eye"]["material"] in materials:
             if report["eye"] is not None:
                 raise ValueError("More than one eye mesh")
@@ -227,17 +296,48 @@ def fit(profile):
             for v, p, old_w, old_m in zip(obj.data.vertices, points, original_weights, transforms):
                 if not lower < p.z < stop:
                     continue
+                # Jaw/chin geometry can extend below the numeric collar band.
+                # A vertex bound solely to the head is not a neck-fit target.
+                if set(old_w)=={'sk_head'}:
+                    preserved_head.append(v.index)
+                    continue
                 amount = smooth((stop-p.z)/(stop-full)) * smooth((p.z-lower)/2)
                 target, normal, face_index, distance = tree.find_nearest(p)
+                reference_surface = surface
+                reference_vertices = ref_vertices
+                reference_faces = faces
+                # Below the collar, wide chest/shoulder skin can lie outside
+                # the head asset while still matching the native body. Use
+                # that measured surface only for torso-bound lower vertices.
+                torso = sum(old_w.get(n,0) for n in ('sk_chest','sk_shoulder_l','sk_shoulder_r'))
+                posterior_neck=p.z<151 and p.y<0 and torso>.1
+                if (distance > settings["max_reference_distance_cm"] or (p.z<151 and old_w=={"sk_chest":1.})) and p.z < full and (torso >= .5 or posterior_neck):
+                    q,n,face,d = body_tree.find_nearest(p)
+                    if p.z<151 and p.y<0 and torso>=.5:
+                        posterior=[hit for hit in body_tree.find_nearest_range(p,settings['max_reference_distance_cm']) if hit[0].y<=p.y and hit[1].y<-.1]
+                        if posterior:q,n,face,d=min(posterior,key=lambda hit:hit[3])
+                        elif old_w=={'sk_chest':1.}:d=float('inf');distance=d
+                    if d <= settings["max_reference_distance_cm"]:
+                        target,normal,face_index,distance = q,n,face,d
+                        reference_surface = body
+                        reference_vertices = body_vertices
+                        reference_faces = body['faces']
                 if distance > settings["max_reference_distance_cm"]:
+                    if p.z<full and torso>=.5 and enclosed(p,old_w):
+                        preserved_covered.append(v.index)
+                        continue
+                    if p.z<151 and p.y<0 and old_w=={'sk_chest':1.} and body_tree.find_nearest(p)[3]<3.5:
+                        unsupported.append(v.index)
+                        continue
                     raise ValueError(f"{obj.name}: lower neck is too far from the native reference")
-                triangle = faces[face_index]
-                coefficients = barycentric(target, [ref_vertices[i] for i in triangle])
+                triangle = reference_faces[face_index]
+                coefficients = barycentric(target, [reference_vertices[i] for i in triangle])
                 target_weights = {}
                 for i, coefficient in zip(triangle, coefficients):
-                    for name, weight in surface["weights"][i].items():
+                    for name, weight in reference_surface["weights"][i].items():
                         target_weights[name] = target_weights.get(name, 0) + weight*coefficient
                 weights = mix_weights(old_w, target_weights, amount*settings["weight_blend"])
+                reference_point = target.copy()
                 delta = target-p
                 if delta.length > cap:
                     delta *= cap/delta.length
@@ -262,13 +362,38 @@ def fit(profile):
                     for group in obj.vertex_groups:
                         group.remove([v.index])
                     for name, weight in weights.items():
+                        # FBX strips groups unused by the source mesh. Native
+                        # neck fitting can introduce a valid shoulder/chest
+                        # influence; restore that group on the audited rig.
+                        if name not in arms[0].data.bones:
+                            raise ValueError('Fitting produced an unmapped bone: ' + name)
+                        if name not in obj.vertex_groups:
+                            obj.vertex_groups.new(name=name)
                         obj.vertex_groups[name].add([v.index], weight, 'REPLACE')
                     weight_changes += 1
                 changed.add(v.index)
                 distances.append((target-p).length)
                 motion_samples.append(dict(mesh=obj.name, index=v.index, before=list(p), after=list(target),
                                            before_weights=old_w, after_weights=weights,
-                                           native_surface=list(tree.find_nearest(p)[0]), target_weights=target_weights))
+                                           native_surface=list(reference_point), reference_kind="body" if reference_surface is body else "face", target_weights=target_weights))
+            if unsupported:
+                fitted=[runtime_matrix(obj,vertex_weights(obj,v),native,cooked)@v.co for v in obj.data.vertices]
+                support_repairs=supported_seam_moves(points,fitted,topology,changed,unsupported,cap+settings['cloth_clearance_cm'])
+                for repair in support_repairs:
+                    for index in repair['indices']:
+                        target=points[index]+Vector(repair['delta_cm'])
+                        obj.data.vertices[index].co=transforms[index].inverted()@target
+                        changed.add(index);distances.append(Vector(repair['delta_cm']).length)
+                        q,n,face,d=body_tree.find_nearest(points[index])
+                        triangle=body['faces'][face]
+                        coefficients=barycentric(q,[body_vertices[i] for i in triangle])
+                        target_weights={}
+                        for i,coefficient in zip(triangle,coefficients):
+                            for name,weight in body['weights'][i].items():
+                                target_weights[name]=target_weights.get(name,0)+coefficient*weight
+                        motion_samples.append(dict(mesh=obj.name,index=index,before=list(points[index]),after=list(target),
+                            before_weights=original_weights[index],after_weights=original_weights[index],
+                            native_surface=list(q),reference_kind='supported_body_seam',target_weights=target_weights))
             if changed:
                 rebuild_smooth_normals(obj)
                 normals = [n.vector.copy() for n in obj.data.corner_normals]
@@ -280,7 +405,7 @@ def fit(profile):
             raise ValueError("UV/topology changed during fitting")
         if not all(math.isfinite(c) for v in obj.data.vertices for c in v.co):
             raise ValueError("Non-finite fitted coordinates")
-        upper = [i for i,p in enumerate(points) if p.z >= stop]
+        upper = [i for i,p in enumerate(points) if p.z >= stop]+preserved_head+preserved_covered
         drift = max(((runtime_matrix(obj, vertex_weights(obj, obj.data.vertices[i]), native, cooked) @ obj.data.vertices[i].co-points[i]).length for i in upper), default=0)
         is_eye = profile.get('eye') and profile['eye']['material'] in materials
         if not is_eye and drift > .001:
@@ -288,7 +413,8 @@ def fit(profile):
         report["meshes"].append(dict(name=obj.name, vertices=len(points),
                                      adjusted_neck_vertices=len(changed), weight_changes=weight_changes,
                                      max_neck_move_cm=max(distances, default=0), upper_drift_cm=drift,
-                                     uv_topology_preserved=True))
+                                     preserved_head_vertices=preserved_head,preserved_covered_vertices=preserved_covered,
+                                     uv_topology_preserved=True,neighbor_support=support_repairs))
     if profile.get("eye") and report["eye"] is None:
         raise ValueError("Configured eye mesh is missing")
     if report["eye"] and report["eye"]["accepted_eye_max_drift_cm"] > .001:

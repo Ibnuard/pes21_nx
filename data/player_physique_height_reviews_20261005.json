@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "collection_snapshot_id": "fa638ee2be4db5a6",
+  "players": [
+    {
+      "base_id": 147074,
+      "native_player_id": 147074,
+      "name": "Lorenzo Palmisani",
+      "asset_fingerprint": "1711d4096e13eee0abdf",
+      "native_row_sha256": "33d3e063646352aeb8fcc94beea4697ad4a757e188de58c45b4c0611765a6a0a",
+      "api_sha256": "3a9a7865e733cd88609a80e287fe568d7b49eb6cb8c0de2e39f7162f920f0eaa",
+      "height_before_cm": 180,
+      "height_after_cm": 196,
+      "reason": "Reviewed existing BaseId/native owner, complete registered name, country, foot and one-year age progression. Adopt the frozen 2026-10-05 measurement; preserve asset identity and every nonphysical field."
+    },
+    {
+      "base_id": 153589,
+      "native_player_id": 153589,
+      "name": "Milan Zonneveld",
+      "asset_fingerprint": "270b74d9d4bde891dff3",
+      "native_row_sha256": "93d2bc9b5b03865ead4f14ee2a634f1c6481f611fc489072ff2d02cbdff77699",
+      "api_sha256": "6093e07e02ffbd9280f85d95bad6b01fbf2d025d696b2238ede65b9010894ffd",
+      "height_before_cm": 180,
+      "height_after_cm": 198,
+      "reason": "Reviewed existing BaseId/native owner, complete registered name, country, foot and one-year age progression. Adopt the frozen 2026-10-05 measurement; preserve asset identity and every nonphysical field."
+    },
+    {
+      "base_id": 170554,
+      "native_player_id": 532024,
+      "name": "Fabian Merién",
+      "asset_fingerprint": "59810da043d310734d89",
+      "native_row_sha256": "9ebeb49ccf28528bbbb2494605a2bf938323d713feedad423f5f165e8447393a",
+      "api_sha256": "e63840f56ec0b42fef462e0cd738632dede016e064c5e3ecb787fe16434810d6",
+      "height_before_cm": 180,
+      "height_after_cm": 191,
+      "reason": "Reviewed existing BaseId/native owner, complete registered name, country, foot and one-year age progression. Adopt the frozen 2026-10-05 measurement; preserve asset identity and every nonphysical field."
+    },
+    {
+      "base_id": 171367,
+      "native_player_id": 171367,
+      "name": "Hossein Nassif",
+      "asset_fingerprint": "36de9bec17760d7e8686",
+      "native_row_sha256": "9df5e727dfccab475e052eac069df8e755036ac47d3c7f2a965e17f8715df411",
+      "api_sha256": "1c5fe3c47d3263ba4c9eb04ed6fc8c6d4fa4db7342511fe9d2be343eff3a0162",
+      "height_before_cm": 170,
+      "height_after_cm": 181,
+      "reason": "Reviewed existing BaseId/native owner, complete registered name, country, foot and one-year age progression. Adopt the frozen 2026-10-05 measurement; preserve asset identity and every nonphysical field."
+    },
+    {
+      "base_id": 172193,
+      "native_player_id": 172193,
+      "name": "Guy-Noël Zohouri",
+      "asset_fingerprint": "8e0bbfaa1a67b94aca21",
+      "native_row_sha256": "a6d438699f6d530ce6616e4689e96e9ffde8d884494db951ce8974b6adb07afa",
+      "api_sha256": "2bfcf281b465645a91e559f44a068bb45bfba3e9710a5d57329931d9323dc262",
+      "height_before_cm": 176,
+      "height_after_cm": 188,
+      "reason": "Reviewed existing BaseId/native owner, complete registered name, country, foot and one-year age progression. Adopt the frozen 2026-10-05 measurement; preserve asset identity and every nonphysical field."
+    },
+    {
+      "base_id": 177820,
+      "native_player_id": 177820,
+      "name": "Matheus Lins",
+      "asset_fingerprint": "5c33bc828a313cbf2bae",
+      "native_row_sha256": "a471bf374dd110ec6c549802604c49b93c28b56b7e0ca532868a1c1c0023f310",
+      "api_sha256": "8c5fe84a956fc560ab947c818e9258449183ce7bc23ae31a236171239598d1e1",
+      "height_before_cm": 173,
+      "height_after_cm": 186,
+      "reason": "Reviewed existing BaseId/native owner, complete registered name, country, foot and one-year age progression. Adopt the frozen 2026-10-05 measurement; preserve asset identity and every nonphysical field."
+    }
+  ]
+}

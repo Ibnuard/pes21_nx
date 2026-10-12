@@ -255,6 +255,9 @@ use the **current curated selector**, not the historical 443-team master or a
    memberships reference the same canonical identity. Names alone and reused
    numeric IDs are not sufficient evidence. Tombstones reserve their slots
    and require native as well as web fingerprint verification before reactivation.
+   An explicit later height/weight correction uses the separate
+   [physical-data synchronization tool](PLAYER_PHYSIQUE_SYNC.md), which preserves
+   these identities and assets while updating only the two native measurements.
 4. New verified identities may be imported only with the approved asset
    policy: neutral portrait, generic native appearance, no donor face or
    commentary. Native IDs avoid current and historical IDs and asset owners;

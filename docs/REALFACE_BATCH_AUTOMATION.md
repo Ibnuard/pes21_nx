@@ -2,6 +2,11 @@
 
 11 Oktober 2026. Kandidat lokal; belum diterima di Switch.
 
+Untuk perluasan ke seluruh tim Liga Inggris/Spanyol dalam selector, gunakan
+[factory liga v22](REALFACE_LEAGUE_AUTOMATION.md). Pipeline tersebut menambahkan
+cache per pemain, material rambut berulang, satu PAK gabungan, dan daftar
+status lengkap yang dapat dicari.
+
 Roster dikunci pada selector dan dt200 build `e861c583ec78e9ae`, team 108,
 29 pemain. Ini mencakup transfer dalam dataset tersebut. Registry publik
 snapshot lama tidak dipakai sebagai pengganti bukti identitas runtime.

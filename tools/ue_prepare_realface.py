@@ -28,7 +28,7 @@ def absent(path):
         raise RuntimeError('Refusing existing player asset: '+path)
 
 
-def texture(source,name,alpha):
+def texture(source,name,alpha,max_size=128):
     path=destination+'/'+name
     absent(path)
     task=unreal.AssetImportTask()
@@ -38,7 +38,8 @@ def texture(source,name,alpha):
     assets.import_asset_tasks([task])
     result=unreal.load_asset(path)
     if result is None:raise RuntimeError('Texture import failed: '+path)
-    result.set_editor_property('max_texture_size',128)
+    if max_size not in (128,256):raise RuntimeError('Unsupported mobile face texture size')
+    result.set_editor_property('max_texture_size',max_size)
     result.set_editor_property('lod_bias',0)
     result.set_editor_property('srgb',True)
     result.set_editor_property('compression_no_alpha',not alpha)
@@ -49,7 +50,7 @@ def texture(source,name,alpha):
 
 
 face_texture=texture(profile['face_texture'],player+'_face_tablet',False)
-texture(profile['hair_texture'],player+'_hair_parts_color_tablet',True)
+texture(profile['hair_texture'],player+'_hair_parts_color_tablet',True,profile.get('hair_texture_size',128))
 eye_texture=texture(profile['native_eye_texture'],player+'_eyes_tablet',False)
 
 
@@ -77,6 +78,10 @@ for part in ('face','hair'):
         options.set_editor_property(key,value)
     options.get_editor_property('skeletal_mesh_import_data').set_editor_property(
         'normal_import_method',unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
+    # Preserve very thin source hair cards. UE's default position weld merges
+    # distinct corners before cook; exact duplicates may still be audited.
+    options.get_editor_property('skeletal_mesh_import_data').set_editor_property(
+        'threshold_position',0.0)
     task=unreal.AssetImportTask()
     for key,value in {'filename':profile[part+'_fbx'],'destination_path':destination,
                       'destination_name':name,'automated':True,'save':True,

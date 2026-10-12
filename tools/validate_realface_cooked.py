@@ -17,9 +17,11 @@ from mathutils.kdtree import KDTree
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_realface_rig import audit_rig
 from blender_export_ue_fbx import rig_globals
-from blender_fit_realface import runtime_matrix, vertex_weights
+from blender_fit_realface import runtime_matrix, vertex_weights, weighted_bind_matrix
 from realface_reference import load_reference
-from realface_cook_policy import collapsed_triangle
+from realface_cook_policy import collapsed_triangle, audited_triangle_drop
+from realface_triangle_audit import surviving_triangles
+from realface_vertex_audit import match_vertices
 
 
 def imported_weights(source):
@@ -45,7 +47,7 @@ def validate_part(spec, native, contract, contract_rows):
         if len(materials) != 1 or materials[0] not in spec['material_map']:
             raise ValueError('Unexpected FBX material: ' + str(materials))
         kind = spec['material_map'][materials[0]]
-        row = expected.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, collapsed=0))
+        row = expected.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, collapsed=0, faces=[]))
         base = len(row['points'])
         weights = [vertex_weights(obj, v) for v in obj.data.vertices]
         row['points'].extend(runtime_matrix(obj, w, native, contract) @ v.co
@@ -60,6 +62,11 @@ def validate_part(spec, native, contract, contract_rows):
             u, v = obj.data.uv_layers[0].data[loop.index].uv
             row['uv'][base + loop.vertex_index].add((u, 1-v))
         obj.data.calc_loop_triangles()
+        for triangle in obj.data.loop_triangles:
+            ids=[base+i for i in triangle.vertices]
+            uv=[obj.data.uv_layers[0].data[i].uv for i in triangle.loops]
+            row['faces'].append(dict(points=[tuple(row['bind_points'][i]) for i in ids],
+                uv=[(u,1-v) for u,v in uv],weights=[imported_weights(row['weights'][i]) for i in ids]))
         row['triangles'] += len(obj.data.loop_triangles)
         row['collapsed'] += sum(collapsed_triangle([row['bind_points'][base+i]
                                 for i in triangle.vertices])
@@ -69,60 +76,54 @@ def validate_part(spec, native, contract, contract_rows):
     document = json.loads(path.read_text())
     mesh = load_reference(path)
     actual = {}
-    start = 0
+    start = 0;face_start=0
     for primitive in document['meshes'][0]['primitives']:
         material = document['materials'][primitive['material']]['name']
         if material not in spec['cooked_material_map']:
             raise ValueError('Unexpected cooked material: ' + material)
         kind = spec['cooked_material_map'][material]
         count = document['accessors'][primitive['attributes']['POSITION']]['count']
-        row = actual.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0))
+        row = actual.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, faces=[]))
         for index in range(start, start+count):
             weights = mesh['weights'][index]
-            transform = Matrix([[sum((native[b] @ actual_rig[b].inverted())[j][k]*v
-                                    for b, v in weights.items())
-                                 for k in range(4)] for j in range(4)])
+            transform = weighted_bind_matrix(weights, native, actual_rig)
             row['points'].append(transform @ Vector(mesh['vertices'][index]))
             row['bind_points'].append(Vector(mesh['vertices'][index]))
             row['uv'].append(mesh['uv'][index])
             row['weights'].append(weights)
-        row['triangles'] += document['accessors'][primitive['indices']]['count']//3
+        face_count=document['accessors'][primitive['indices']]['count']//3
+        for ids in mesh['faces'][face_start:face_start+face_count]:
+            row['faces'].append(dict(points=[mesh['vertices'][i] for i in ids],
+                uv=[mesh['uv'][i] for i in ids],weights=[mesh['weights'][i] for i in ids]))
+        face_start+=face_count
+        row['triangles'] += face_count
         start += count
     if set(actual) != set(expected):
         raise ValueError('Cooked mesh omitted or added a material component')
     results = {}
     for kind, old in expected.items():
         new = actual[kind]
+        surface_proof=None
         dropped = spec.get('expected_collapsed_triangles', {}).get(kind, 0)
-        if dropped and old['collapsed'] != dropped:
+        if spec.get('permit_exact_source_collapses'):
+            # Deterministic batch policy: only triangles whose three source
+            # bind-space corners all coincide within 0.00001 cm may disappear.
+            # A thin but extended card still fails the exact count check.
+            try:
+                dropped = audited_triangle_drop(old['triangles'], new['triangles'], old['collapsed'])
+            except ValueError as error:
+                dropped=old['triangles']-new['triangles']
+                if not 0<dropped<=old['collapsed']:
+                    raise ValueError('Cooked triangle count changed: ' + kind) from error
+                surface_proof=surviving_triangles(old['faces'],new['faces'],.005 if kind=='eye' else .03)
+        if dropped and old['collapsed'] != dropped and surface_proof is None:
             raise ValueError('Audited collapsed triangle count changed: ' + kind)
         if old['triangles'] - dropped != new['triangles']:
             raise ValueError('Cooked triangle count changed: ' + kind)
         limit = .005 if kind == 'eye' else .03
-        tree = KDTree(len(old['points']))
         source_weights = [imported_weights(weights) for weights in old['weights']]
-        for i, point in enumerate(old['bind_points']):
-            tree.insert(point, i)
-        tree.balance()
-        errors, uv_errors, weight_errors = [], [], []
-        for point, uv, weights in zip(new['bind_points'], new['uv'], new['weights']):
-            candidates = tree.find_range(point, limit)
-            if not candidates:
-                raise ValueError('Cooked geometry moved beyond tolerance: ' + kind)
-            errors.append(min(d for _, _, d in candidates))
-            # Require a single matching position/UV/weight tuple. Independent
-            # minima could accidentally approve UVs from another seam vertex.
-            matches = [(d, max(abs(uv[k]-st[k]) for k in (0, 1)),
-                        sum(abs(weights.get(b, 0)-source_weights[i].get(b, 0))
-                            for b in weights.keys() | source_weights[i].keys()))
-                       for _, i, d in candidates for st in old['uv'][i]]
-            eligible = [m for m in matches if m[1] < .001 and m[2] < .025]
-            if not eligible:
-                raise ValueError('Cooked UV or skin weights changed: ' + str(dict(kind=kind,
-                    best=min(matches,key=lambda m:m[1]+m[2]),weights=weights,
-                    source_weights=old['weights'][candidates[0][1]])))
-            _, u, w = min(eligible, key=lambda m: m[0])
-            uv_errors.append(u); weight_errors.append(w)
+        errors,uv_errors,weight_errors=match_vertices(new['bind_points'],new['uv'],new['weights'],
+            old['bind_points'],old['uv'],source_weights,limit)
         reverse = KDTree(len(new['points']))
         for i, point in enumerate(new['bind_points']):
             reverse.insert(point, i)
@@ -132,7 +133,7 @@ def validate_part(spec, native, contract, contract_rows):
             raise ValueError('Cooked geometry dropped source vertices: ' + kind)
         results[kind] = dict(source_vertices=len(old['points']), cooked_vertices=len(new['points']),
             source_triangles=old['triangles'], triangles=new['triangles'],
-            audited_collapsed_triangles_removed=dropped,
+            audited_collapsed_triangles_removed=dropped,surviving_surface_proof=surface_proof,
             comparison_space='cooked_bind_cm',max_position_error_cm=max(errors),
             max_source_coverage_error_cm=coverage, max_uv_error=max(uv_errors),
             weight_comparison='UE4_minimum_one_percent_then_8bit',max_weight_l1_error=max(weight_errors))

@@ -240,3 +240,17 @@ def test_retargets_facial_weights_to_mobile_head_and_scales_mesh(tmp_path):
     assert document["skins"][0]["joints"] == [0, 1]
     position = document["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
     assert document["accessors"][position]["max"] == [100.0, 100.0, -0.0]
+
+
+def test_explicit_facial_aliases_are_symmetric_and_unknown_bones_still_fail():
+    import pytest
+    from tools.export_pes_fmdl_gltf import _mobile_bone_name
+    targets = {'sk_head', 'sk_neck'}
+    for side in ('Left', 'Right'):
+        for part in ('LowMiddleEyebrow', 'LowEyelid'):
+            assert _mobile_bone_name(side + part, targets) == 'sk_head'
+    assert _mobile_bone_name('Head', targets) == 'sk_head'
+    for name in ('d_scm_01_l', 'd_scm_01_r', 'd_scm_02_l', 'd_scm_02_r'):
+        assert _mobile_bone_name(name, targets) == 'sk_neck'
+    with pytest.raises(ValueError, match='no mobile skeleton mapping'):
+        _mobile_bone_name('UnverifiedFaceGroup', targets)

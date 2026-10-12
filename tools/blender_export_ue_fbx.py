@@ -225,7 +225,38 @@ def fit_mesh_island(obj, axis: str, index: int, scale: float, offset, count: int
             "offset_cm": list(offset), "index": index, "sort_axis": axis, "count": count}
 
 
-def rebuild_smooth_normals(obj) -> None:
+def repair_fold_normals(mesh):
+    """Split shading at folded corners without changing the source surface.
+
+    Unconditional smoothing across a folded hair card can point a corner
+    normal through the opposite side of its polygon. Keep every valid smooth
+    corner and use the polygon normal only at undefined or opposing corners.
+    Winding, vertices, UVs and skin weights remain untouched.
+    """
+    normals = [n.vector.copy() for n in mesh.corner_normals]
+    repaired, degenerate = [], 0
+    for polygon in mesh.polygons:
+        if polygon.area < 1e-10 or polygon.normal.length < .5:
+            degenerate += 1
+            continue
+        for i in polygon.loop_indices:
+            if normals[i].length < .5 or normals[i].dot(polygon.normal) < 0:
+                normals[i] = polygon.normal.copy()
+                repaired.append(i)
+    if repaired:
+        mesh.normals_split_custom_set(normals)
+    return dict(repaired_corners=len(repaired), total_corners=len(normals),
+                degenerate_polygons=degenerate)
+
+
+def opposed_triangle_count(mesh):
+    """Only a nondegenerate surface has a meaningful shading direction."""
+    mesh.calc_loop_triangles()
+    return sum(sum(mesh.corner_normals[i].vector.dot(tri.normal) for i in tri.loops) < 0
+               for tri in mesh.loop_triangles if tri.area >= 1e-10)
+
+
+def rebuild_smooth_normals(obj):
     """Discard stale custom normals while preserving topology, UVs and skinning.
 
     Replacing an object's mesh also clears its vertex groups in Blender, so
@@ -260,6 +291,7 @@ def rebuild_smooth_normals(obj) -> None:
         for group, weight in groups:
             obj.vertex_groups[group].add([index], weight, "REPLACE")
     rebuilt.update()
+    return repair_fold_normals(rebuilt)
 
 
 def main() -> int:
@@ -400,9 +432,10 @@ def main() -> int:
     if args.flip_faces:
         for obj in meshes:
             obj.data.flip_normals()
+    normal_repairs = []
     if args.recompute_normals:
         for obj in meshes:
-            rebuild_smooth_normals(obj)
+            normal_repairs.append(dict(mesh=obj.name, **rebuild_smooth_normals(obj)))
     # UE4.22 strips Blender's synthetic armature node only when it is named
     # "Armature". A custom name becomes an unwanted 30th root bone.
     armature.name = "Armature"
@@ -450,10 +483,7 @@ def main() -> int:
         minimum = [min(point[axis] for point in coordinates) for axis in range(3)]
         maximum = [max(point[axis] for point in coordinates) for axis in range(3)]
         obj.data.calc_loop_triangles()
-        opposed = sum(
-            sum(obj.data.corner_normals[i].vector.dot(tri.normal) for i in tri.loops) < 0
-            for tri in obj.data.loop_triangles
-        )
+        opposed = opposed_triangle_count(obj.data)
         return {
             "name": obj.name,
             "vertices": len(obj.data.vertices),
@@ -462,6 +492,7 @@ def main() -> int:
             "vertex_groups": len(obj.vertex_groups),
             "bounds_cm": {"min": minimum, "max": maximum},
             "opposed_shading_normals": opposed,
+            "degenerate_triangles": sum(tri.area < 1e-10 for tri in obj.data.loop_triangles),
         }
 
     expected_meshes = [mesh_summary(obj) for obj in meshes]
@@ -513,6 +544,7 @@ def main() -> int:
         "included_meshes": sorted(included_meshes),
         "flipped_faces": args.flip_faces,
         "recomputed_normals": args.recompute_normals,
+        "normal_repairs": normal_repairs,
         "rotation_z_degrees": args.rotate_z_degrees,
         "rotation_pivot_bone": args.rotation_pivot_bone,
         "island_fits": island_fits,

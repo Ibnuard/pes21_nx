@@ -13,6 +13,14 @@ from blender_fit_realface import vertex_weights, runtime_matrix
 from blender_export_ue_fbx import rig_globals
 
 
+def protected_normal_drift(old, new, protected):
+    """Ignore shading only on triangles that remain degenerate across export."""
+    meaningless=old['degenerate_corners'] & new['degenerate_corners']
+    drift=max(((a-b).length for i,(a,b,v) in enumerate(zip(old['normals'],new['normals'],old['loops']))
+               if v in protected and i not in meaningless),default=0)
+    return drift
+
+
 def validate(profile, candidate):
     native_rows = json.loads(Path(profile['native_rig']).read_text())
     native = rig_globals(native_rows)
@@ -34,10 +42,12 @@ def validate(profile, candidate):
             if obj.get('reference_only') or obj.name.startswith('native_'):
                 raise ValueError('Reference geometry leaked into the export')
             weights = [vertex_weights(obj, v) for v in obj.data.vertices]
+            obj.data.calc_loop_triangles()
             result[obj.name] = dict(
                 points=[runtime_matrix(obj,w,native,cooked)@v.co for w,v in zip(weights,obj.data.vertices)],
                 weights=weights, normals=[n.vector.copy() for n in obj.data.corner_normals],
                 loops=[l.vertex_index for l in obj.data.loops],
+                degenerate_corners={i for t in obj.data.loop_triangles if t.area<1e-10 for i in t.loops},
                 uv=[[tuple(l.uv) for l in layer.data] for layer in obj.data.uv_layers],
                 polys=[tuple(p.vertices) for p in obj.data.polygons],
                 materials=[m.name.split('.')[0] for m in obj.data.materials])
@@ -47,6 +57,7 @@ def validate(profile, candidate):
     if set(before) != set(after):
         raise ValueError('Exported mesh set differs')
     rows = []
+    fit_rows={r['name']:r for r in json.loads((candidate/'fit-report.json').read_text())['meshes']}
     for name, old in before.items():
         new = after[name]
         for key in ('uv', 'polys', 'materials', 'loops'):
@@ -56,12 +67,14 @@ def validate(profile, candidate):
         protected = [i for i,p in enumerate(old['points']) if
                      (p.x < 0 if profile.get('eye', {}).get('reference_side') == 'negative_x' else p.x > 0)
                      ] if eye else [i for i,p in enumerate(old['points']) if p.z >= stop]
+        if not eye:
+            protected+=fit_rows[name].get('preserved_head_vertices',[])+fit_rows[name].get('preserved_covered_vertices',[])
         drift = max(((old['points'][i]-new['points'][i]).length for i in protected), default=0)
         if drift > .001:
             raise ValueError(name + ': protected region moved')
         if any(sum(abs(old['weights'][i].get(n,0)-new['weights'][i].get(n,0)) for n in native) > 1e-5 for i in protected):
             raise ValueError(name + ': protected skin weights changed')
-        normal_drift = max(((a-b).length for a,b,v in zip(old['normals'],new['normals'],old['loops']) if v in protected), default=0)
+        normal_drift = protected_normal_drift(old,new,set(protected))
         if normal_drift > .002:
             raise ValueError(name + ': protected normals changed')
         if any(len(w)>4 for w in new['weights']):
