@@ -2163,7 +2163,7 @@ static void overlay_render(void) {
     pacing.previous=0;
     if(pacing.frames>=120) {
       char message[320];
-      snprintf(message,sizeof(message),"v20 session=%u time=%s stadium=%u day_lite=%u csm=%d weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
+      snprintf(message,sizeof(message),"v30 session=%u time=%s stadium=%u day_lite=%u csm=%d weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
           pacing.session,pacing.day?"DAY":"NIGHT",pacing.stadium,pacing.day_lite,pacing.cascades,
           nx_weather_label(pacing.weather),pacing.season,pacing.frames,
           (unsigned long long)(pacing.total/pacing.frames/1000u),
@@ -7451,7 +7451,7 @@ static void overlay_render(void) {
                    kit_number ? kit_number : 1u);
         value = kit_value;
       } else if (row == 0) {
-        value = stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index());
+        value = pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index());
       } else if (row == 1) {
         value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
       } else if (row == 2) {
@@ -7703,17 +7703,20 @@ static void overlay_render(void) {
           EFOOTBALL_FONT_BOLD, verts + quads * 24);
       custom_dark_text_quads += line_quads;
       quads += line_quads;
-      for (uint32_t option = 0; option < pes_controller_stadium_catalog_count(); option++) {
-        if (option == stadium_focus)
-          continue;
-        const char *stadium_value = stadium_catalog_label(option);
+      const uint32_t stadium_count = pes_controller_stadium_catalog_count();
+      for (int relative = -1; relative <= 1; relative += 2) {
+        if (stadium_count < 2 || (stadium_count == 2 && relative == -1)) continue;
+        const uint32_t option = relative < 0
+            ? (stadium_focus ? stadium_focus - 1 : stadium_count - 1)
+            : (stadium_focus + 1) % stadium_count;
+        const char *stadium_value = pes_controller_stadium_catalog_label(option);
         const float value_width = measure_efootball_line(
             stadium_value, (int)strlen(stadium_value), title_gh,
             EFOOTBALL_FONT_STENCIL);
         line_quads = emit_efootball_line(
             stadium_value, (int)strlen(stadium_value),
             (float)screen_width * 0.5f - value_width * 0.5f,
-            card_y + (0.235f + 0.080f * (float)option) *
+            card_y + (0.315f + 0.080f * (float)relative) *
                          (float)screen_height,
             title_gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
         custom_dark_text_quads += line_quads;
@@ -7778,14 +7781,14 @@ static void overlay_render(void) {
     } else if (page == PES_2P_PREMATCH_HUB_PAGE_STADIUM) {
       const uint32_t stadium_focus =
           pes_controller_2p_prematch_hub_stadium_index();
-      const char *stadium_value = stadium_catalog_label(stadium_focus);
+      const char *stadium_value = pes_controller_stadium_catalog_label(stadium_focus);
       const float stadium_width = measure_efootball_line(
           stadium_value, (int)strlen(stadium_value), title_gh,
           EFOOTBALL_FONT_STENCIL);
       line_quads = emit_efootball_line(
           stadium_value, (int)strlen(stadium_value),
           (float)screen_width * 0.5f - stadium_width * 0.5f,
-          card_y + (0.235f + 0.080f * (float)stadium_focus) *
+          card_y + 0.315f *
                        (float)screen_height,
           title_gh, EFOOTBALL_FONT_STENCIL, verts + quads * 24);
       custom_focus_text_quads += line_quads;

@@ -16,6 +16,23 @@ def fixture():
 
 
 class CrowdTests(unittest.TestCase):
+    def test_multigroup_legacy_and_explicit_empty_tiers(self):
+        original=fixture()
+        group=original[64:]
+        first=56
+        # Two groups plus a four-byte empty next tier. Both source versions
+        # use the same bounded quad records and absolute group pointers.
+        section=struct.pack('<3I',2<<16,first+12,first+12+len(group))+group+group
+        empty=first+len(section)
+        for header in ((0,0),(1,1),(4,0)):
+            data=struct.pack('<14I',*header,first,empty,*([0]*10))+section+struct.pack('<I',256)
+            self.assertEqual(len(read_areas(data)),2)
+            bad=bytearray(data);struct.pack_into('<I',bad,64,first+12)
+            with self.assertRaises(ValueError):read_areas(bad)
+            with self.assertRaises(ValueError):read_areas(data+b'junk')
+        bad=bytearray(data);struct.pack_into('<2I',bad,0,4,1)
+        with self.assertRaises(ValueError):read_areas(bad)
+
     def test_rows_follow_seating_rake_with_bounded_repeating_uvs(self):
         areas = read_areas(fixture())
         vertices, faces, uvs = crowd_rows(areas)

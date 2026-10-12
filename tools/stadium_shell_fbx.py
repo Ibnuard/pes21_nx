@@ -9,17 +9,23 @@ from pathlib import Path
 import sys
 import argparse
 import bpy
+import bmesh
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('work', type=Path)
 parser.add_argument('--triangle-ratio', type=float, default=1.0)
 parser.add_argument('--crowd-area', type=Path)
 parser.add_argument('--crowd-atlas', type=Path)
+parser.add_argument('--crowd-flipbook', action='store_true')
+parser.add_argument('--target-triangles', type=int)
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
 if not .5 <= args.triangle_ratio <= 1 or bool(args.crowd_area) != bool(args.crowd_atlas):
     raise ValueError('Use ratio .5..1 and provide both crowd area and atlas')
 work = args.work.resolve()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from stadium_assets import asset_key, material_key
 report = json.loads((work / "conversion.local.json").read_text())
+stadium_key = asset_key(report.get('key', 'Anfield'))
 bpy.ops.object.select_all(action="SELECT")
 bpy.ops.object.delete(use_global=False)
 for part in report["parts"]:
@@ -29,25 +35,47 @@ for obj in list(bpy.context.scene.objects):
     if obj.type != "MESH":
         bpy.data.objects.remove(obj, do_unlink=True)
         continue
+    # Fox stores clockwise front faces; glTF/Blender use counter-clockwise.
+    # The old two-sided material hid this mismatch. Correct it before enabling
+    # source backface culling and before decimation; native crowd is added later.
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
     for slot in obj.material_slots:
         material = slot.material
         images = [n.image for n in material.node_tree.nodes
                   if n.type == "TEX_IMAGE" and n.image] if material and material.use_nodes else []
-        key = Path(images[0].filepath).stem if images else "plain_concrete"
+        texture_key = Path(images[0].filepath).stem if images else "plain_concrete"
+        masked = bool(material.get('nxMasked', 'alp' in texture_key))
+        two_sided = bool(material.get('nxTwoSided', True))
+        key = texture_key + ('_cut' if masked else '_solid') + ('_two' if two_sided else '_one')
         if key not in materials:
-            material.name = "M_" + key
+            material.name = material_key("M_" + key)
             materials[key] = material
+            if images:
+                report.setdefault('texture_files', {})[material.name] = str(Path(bpy.path.abspath(images[0].filepath)).resolve())
+            report.setdefault('material_policies', {})[material.name] = dict(masked=masked, two_sided=two_sided)
+            if texture_key in report['textures']:
+                report['textures'][material.name[2:]] = report['textures'][texture_key]
         slot.material = materials[key]
 bpy.ops.object.select_all(action="SELECT")
 bpy.context.view_layer.objects.active = next(o for o in bpy.context.scene.objects if o.type == "MESH")
 bpy.ops.object.join()
 shell = bpy.context.object
-shell.name = "AnfieldShell"
+shell.name = stadium_key + 'Shell'
 shell.data.calc_loop_triangles()
 original_triangles = len(shell.data.loop_triangles)
-if args.triangle_ratio < 1:
+ratio = args.triangle_ratio
+if args.target_triangles is not None:
+    if not 30000 <= args.target_triangles <= 140000:
+        raise ValueError('Invalid final shell triangle budget')
+    ratio = min(1., args.target_triangles / original_triangles)
+if ratio < 1:
     modifier = shell.modifiers.new('Mobile shell reduction', 'DECIMATE')
-    modifier.ratio = args.triangle_ratio
+    modifier.ratio = ratio
     modifier.use_collapse_triangulate = True
     bpy.ops.object.modifier_apply(modifier=modifier.name)
 shell.data.calc_loop_triangles()
@@ -95,7 +123,8 @@ if args.crowd_area:
     report['textures']['crowd_seated'] = {'alpha_range': [0,255],
         'max_texture_size': 1024, 'source': 'owned native seated audience atlas'}
     report['crowd'] = {'authored_rows': len(faces), 'fitted_rows': len(kept_faces),
-                       'triangles': 2*len(kept_faces), 'animated': False}
+                       'triangles': 2*len(kept_faces), 'animated': args.crowd_flipbook}
+    report['crowd_flipbook'] = args.crowd_flipbook
     bpy.ops.object.select_all(action='DESELECT')
     shell.select_set(True)
     crowd.select_set(True)
@@ -107,7 +136,10 @@ bpy.ops.mesh.select_all(action="SELECT")
 bpy.ops.object.mode_set(mode="OBJECT")
 used, remap = [], {}
 old = list(shell.data.materials)
+active_slots = {p.material_index for p in shell.data.polygons}
 for i, material in enumerate(old):
+    if i not in active_slots:
+        continue
     if material not in used:
         used.append(material)
     remap[i] = used.index(material)
@@ -119,15 +151,17 @@ for polygon, index in zip(shell.data.polygons, indices):
     polygon.material_index = index
 bpy.context.scene.unit_settings.system = "METRIC"
 bpy.context.scene.unit_settings.scale_length = 1.0
-bpy.ops.export_scene.fbx(filepath=str(work / "AnfieldShell.fbx"),
+bpy.ops.export_scene.fbx(filepath=str(work / (stadium_key + 'Shell.fbx')),
     use_selection=True, object_types={"MESH"}, global_scale=1.0,
     apply_unit_scale=True, apply_scale_options="FBX_SCALE_NONE",
     axis_forward="-Y", axis_up="Z", use_mesh_modifiers=True,
     bake_anim=False, path_mode="ABSOLUTE", add_leaf_bones=False)
-report["fbx"] = str(work / "AnfieldShell.fbx")
+report["fbx"] = str(work / (stadium_key + 'Shell.fbx'))
+report['close_camera_cutaway'] = True
+report['source_winding'] = 'Fox clockwise converted to counter-clockwise before reduction'
 report["material_slots"] = [m.name for m in used]
 report["blender_bounds"] = [list(min(v.co[i] for v in shell.data.vertices) for i in range(3)),
                              list(max(v.co[i] for v in shell.data.vertices) for i in range(3))]
 (work / "fbx.local.json").write_text(json.dumps(report, indent=2))
-bpy.ops.wm.save_as_mainfile(filepath=str(work / "AnfieldShell.blend"))
+bpy.ops.wm.save_as_mainfile(filepath=str(work / (stadium_key + 'Shell.blend')))
 print("PESNX_STADIUM_FBX_OK", len(shell.data.polygons), len(used))

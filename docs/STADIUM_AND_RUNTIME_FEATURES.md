@@ -1,5 +1,25 @@
 # Stadium and runtime expansion — 2026-10-10
 
+For the ten-addon registry and current Anfield Stadium naming, see
+[Stadium expansion v25](STADIUM_EXPANSION_V25.md). The sections below retain
+the earlier Anfield conversion history.
+
+For the lighter ten-stadium candidate following device feedback on v25, see
+[Stadium performance v26](STADIUM_PERFORMANCE_V26.md).
+
+For the selected six additions (including Old Trafford), source-surface repairs
+and near-camera/lighting optimizations, see
+[Stadium camera performance v27](STADIUM_CAMERA_PERFORMANCE_V27.md).
+
+For the user-requested overhead roofs in San Siro/Bernabeu and coplanar
+goal-side floor repair, see [Stadium roof and floor v28](STADIUM_ROOF_FLOOR_V28.md).
+Its v29 follow-up expands the left/lower bands to the requested 10–20% of the
+pitch using an NRO-only update with the same v28 stadium PAKs.
+
+After further device testing, [Camp Nou v30](STADIUM_CAMP_NOU_V30.md) retires
+San Siro and Santiago Bernabeu from the menu and adds an optimized Camp Nou
+trial with a single-sided roof.
+
 Accepted Day pitch checkpoint: `288ab12` (Stadium Lite v6), pushed to
 `cupleague`. This expansion is a test build on top of that checkpoint.
 Compilation and host tests do not establish Switch appearance, timing or FPS.

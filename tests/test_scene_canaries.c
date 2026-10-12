@@ -15,7 +15,7 @@ static uint32_t selected;
 uint32_t pes_controller_2p_prematch_hub_stadium_index(void) { return selected; }
 #define PESNX_STADIUM_CANARY_HOST_TEST
 #include "../source/stadium_canary.inc"
-static unsigned char actor[4][0x180], component[4][0x600], mesh[5][128];
+static unsigned char actor[4][0x180], component[4][0x600], mesh[6][128];
 static int hidden[4], forwarded, have_asset=1, class_token, reject_mesh;
 static int transaction, release_stage, transactions, stale_indices=1;
 static unsigned mobility;
@@ -36,6 +36,8 @@ static void *load(void *c,void *o,const uint16_t *p,const uint16_t *f,
                    uint32_t flags,void *map,int reconcile,void *context) {
   assert(c==&class_token && !o && !f && !flags && !map && reconcile && !context);
   if(!have_asset)return NULL;
+  char path[192];int i=0;for(;p[i] && i<191;i++)path[i]=(char)p[i];path[i]=0;
+  if(strstr(path,"/EtihadStadium/"))return mesh[5];
   return p[6]=='F' ? mesh[4] : mesh[0];
 }
 static int set_mesh(void *c,void *m) {
@@ -88,7 +90,8 @@ static void stadium_test(void) {
   stadium_release_resources=release_resources;stadium_flush_rendering=flush_resources;
   stadium_set_lod_count=clear_lods;stadium_set_forced_lod=reset_lod;
   assert(pes_controller_stadium_catalog_count()==1);
-  stadium_canary_installed=1; assert(pes_controller_stadium_catalog_count()==2);
+  stadium_canary_installed=1; stadium_available[1]=1; stadium_available_count=2;
+  assert(pes_controller_stadium_catalog_count()==2);
   selected=1; have_asset=0; stadium_loaded_canary(NULL);
   assert(!hidden[2] && !pes_controller_stadium_canary_active());
   assert(!transactions && stale_indices);
@@ -112,6 +115,20 @@ static void stadium_test(void) {
   assert(forwarded==6 && transactions==3 && !transaction);
   assert(!stadium_shell_member("st029_pitch_2") && !stadium_shell_member("flag"));
   assert(stadium_shell_member("st029_c") && stadium_shell_member("pitch_side_nf2"));
+  // Installing only a later PAK must not map menu index 1 to Anfield.
+  strcpy((char*)mesh[5]+0x18,"EtihadStadiumShell");
+  stadium_available[1]=2;
+  assert(!strcmp(pes_controller_stadium_catalog_label(1),"ETIHAD STADIUM"));
+  assert(!strcmp(pes_controller_stadium_catalog_label(99),"KONAMI STADIUM"));
+  *(void**)(component[0]+0x10)=&class_token;
+  stadium_loaded_canary(NULL);
+  assert(pes_controller_stadium_canary_active()==2 && *(void**)(component[0]+0x5b0)==mesh[5]);
+  int count_before=transactions;
+  stadium_loaded_canary(NULL);assert(transactions==count_before);
+  stadium_available[1]=1;stadium_loaded_canary(NULL);
+  assert(pes_controller_stadium_canary_active()==1 && *(void**)(component[0]+0x5b0)==mesh[4]);
+  selected=0;stadium_loaded_canary(NULL);
+  assert(!pes_controller_stadium_canary_active() && !hidden[2]);
 }
 
 static void *exhibition_get_tmpdb_match(void) { return (void*)1; }

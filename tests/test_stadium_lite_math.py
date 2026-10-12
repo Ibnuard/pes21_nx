@@ -11,6 +11,100 @@ from stadium_lite_preview import host_math
 
 
 class StadiumLiteMathTests(unittest.TestCase):
+    def test_camp_nou_single_roof_keeps_midfield_clear_in_both_seasons(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        profiles=(ROOT/'source/stadium_roof_profiles.h').read_text()
+        build_and_run(cc,host_math()+profiles+r'''
+int main(){
+ float values[16];stadium_roof_uniform(13,values);nxStadiumProfile=13;
+ for(int i=0;i<4;i++)nxShellRoof[i]=vec4(values[i*4],values[i*4+1],values[i*4+2],values[i*4+3]);
+ assert(values[10]==0 && values[12]==0 && values[13]==0 && values[14]==0 && values[15]==1);
+ assert(nxImportedRoofProxy(vec2(0,7000),8)==0);
+ assert(nxImportedRoofProxy(vec2(0,-7000),8)==1);
+ assert(nxImportedRoofProxy(vec2(7000,0),8)==1);
+ assert(nxImportedRoofProxy(vec2(-7000,0),8)==1);
+ for(int weather=0;weather<3;weather++)for(int winter=0;winter<2;winter++) {
+  nxStadiumClimate=vec4(weather,winter,0,0);unsigned total=0,shade=0;
+  for(int y=-3400;y<=3400;y+=50)for(int x=-5250;x<=5250;x+=50) {
+   float ground=nxRoofVisibility(vec3(x,y,0));
+   vec2 head=vec2(x,y)+nxSun.xy*((1+.45f*winter)*185/nxSun.z);
+   assert(fabsf(ground-nxRoofVisibility(vec3(head.x,head.y,185)))<.002f);
+   if(abs(x)<2500 && abs(y)<1500)assert(ground==1);
+   total++;shade+=ground<.99f;
+  }
+  assert(shade>total*.01f && shade<total*.20f);
+ }
+}
+''')
+
+    def test_tall_roofs_use_overhead_sun_and_shade_ten_to_twenty_percent(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        profiles=(ROOT/'source/stadium_roof_profiles.h').read_text()
+        build_and_run(cc,host_math()+profiles+r'''
+int main(){
+ for(int id=6;id<=7;id++) {
+  float values[16];stadium_roof_uniform(id,values);nxStadiumProfile=id;
+  for(int i=0;i<4;i++)nxShellRoof[i]=vec4(values[4*i],values[4*i+1],values[4*i+2],values[4*i+3]);
+  unsigned total=0,shade=0;
+  for(int weather=0;weather<3;weather++)for(int winter=0;winter<2;winter++) {
+   nxStadiumClimate=vec4(weather,winter,0,0);
+   for(int direction=0;direction<3;direction++) {
+    MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition.xyz=vec3(.3f*direction-.3f,.6f-.5f*direction,.25f+.2f*direction);
+    for(int y=-3400;y<=3400;y+=50)for(int x=-5250;x<=5250;x+=50) {
+     float ground=nxRoofVisibility(vec3(x,y,0));
+     assert(fabsf(ground-nxRoofVisibility(vec3(x,y,185)))<.00001f);
+     // Deeper left/lower shade must not spill into central play.
+     if(abs(x)<=4200 && abs(y)<=2000)assert(ground==1);
+     if(weather==0 && winter==0 && direction==0){total++;shade+=ground<.99f;}
+     float expected=mix(nxImportedRoofProxy(vec2(x-values[8],y-values[9]),8+50*min(weather,1)),1,.65f*min(weather,1));
+     assert(fabsf(ground-expected)<.0001f);
+    }
+   }
+  }
+  assert(shade>=total*.10f && shade<=total*.20f);
+  nxStadiumClimate=vec4(0,0,0,0);
+  assert(nxRoofVisibility(vec3(0,-3375,0))==0); // lower touchline shaded
+  assert(nxRoofVisibility(vec3(0,3375,0))==1); // upper touchline stays lit
+  assert(nxRoofVisibility(vec3(5200,0,0))==1); // right goal stays lit
+  assert(nxRoofVisibility(vec3(-5000,0,0))==0); // 2.5 m inside left goal line
+  assert(nxRoofVisibility(vec3(0,-3000,0))==0); // 4 m inside lower touchline
+  assert(nxRoofVisibility(vec3(-4400,0,0))==1); // leave the inner field lit
+  assert(nxRoofVisibility(vec3(0,-2500,0))==1);
+  assert(nxRoofVisibility(vec3(0,-4000,0))==0); // apron still receives the roof
+  printf("overhead roof %d: shaded %u/%u ground samples\n",id,shade,total);
+ }
+}
+''')
+
+    def test_imported_roof_is_shared_by_pitch_and_moving_players(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        profiles=(ROOT/'source/stadium_roof_profiles.h').read_text()
+        build_and_run(cc,host_math()+profiles+r'''
+int main(){
+ for(int id=2;id<12;id++) {
+  float values[16];stadium_roof_uniform(id,values);nxStadiumProfile=id;
+  for(int i=0;i<4;i++)nxShellRoof[i]=vec4(values[4*i],values[4*i+1],values[4*i+2],values[4*i+3]);
+  assert(nxImportedRoofProxy(vec2(0,0),8)==1);
+  assert(nxImportedRoofProxy(vec2(40000,0),8)==1);
+  assert(nxImportedRoofProxy(vec2((values[0]+values[4])*.5f,0),8)==0);
+  for(int weather=0;weather<3;weather++)for(int winter=0;winter<2;winter++) {
+   nxStadiumClimate=vec4(weather,winter,0,0);
+   float season=1+.45f*winter;
+   for(int y=-3400;y<=3400;y+=100)for(int x=-5250;x<=5250;x+=100) {
+    float ground=nxRoofVisibility(vec3(x,y,0));
+    vec2 shifted=(id==6 || id==7)?vec2(x,y):vec2(x,y)+nxSun.xy*(season*170/nxSun.z);
+    float head=nxRoofVisibility(vec3(shifted.x,shifted.y,170));
+    assert(ground>=0 && ground<=1 && head>=0 && head<=1);
+    assert(fabsf(ground-head)<.002);
+   }
+  }
+ }
+}
+''')
+
     def test_roof_holes_projection_skin_response_and_neutral_lighting(self):
         cc=shutil.which('g++')
         if not cc:self.skipTest('Host C++ compiler unavailable')

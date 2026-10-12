@@ -72,6 +72,82 @@ class RoofFastPathTests(unittest.TestCase):
         if not self.compiler:
             self.skipTest('Host C++ compiler unavailable')
 
+    def test_imported_curves_preserve_v25_shade_with_roots_only_at_soft_edges(self):
+        profiles = (ROOT / 'source/stadium_roof_profiles.h').read_text()
+        build_and_run(self.compiler, counted_math() + profiles + r'''
+static float v25Imported(vec2 p,float edge){
+ vec2 extent(nxShellRoof[0].x,nxShellRoof[0].y);
+ float inner=nxRoofDistance(p,extent,nxShellRoof[0].z);
+ if(inner<=-edge)return 1;
+ vec2 side=abs(p)-extent;
+ float panel=side.x>side.y?(p.x<0?nxShellRoof[3].x:nxShellRoof[3].y):(p.y<0?nxShellRoof[3].z:nxShellRoof[3].w);
+ if(panel<.5)return 1;
+ float outer=nxRoofDistance(p,vec2(nxShellRoof[1].x,nxShellRoof[1].y),nxShellRoof[1].z);
+ if(outer>=edge)return 1;
+ float roof=1;
+ if(inner<edge)roof=smoothstep(-edge,edge,inner);
+ if(outer>-edge)roof*=1-smoothstep(-edge,edge,outer);
+ return 1-roof;
+}
+static unsigned oldRoots,newRoots,samples;
+static void compareImported(vec2 p,float edge){
+ float inner=referenceDistance(p,vec2(nxShellRoof[0].x,nxShellRoof[0].y),nxShellRoof[0].z);
+ float outer=referenceDistance(p,vec2(nxShellRoof[1].x,nxShellRoof[1].y),nxShellRoof[1].z);
+ roots=blends=0;float old=v25Imported(p,edge);oldRoots+=roots;
+ roots=blends=0;float current=nxImportedRoofProxy(p,edge);newRoots+=roots;
+ assert(fabsf(old-current)<.0002f);
+ assert(current>=0 && current<=1);
+ // Fully lit/shaded curved regions do not need any square root or smoothing.
+ if(inner < -edge-.1f || (inner > edge+.1f && (outer < -edge-.1f || outer > edge+.1f)))assert(roots==0);
+ ++samples;
+}
+int main(){
+ const float edges[]={8,24,70,120};
+ for(int id=2;id<12;id++){
+  float values[16];stadium_roof_uniform(id,values);
+  for(int i=0;i<4;i++)nxShellRoof[i]=vec4(values[4*i],values[4*i+1],values[4*i+2],values[4*i+3]);
+  for(float edge:edges){
+   for(int y=-18000;y<=18000;y+=113)for(int x=-18000;x<=18000;x+=127)
+    compareImported(vec2(x,y),edge);
+   // Sweep both rounded contours, all signs, including exactly +/-edge.
+   for(int which=0;which<2;which++)for(int angle=1;angle<90;angle+=3)
+    for(int offset=-20;offset<=20;offset++)for(int sx=-1;sx<=1;sx+=2)for(int sy=-1;sy<=1;sy+=2){
+     vec4 b=nxShellRoof[which];float r=b.z+edge*offset/20;
+     compareImported(vec2(sx*(b.x-b.z+cosf(angle*.0174532925f)*r),
+                          sy*(b.y-b.z+sinf(angle*.0174532925f)*r)),edge);
+    }
+  }
+  // Future partial roofs still respect their four directional panel gates.
+  nxShellRoof[2].z=0;nxShellRoof[3].y=0;
+  for(int x=-16000;x<16000;x+=100)compareImported(vec2(x,100),8);
+ }
+ assert(oldRoots>100000 && newRoots<oldRoots/8);
+ printf("Imported roof: %u samples, square-root calls %u -> %u\n",samples,oldRoots,newRoots);
+}
+''')
+
+    def test_old_trafford_asymmetric_outer_roof_retains_soft_edges(self):
+        profiles = (ROOT / 'source/stadium_roof_profiles.h').read_text()
+        build_and_run(self.compiler, counted_math() + profiles + r'''
+int main(){
+ float values[16];stadium_roof_uniform(12,values);
+ for(int i=0;i<4;i++)nxShellRoof[i]=vec4(values[4*i],values[4*i+1],values[4*i+2],values[4*i+3]);
+ assert(values[7]==-50 && values[11]==-1850 && values[10]==1);
+ const float edges[]={8,24,70,120};
+ unsigned lit=0,shaded=0,soft=0;
+ for(float edge:edges)for(int y=-17000;y<17000;y+=71)for(int x=-17000;x<17000;x+=89){
+  vec2 p(x,y),outerPoint=p-vec2(values[7],values[11]);
+  float inner=referenceDistance(p,vec2(values[0],values[1]),values[2]);
+  float outer=referenceDistance(outerPoint,vec2(values[4],values[5]),values[6]);
+  float expected=1-smoothstep(-edge,edge,inner)*(1-smoothstep(-edge,edge,outer));
+  float actual=nxImportedRoofProxy(p,edge);
+  assert(actual>=0 && actual<=1 && fabsf(actual-expected)<.0002f);
+  lit+=actual==1;shaded+=actual==0;soft+=actual>0 && actual<1;
+ }
+ assert(lit>10000 && shaded>10000 && soft>1000);
+}
+''')
+
     def test_both_roofs_match_interior_corners_skylights_and_soft_edges(self):
         build_and_run(self.compiler, counted_math() + r'''
 static void compare(vec2 p,float edge,int profile){

@@ -60,6 +60,7 @@
 #include "perf_match.h"
 #include "stadium_lighting_policy.h"
 #include "stadium_environment.h"
+#include "stadium_roof_profiles.h"
 #include "ue4_hooks.h"
 #include "scene_runtime_log.h"
 #ifdef DEBUG_LOG
@@ -367,7 +368,7 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
 static __thread struct {
   GLuint program;
   GLint location, night_location, day_location, climate_location, profile_location;
-  GLint light_location;
+  GLint light_location, shell_roof_location;
   int light_day_value;
   int profile_value;
   int valid, roof_value, night_value, day_value;
@@ -415,6 +416,7 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].climate_location = glGetUniformLocation(p, "nxStadiumClimate");
       roof_uniforms[index].profile_location = glGetUniformLocation(p, "nxStadiumProfile");
       roof_uniforms[index].light_location = glGetUniformLocation(p, "nxStadiumLight[0]");
+      roof_uniforms[index].shell_roof_location = glGetUniformLocation(p, "nxShellRoof[0]");
       roof_uniforms[index].light_day_value = -1;
       roof_uniforms[index].profile_value = -1;
       roof_uniforms[index].climate_key = UINT32_MAX;
@@ -444,10 +446,15 @@ static void glUseProgram_c(GLuint p) {
         roof_uniforms[index].day_value = enabled;
       }
     }
-    if (roof_uniforms[index].profile_location >= 0) {
+    if (roof_uniforms[index].profile_location >= 0 || roof_uniforms[index].shell_roof_location >= 0) {
       const int profile = (int)pes_controller_stadium_canary_active();
       if (profile != roof_uniforms[index].profile_value) {
-        glUniform1f(roof_uniforms[index].profile_location, (GLfloat)profile);
+        if (roof_uniforms[index].profile_location >= 0)
+          glUniform1f(roof_uniforms[index].profile_location, (GLfloat)profile);
+        if (roof_uniforms[index].shell_roof_location >= 0) {
+          float roof[16]; stadium_roof_uniform((unsigned)profile,roof);
+          glUniform4fv(roof_uniforms[index].shell_roof_location,4,roof);
+        }
         roof_uniforms[index].profile_value = profile;
       }
     }

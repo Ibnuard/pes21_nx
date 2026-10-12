@@ -35,6 +35,8 @@ class SceneCanaryTests(unittest.TestCase):
             for feature in ('stadium', 'referee'):
                 scenarios = ['enabled', 'absent', 'missing-gate', 'missing-binding',
                              'bad-opcode', 'bad-plt']
+                if feature == 'stadium':
+                    scenarios += ['selected-packages', 'retired-packages', 'campnou-only']
                 if feature == 'referee':
                     scenarios += ['bad-retire-plt', 'bad-preload-plt',
                                   'bad-frame-plt', 'bad-event-plt', 'bad-event-layout', 'bad-sound-plt',
@@ -48,9 +50,18 @@ class SceneCanaryTests(unittest.TestCase):
                         (run / 'Animations').mkdir()
                         if scenario != 'absent':
                             if feature == 'stadium':
-                                pak = run / 'PesMobile/Content/Paks/PesMobile-Anfield-Android_ETC1_P.pak'
-                                pak.parent.mkdir(parents=True)
-                                pak.write_bytes(b'host presence fixture')
+                                keys = ['Anfield']
+                                retired = ['GiuseppeMeazza','ParcdesPrinces','RamonSanchezPizjuan','TottenhamStadium','WandaMetropolitano','SanSiro','SantiagoBernabeu']
+                                if scenario == 'retired-packages':
+                                    keys = retired
+                                elif scenario == 'selected-packages':
+                                    keys += retired + ['EtihadStadium','SignalIdunaPark','StamfordBridge','OldTrafford','CampNou']
+                                elif scenario == 'campnou-only':
+                                    keys = ['CampNou']
+                                for key in keys:
+                                    pak = run / ('PesMobile/Content/Paks/PesMobile-'+key+'-Android_ETC1_P.pak')
+                                    pak.parent.mkdir(parents=True, exist_ok=True)
+                                    pak.write_bytes(b'host presence fixture')
                             else:
                                 (run / 'referee-probe.txt').write_text('PESNX_REFEREE_PROBE_V1\n')
                         test = subprocess.run([str(exe), feature, scenario], cwd=run,

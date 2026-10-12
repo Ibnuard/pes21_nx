@@ -23,9 +23,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--blend', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--mesh', default='AnfieldShell')
     args = parser.parse_args(sys.argv[sys.argv.index('--')+1:])
     bpy.ops.wm.open_mainfile(filepath=str(args.blend.resolve()))
-    obj = bpy.data.objects['AnfieldShell']
+    obj = bpy.data.objects[args.mesh]
     tree = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
     # Blender export basis is (Fox X, -Fox Z, Fox Y), in metres.
     def ue(point):

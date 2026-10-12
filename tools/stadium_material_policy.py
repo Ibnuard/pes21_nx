@@ -4,6 +4,15 @@ CROWD_FRAMES = 16
 CROWD_FPS = 8
 CROWD_PERIOD = CROWD_FRAMES / CROWD_FPS
 
+# Static stadium atlas: UV1.x stores the integer tile ID through FBX's V flip.
+# Repeated UV0 is kept within a 240px tile, surrounded by an 8px wrap gutter.
+ATLAS_UV = r'''
+float tile = floor(Tile.x + 0.5);
+float row = floor(tile * 0.25);
+float2 origin = float2(tile - row * 4.0, row) * 256.0 + 8.0;
+return (origin + frac(UV) * 240.0) / 1024.0;
+'''
+
 # The owned sheet contains sixteen vertical animation frames, not sixteen
 # different crowd rows. Existing geometry used an 8:1 still; one new frame is
 # 16:1, so halve its U span. Sample inside each 64-pixel frame to avoid bleeding.
@@ -38,6 +47,30 @@ float entry = max(lo.x, max(lo.y, lo.z));
 float leave = min(hi.x, min(hi.y, hi.z));
 return leave >= max(1.0, entry) ? 0.0 : 1.0;
 '''
+
+# Conservative vertex-stage rejection. A box shared by a small spatial
+# cluster encloses every triangle. Collapse it only when the WHOLE box is
+# inside the existing lens sphere. The farthest box corner test is cheap;
+# leave the exact camera ray/pitch-box intersection in the pixel policy for
+# partial triangles and celebrations, avoiding extra work on all far vertices.
+CAMERA_CULL = r'''
+float3 delta = Centre - Camera;
+float2 outside = max(abs(Camera.xy) - float2(5250.0, 3400.0), 0.0);
+float lensRadius = length(outside) + 600.0;
+float3 farCorner = abs(delta) + HalfSize;
+if (dot(farCorner, farCorner) < lensRadius * lensRadius)
+    return Centre - World;
+return float3(0.0, 0.0, 0.0);
+'''
+
+
+def camera_box_hidden(centre, half_size, camera):
+    """Host counterpart of the conservative vertex cull, all units centimetres."""
+    import math
+    radius = math.hypot(*[max(abs(c)-b, 0.) for c, b in zip(camera[:2], (5250., 3400.))]) + 600
+    if sum((abs(p-c)+h)**2 for p, c, h in zip(centre, camera, half_size)) < radius**2:
+        return True
+    return False
 
 
 def crowd_uv(u, v, seconds):

@@ -1,4 +1,4 @@
-/* Optional local Anfield shell. Uses native pitch, goals, lights and cameras.
+/* Optional local stadium shells. Uses native pitch, goals, lights and cameras.
  * Runs on LoadedCall's game thread. No UObject pointer survives the callback. */
 #include "stadium_catalog.h"
 #include "scene_runtime_log.h"
@@ -25,6 +25,8 @@ static int (*stadium_set_lod_count)(void *, uint32_t, uint32_t);
 static void (*stadium_set_forced_lod)(void *, int);
 static void **stadium_world;
 static uint32_t stadium_canary_installed, stadium_canary_active;
+static uint32_t stadium_available[NX_STADIUM_COUNT] = {0};
+static uint32_t stadium_available_count = 1;
 
 static void stadium_canary_note(const char *text) {
   scene_runtime_note("stadium",text);
@@ -37,7 +39,13 @@ static void stadium_canary_note(const char *text) {
 }
 
 uint32_t pes_controller_stadium_catalog_count(void) {
-  return stadium_canary_installed ? 2u : 1u;
+  return stadium_canary_installed ? stadium_available_count : 1u;
+}
+static uint32_t stadium_catalog_id(uint32_t index) {
+  return index < pes_controller_stadium_catalog_count() ? stadium_available[index] : 0;
+}
+const char *pes_controller_stadium_catalog_label(uint32_t index) {
+  return stadium_catalog_label(stadium_catalog_id(index));
 }
 uint32_t pes_controller_stadium_canary_active(void) {
   return __atomic_load_n(&stadium_canary_active, __ATOMIC_ACQUIRE);
@@ -88,7 +96,7 @@ static void stadium_loaded_canary(void *loader) {
     if (actors.data) stadium_engine_free(actors.data);
     return;
   }
-  const int requested = pes_controller_2p_prematch_hub_stadium_index() == 1;
+  uint32_t requested = stadium_catalog_id(pes_controller_2p_prematch_hub_stadium_index());
   void *carrier = NULL, *carrier_actor = NULL;
   int previous_canary = 0;
   for (int32_t i = 0; i < actors.num; ++i) {
@@ -100,21 +108,24 @@ static void stadium_loaded_canary(void *loader) {
     void *mesh = *(void **)((char *)component + 0x5b0);
     char name[96];
     if (!mesh || !stadium_object_name(mesh, name)) continue;
-    if (!strcmp(name, "AnfieldShell")) previous_canary = 1;
-    if (!strcmp(name, "st029_b") || !strcmp(name, "AnfieldShell")) {
+    if (stadium_imported_mesh(name)) previous_canary = 1;
+    if (!strcmp(name, "st029_b") || stadium_imported_mesh(name)) {
       carrier = component; carrier_actor = actor;
     }
   }
   if (!carrier || (!requested && !previous_canary)) {
     stadium_canary_note(requested
-        ? "Anfield not applied: native shell carrier unavailable. Test with High quality."
+        ? "Imported stadium not applied: native shell carrier unavailable. Test with High quality."
         : "Konami stadium selected.");
     stadium_engine_free(actors.data); return;
   }
   const uint64_t asset_begin=scene_runtime_ms();
-  void *replacement = stadium_load_mesh(requested
-      ? "/Game/FootballNX/Stadiums/Anfield/AnfieldShell.AnfieldShell"
-      : "/Game/Assets/bg_lighting_AM1/Meshes/st029_b.st029_b");
+  void *replacement = stadium_load_mesh(nx_stadium_catalog[requested].object);
+  if (!replacement && previous_canary) {
+    stadium_canary_note("Selected asset unavailable; restoring native stadium.");
+    requested = 0;
+    replacement = stadium_load_mesh(nx_stadium_catalog[0].object);
+  }
   if (!replacement) {
     stadium_canary_note("Stadium replacement asset unavailable; native shell retained.");
     stadium_engine_free(actors.data); return;
@@ -161,7 +172,7 @@ static void stadium_loaded_canary(void *loader) {
     void *mesh = *(void **)((char *)component + 0x5b0);
     char name[96];
     if (mesh && stadium_object_name(mesh, name) && stadium_shell_member(name))
-      stadium_hide_actor(actor, requested);
+      stadium_hide_actor(actor, requested != 0);
   }
   stadium_engine_free(actors.data);
   __atomic_store_n(&stadium_canary_active, requested, __ATOMIC_RELEASE);
@@ -172,15 +183,22 @@ static void stadium_loaded_canary(void *loader) {
       (unsigned long long)(asset_done-asset_begin),
       (unsigned long long)(scene_runtime_ms()-asset_done),mesh_changed);
   scene_runtime_note("stadium",timing);
-  stadium_canary_note(!requested ? "Konami stadium restored." : cleared_lods
-      ? "Anfield v5 applied; old instance LOD/pre-cull/lightmap caches released."
-      : "Anfield v5 applied; existing component resources retained.");
+  snprintf(timing,sizeof(timing),"%s applied; mesh=%s caches=%s",
+      stadium_catalog_label(requested),nx_stadium_catalog[requested].mesh,
+      cleared_lods ? "released" : "retained");
+  stadium_canary_note(timing);
 }
 #ifndef PESNX_STADIUM_CANARY_HOST_TEST
 static void install_stadium_canary(so_module *module) {
-  FILE *package = fopen("PesMobile/Content/Paks/PesMobile-Anfield-Android_ETC1_P.pak", "rb");
-  if (!package) return;
-  fclose(package);
+  stadium_available_count = 1;
+  for (uint32_t id=1; id<NX_STADIUM_COUNT; ++id) {
+    if (!stadium_catalog_selectable(id)) continue;
+    FILE *package = fopen(nx_stadium_catalog[id].package, "rb");
+    if (!package) continue;
+    fclose(package);
+    stadium_available[stadium_available_count++] = id;
+  }
+  if (stadium_available_count == 1) return;
   scene_runtime_begin();
   const char *root_symbol =
       "_ZN6AActor23execK2_GetRootComponentEP7UObjectR6FFramePv";
@@ -225,6 +243,6 @@ static void install_stadium_canary(so_module *module) {
 #undef STADIUM_BIND
   hook_arm64(loaded_plt, (uintptr_t)stadium_loaded_canary);
   stadium_canary_installed = 1;
-  stadium_canary_note("Anfield package detected; select ANFIELD (TEST) in Stadium settings.");
+  stadium_canary_note("Local stadium packages detected; select a stadium in Stadium settings.");
 }
 #endif

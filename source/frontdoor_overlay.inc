@@ -152,7 +152,7 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
       s->kit_number=pes_controller_2p_prematch_hub_kit_number(side);
     }
     snprintf(v->subtitle,sizeof(v->subtitle),"%s / %s / %s",
-        stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
+        pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
         pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
         nx_weather_label(pes_controller_stadium_weather()));
   }
@@ -161,7 +161,7 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
     static const char *const labels[]={"STADIUM","MATCH TIME","WEATHER","SEASON","GRASS LENGTH","PITCH CONDITION"};
     static const char *const grass[]={"SHORT","NORMAL","LONG"};
     static const char *const pitch[]={"DRY","NORMAL","WET"};
-    const char *values[]={stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
+    const char *values[]={pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
       pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
       nx_weather_label(pes_controller_stadium_weather()),
       pes_controller_stadium_season() ? "WINTER" : "SUMMER",

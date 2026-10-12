@@ -214,13 +214,23 @@ int main(int argc, char **argv) {
   } else {
   if (stadium) install_stadium_canary(&module);
   else install_referee_probe(&module);
-  const int expected = !strcmp(scenario, "enabled");
+  const int expected = !strcmp(scenario, "enabled") || !strcmp(scenario, "selected-packages") || !strcmp(scenario, "campnou-only");
   assert(hooks == (expected ? (stadium ? 1u : 17u) : 0u));
   assert((stadium ? stadium_canary_installed : referee_probe_enabled) == (unsigned)expected);
   if (expected) {
     /* Bind eventual native calls to RX, but only inspect/patch backing now. */
     uintptr_t runtime = (uintptr_t)module.load_virtbase;
     if (stadium) {
+      if (!strcmp(scenario,"selected-packages")) {
+        const unsigned wanted[]={0,1,2,8,9,12,13};
+        assert(stadium_available_count==sizeof(wanted)/sizeof(wanted[0]));
+        for(unsigned i=0;i<stadium_available_count;i++)assert(stadium_available[i]==wanted[i]);
+        assert(!strcmp(pes_controller_stadium_catalog_label(5),"OLD TRAFFORD"));
+        assert(!strcmp(pes_controller_stadium_catalog_label(6),"CAMP NOU"));
+      } else if (!strcmp(scenario,"campnou-only")) {
+        assert(stadium_available_count==2 && stadium_available[1]==13);
+        assert(!strcmp(pes_controller_stadium_catalog_label(1),"CAMP NOU"));
+      }
       assert((uintptr_t)stadium_set_mesh == runtime + 0x400);
       assert((uintptr_t)stadium_loaded_original == runtime + 0x1000);
       assert(hook_sites[0] == 0x38c3dc0);
