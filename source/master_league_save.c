@@ -11,11 +11,12 @@
 #endif
 
 #define ML_SAVE_MAGIC 0x314c4d46u /* FML1 */
-#define ML_SAVE_VERSION 5u
+#define ML_SAVE_VERSION 6u
 #define ML_V1_SIZE offsetof(MasterLeague, options)
 #define ML_V2_SIZE offsetof(MasterLeague, office)
 #define ML_V3_SIZE offsetof(MasterLeague, offer_seen)
 #define ML_V4_SIZE offsetof(MasterLeague, world)
+#define ML_V5_SIZE offsetof(MasterLeague, history)
 typedef struct { uint32_t magic, version, size, sequence, checksum; } MlSaveHeader;
 
 static uint32_t ml_checksum(const MasterLeague *career, size_t size) {
@@ -41,6 +42,7 @@ static int ml_read_copy(uint32_t slot, uint32_t copy, const char *content,
        (header.version==2u && header.size==ML_V2_SIZE) ||
        (header.version==3u && header.size==ML_V3_SIZE) ||
        (header.version==4u && header.size==ML_V4_SIZE) ||
+       (header.version==5u && header.size==ML_V5_SIZE) ||
        (header.version==ML_SAVE_VERSION && header.size==sizeof(*out))) &&
       fread(out, 1, header.size, file) == header.size;
   const int end = fgetc(file) == EOF, closed = fclose(file) == 0;

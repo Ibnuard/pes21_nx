@@ -1,5 +1,20 @@
 # FootballNX 26 — Competition Modes Plan
 
+## Implemented reliability follow-up (2026-10-15)
+
+Cup and League now retain failed-save state visibly until a successful retry.
+NEXT cannot progress past unsaved results; the leave confirmation retries saving
+and keeps the hub open on failure. Played knockout ties require an authoritative
+penalty winner instead of guessing from a seed, while COM simulation remains
+deterministic. Missing penalty information is rejected without mutating the
+fixture, and repeated result notifications cannot apply a completed match twice.
+
+New competitions receive fresh seeds without changing seeds on edit or load.
+League adds balanced home/away scheduling, explicit pre-season tie-break policy,
+and cross-club BaseId scorer aggregation. Master League adds a persistent,
+read-only season archive. See `FOOTBALLNX_LEAGUE_DESIGN.md` and
+`MASTER_LEAGUE_IMPLEMENTATION.md` for compatibility and verification boundaries.
+
 Status: design baseline; Cup implementation flow updated 2026-09-24
 Branch: cupleague
 Owner: Androswitch Project

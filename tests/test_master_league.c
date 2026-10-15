@@ -23,6 +23,10 @@ typedef struct { MasterLeagueV1 prefix; MlCareerOptions options; } MasterLeagueV
 _Static_assert(sizeof(MasterLeagueV2)==offsetof(MasterLeague,office),"v2 save ABI changed");
 typedef struct { MasterLeagueV2 prefix; _Alignas(8) MlOfficeState office; } MasterLeagueV3;
 _Static_assert(sizeof(MasterLeagueV3)==offsetof(MasterLeague,offer_seen),"v3 save ABI changed");
+typedef struct { MasterLeagueV3 prefix; _Alignas(8) uint32_t receipts[ML_MAX_OFFERS]; } FrozenMasterLeagueV4;
+typedef struct { FrozenMasterLeagueV4 prefix; _Alignas(8) MlWorldState world; } MasterLeagueV5;
+_Static_assert(sizeof(FrozenMasterLeagueV4)==offsetof(MasterLeague,world),"v4 save ABI changed");
+_Static_assert(sizeof(MasterLeagueV5)==offsetof(MasterLeague,history),"v5 save ABI changed");
 
 static void make_career(MasterLeague *c, uint32_t teams_count) {
   const MlSettings settings={11u,101u,3u,10u,5u,1u,5u,15u};
@@ -228,6 +232,14 @@ static void unread_tests(MasterLeague *c,MasterLeague *copy) {
 int main(void) {
   MasterLeague *c=malloc(sizeof(*c)), *copy=malloc(sizeof(*copy));
   assert(c && copy);
+  make_career(c,4u);
+  assert(league_tournament_credit_goals(&c->league,101u,1001u,10001u,"Transferred striker",6u));
+  assert(!*ml_transfer(c,1u,102u,3u));
+  assert(c->players[1].identity==1001u && c->players[1].club==102u);
+  assert(league_tournament_credit_goals(&c->league,102u,1001u,10001u,"Transferred striker",7u));
+  assert(league_tournament_credit_goals(&c->league,102u,1101u,10101u,"Runner up",10u));
+  uint16_t leaders[4];assert(league_tournament_top_scorers(&c->league,leaders)==2u);
+  assert(c->league.scorers[leaders[0]].base_id==1001u && league_tournament_scorer_goals(&c->league,leaders[0])==13u);
   office_tests(c,copy);
   renewal_tests(c,copy);
   release_tests(c,copy);
@@ -319,15 +331,40 @@ int main(void) {
   assert(c->league.scorer_count>0u && c->wages_paid>0 && c->match_income>0);
   assert(c->prize_income>0 && c->last_rank>0u);
   assert(ml_save_write(1u,c));
+  /* Frozen v5 prefix migrates with an empty archive and unchanged old bytes. */
+  {
+    const uint32_t size=sizeof(MasterLeagueV5);uint32_t sum=2166136261u;
+    for(uint32_t i=0;i<size;i++)sum=(sum^((const unsigned char *)c)[i])*16777619u;
+    const uint32_t header[]={0x314c4d46u,5u,size,1000000u,sum};
+    FILE *file=fopen("SaveData/footballnx_master_league_3_a.bin","wb");assert(file);
+    assert(fwrite(header,1,sizeof(header),file)==sizeof(header));assert(fwrite(c,1,size,file)==size);assert(!fclose(file));
+    memset(copy,0xaa,sizeof(*copy));assert(ml_save_read(2u,c->content_id,copy));
+    assert(!memcmp(c,copy,size) && !copy->history.count && !copy->history.reserved);
+  }
+  const uint32_t final_rank=ml_rank(c),final_champion=c->league.knockout.champion;
+  /* Canonical identity survives a move without splitting the Golden Boot. */
+  c->league.scorer_count=0u;
+  assert(league_tournament_credit_goals(&c->league,101u,1001u,10001u,"Moved player",6u));
+  assert(league_tournament_credit_goals(&c->league,102u,1001u,10001u,"Moved player",7u));
+  assert(league_tournament_credit_goals(&c->league,102u,1101u,10101u,"Runner up",10u));
   assert(ml_next_season(c));
   assert(c->season==2u && c->day==0u && c->league.active_matchday==0u);
   assert(c->players[purchase].club==101u && ml_valid(c));
+  assert(c->history.count==1u && c->history.seasons[0].season==1u);
+  assert(c->history.seasons[0].rank==final_rank && c->history.seasons[0].league_champion==final_champion);
+  assert(c->history.seasons[0].scorers[0].base_id==1001u && c->history.seasons[0].scorers[0].goals==13u);
+  assert(!c->history.seasons[0].scorers[0].team && c->history.seasons[0].scorer_count==2u);
+  assert(ml_save_write(1u,c) && ml_save_read(1u,c->content_id,copy));
+  assert(!memcmp(c,copy,sizeof(*c)));
+  copy->history.seasons[0].season=copy->season;assert(!ml_valid(copy));
+  *copy=*c;copy->history.seasons[0].honours^=ML_HONOUR_CUP;assert(!ml_valid(copy));
   for (uint32_t n=0;n<3u;n++) {
     while (ml_next_event(c,&event) && event.kind!=ML_EVENT_SEASON_END)
       assert(ml_simulate_event(c,&event));
     for (uint32_t i=0;i<c->player_count;i++)
       if(c->players[i].club==101u) assert(!*ml_renew(c,i,3u));
     assert(ml_next_season(c) && ml_valid(c));
+    assert(c->history.count==c->season-1u);
   }
   make_career(c,3u); /* odd-team byes must advance without fictitious matches */
   events=0;

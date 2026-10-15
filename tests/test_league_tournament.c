@@ -41,6 +41,25 @@ static void check_schedule(uint32_t count, int home_away) {
                (home_away ? 2u : 1u));
         if (home_away) assert(home_counts[home][away] == 1u);
       }
+  for(uint32_t team=0;team<count;team++) {
+    uint32_t first_home=0,first_away=0,byes=0;
+    for(uint32_t day=0;day<days;day++) {
+      uint32_t seen=0;
+      for(uint32_t i=0;i<league.matchday_fixture_count[day];i++) {
+        const LeagueFixture *f=league_tournament_matchday_fixture(&league,day,i);
+        first_home+=f->home==teams[team];first_away+=f->away==teams[team];
+        seen+=f->home==teams[team] || f->away==teams[team];
+        if(home_away) {
+          const LeagueFixture *back=league_tournament_matchday_fixture(&league,day+days,i);
+          assert(f->home==back->away && f->away==back->home);
+        }
+      }
+      byes+=!seen;
+    }
+    assert(first_home+first_away==count-1u);
+    assert((int)first_home-(int)first_away>=-1 && (int)first_home-(int)first_away<=1);
+    assert(byes==(count&1u));
+  }
 }
 
 static void check_all_opening_players(void) {
@@ -202,11 +221,12 @@ static void check_simulated_knockout_scorers(void) {
   assert(simulated_goals == credited);
 }
 
-static void check_rank_changes(uint32_t count) {
+static void check_rank_changes(uint32_t count, LeagueTiebreak rule) {
   uint32_t teams[LEAGUE_MAX_TEAMS];
   for (uint32_t i = 0; i < count; i++) teams[i] = 100u + count - i;
   assert(league_tournament_init(&league, teams, count, teams, 1u, 1, 37u));
   league_tournament_set_system(&league, LEAGUE_SYSTEM_STANDINGS);
+  league_tournament_set_tiebreak(&league,rule);
   int8_t changes[LEAGUE_MAX_TEAMS];
   league_tournament_rank_changes(&league, changes);
   for (uint32_t i = 0; i < LEAGUE_MAX_TEAMS; i++) assert(!changes[i]);
@@ -241,7 +261,49 @@ static void check_rank_changes(uint32_t count) {
   assert(league.phase == LEAGUE_PHASE_COMPLETE && rises && falls && unchanged);
 }
 
+static void check_identity_totals(void) {
+  const uint32_t teams[]={101u,102u};uint16_t top[4];
+  assert(league_tournament_init(&league,teams,2u,teams,1u,0,9u));
+  assert(league_tournament_credit_goals(&league,101u,11u,111u,"Transferred striker",6u));
+  assert(league_tournament_credit_goals(&league,102u,11u,111u,"Transferred striker",7u));
+  assert(league_tournament_credit_goals(&league,102u,22u,222u,"Runner up",10u));
+  static LeagueTournament before;before=league;
+  assert(league_tournament_top_scorers(&league,top)==2u);
+  assert(league.scorers[top[0]].base_id==11u && league_tournament_scorer_goals(&league,top[0])==13u);
+  assert(league_tournament_scorer_clubs(&league,top[0])==2u);
+  assert(league_tournament_scorer_goals(&league,top[1])==10u);
+  assert(league.scorers[0].goals==6u && league.scorers[1].goals==7u);
+  assert(!memcmp(&before,&league,sizeof(league)));
+}
+static void check_h2h_and_knockout_decider(void) {
+  const uint32_t teams[]={101u,102u,103u,104u};uint8_t order[LEAGUE_MAX_TEAMS];
+  assert(league_tournament_init(&league,teams,4u,teams,1u,0,9u));
+  league_tournament_set_tiebreak(&league,LEAGUE_TIEBREAK_HEAD_TO_HEAD);
+  /* Three teams tied on points: a cyclic win/loss must use a mini-table,
+   * never a non-transitive pairwise comparator. Overall GD favours 103. */
+  league.standings[0].points=league.standings[1].points=league.standings[2].points=6u;
+  league.standings[2].goals_for=99u;
+  league.fixtures[0]=(LeagueFixture){101u,102u,3u,0u,1u,0u};
+  league.fixtures[1]=(LeagueFixture){102u,103u,2u,0u,1u,0u};
+  league.fixtures[2]=(LeagueFixture){103u,101u,1u,0u,1u,0u};
+  league_tournament_ranked_slots(&league,order);
+  assert(order[0]==0u && order[1]==1u && order[2]==2u);
+  league_tournament_set_tiebreak(&league,LEAGUE_TIEBREAK_GOAL_DIFFERENCE);
+  league_tournament_ranked_slots(&league,order);assert(order[0]==2u);
+  league.first_match_started=1u;league_tournament_set_tiebreak(&league,LEAGUE_TIEBREAK_HEAD_TO_HEAD);
+  assert(league.reserved[1]==LEAGUE_TIEBREAK_GOAL_DIFFERENCE);
+  assert(league_tournament_init(&league,teams,2u,teams,1u,0,772u));
+  assert(league_tournament_record(&league,0u,0u,0u,1u,0u));
+  assert(league.phase==LEAGUE_PHASE_KNOCKOUT);
+  static LeagueTournament before;before=league;
+  assert(!league_tournament_record(&league,0u,0u,0u,1u,1u));
+  assert(!memcmp(&league,&before,sizeof(league)));
+  const uint32_t winner=league.knockout.fixtures[0][0].away;
+  assert(league_tournament_record_decided(&league,0u,0u,0u,1u,1u,winner));
+  assert(league.phase==LEAGUE_PHASE_COMPLETE && league.knockout.champion==winner);
+}
 int main(void) {
+  check_identity_totals();check_h2h_and_knockout_decider();
   check_all_opening_players();
   for (uint32_t teams = 2u; teams <= 32u; teams++) {
     check_schedule(teams, 0);
@@ -257,10 +319,12 @@ int main(void) {
   check_knockout_seeding();
   check_simulated_opening_locks_teams();
   check_simulated_knockout_scorers();
-  check_rank_changes(2u);
-  check_rank_changes(3u);
-  check_rank_changes(4u);
-  check_rank_changes(32u);
+  for(uint32_t rule=0;rule<=1u;rule++) {
+    check_rank_changes(2u,(LeagueTiebreak)rule);
+    check_rank_changes(3u,(LeagueTiebreak)rule);
+    check_rank_changes(4u,(LeagueTiebreak)rule);
+    check_rank_changes(32u,(LeagueTiebreak)rule);
+  }
   puts("league tournament tests passed");
   return 0;
 }

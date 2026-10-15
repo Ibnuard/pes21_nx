@@ -93,6 +93,9 @@ static void league_ui_settings(MasterLeagueRender *ui,int general,GLfloat *verts
     row.adjustable=general || i!=2u || competition_frontend_league_catalog_index()==FL26_LEAGUE_CUSTOM_INDEX ? 1u : ML_VALUE_FIXED;
     static const char *labels[]={"LEAGUE TYPE","PLAYERS","TEAMS","HOME & AWAY","LEAGUE SYSTEM"};
     snprintf(row.label,sizeof(row.label),"%s",general ? competition_frontend_cup_general_label(i) : labels[i]);
+    const LeagueTournament *t=competition_frontend_league_tournament();
+    if(general && !strcmp(row.label,"TABLE TIE-BREAK") && t && t->first_match_started)
+      row.adjustable=ML_VALUE_FIXED;
     snprintf(row.value,sizeof(row.value),"%s",general ? competition_frontend_cup_general_value(i) : competition_frontend_item_value(i));
     ml_ui_row(ui,&row,.400f,.298f+(i-start)*.093f,.543f,.078f,focus==i,0,verts,quads);
   }
@@ -283,7 +286,8 @@ static void league_ui_table(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   }
   if(qualifiers)snprintf(label,sizeof(label),"TOP %u QUALIFY FOR KNOCKOUT",qualifiers);
   else snprintf(label,sizeof(label),champion ? "FINAL LEAGUE TABLE" : "3 POINTS FOR A WIN   /   1 FOR A DRAW");
-  cup_ui_text(ui,label,.062f,.861f,.75f,.025f,-3,verts,quads);
+  cup_ui_text(ui,label,.062f,.850f,.75f,.022f,-3,verts,quads);
+  cup_ui_text(ui,league_tournament_tiebreak_rules((LeagueTiebreak)l->reserved[1]),.062f,.879f,.86f,.019f,-3,verts,quads);
 }
 static void league_ui_fixture_card(MasterLeagueRender *ui,uint32_t number,const char *stage,const char *status,
     uint32_t home,uint32_t away,int scored,uint32_t hg,uint32_t ag,
@@ -346,8 +350,10 @@ static void league_ui_scorers(MasterLeagueRender *ui,GLfloat *verts,int *quads) 
     char label[32];snprintf(label,sizeof(label),"RANK %02u",i+1u);
     cup_ui_text(ui,label,x+.116f,y+.023f,.232f,.023f,-3,verts,quads);
     cup_ui_text(ui,r->name,x+.116f,y+.077f,.243f,.030f,-2,verts,quads);
-    ml_ui_text(ui,cup_ui_team(r->team),x+.116f,y+.140f,.243f,.024f,2,-3,0,1,verts,quads);
-    snprintf(label,sizeof(label),"%u",r->goals);ml_ui_center_text(ui,label,x+.363f,y+.067f,.049f,.086f,.048f,0,-2,verts,quads);
+    const uint32_t clubs=league_tournament_scorer_clubs(l,slots[i]);
+    snprintf(label,sizeof(label),"%u CLUBS / SEASON TOTAL",clubs);
+    ml_ui_text(ui,clubs>1u ? label : cup_ui_team(r->team),x+.116f,y+.140f,.243f,.024f,2,-3,0,1,verts,quads);
+    snprintf(label,sizeof(label),"%u",league_tournament_scorer_goals(l,slots[i]));ml_ui_center_text(ui,label,x+.363f,y+.067f,.049f,.086f,.048f,0,-2,verts,quads);
     cup_ui_text(ui,"GOALS",x+.363f,y+.175f,.050f,.022f,-3,verts,quads);
   }
 }
@@ -357,7 +363,7 @@ static void league_ui_knockout_card(MasterLeagueRender *ui,uint32_t round,uint32
   const CupFixture *f=cup_tournament_fixture(cup,round,index);if(!f)return;
   uint32_t home=0,away=0;cup_tournament_schedule_teams(cup,round,index,&home,&away);
   const int two_leg=cup->home_away && round+1u<cup->round_count;
-  const char *status=f->complete ? (two_leg ? "AGGREGATE" : "FULL TIME")
+  const char *status=f->complete ? ((f->reserved&CUP_DECIDED_PENALTIES) ? "PENALTIES" : two_leg ? "AGGREGATE" : "FULL TIME")
       : two_leg ? (f->first_leg_complete ? "LEG 1 DONE" : "LEG 1 NEXT") : "UPCOMING";
   league_ui_fixture_card(ui,index+1u,league_ui_round(round),status,home,away,f->complete || f->first_leg_complete,
       f->complete ? f->home_goals : f->first_leg_home_goals,f->complete ? f->away_goals : f->first_leg_away_goals,x,y,w,h,verts,quads);

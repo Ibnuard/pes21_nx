@@ -190,6 +190,21 @@ int main(void) {
   go(0,0);press(A);press(A);assert(ml_frontend_take_action()==ML_ACTION_MATCH);
   ml_frontend_result(1u,3u,NULL,0u);assert(ml_frontend_restore());finish_advance();
   ticks+=3100000000u;dump("home-after-national-loss");go(0,1);dump("feed-national-result");
+  go(2,3);press(DOWN);press(DOWN);press(DOWN);press(A);dump("career-archive-empty");
+  ml_club(fixture,fixture->settings.club)->cash=INT64_C(10000000000);
+  for(uint32_t guard=0;guard<512u;guard++) {
+    MlEvent e;assert(ml_next_event(fixture,&e));if(e.kind==ML_EVENT_SEASON_END)break;
+    if(ml_event_is_match(e.kind) && e.home && e.away) {
+      const uint32_t own=ml_event_manager_team(fixture,e.kind);
+      assert(ml_record_event(fixture,&e,e.home==own ? 3u : 0u,e.away==own ? 3u : 0u,NULL,0u,0));
+    }else assert(ml_simulate_event(fixture,&e));
+  }
+  for(uint32_t i=0;i<fixture->player_count;i++)if(fixture->players[i].club==fixture->settings.club)
+    fixture->players[i].contract_end=fixture->season+3u;
+  assert(ml_next_season(fixture) && ml_valid(fixture));
+  go(2,3);press(DOWN);press(DOWN);press(DOWN);press(A);dump("career-archive");
+  press(A);dump("career-totals");press(B);press(DOWN);press(A);dump("season-review");
+  press(R);dump("season-review-scorers");press(R);dump("season-review-finances");
   return 0;
 }
 '''

@@ -94,7 +94,10 @@ static void ml_scroll(uint32_t pressed,uint32_t count,uint32_t *position,uint32_
   if(pressed&(ML_UP|ML_L))*position=*position>=step ? *position-step : 0u;
   if(pressed&(ML_DOWN|ML_R))*position=*position+step<count ? *position+step : count-1u;
 }
+#include "master_league_history_frontend.inc"
+
 static int ml_office_pad(uint32_t pressed) {
+  if(!drawer_kind && ml_history_pad(pressed))return 1;
   if(drawer_kind>=ML_DRAWER_MARKET_LEAGUE) {
     if(pressed&ML_B) {
       if(drawer_kind==ML_DRAWER_MARKET_TEAM)ml_drawer_open(ML_DRAWER_MARKET_LEAGUE,market_group);
@@ -175,7 +178,7 @@ static int ml_office_pad(uint32_t pressed) {
   }
   if(page==ML_PAGE_OFFERS || page==ML_PAGE_MANAGER_OFFICE || page==ML_PAGE_MESSAGES || page==ML_PAGE_JOBS) {
     if(pressed&ML_B){ml_page(page==ML_PAGE_OFFERS ? (offers_incoming ? ML_PAGE_MY_TEAM : ML_PAGE_MARKET_CLUBS) : page==ML_PAGE_MANAGER_OFFICE ? ML_PAGE_HUB : ML_PAGE_MANAGER_OFFICE);return 1;}
-    const uint32_t count=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 3u :
+    const uint32_t count=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 4u :
       page==ML_PAGE_MESSAGES ? career.office.notice_count : career.office.job_team && career.day<=career.office.job_expiry ? 1u : 0u;
     ml_scroll(pressed,count,&focus,pressed&(ML_L|ML_R) ? 5u : 1u);
     if((pressed&ML_A) && count) {
@@ -184,7 +187,7 @@ static int ml_office_pad(uint32_t pressed) {
         current_offer=career.office.offers[index].id;ml_drawer_open(ML_DRAWER_OFFER_ACTIONS,0u);
         if(ml_offer_unread(&career,index)){ml_offer_mark_read(&career,index);ml_autosave();}
       }
-      else if(page==ML_PAGE_MANAGER_OFFICE)ml_page(focus==2u ? ML_PAGE_NATIONAL : focus ? ML_PAGE_MESSAGES : ML_PAGE_JOBS);
+      else if(page==ML_PAGE_MANAGER_OFFICE)ml_page(focus==3u ? ML_PAGE_HISTORY : focus==2u ? ML_PAGE_NATIONAL : focus ? ML_PAGE_MESSAGES : ML_PAGE_JOBS);
       else if(page==ML_PAGE_MESSAGES)ml_drawer_open(ML_DRAWER_NOTICE,0u);
       else ml_drawer_open(ML_DRAWER_JOB,0u);
     }return 1;
@@ -399,7 +402,7 @@ static void ml_office_view(MlView *v) {
     snprintf(v->title,64,"%s",page==ML_PAGE_OFFERS ? (offers_incoming ? "CLUB OFFERS" : "TRANSFER RESPONSE") :
       page==ML_PAGE_MANAGER_OFFICE ? "MANAGER" : page==ML_PAGE_MESSAGES ? "PRESIDENT MESSAGES" : "JOB OFFERS");
     snprintf(v->left_title,64,"%s",v->title);
-    v->total=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 3u : page==ML_PAGE_MESSAGES ? career.office.notice_count :
+    v->total=page==ML_PAGE_OFFERS ? offer_rows : page==ML_PAGE_MANAGER_OFFICE ? 4u : page==ML_PAGE_MESSAGES ? career.office.notice_count :
       career.office.job_team && career.day<=career.office.job_expiry && !career.office.dismissed ? 1u : 0u;
     for(uint32_t i=0;i<5u && v->first+i<v->total;i++) {
       const uint32_t index=v->first+i;MlViewRow *r=&v->rows[v->count++];r->enabled=1;
@@ -412,8 +415,8 @@ static void ml_office_view(MlView *v) {
           exhibition_team_catalog_name(offers_incoming ? o->to : o->from));
         ml_money(r->value,48,o->fee);r->portrait=career.players[o->player].portrait_id;
       }else if(page==ML_PAGE_MANAGER_OFFICE) {
-        snprintf(r->label,64,"%s",index==2u ? "NATIONAL TEAM" : index ? "PRESIDENT MESSAGES" : "JOB OFFERS");
-        snprintf(r->detail,96,"%s",index==2u ? "International appointment alongside your club" : index ? "Board feedback, warnings and club notifications" : "Review opportunities within your league");
+        snprintf(r->label,64,"%s",index==3u ? "CAREER ARCHIVE" : index==2u ? "NATIONAL TEAM" : index ? "PRESIDENT MESSAGES" : "JOB OFFERS");
+        snprintf(r->detail,96,"%s",index==3u ? "Past seasons, trophies and recorded career totals" : index==2u ? "International appointment alongside your club" : index ? "Board feedback, warnings and club notifications" : "Review opportunities within your league");
         r->emblem=index==2u ? 2u : index ? 4u : 3u;
       }else if(page==ML_PAGE_MESSAGES) {
         const MlNotice *n=&career.office.notices[career.office.notice_count-1u-index];
@@ -427,5 +430,6 @@ static void ml_office_view(MlView *v) {
     if(v->total<=5u)v->helper_count=2u;
   }
   if(v->empty[0]){memset(v->info,0,sizeof(v->info));snprintf(v->left_title,64,"%s",v->title);}
+  ml_history_view(v);
   ml_office_drawer(v);
 }

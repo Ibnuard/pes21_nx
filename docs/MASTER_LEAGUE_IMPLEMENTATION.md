@@ -1,5 +1,37 @@
 # Master League implementation
 
+## Season archive and competition follow-up (2026-10-15)
+
+Manager Office now has a read-only CAREER ARCHIVE with season reviews and
+ARCHIVED SEASON TOTALS. Starting the next season archives the completed season
+before resetting its tables: the season-end club, rank and league record,
+competition champions, honours, four combined scorer leaders, closing cash and
+operating income/wages. Up to 99 completed seasons are retained. Browsing the
+archive neither changes the career nor allocates a long-lived projection cache.
+
+Totals explicitly describe archived **season-end club records**, not individual
+manager-tenure statistics when a manager changed jobs during a season. Past
+seasons that predate the archive are not reconstructed or credited with invented
+results. Current unfinished seasons are excluded. The coverage screen reports
+which seasons are present.
+
+The archive is appended after the existing world state in save version 6.
+Versions 1-5 remain readable using their original prefix sizes and checksum
+validation; migration initializes an empty history and does not rewrite the
+file on read. Back up SaveData and the previous NRO before upgrading: saves
+written by the new build are not readable by older builds.
+
+League scorer leaders now aggregate canonical BaseIds across clubs, including
+in archived results. Domestic and world knockout completions consume the actual
+shootout winner for played matches; seeded tie resolution is limited to COM
+simulation. Existing fixtures and career settings are preserved on load.
+
+Verification includes frozen v4/v5 prefix migration, v6 round trips, archive
+validation, multi-season rollover, transferred-scorer totals, frontend back/page
+navigation and renderer geometry checks. Software previews exercise empty and
+populated archives, totals, scorer and finance pages. Native Switch shootouts,
+long careers and real storage failure recovery still need hardware testing.
+
 ## Risky-action safeguards (2026-10-08)
 
 Occupied-slot overwrite and player release retain their confirmation dialogs.

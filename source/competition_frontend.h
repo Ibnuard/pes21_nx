@@ -54,6 +54,7 @@ const char *competition_frontend_slot_competition(uint32_t index);
 const char *competition_frontend_slot_progress(uint32_t index);
 int competition_frontend_item_enabled(uint32_t index);
 const char *competition_frontend_status(void);
+int competition_frontend_save_pending(void);
 uint32_t competition_frontend_status_serial(void);
 int competition_frontend_confirmation_active(void);
 uint32_t competition_frontend_confirmation_focus(void);
@@ -136,6 +137,8 @@ int competition_frontend_league_penalty(void);
 int competition_frontend_cup_match_active(void);
 int competition_frontend_cup_take_champion_presentation(void);
 void competition_frontend_cup_handoff_result(int opened);
+/* Shootout-only score, in native HOME/AWAY order. Never added to match goals. */
+void competition_frontend_penalty_result(uint32_t home, uint32_t away);
 void competition_frontend_cup_match_result(uint32_t home_goals,
                                            uint32_t away_goals);
 void competition_frontend_cup_restore_after_match(void);

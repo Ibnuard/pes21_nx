@@ -482,6 +482,28 @@ int main(void) {
   assert(end_career->season==old_season && end_career->day==old_day);
   press(A);press(LEFT);press(B);
   assert(!view().modal.open && end_career->season==old_season && end_career->day==old_day);
+  for(uint32_t i=0;i<end_career->player_count;i++)
+    if(end_career->players[i].club==end_career->settings.club)end_career->players[i].contract_end=end_career->season+3u;
+  press(A);press(LEFT);press(A);finish_advance();
+  assert(end_career->season==old_season+1u && end_career->history.count==1u && ml_valid(end_career));
+  office_go(2u,3u);assert(view().page==ML_PAGE_MANAGER_OFFICE && view().count==4u);
+  press(DOWN);press(DOWN);press(DOWN);press(A);
+  assert(view().page==ML_PAGE_HISTORY && view().count==2u);
+  uint32_t archive_trophies=0u;
+  for(uint32_t mask=end_career->history.seasons[0].honours;mask;mask>>=1u)archive_trophies+=mask&1u;
+  char archive_label[64];
+  snprintf(archive_label,sizeof(archive_label),"SEASON %u / %u TROPHIES",old_season,archive_trophies);
+  assert(!strcmp(view().rows[1].label,archive_label));
+  assert(!strcmp(view().rows[0].value,"1 SEASON"));
+  press(A);assert(view().page==ML_PAGE_CAREER_STATS && view().count==5u);
+  press(B);press(DOWN);press(A);
+  assert(view().page==ML_PAGE_SEASON_DETAIL && view().count==5u);
+  assert(!strcmp(view().rows[0].label,"LEAGUE RECORD"));
+  const uint32_t archived_total=view().total;
+  press(R);assert(view().first==5u && view().count==5u);
+  press(R);assert(view().first==10u && view().count==archived_total-10u);
+  press(B);assert(view().page==ML_PAGE_HISTORY && view().selected==1u);
+  press(B);assert(view().page==ML_PAGE_MANAGER_OFFICE && view().selected==3u);
   puts("career UI: profile, paged hub, feed, native context, save/continue OK");
   return 0;
 }

@@ -73,6 +73,7 @@ int main(void) {
   const uint32_t teams[] = {104u,103u,102u,101u};
   assert(league_tournament_init(&loaded.tournament,teams,4u,teams,1u,1,17u));
   league_tournament_set_system(&loaded.tournament,LEAGUE_SYSTEM_STANDINGS);
+  league_tournament_set_tiebreak(&loaded.tournament,LEAGUE_TIEBREAK_HEAD_TO_HEAD);
   loaded.team_count=4u;
   assert(league_tournament_record_table_fixture(&loaded.tournament,0u,2u,0u,0));
   int8_t changes[LEAGUE_MAX_TEAMS],restored[LEAGUE_MAX_TEAMS];
@@ -80,8 +81,16 @@ int main(void) {
   assert(changes[0]>0);
   assert(league_save_write(1u,&loaded));
   memset(&loaded,0,sizeof(loaded));assert(league_save_read(1u,&loaded));
+  assert(loaded.tournament.reserved[1]==LEAGUE_TIEBREAK_HEAD_TO_HEAD);
   league_tournament_rank_changes(&loaded.tournament,restored);
   assert(!memcmp(changes,restored,sizeof(changes)));
+  /* v4 reserved bytes were not a tie-break choice. Migrate conservatively. */
+  loaded.tournament.reserved[1]=255u;
+  const TestHeader v4_header={0x314c5846u,4u,sizeof(loaded),10000u,checksum(&loaded,sizeof(loaded))};
+  stream=fopen("SaveData/footballnx_league_3_a.bin","wb");assert(stream);
+  assert(fwrite(&v4_header,1,sizeof(v4_header),stream)==sizeof(v4_header));
+  assert(fwrite(&loaded,1,sizeof(loaded),stream)==sizeof(loaded));assert(!fclose(stream));
+  assert(league_save_read(2u,&loaded) && loaded.tournament.reserved[1]==LEAGUE_TIEBREAK_GOAL_DIFFERENCE);
   puts("league save migration tests passed");
   return 0;
 }

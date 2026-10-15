@@ -78,6 +78,25 @@ typedef struct {
   CupTournament regional, world_cup;
 } MlWorldState;
 
+/* v6 append-only archive. Only observed season ends are recorded: loading an
+ * older save never invents results for seasons that have already been reset. */
+#define ML_MAX_SEASON_RECORDS 99u
+enum { ML_HONOUR_LEAGUE=1u, ML_HONOUR_CUP=2u, ML_HONOUR_CONTINENTAL=4u,
+       ML_HONOUR_REGIONAL=8u, ML_HONOUR_WORLD=16u };
+typedef struct {
+  uint32_t season, club, competition_id, cup_id, rank, team_count;
+  uint32_t league_champion, cup_champion, continental_id, continental_champion;
+  uint32_t national_team, regional_champion, world_champion, honours;
+  LeagueStanding standing; /* season-end club's full league record */
+  int64_t closing_cash, wages_paid, match_income, prize_income;
+  uint32_t scorer_count, reserved;
+  LeagueScorer scorers[4]; /* combined BaseId totals, not per-club rows */
+} MlSeasonRecord;
+typedef struct {
+  uint32_t count, reserved;
+  MlSeasonRecord seasons[ML_MAX_SEASON_RECORDS];
+} MlCareerHistory;
+
 typedef struct {
   uint32_t seed, season, day, transaction_sequence;
   uint32_t club_count, player_count, target_rank, last_rank, seasons_completed;
@@ -98,6 +117,7 @@ typedef struct {
   /* v4 append-only read receipts, parallel to office.offers. Zero = unseen. */
   _Alignas(8) uint32_t offer_seen[ML_MAX_OFFERS];
   _Alignas(8) MlWorldState world;
+  _Alignas(8) MlCareerHistory history;
 } MasterLeague;
 
 typedef enum { ML_EVENT_LEAGUE = 1, ML_EVENT_CUP, ML_EVENT_SEASON_END,

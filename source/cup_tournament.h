@@ -7,6 +7,7 @@
 #define CUP_MAX_ROUNDS 5u
 #define CUP_MAX_FIXTURES 32u
 #define CUP_THIRD_PLACE_INDEX 1u
+#define CUP_DECIDED_PENALTIES 1u /* CupFixture.reserved; keeps the saved ABI */
 
 typedef struct {
   uint32_t home;
@@ -57,10 +58,17 @@ int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,
                               uint32_t *index);
 int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
                           uint32_t home_goals, uint32_t away_goals);
+/* Played level ties require a verified team ID. No guessed shootout winner. */
+int cup_tournament_record_decided(CupTournament *cup, uint32_t round,
+    uint32_t index, uint32_t home_goals, uint32_t away_goals,
+    uint32_t shootout_winner);
 void cup_tournament_advance(CupTournament *cup);
 /* One-round calendar API: no implicit COM results or future-round progress. */
 int cup_tournament_record_deferred(CupTournament *cup, uint32_t round,
     uint32_t index, uint32_t home_goals, uint32_t away_goals);
+int cup_tournament_record_deferred_decided(CupTournament *cup, uint32_t round,
+    uint32_t index, uint32_t home_goals, uint32_t away_goals,
+    uint32_t shootout_winner, int simulated);
 int cup_tournament_commit_round(CupTournament *cup);
 const CupFixture *cup_tournament_third_place_fixture(
     const CupTournament *cup);

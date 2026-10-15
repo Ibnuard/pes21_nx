@@ -1,5 +1,40 @@
 # FootballNX League
 
+## Competition reliability and standings follow-up (2026-10-15)
+
+- Played knockout ties require the actual native penalty-shootout winner. A
+  missing result leaves the fixture unresolved and retryable; only simulated
+  COM matches use the seeded decider. Shootout goals are not added to the match
+  score or scorer totals. The shared result bridge captures penalties for Cup,
+  League knockout, and Master League before dispatching the football score.
+- Failed Cup/League saves remain visibly pending. NEXT is blocked until a
+  successful save; leaving offers RETRY & LEAVE and stays in the hub if that
+  write also fails. Manual save can recover without replaying or applying the
+  same result twice. Tests inject failures using temporary directories only.
+- Newly generated round robins balance first-leg home/away counts within one
+  match for every team count from 2 to 32. The return leg reverses each fixture.
+  Existing loaded schedules are preserved, including in-progress seasons.
+- TABLE TIE-BREAK is selectable before the first match and then locked. The
+  table displays the active policy: `PTS > GD > GF > TEAM ID`, or
+  `PTS > H2H PTS/GD/GF > GD > GF > TEAM ID`. H2H uses a mini-table for the entire
+  equal-points group, not pairwise comparisons; it does not recursively reapply
+  mini-tables to smaller tied subgroups. These are explicit project rules, not
+  a claim to reproduce each real-world competition's regulations.
+- Scorer rankings combine rows sharing a BaseId across club transfers. Club
+  rows remain available as evidence, while multi-club totals are labelled as
+  such instead of attributing all goals to one club.
+- New Cup/League creation gets a fresh seed; editing or loading an existing
+  competition does not reseed it. Saved fixtures and COM simulation remain
+  deterministic for that saved state.
+- League save version 5 stores the tie-break choice in an existing reserved
+  byte without resizing the payload. Versions 1-4 still load and default to
+  goal difference. Older NROs cannot read a newly written v5 save: back up
+  SaveData and the old NRO together before upgrading or rolling back.
+
+Focused core, save, frontend, result-bridge, recovery and layout tests cover
+these paths. Hardware verification is still needed for native shootout capture
+and interrupted storage writes on Switch; host tests are not hardware sign-off.
+
 Status: League season, save slots, match handoff, standings, knockout, and
 Switch Hub render are implemented. The concept PNGs remain design references,
 not screenshots. Top Scorer ranks individual players after goals are recorded;

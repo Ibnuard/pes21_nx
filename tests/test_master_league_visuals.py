@@ -24,7 +24,9 @@ class MasterLeagueVisualTests(unittest.TestCase):
 
     def test_every_page_fits_native_vertex_budget(self):
         self.assertTrue({'landing','settings','club-selector','nationality-selector',
-            'calendar','squad-list','contract-term','career-settings','ranking-focus'} <= self.frames.keys())
+            'calendar','squad-list','contract-term','career-settings','ranking-focus',
+            'career-archive-empty','career-archive','career-totals','season-review',
+            'season-review-scorers','season-review-finances'} <= self.frames.keys())
         for name,draws in self.frames.items():
             with self.subTest(page=name):
                 self.assertLess(len(draws),384)

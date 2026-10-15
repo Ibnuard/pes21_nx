@@ -1123,7 +1123,8 @@ static void *pause_record_get_stats(void *record) {
       if (pause_score_get) __atomic_store_n(&pause_scores[side], pause_score_get(team, 5), __ATOMIC_RELAXED);
       // Native TimeUpDemo uses HalfKind 4 as the shootout tiebreaker;
       // HalfKind 5 is the regulation + extra-time total, excluding penalties.
-      if (pause_score_get && ml_frontend_match_active())
+      if (pause_score_get && (competition_frontend_cup_match_active() ||
+                             competition_frontend_league_match_active()))
         __atomic_store_n(&pause_penalty_scores[side], pause_score_get(team, 4), __ATOMIC_RELAXED);
       float control = pause_stats_control(stats, side, 5);
       uint32_t percent = isfinite(control) && control >= 0 && control <= 1
@@ -16325,11 +16326,6 @@ static void match_result_record_league_score(uint32_t home_goals,
           }
         }
       }
-      if (ml_frontend_match_is_cup() &&
-          __atomic_load_n(&pause_stats_seen, __ATOMIC_ACQUIRE))
-        ml_frontend_penalty_result(
-            __atomic_load_n(&pause_penalty_scores[0], __ATOMIC_RELAXED),
-            __atomic_load_n(&pause_penalty_scores[1], __ATOMIC_RELAXED));
       competition_frontend_league_match_result_with_scorers(
           home_goals, away_goals, scorers, scorer_count);
 #ifdef DEBUG_LOG
@@ -16343,6 +16339,10 @@ static void match_result_record_competition_score(void) {
   uint32_t home_goals = 0, away_goals = 0;
   if (pes_controller_pause_score(0, &home_goals) &&
       pes_controller_pause_score(1, &away_goals)) {
+    if (__atomic_load_n(&pause_stats_seen, __ATOMIC_ACQUIRE))
+      competition_frontend_penalty_result(
+          __atomic_load_n(&pause_penalty_scores[0], __ATOMIC_RELAXED),
+          __atomic_load_n(&pause_penalty_scores[1], __ATOMIC_RELAXED));
     if (competition_frontend_cup_match_active())
       competition_frontend_cup_match_result(home_goals, away_goals);
     if (competition_frontend_league_match_active())

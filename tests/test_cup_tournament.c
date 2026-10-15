@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "cup_tournament.h"
 
@@ -150,7 +151,33 @@ static void second_leg_resolves_by_aggregate_without_away_goals(void) {
   assert(cup.fixtures[0][0].winner == ids[0]);
 }
 
+static void actual_shootout_decides_level_ties(void) {
+  const uint32_t ids[]={901u,902u,903u,904u};
+  CupTournament cup, before;
+  for(uint32_t side=0;side<2u;side++) {
+    assert(cup_tournament_init(&cup,ids,2u,ids,1u,772u));
+    before=cup;
+    assert(!cup_tournament_record(&cup,0u,0u,1u,1u));
+    assert(!cup_tournament_record_decided(&cup,0u,0u,1u,1u,9999u));
+    assert(!memcmp(&cup,&before,sizeof(cup)));
+    assert(cup_tournament_record_decided(&cup,0u,0u,1u,1u,ids[side]));
+    assert(cup.champion==ids[side]);
+    assert(cup.fixtures[0][0].reserved&CUP_DECIDED_PENALTIES);
+    assert(cup.fixtures[0][0].home_goals==1u && cup.fixtures[0][0].away_goals==1u);
+    before=cup;assert(!cup_tournament_record_decided(&cup,0u,0u,1u,1u,ids[!side]));
+    assert(!memcmp(&cup,&before,sizeof(cup)));
+  }
+  assert(cup_tournament_init(&cup,ids,4u,ids,1u,772u));
+  cup_tournament_set_rules(&cup,1,0);
+  assert(cup_tournament_record(&cup,0u,0u,0u,0u)); /* no decider on leg one */
+  before=cup;assert(!cup_tournament_record(&cup,0u,0u,2u,2u));
+  assert(!memcmp(&cup,&before,sizeof(cup)));
+  assert(cup_tournament_record_decided(&cup,0u,0u,2u,2u,cup.fixtures[0][0].away));
+  assert(cup.fixtures[0][0].winner==before.fixtures[0][0].away);
+}
+
 int main(void) {
+  actual_shootout_decides_level_ties();
   run_size(2u);
   run_size(3u);
   run_size(7u);

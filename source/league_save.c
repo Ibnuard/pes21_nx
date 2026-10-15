@@ -10,7 +10,7 @@
 #endif
 
 #define LEAGUE_SAVE_MAGIC 0x314c5846u /* FXL1 */
-#define LEAGUE_SAVE_VERSION 4u
+#define LEAGUE_SAVE_VERSION 5u /* persisted configurable tie-break semantics */
 
 typedef struct {
   uint32_t magic, version, payload_size, sequence, checksum;
@@ -79,6 +79,8 @@ static int league_save_read_copy(uint32_t slot, uint32_t copy,
       league_save_checksum(&out->state, payload_size)) return 0;
   if (header.version <= 3u)
     out->state.player_condition = 5u;
+  if (header.version < 5u)
+    out->state.tournament.reserved[1] = LEAGUE_TIEBREAK_GOAL_DIFFERENCE;
   out->sequence = header.sequence;
   return 1;
 }

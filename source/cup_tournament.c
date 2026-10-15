@@ -74,17 +74,19 @@ static int cup_has_second_leg(const CupTournament *cup, uint32_t round,
 
 static void cup_complete(CupTournament *cup, uint32_t round, uint32_t index,
                          uint32_t home_goals, uint32_t away_goals,
-                         int simulated) {
+                         int simulated, uint32_t shootout_winner) {
   CupFixture *fixture = &cup->fixtures[round][index];
   fixture->home_goals = (uint8_t)(home_goals > 99u ? 99u : home_goals);
   fixture->away_goals = (uint8_t)(away_goals > 99u ? 99u : away_goals);
   fixture->winner = home_goals > away_goals ? fixture->home
                     : away_goals > home_goals ? fixture->away
+                    : shootout_winner ? shootout_winner
                     : ((cup->seed ^ fixture->home ^ fixture->away ^
                         (round << 8) ^ index) & 1u) ? fixture->home
                                                      : fixture->away;
   fixture->complete = 1;
   fixture->simulated = simulated != 0;
+  fixture->reserved = home_goals == away_goals ? CUP_DECIDED_PENALTIES : 0u;
   if (cup->history_count < CUP_MAX_FIXTURES) {
     cup->history_round[cup->history_count] = (uint8_t)round;
     cup->history_index[cup->history_count] = (uint8_t)index;
@@ -166,7 +168,14 @@ int cup_tournament_next_human(const CupTournament *cup, uint32_t *round,
 
 int cup_tournament_record_deferred(CupTournament *cup, uint32_t round, uint32_t index,
                           uint32_t home_goals, uint32_t away_goals) {
-  if (!cup || round != cup->active_round)
+  return cup_tournament_record_deferred_decided(cup, round, index,
+      home_goals, away_goals, 0u, 0);
+}
+
+int cup_tournament_record_deferred_decided(CupTournament *cup, uint32_t round,
+    uint32_t index, uint32_t home_goals, uint32_t away_goals,
+    uint32_t shootout_winner, int simulated) {
+  if (!cup || round != cup->active_round || home_goals > 99u || away_goals > 99u)
     return 0;
   const CupFixture *target = cup_tournament_fixture(cup, round, index);
   if (!target) return 0;
@@ -183,13 +192,25 @@ int cup_tournament_record_deferred(CupTournament *cup, uint32_t round, uint32_t 
     home_goals += fixture->first_leg_home_goals;
     away_goals += fixture->first_leg_away_goals;
   }
-  cup_complete(cup, round, index, home_goals, away_goals, 0);
+  /* First legs may draw. Only a level deciding aggregate needs penalties.
+   * Validate before changing the fixture so a later stats sample can retry. */
+  if (!simulated && home_goals == away_goals &&
+      shootout_winner != fixture->home && shootout_winner != fixture->away)
+    return 0;
+  cup_complete(cup, round, index, home_goals, away_goals, simulated,
+               home_goals == away_goals ? shootout_winner : 0u);
   return 1;
 }
 
 int cup_tournament_record(CupTournament *cup, uint32_t round, uint32_t index,
                           uint32_t home_goals, uint32_t away_goals) {
-  if (!cup_tournament_record_deferred(cup, round, index, home_goals, away_goals))
+  return cup_tournament_record_decided(cup, round, index, home_goals, away_goals, 0u);
+}
+
+int cup_tournament_record_decided(CupTournament *cup, uint32_t round, uint32_t index,
+    uint32_t home_goals, uint32_t away_goals, uint32_t shootout_winner) {
+  if (!cup_tournament_record_deferred_decided(cup, round, index,
+          home_goals, away_goals, shootout_winner, 0))
     return 0;
   /* Preserve the original early return after leg 1, including COM fixtures. */
   if (cup->fixtures[round][index].complete) cup_tournament_advance(cup);
@@ -257,7 +278,7 @@ void cup_tournament_advance(CupTournament *cup) {
         home_goals = fixture->first_leg_home_goals + ((roll >> 17) % 4u);
         away_goals = fixture->first_leg_away_goals + ((roll >> 23) % 4u);
       }
-      cup_complete(cup, round, i, home_goals, away_goals, 1);
+      cup_complete(cup, round, i, home_goals, away_goals, 1, 0u);
     }
     if (round + 1u >= cup->round_count) {
       CupFixture *bronze = &cup->fixtures[round][CUP_THIRD_PLACE_INDEX];
@@ -266,7 +287,7 @@ void cup_tournament_advance(CupTournament *cup) {
           const uint32_t roll = cup->seed ^ bronze->home * 2246822519u ^
                                 bronze->away * 3266489917u;
           cup_complete(cup, round, CUP_THIRD_PLACE_INDEX,
-                       (roll >> 6) % 4u, (roll >> 14) % 4u, 1);
+                       (roll >> 6) % 4u, (roll >> 14) % 4u, 1, 0u);
         }
         cup->third_place = bronze->winner;
       }

@@ -88,6 +88,12 @@ int main(void) {
   focus_hub(1u);
   press(BUTTON_A); /* General settings. */
   assert(competition_frontend_cup_general_open());
+  assert(competition_frontend_cup_general_count()==9u);
+  for(uint32_t i=0;i<8u;i++)press(BUTTON_DOWN);
+  assert(!strcmp(competition_frontend_cup_general_label(8u),"TABLE TIE-BREAK"));
+  press(BUTTON_RIGHT);
+  assert(!strcmp(competition_frontend_cup_general_value(8u),"HEAD-TO-HEAD"));
+  assert(competition_frontend_league_tournament()->reserved[1]==LEAGUE_TIEBREAK_HEAD_TO_HEAD);
   press(BUTTON_B);
   focus_hub(2u);
   assert(competition_frontend_item_enabled(2u));
@@ -132,6 +138,7 @@ int main(void) {
   assert(competition_draft_ready(competition_frontend_league_draft()));
   assert(competition_frontend_league_tournament()->matchday_count == 1u);
   assert(competition_frontend_focus() == 2u);
+  assert(competition_frontend_league_tournament()->reserved[1]==LEAGUE_TIEBREAK_HEAD_TO_HEAD);
   press(BUTTON_A);
   assert(competition_frontend_take_action() ==
          COMPETITION_ACTION_LEAGUE_FIXTURE);
@@ -158,6 +165,11 @@ int main(void) {
   competition_frontend_league_restore_after_match();
   assert(competition_frontend_league_tournament()->phase ==
          LEAGUE_PHASE_KNOCKOUT);
+  focus_hub(1u);press(BUTTON_A);
+  for(uint32_t i=0;i<8u;i++)press(BUTTON_DOWN);
+  press(BUTTON_LEFT);
+  assert(competition_frontend_league_tournament()->reserved[1]==LEAGUE_TIEBREAK_HEAD_TO_HEAD);
+  assert(strstr(competition_frontend_status(),"LOCKED"));press(BUTTON_B);
   assert(competition_frontend_item_enabled(0u));
   focus_hub(0u);press(BUTTON_A);
   assert(competition_frontend_league_page() == LEAGUE_PAGE_TEAMS);

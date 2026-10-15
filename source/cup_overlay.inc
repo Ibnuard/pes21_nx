@@ -293,7 +293,7 @@ static void cup_ui_fixture(MasterLeagueRender *ui,uint32_t round,uint32_t index,
     ml_ui_center_text(ui,score,x+w-.041f,yy+.015f,.030f,.034f,.0278f,0,-2,verts,quads);
     if(teams[side])cup_ui_player_badge(ui,competition_frontend_cup_player_slot(teams[side]),x+w-.104f,yy+.016f,.050f,.032f,verts,quads);
   }
-  cup_ui_text(ui,bye ? "BYE / AUTOMATIC ADVANCE" : f->complete ? (two_leg ? "AGGREGATE / FULL TIME" : "FULL TIME") : f->first_leg_complete ? "FIRST LEG / RETURN TO PLAY" : "UPCOMING",x+.014f,y+h-.034f,w-.028f,.0208f,-3,verts,quads);
+  cup_ui_text(ui,bye ? "BYE / AUTOMATIC ADVANCE" : f->complete ? ((f->reserved&CUP_DECIDED_PENALTIES) ? "DECIDED ON PENALTIES" : two_leg ? "AGGREGATE / FULL TIME" : "FULL TIME") : f->first_leg_complete ? "FIRST LEG / RETURN TO PLAY" : "UPCOMING",x+.014f,y+h-.034f,w-.028f,.0208f,-3,verts,quads);
 }
 static void cup_ui_bracket(MasterLeagueRender *ui,int matches,GLfloat *verts,int *quads) {
   const CupTournament *cup=competition_frontend_cup_tournament();
@@ -375,8 +375,9 @@ static void cup_ui_toast(MasterLeagueRender *ui,int moving,GLfloat *verts,int *q
     snprintf(move_status,sizeof(move_status),"MOVE %s  TO  %s",from,to);status=move_status;
   }
   const float ms=(float)armTicksToNs(armGetSystemTick()-began)/1000000.f;
-  if(!move_hint && ms>=3000.f)return;
-  const float enter=fminf(1.f,ms/180.f),leave=move_hint ? 0.f : fmaxf(0.f,(ms-2750.f)/250.f);
+  const int persistent=move_hint || competition_frontend_save_pending();
+  if(!persistent && ms>=3000.f)return;
+  const float enter=fminf(1.f,ms/180.f),leave=persistent ? 0.f : fmaxf(0.f,(ms-2750.f)/250.f);
   ml_ui_toast_card(ui,status,(1.f-enter)*(1.f-enter)+leave*leave,verts,quads);
 }
 static void cup_news_emit(MasterLeagueRender *ui,CompetitionFrontendState state,GLfloat *verts,int *quads) {

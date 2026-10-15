@@ -21,6 +21,11 @@ typedef enum {
   LEAGUE_SYSTEM_STANDINGS = 1,
 } LeagueSystem;
 
+typedef enum {
+  LEAGUE_TIEBREAK_GOAL_DIFFERENCE = 0,
+  LEAGUE_TIEBREAK_HEAD_TO_HEAD = 1,
+} LeagueTiebreak;
+
 typedef struct {
   uint32_t home, away;
   uint8_t home_goals, away_goals, complete, simulated;
@@ -48,7 +53,7 @@ typedef struct {
   LeagueStanding standings[LEAGUE_MAX_TEAMS];
   uint8_t phase;
   uint8_t first_match_started;
-  uint8_t reserved[2]; /* reserved[0]: LeagueSystem; old saves default to knockout */
+  uint8_t reserved[2]; /* [0]: LeagueSystem, [1]: LeagueTiebreak; saved ABI */
   CupTournament knockout;
   uint32_t scorer_count;
   LeagueScorer scorers[LEAGUE_MAX_SCORERS];
@@ -61,6 +66,9 @@ int league_tournament_init(LeagueTournament *league,
                            int home_away, uint32_t seed);
 void league_tournament_set_system(LeagueTournament *league,
                                   LeagueSystem system);
+void league_tournament_set_tiebreak(LeagueTournament *league, LeagueTiebreak rule);
+const char *league_tournament_tiebreak_label(LeagueTiebreak rule);
+const char *league_tournament_tiebreak_rules(LeagueTiebreak rule);
 const LeagueFixture *league_tournament_matchday_fixture(
     const LeagueTournament *league, uint32_t matchday, uint32_t offset);
 int league_tournament_next_human(const LeagueTournament *league,
@@ -77,6 +85,9 @@ int league_tournament_record(LeagueTournament *league,
                               uint32_t knockout_round,
                               uint32_t knockout_index,
                               uint32_t home_goals, uint32_t away_goals);
+int league_tournament_record_decided(LeagueTournament *league,
+    uint32_t fixture_index, uint32_t knockout_round, uint32_t knockout_index,
+    uint32_t home_goals, uint32_t away_goals, uint32_t shootout_winner);
 void league_tournament_advance(LeagueTournament *league);
 /* Career calendar owns simulation and time. These never simulate or skip days. */
 int league_tournament_record_table_fixture(LeagueTournament *league,
@@ -96,6 +107,9 @@ int league_tournament_credit_goals(LeagueTournament *league,
                                     uint32_t goals);
 uint32_t league_tournament_top_scorers(const LeagueTournament *league,
                                         uint16_t slots[4]);
+/* Ranking uses canonical identity totals; stored rows retain club breakdowns. */
+uint32_t league_tournament_scorer_goals(const LeagueTournament *league, uint32_t slot);
+uint32_t league_tournament_scorer_clubs(const LeagueTournament *league, uint32_t slot);
 uint32_t league_tournament_base_id_for_portrait(uint32_t portrait_id);
 
 #endif

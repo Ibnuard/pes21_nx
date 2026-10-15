@@ -290,8 +290,7 @@ static int ml_world_record(MasterLeague *c,const MlEvent *e,uint32_t hg,uint32_t
       CupFixture *f=&cup->fixtures[e->round][i];if(f->complete)continue;
       uint32_t h=hg,a=ag;const int ai=simulated || i!=e->index;
       if(ai)ml_simulate_score(c,f->home,f->away,e->day+i,&h,&a);
-      cup_tournament_record_deferred(cup,e->round,i,h,a);f->simulated=ai;
-      if(!ai && h==a)f->winner=winner;
+      if(!cup_tournament_record_deferred_decided(cup,e->round,i,h,a,ai ? 0u : winner,ai))return 0;
       if(e->kind==ML_EVENT_CONTINENTAL) {
         MlClub *club=ml_club(c,f->home);if(club)club->cash+=800000;
         club=ml_club(c,f->away);if(club)club->cash+=400000;

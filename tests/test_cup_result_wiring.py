@@ -27,6 +27,10 @@ static uint32_t match_result_page, match_result_final_seen;
 static uint32_t phase, cup_active, league_active, scores_ready = 1u, calls;
 static uint32_t league_calls;
 static uint32_t recorded_home, recorded_away;
+static uint32_t pause_stats_seen, pause_penalty_scores[2], penalty_calls;
+static void competition_frontend_penalty_result(uint32_t home, uint32_t away) {
+  assert(home == 4u && away == 5u); ++penalty_calls;
+}
 static int competition_frontend_cup_match_active(void) { return cup_active; }
 static int competition_frontend_league_match_active(void) { return league_active; }
 static uint32_t match_result_current_phase(void) { return phase; }
@@ -67,8 +71,12 @@ int main(void) {
   match_result_page = MATCH_RESULT_PAGE_FINAL;
   cup_active = 0u;
   league_active = 1u;
+  pause_stats_seen = 1u; pause_penalty_scores[0] = 4u; pause_penalty_scores[1] = 5u;
   match_result_record_competition_score();
-  assert(calls == 1u && league_calls == 1u);
+  assert(calls == 1u && league_calls == 1u && penalty_calls == 1u);
+  cup_active = 1u; league_active = 0u;
+  match_result_record_competition_score();
+  assert(calls == 2u && penalty_calls == 2u);
   return 0;
 }
 """

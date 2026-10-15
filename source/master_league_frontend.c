@@ -916,8 +916,10 @@ static void ml_base_view(MlView *v) {
         if (table_scorers) {
           const LeagueScorer *s=&career.league.scorers[scorers[index]];
           snprintf(row->label,64,"%u  %s",index+1u,s->name); snprintf(row->detail,96,"%s",exhibition_team_catalog_name(s->team));
-          snprintf(row->value,48,"%u GOALS",s->goals); row->portrait=s->portrait_id;
-          row->badge=exhibition_team_catalog_badge(s->team);
+          const uint32_t clubs=league_tournament_scorer_clubs(&career.league,scorers[index]);
+          if(clubs>1u)snprintf(row->detail,96,"%u CLUBS / COMBINED SEASON TOTAL",clubs);
+          snprintf(row->value,48,"%u GOALS",league_tournament_scorer_goals(&career.league,scorers[index])); row->portrait=s->portrait_id;
+          row->badge=clubs>1u ? 0u : exhibition_team_catalog_badge(s->team);
         } else {
           const LeagueStanding *s=&career.league.standings[standings[index]];
           snprintf(row->label,64,"%u  %.55s",index+1u,exhibition_team_catalog_name(s->team));

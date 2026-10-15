@@ -460,9 +460,8 @@ int ml_record_event_decided(MasterLeague *c, const MlEvent *event,
         ml_simulated_goals(c, away, a, salt ^ 0x1234u);
       }
     } else {
-      if (!cup_tournament_record_deferred(&c->cup, event->round, i, h, a)) return 0;
-      c->cup.fixtures[event->round][i].simulated = !played;
-      if (played && h == a) c->cup.fixtures[event->round][i].winner = shootout_winner;
+      if (!cup_tournament_record_deferred_decided(&c->cup, event->round, i,
+              h, a, played ? shootout_winner : 0u, !played)) return 0;
     }
     MlClub *home_club = ml_club(c, home), *away_club = ml_club(c, away);
     if (home_club) home_club->cash += 600000;
@@ -511,10 +510,40 @@ int ml_simulate_event(MasterLeague *c, const MlEvent *event) {
   return ml_record_event(c, event, 0u, 0u, NULL, 0u, 1);
 }
 
+static void ml_archive_season(MasterLeague *c) {
+  MlSeasonRecord *r=&c->history.seasons[c->history.count++];
+  memset(r,0,sizeof(*r));
+  r->season=c->season; r->club=c->settings.club;
+  r->competition_id=c->settings.competition_id; r->cup_id=c->settings.cup_id;
+  r->rank=ml_rank(c); r->team_count=c->league.team_count;
+  r->league_champion=c->league.knockout.champion;
+  r->cup_champion=c->cup_enabled ? c->cup.champion : 0u;
+  r->continental_id=c->world.continental_id;
+  r->continental_champion=c->world.continental.champion;
+  r->national_team=c->world.national_team;
+  r->regional_champion=c->world.regional.champion;
+  r->world_champion=c->world.world_cup.champion;
+  if(r->league_champion==r->club)r->honours|=ML_HONOUR_LEAGUE;
+  if(r->cup_champion==r->club)r->honours|=ML_HONOUR_CUP;
+  if(r->continental_champion==r->club)r->honours|=ML_HONOUR_CONTINENTAL;
+  if(r->national_team && r->regional_champion==r->national_team)r->honours|=ML_HONOUR_REGIONAL;
+  if(r->national_team && r->world_champion==r->national_team)r->honours|=ML_HONOUR_WORLD;
+  for(uint32_t i=0;i<c->league.team_count;i++)
+    if(c->league.standings[i].team==r->club)r->standing=c->league.standings[i];
+  r->closing_cash=ml_find_club(c,r->club)->cash;
+  r->wages_paid=c->wages_paid; r->match_income=c->match_income; r->prize_income=c->prize_income;
+  uint16_t slots[4]; r->scorer_count=league_tournament_top_scorers(&c->league,slots);
+  for(uint32_t i=0;i<r->scorer_count;i++) {
+    r->scorers[i]=c->league.scorers[slots[i]];
+    r->scorers[i].goals=(uint16_t)league_tournament_scorer_goals(&c->league,slots[i]);
+    if(league_tournament_scorer_clubs(&c->league,slots[i])>1u)r->scorers[i].team=0u;
+  }
+}
+
 int ml_next_season(MasterLeague *c) {
   MlEvent event;
   if (!ml_next_event(c, &event) || event.kind != ML_EVENT_SEASON_END ||
-      c->season >= 100u) return 0;
+      c->season >= 100u || c->history.count>=ML_MAX_SEASON_RECORDS) return 0;
   const MlClub *managed = ml_find_club(c, c->settings.club);
   uint32_t staying = 0u, keepers = 0u;
   for (uint32_t i = 0; i < managed->count; i++) {
@@ -544,6 +573,7 @@ int ml_next_season(MasterLeague *c) {
     ml_remove_member(c, club, slot);
     p->club = p->wage = p->contract_end = 0u;
   }
+  ml_archive_season(c); /* Before the new season clears fixtures and scorers. */
   c->seasons_completed++; c->season++;
   memset(&c->office,0,sizeof(c->office));
   memset(c->offer_seen,0,sizeof(c->offer_seen));
@@ -596,6 +626,36 @@ static int ml_u32_compare(const void *a, const void *b) {
   const uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
   return x < y ? -1 : x > y;
 }
+static int ml_history_valid(const MasterLeague *c) {
+  if(c->history.count>ML_MAX_SEASON_RECORDS || c->history.count>c->seasons_completed ||
+      c->history.reserved)return 0;
+  uint32_t previous=0u;
+  for(uint32_t i=0;i<c->history.count;i++) {
+    const MlSeasonRecord *r=&c->history.seasons[i];
+    const LeagueStanding *s=&r->standing;
+    if(!r->season || r->season<=previous || r->season>=c->season ||
+        !ml_find_club(c,r->club) || !r->competition_id ||
+        r->team_count<2u || r->team_count>LEAGUE_MAX_TEAMS ||
+        !r->rank || r->rank>r->team_count || s->team!=r->club ||
+        s->played!=2u*(r->team_count-1u) || s->wins+s->draws+s->losses!=s->played ||
+        s->points!=3u*s->wins+s->draws || (r->honours&~31u) ||
+        r->wages_paid<0 || r->match_income<0 || r->prize_income<0 ||
+        r->scorer_count>4u || r->reserved)return 0;
+    const uint32_t honours=(r->league_champion==r->club ? ML_HONOUR_LEAGUE : 0u) |
+      (r->cup_champion==r->club ? ML_HONOUR_CUP : 0u) |
+      (r->continental_champion==r->club ? ML_HONOUR_CONTINENTAL : 0u) |
+      (r->national_team && r->regional_champion==r->national_team ? ML_HONOUR_REGIONAL : 0u) |
+      (r->national_team && r->world_champion==r->national_team ? ML_HONOUR_WORLD : 0u);
+    if(r->honours!=honours)return 0;
+    for(uint32_t j=0;j<r->scorer_count;j++) {
+      const LeagueScorer *p=&r->scorers[j];
+      if(!p->base_id || !p->goals || !p->name[0] || !memchr(p->name,0,sizeof(p->name)))return 0;
+      for(uint32_t k=0;k<j;k++)if(r->scorers[k].base_id==p->base_id)return 0;
+    }
+    previous=r->season;
+  }
+  return 1;
+}
 int ml_valid(const MasterLeague *c) {
   if (!c || c->club_count < 2u || c->club_count > ML_MAX_CLUBS ||
       !c->player_count || c->player_count > ML_MAX_PLAYERS ||
@@ -619,6 +679,7 @@ int ml_valid(const MasterLeague *c) {
       c->league.home_away!=1u || c->league.first_match_started>1u ||
       (c->league.phase!=LEAGUE_PHASE_TABLE && c->league.phase!=LEAGUE_PHASE_COMPLETE) ||
       c->league.reserved[0] != LEAGUE_SYSTEM_STANDINGS ||
+      c->league.reserved[1] > LEAGUE_TIEBREAK_HEAD_TO_HEAD ||
       c->cup_enabled > 1u || c->cup.round_count > CUP_MAX_ROUNDS ||
       c->cup.active_round >= CUP_MAX_ROUNDS || c->cup.history_count > CUP_MAX_FIXTURES ||
       !ml_find_club(c, c->settings.club)) return 0;
@@ -720,6 +781,7 @@ int ml_valid(const MasterLeague *c) {
   if(valid && c->current_plan.player_count && !ml_plan_compatible(c,&c->current_plan))valid=0;
   if(valid && !ml_office_valid(c))valid=0;
   if(valid && !ml_world_valid(c))valid=0;
+  if(valid && !ml_history_valid(c))valid=0;
   free(seen); free(ids);
   return valid;
 }
