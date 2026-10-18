@@ -2332,6 +2332,39 @@ int competition_frontend_league_penalty(void) {
   return competition_frontend_league_extra_time();
 }
 int competition_frontend_cup_match_active(void) { return cup_match_active != 0; }
+int competition_frontend_cup_live_final_context(
+    CompetitionCupFinalContext *context) {
+  if (!context) return 0;
+  memset(context, 0, sizeof(*context));
+  if (cup_match_active != 1u || cup_match_result_received ||
+      cup_tournament_valid != 1u || league_match_active ||
+      ml_frontend_match_active() || frontend_state != COMPETITION_FRONTEND_NONE ||
+      frontend_closing || !cup_tournament.round_count ||
+      cup_tournament.round_count > CUP_MAX_ROUNDS ||
+      cup_pending_round != cup_tournament.round_count - 1u ||
+      cup_pending_round != cup_tournament.active_round ||
+      cup_pending_index != 0u || cup_tournament.champion ||
+      !cup_player_count || cup_player_count > COMPETITION_MAX_PLAYER_SLOTS ||
+      cup_match_swapped > 1u)
+    return 0;
+  const CupFixture *fixture = cup_tournament_fixture(
+      &cup_tournament, cup_pending_round, cup_pending_index);
+  if (!fixture || fixture->complete || fixture->simulated || fixture->winner ||
+      !fixture->home || !fixture->away || fixture->home == fixture->away ||
+      fixture->first_leg_complete || fixture->first_leg_home_goals ||
+      fixture->first_leg_away_goals ||
+      (!competition_frontend_cup_team_is_human(fixture->home) &&
+       !competition_frontend_cup_team_is_human(fixture->away)))
+    return 0;
+  /* The core always makes index 0 of the last round a single-leg final,
+   * including Home Away cups. Index 1 is the separate third-place match.
+   * Do not call cup_match_teams() here: that setter recalculates the swap. */
+  context->native_home_team = cup_match_swapped ? fixture->away : fixture->home;
+  context->native_away_team = cup_match_swapped ? fixture->home : fixture->away;
+  context->round = cup_pending_round;
+  context->fixture_index = cup_pending_index;
+  return 1;
+}
 uint32_t competition_frontend_scoreboard(uint32_t home, uint32_t away) {
   if (ml_frontend_match_active()) return ml_frontend_scoreboard();
   if (cup_match_active) return nx_score_key(1, competition_cup_entry()->competition_id);

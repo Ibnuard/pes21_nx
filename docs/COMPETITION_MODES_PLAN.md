@@ -507,6 +507,13 @@ harus masuk ke CPK bersarang: `dt220_mobile_all.cpk` memuat skeleton/model
 memang ada di input lokal, meski kelengkapan scene, kamera, dan pemetaan
 kompetisinya belum terbukti.
 
+Koreksi audit (2026-10-15): kesimpulan historis di bawah tentang
+`fixdemo::DB::Init()` yang kosong tidak berarti DB tidak dapat diisi.
+`DataManager::Setup()` / `LoadDBData()` memuat tabel scene bertipe dari CPK.
+Parser dan canary entrance kini tersedia; piala tetap belum diaktifkan karena
+geometri PC, dependensi scene, dan gate final belum tervalidasi lengkap.
+Lihat [status port cinematic](FL26_CINEMATICS_CANARY.md).
+
 Audit lanjutan tanpa emulator (2026-09-25) menemukan hambatan yang lebih
 spesifik untuk adegan 3D native pada target ini: `fixdemo::DB::Init()` hanya
 `ret`, dan `FixDemoMatch::SetSceneId()` serta

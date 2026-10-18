@@ -135,6 +135,20 @@ uint32_t competition_frontend_match_leg(uint8_t *first_home,
 int competition_frontend_league_extra_time(void);
 int competition_frontend_league_penalty(void);
 int competition_frontend_cup_match_active(void);
+/* Team values are logical catalog IDs in native HOME/AWAY order, not encoded
+ * physical native IDs (physical_team_id << 14). */
+typedef struct {
+  uint32_t native_home_team;
+  uint32_t native_away_team;
+  uint32_t round;
+  uint32_t fixture_index;
+} CompetitionCupFinalContext;
+/* Read-only, live standalone Cup championship final. Call at the native result
+ * boundary, after a successful handoff; never cache this for later eligibility.
+ * Uses the HOME/AWAY order already established by cup_match_teams(). On failure
+ * clears context, without changing match ordering, tournament or save state. */
+int competition_frontend_cup_live_final_context(
+    CompetitionCupFinalContext *context);
 int competition_frontend_cup_take_champion_presentation(void);
 void competition_frontend_cup_handoff_result(int opened);
 /* Shootout-only score, in native HOME/AWAY order. Never added to match goals. */

@@ -47,6 +47,8 @@ Subsystem notes and historical implementation audits live here.
 - [Match review v17: preset flow, Anfield camera clearance and referee cost](MATCH_REVIEW_V17.md)
 - [Match review v16: Game Plan, stadium, referee and local rematch](MATCH_REVIEW_V16.md)
 - [Competition modes plan: Match, Cup, League, and Master League](COMPETITION_MODES_PLAN.md)
+- [FL26 cinematics and trophy integration boundaries](FL26_CINEMATICS_CANARY.md)
+- [Trophy ceremony readiness and device test plan](TROPHY_CEREMONY_TEST_PLAN.md) — reproducible asset audit, missing runtime gates, and normal/penalty/Skip final scenarios.
 - [MINI-GAME: Football Triple Triad and Mini Soccer concepts](MINI-GAME.md)
 - [NRO launcher icon and NSP forwarder notes](NRO_ICON.md)
 - [Loose CPK canary](LOOSE_CPK_CANARY.md)

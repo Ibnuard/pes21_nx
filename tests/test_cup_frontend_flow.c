@@ -81,8 +81,149 @@ static void check_opening_owner_rule(void) {
   competition_frontend_finish_close();
 }
 
+static void check_final_context(int expected, uint32_t home, uint32_t away,
+                                uint32_t round) {
+  const CupTournament *cup = competition_frontend_cup_tournament();
+  const CompetitionEntryDraft *draft = competition_frontend_cup_draft();
+  const CupTournament before_cup = *cup;
+  const CompetitionEntryDraft before_draft = *draft;
+  const uint32_t status = competition_frontend_status_serial();
+  const int pending = competition_frontend_save_pending();
+  const int active = competition_frontend_cup_match_active();
+  const CompetitionFrontendState state = competition_frontend_state();
+  for (uint32_t i = 0u; i < 2u; i++) {
+    CompetitionCupFinalContext context;
+    memset(&context, 0xa5, sizeof(context));
+    assert(competition_frontend_cup_live_final_context(&context) == expected);
+    if (expected) {
+      assert(context.native_home_team == home);
+      assert(context.native_away_team == away);
+      assert(context.round == round && context.fixture_index == 0u);
+    } else {
+      const CompetitionCupFinalContext empty = {0};
+      assert(!memcmp(&context, &empty, sizeof(context)));
+    }
+  }
+  assert(!competition_frontend_cup_live_final_context(NULL));
+  assert(!memcmp(&before_cup, cup, sizeof(*cup)));
+  assert(!memcmp(&before_draft, draft, sizeof(*draft)));
+  assert(competition_frontend_status_serial() == status);
+  assert(competition_frontend_save_pending() == pending);
+  assert(competition_frontend_cup_match_active() == active);
+  assert(competition_frontend_state() == state);
+}
+
+static void fill_ceremony_bracket(void) {
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  assert(competition_frontend_focus() == 0u);
+  press(BUTTON_A);press(BUTTON_X);press(BUTTON_B);
+  assert(competition_draft_ready(competition_frontend_cup_draft()));
+  press(BUTTON_UP);press(BUTTON_RIGHT);
+  assert(competition_frontend_focus() == 1u);
+}
+
+static void begin_ceremony_fixture(uint32_t *home, uint32_t *away) {
+  assert(competition_frontend_focus() == 1u);
+  press(BUTTON_A);
+  assert(competition_frontend_take_action() == COMPETITION_ACTION_CUP_FIXTURE);
+  assert(competition_frontend_cup_match_teams(home, away));
+  check_final_context(0, 0u, 0u, 0u); /* Pending is not successful handoff. */
+  competition_frontend_cup_handoff_result(1);
+}
+
+static void check_live_final_eligibility(void) {
+  /* A lone human in the bracket's AWAY slot becomes native HOME. Queries
+   * must preserve that established swap, even when COM wins the final. */
+  new_custom_cup(2u, 1u);
+  check_final_context(0, 0u, 0u, 0u); /* Unassigned fixture. */
+  press(BUTTON_A);press(BUTTON_X);
+  press(BUTTON_Y);press(BUTTON_DOWN);press(BUTTON_A);
+  assert(competition_frontend_cup_draft()->owners[1] == 1u);
+  press(BUTTON_B);press(BUTTON_UP);press(BUTTON_RIGHT);
+  press(BUTTON_A);
+  assert(competition_frontend_take_action() == COMPETITION_ACTION_CUP_FIXTURE);
+  uint32_t home = 0u, away = 0u;
+  assert(competition_frontend_cup_match_teams(&home, &away));
+  assert(home == competition_frontend_cup_tournament()->fixtures[0][0].away);
+  check_final_context(0, 0u, 0u, 0u);
+  competition_frontend_cup_handoff_result(0);
+  assert(!competition_frontend_cup_match_active());
+  check_final_context(0, 0u, 0u, 0u); /* Failed/cancelled native route. */
+  begin_ceremony_fixture(&home, &away);
+  check_final_context(1, home, away, 0u);
+  competition_frontend_cup_match_result(0u, 2u);
+  assert(competition_frontend_cup_tournament()->champion == away);
+  check_final_context(0, 0u, 0u, 0u); /* Already recorded. */
+  competition_frontend_cup_restore_after_match();
+  check_final_context(0, 0u, 0u, 0u);
+
+  /* Human vs human still orders native pads by logical owner, not team ID. */
+  new_custom_cup(2u, 2u);
+  press(BUTTON_A);press(BUTTON_X);
+  press(BUTTON_Y);press(BUTTON_DOWN);press(BUTTON_A);
+  press(BUTTON_B);press(BUTTON_UP);press(BUTTON_RIGHT);
+  begin_ceremony_fixture(&home, &away);
+  assert(competition_frontend_cup_player_slot(home) == 1u);
+  assert(competition_frontend_cup_player_slot(away) == 2u);
+  check_final_context(1, home, away, 0u);
+  competition_frontend_cup_match_result(1u, 1u);
+  check_final_context(1, home, away, 0u); /* Missing PK evidence was not saved. */
+  competition_frontend_penalty_result(3u, 4u);
+  competition_frontend_cup_match_result(1u, 1u);
+  assert(competition_frontend_cup_tournament()->champion == away);
+  check_final_context(0, 0u, 0u, 0u);
+  competition_frontend_cup_restore_after_match();
+
+  /* Elimination leaves a COM-only final, resolved by the actual simulator. */
+  new_custom_cup(4u, 1u);
+  fill_ceremony_bracket();
+  begin_ceremony_fixture(&home, &away);
+  check_final_context(0, 0u, 0u, 0u); /* Semi-final. */
+  competition_frontend_cup_match_result(0u, 1u);
+  const CupFixture *com_final = cup_tournament_fixture(
+      competition_frontend_cup_tournament(), 1u, 0u);
+  assert(com_final && com_final->simulated && com_final->complete);
+  assert(!competition_frontend_cup_team_is_human(com_final->home));
+  assert(!competition_frontend_cup_team_is_human(com_final->away));
+  check_final_context(0, 0u, 0u, 0u);
+  competition_frontend_cup_restore_after_match();
+
+  /* Home Away affects only semis. Play both legs, then the third-place
+   * fixture at index 1; only the last-round championship at index 0 qualifies. */
+  competition_frontend_close();competition_frontend_finish_close();
+  competition_frontend_open_modes();competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);press(BUTTON_A);press(BUTTON_LEFT);
+  press(BUTTON_DOWN);press(BUTTON_DOWN);
+  for (uint32_t i = 0u; i < 4u; i++) press(BUTTON_LEFT);
+  press(BUTTON_UP);
+  for (uint32_t i = 0u; i < 3u; i++) press(BUTTON_RIGHT);
+  press(BUTTON_DOWN);press(BUTTON_DOWN);press(BUTTON_A);
+  press(BUTTON_DOWN);press(BUTTON_A);press(BUTTON_DOWN);press(BUTTON_A);
+  assert(competition_frontend_cup_home_away());
+  assert(competition_frontend_cup_third_place());
+  fill_ceremony_bracket();
+  for (uint32_t match = 0u; match < 6u; match++) {
+    uint32_t round = UINT32_MAX, index = UINT32_MAX;
+    assert(competition_frontend_cup_next_fixture(&round, &index));
+    const int championship = round == 1u && index == 0u;
+    if (match < 4u) assert(round == 0u);
+    if (match == 4u) assert(round == 1u && index == CUP_THIRD_PLACE_INDEX);
+    if (match == 5u) assert(championship);
+    begin_ceremony_fixture(&home, &away);
+    if (match < 4u) assert(competition_frontend_match_leg(NULL, NULL) != 0u);
+    else assert(competition_frontend_match_leg(NULL, NULL) == 0u);
+    check_final_context(championship, home, away, round);
+    competition_frontend_cup_match_result(1u, 0u);
+    check_final_context(0, 0u, 0u, 0u);
+    competition_frontend_cup_restore_after_match();
+  }
+  assert(competition_frontend_cup_tournament()->champion);
+  competition_frontend_close();competition_frontend_finish_close();
+}
+
 int main(void) {
   check_opening_owner_rule();
+  check_live_final_eligibility();
   competition_frontend_open_modes();
   competition_frontend_pad_event(0u, 0u); /* consume opening A tick */
   press(BUTTON_A);
@@ -246,7 +387,9 @@ int main(void) {
     assert(competition_frontend_cup_match_teams(&home, &away));
     assert(home && away);
     competition_frontend_cup_handoff_result(1);
+    check_final_context(match == 1u, home, away, 1u);
     competition_frontend_cup_match_result(1u, 0u);
+    check_final_context(0, 0u, 0u, 0u);
     assert(!competition_frontend_cup_take_champion_presentation());
     competition_frontend_cup_restore_after_match();
     if (!competition_frontend_cup_tournament()->champion)
@@ -477,7 +620,10 @@ int main(void) {
   press(BUTTON_A);
   assert(competition_frontend_take_action() ==
          COMPETITION_ACTION_CUP_FIXTURE);
+  uint32_t quick_home = 0u, quick_away = 0u;
+  assert(competition_frontend_cup_match_teams(&quick_home, &quick_away));
   competition_frontend_cup_handoff_result(1);
+  check_final_context(1, quick_home, quick_away, 0u);
   competition_frontend_cup_match_result(2u, 0u);
   /* Custom Cup wins even when both clubs belong to the Premier League. */
   assert(competition_frontend_scoreboard(101u,107u)==1000u);
@@ -486,6 +632,13 @@ int main(void) {
   assert(competition_frontend_cup_view_round() == 0u);
   assert(competition_frontend_focus() == 1u);
   assert(competition_frontend_cup_take_champion_presentation());
+  competition_frontend_close();competition_frontend_finish_close();
+  competition_frontend_open_modes();competition_frontend_pad_event(0u, 0u);
+  press(BUTTON_A);press(BUTTON_DOWN);press(BUTTON_A);press(BUTTON_A);
+  assert(competition_frontend_state() == COMPETITION_FRONTEND_CUP_BRACKET);
+  assert(competition_frontend_cup_tournament()->champion);
+  check_final_context(0, 0u, 0u, 0u); /* Completed save has no live final. */
+  assert(!competition_frontend_cup_take_champion_presentation());
   puts("Cup frontend flow tests passed");
   return 0;
 }
