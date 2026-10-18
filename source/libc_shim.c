@@ -141,9 +141,18 @@ unsigned long getauxval_fake(unsigned long type) {
 }
 
 int gettid_fake(void) {
+  // Horizon's current-thread ID is immutable for this native thread. UE's
+  // thread checks must not enter the kernel again for every object/task.
+  // Native TLS is fresh for each pthread, including recycled stack addresses.
+  // Cache successful IDs only: a failed query must be retried next time.
+  static __thread u64 cached_thread_id;
+  if (cached_thread_id)
+    return (int)(cached_thread_id & 0x7fffffff);
   u64 thread_id = 1;
-  if (R_SUCCEEDED(svcGetThreadId(&thread_id, CUR_THREAD_HANDLE)) && thread_id)
+  if (R_SUCCEEDED(svcGetThreadId(&thread_id, CUR_THREAD_HANDLE)) && thread_id) {
+    cached_thread_id = thread_id;
     return (int)(thread_id & 0x7fffffff);
+  }
   return 1;
 }
 

@@ -99,6 +99,7 @@ static void stadium_loaded_canary(void *loader) {
   uint32_t requested = stadium_catalog_id(pes_controller_2p_prematch_hub_stadium_index());
   void *carrier = NULL, *carrier_actor = NULL;
   int previous_canary = 0;
+  unsigned native_shells = 0, imported_shells = 0;
   for (int32_t i = 0; i < actors.num; ++i) {
     void *actor = ((void **)actors.data)[i];
     if (!actor) continue;
@@ -108,11 +109,19 @@ static void stadium_loaded_canary(void *loader) {
     void *mesh = *(void **)((char *)component + 0x5b0);
     char name[96];
     if (!mesh || !stadium_object_name(mesh, name)) continue;
-    if (stadium_imported_mesh(name)) previous_canary = 1;
+    if (stadium_shell_member(name)) ++native_shells;
+    if (stadium_imported_mesh(name)) { previous_canary = 1; ++imported_shells; }
     if (!strcmp(name, "st029_b") || stadium_imported_mesh(name)) {
       carrier = component; carrier_actor = actor;
     }
   }
+  // Loading-time inventory only: confirms which route owns the current shell.
+  // Counts describe components, not submitted draws, triangles or visibility.
+  char inventory[192];
+  snprintf(inventory, sizeof(inventory),
+      "requested=%u static_actors=%d native_shells=%u imported_shells=%u carrier=%u",
+      requested, actors.num, native_shells, imported_shells, carrier != NULL);
+  scene_runtime_note("stadium inventory", inventory);
   if (!carrier || (!requested && !previous_canary)) {
     stadium_canary_note(requested
         ? "Imported stadium not applied: native shell carrier unavailable. Test with High quality."

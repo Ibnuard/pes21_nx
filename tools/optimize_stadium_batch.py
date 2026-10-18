@@ -44,7 +44,8 @@ def main():
                     '--python', str(root / 'tools' / script), '--'] + arguments,
                     stdout=log, stderr=subprocess.STDOUT, check=True)
         use_cull = a.vertex_camera_cull and row.get('vertex_camera_cull', True)
-        blender('optimize_stadium_shell.py', ['--profile', str(source), '--output', str(target)]+(['--vertex-camera-cull'] if use_cull else []), 'optimize.log')
+        blender('optimize_stadium_shell.py', ['--profile', str(source), '--output', str(target),
+            '--triangles', str(row.get('triangle_budget', 35000))]+(['--vertex-camera-cull'] if use_cull else []), 'optimize.log')
         blend = target / (key + 'Shell.blend')
         blender('audit_stadium_camera.py', ['--blend', str(blend), '--mesh', key + 'Shell',
             '--output', str(target / 'camera.local.json')], 'camera.log')

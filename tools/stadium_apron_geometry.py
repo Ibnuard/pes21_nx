@@ -9,6 +9,23 @@ from pathlib import Path
 import sys
 
 
+def height_band(points, minimum, maximum):
+    """XY footprint of only the part of a sloping triangle near floor height."""
+    polygon = [tuple(p) for p in points]
+    for height, sign in ((minimum, 1), (maximum, -1)):
+        clipped = []
+        for a, b in zip(polygon, polygon[1:]+polygon[:1]):
+            inside_a = sign*(a[2]-height) >= 0
+            inside_b = sign*(b[2]-height) >= 0
+            if inside_a:
+                clipped.append(a)
+            if inside_a != inside_b:
+                t = (height-a[2])/(b[2]-a[2])
+                clipped.append(tuple(a[i]+t*(b[i]-a[i]) for i in range(3)))
+        polygon = clipped
+    return [p[:2] for p in polygon]
+
+
 def repair_polygons(native, faces):
     from shapely import Polygon, union_all, constrained_delaunay_triangles
     floor = union_all([Polygon(t) for t in native], grid_size=0.00001)
@@ -16,11 +33,17 @@ def repair_polygons(native, faces):
     if not floor.is_valid or floor.area < 7000 or floor.area > 12000:
         raise ValueError('Invalid native stadium floor footprint')
     output = {}
-    for index, points in faces.items():
+    for index, entry in faces.items():
+        points = entry['points'] if isinstance(entry, dict) else entry
         subject = Polygon(points)
-        if subject.area < 1e-8 or subject.intersection(floor).area < 1e-8:
+        ownership = floor
+        if isinstance(entry, dict):
+            if len(entry['clip']) < 3:
+                continue
+            ownership = floor.intersection(Polygon(entry['clip']))
+        if subject.area < 1e-8 or subject.intersection(ownership).area < 1e-8:
             continue
-        outside = subject.difference(floor, grid_size=0.00001)
+        outside = subject.difference(ownership, grid_size=0.00001)
         pieces = []
         for triangle in constrained_delaunay_triangles(outside).geoms:
             if triangle.area > 1e-8:

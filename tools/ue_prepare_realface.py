@@ -49,9 +49,10 @@ def texture(source,name,alpha,max_size=128):
     return result
 
 
-face_texture=texture(profile['face_texture'],player+'_face_tablet',False)
+face_texture=texture(profile['face_texture'],player+'_face_tablet',False,profile.get('face_texture_size',128))
 texture(profile['hair_texture'],player+'_hair_parts_color_tablet',True,profile.get('hair_texture_size',128))
-eye_texture=texture(profile['native_eye_texture'],player+'_eyes_tablet',False)
+merged_eye=profile.get('opaque_eye_atlas',False)
+eye_texture=None if merged_eye else texture(profile['native_eye_texture'],player+'_eyes_tablet',False)
 
 
 def instance(name,source):
@@ -65,7 +66,7 @@ def instance(name,source):
 
 
 skin=instance('face_'+player,face_texture)
-eye=instance('eye_native_'+player,eye_texture)
+eye=None if merged_eye else instance('eye_native_'+player,eye_texture)
 report={'player':int(player),'parts':{},'native_face_material_packaged':False}
 for part in ('face','hair'):
     name=player+'_'+part
@@ -106,7 +107,9 @@ for part in ('face','hair'):
             raise RuntimeError('Unclassified material slot: '+part+'/'+original)
         assigned[original]=material.get_path_name()
         slot.set_editor_property('material_interface',material)
-    if part=='face' and sum(str(s.get_editor_property('imported_material_slot_name'))==profile['eye_material'] for s in slots)!=1:
+    if part=='face' and merged_eye and (len(slots)!=1 or len(assigned)!=1 or eye is not None):
+        raise RuntimeError('Merged opaque head must have exactly one skin atlas slot')
+    if part=='face' and not merged_eye and sum(str(s.get_editor_property('imported_material_slot_name'))==profile['eye_material'] for s in slots)!=1:
         raise RuntimeError('Expected one dedicated native eye slot')
     mesh.set_editor_property('materials',slots)
     unreal.EditorAssetLibrary.save_asset(path)

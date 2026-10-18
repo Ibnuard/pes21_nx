@@ -18,6 +18,7 @@ class FootballNXTests(unittest.TestCase):
         self.run_c(r'''
 #define PAUSE_SETTINGS_PAGE_CAMERA 2
 static uint32_t pause_settings_page=2,pause_camera_dynamic_wide_custom=1;
+static uint32_t pause_camera_stadium_v2;
 static unsigned char settings[15];
 static unsigned char *pause_settings_tmpdb_camera(uint8_t *type) {*type=settings[0];return settings;}
 ''' + function(SOURCE,'pes_controller_pause_settings_count') +
@@ -31,6 +32,9 @@ int main(void) {
   assert(*pause_settings_camera_field(1,NULL)==7);
   assert(*pause_settings_camera_field(2,NULL)==4);
   assert(*pause_settings_camera_field(3,NULL)==9);
+  pause_camera_stadium_v2=1;settings[0]=12;
+  assert(pes_controller_pause_settings_count()==1);
+  for(unsigned i=1;i<=3;++i)assert(!pause_settings_camera_field(i,NULL));
   pause_settings_page=1;assert(pes_controller_pause_settings_count()==7);
 }
 ''')

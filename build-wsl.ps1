@@ -15,7 +15,8 @@ param(
   [switch]$PlayerMigrationCanary,
   [switch]$LooseCpkFull,
   [switch]$Diagnostics,
-  [switch]$PerfTrace
+  [switch]$PerfTrace,
+  [switch]$NearCameraTrace
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,7 @@ $oldProjectRoot = $env:PES21_NX_PROJECT_ROOT
 $oldWslEnv = $env:WSLENV
 $oldDiagnostics = $env:PES21_NX_DIAGNOSTICS
 $oldPerfTrace = $env:PES21_NX_PERF_TRACE
+$oldNearCameraTrace = $env:PES21_NX_NEAR_CAMERA_TRACE
 $oldJobs = $env:PES21_NX_BUILD_JOBS
 $oldOutputRoot = $env:PES21_NX_BUILD_OUTPUT_ROOT
 $oldPesdbAuthoritativeOvr = $env:PES21_NX_PESDB_AUTHORITATIVE_OVR
@@ -105,6 +107,7 @@ try {
   $env:PES21_NX_PROJECT_ROOT = $projectRoot
   $env:PES21_NX_DIAGNOSTICS = if ($Diagnostics) { "1" } else { "0" }
   $env:PES21_NX_PERF_TRACE = if ($PerfTrace) { "1" } else { "0" }
+  $env:PES21_NX_NEAR_CAMERA_TRACE = if ($NearCameraTrace) { "1" } else { "0" }
   $env:PES21_NX_BUILD_JOBS = if ($Jobs -gt 0) { "$Jobs" } else { "" }
   $env:PES21_NX_BUILD_OUTPUT_ROOT = $buildOutputRoot
   $env:PES21_NX_PESDB_AUTHORITATIVE_OVR = if ($DisablePesdbAuthoritativeOvr) { "0" } else { "1" }
@@ -137,6 +140,7 @@ try {
 
   $env:PES21_NX_MASTER_LEAGUE_CATALOG = if ($MasterLeagueCatalog) { Resolve-ProjectInput $MasterLeagueCatalog } else { "" }
   $env:WSLENV += ":PES21_NX_MASTER_LEAGUE_CATALOG/p"
+  $env:WSLENV += ":PES21_NX_NEAR_CAMERA_TRACE"
 
   $buildScript = @'
 set -euo pipefail
@@ -202,6 +206,7 @@ link_build_id=$(
     printf '%s\n' \
       "DIAGNOSTICS=${PES21_NX_DIAGNOSTICS:-0}" \
       "PERF_TRACE=${PES21_NX_PERF_TRACE:-0}" \
+      "NEAR_CAMERA_TRACE=${PES21_NX_NEAR_CAMERA_TRACE:-0}" \
       "PES_PESDB_AUTHORITATIVE_OVR=${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
       "PES_PLAYER_MIGRATION_CANARY=${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
       "PES_LOOSE_CPK_FULL=${PES21_NX_LOOSE_CPK_FULL:-0}" \
@@ -211,6 +216,7 @@ link_build_id=$(
 make -j"$jobs" \
   DIAGNOSTICS="${PES21_NX_DIAGNOSTICS:-0}" \
   PERF_TRACE="${PES21_NX_PERF_TRACE:-0}" \
+  NEAR_CAMERA_TRACE="${PES21_NX_NEAR_CAMERA_TRACE:-0}" \
   PES_PESDB_AUTHORITATIVE_OVR="${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
   PES_PLAYER_MIGRATION_CANARY="${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
   PES_LOOSE_CPK_FULL="${PES21_NX_LOOSE_CPK_FULL:-0}" \
@@ -257,6 +263,7 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
       Select-Object FullName, Length, LastWriteTime
   }
 } finally {
+  $env:PES21_NX_NEAR_CAMERA_TRACE = $oldNearCameraTrace
   $env:PES21_NX_MASTER_LEAGUE_CATALOG = $oldMasterLeagueCatalog
   if ($null -eq $oldProjectRoot) {
     Remove-Item Env:PES21_NX_PROJECT_ROOT -ErrorAction SilentlyContinue

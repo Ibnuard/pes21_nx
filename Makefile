@@ -60,6 +60,7 @@ LTOFLAGS := -flto=auto -fuse-linker-plugin
 REPROFLAGS := -ffile-prefix-map=$(CURDIR)=. -fdebug-prefix-map=$(CURDIR)=.
 DIAGNOSTICS ?= 0
 PERF_TRACE ?= 0
+NEAR_CAMERA_TRACE ?= 0
 # Inter Miami original-ID/MLS integration is part of the stable runtime.
 # Keep the variable as an opt-out build switch for rollback and bisecting.
 PES_EXPERIMENT_INTER_MIAMI ?= 1
@@ -94,6 +95,10 @@ endif
 
 ifeq ($(PERF_TRACE),1)
 CFLAGS	+=	-DPERF_TRACE=1
+endif
+
+ifeq ($(NEAR_CAMERA_TRACE),1)
+CFLAGS	+=	-DNEAR_CAMERA_TRACE=1
 endif
 
 CFLAGS	+=	-DPES_EXPERIMENT_INTER_MIAMI=$(PES_EXPERIMENT_INTER_MIAMI)

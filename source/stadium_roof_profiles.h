@@ -28,10 +28,17 @@ static inline void stadium_roof_uniform(unsigned id,float out[16]) {
    * not geometry or camera clearance. Bernabeu also widens its opening. */
   if(id==6) { out[8]=800.f; out[9]=900.f; }
   if(id==7) { out[1]=3250.f; out[8]=1850.f; out[9]=500.f; }
-  /* Camp Nou has only the +Y stand roof. A higher-sun projection keeps its
-   * shade near that touchline in both seasons without changing the mesh. */
-  if(id==13) out[3]=2600.f;
+  /* Camp Nou has only the +Y stand roof. The requested side band shifts the
+   * opening at uniform upload; the measured mesh fit remains above. */
+  if(id==13) { out[3]=2600.f; out[9]=-2200.f; }
   /* Uniform decision once per profile, not four per-fragment panel branches. */
   out[10]=(out[12]>=.5f && out[13]>=.5f && out[14]>=.5f && out[15]>=.5f)?1.f:0.f;
+}
+static inline void stadium_roof_uniform_season(unsigned id,unsigned winter,float out[16]) {
+  stadium_roof_uniform(id,out);
+  /* Camp Nou's requested side band stays around a third of the field in
+   * both seasons. Offset the taller winter projection at uniform upload,
+   * preserving its light ray on bodies without new per-fragment work. */
+  if(id==13 && winter==1u) out[9]+=650.f;
 }
 #endif

@@ -42,3 +42,27 @@ def match_vertices(points,uvs,weights,source_points,source_uvs,source_weights,li
             cache[key]=best
         d,u,w=best;errors.append(d);uv_errors.append(u);weight_errors.append(w)
     return errors,uv_errors,weight_errors
+
+
+def match_normals(points,uvs,normals,source_corners,position_limit,angle_limit=2.):
+    """Check imported shading at the same position/UV, including split seams."""
+    def unit(n):
+        if not all(math.isfinite(v) for v in n):raise ValueError('Non-finite shading normal')
+        length=math.sqrt(sum(v*v for v in n))
+        if length<.5:raise ValueError('Invalid shading normal')
+        return tuple(v/length for v in n)
+    cells=defaultdict(list)
+    for point,uv,normal in source_corners:
+        cells[tuple(math.floor(v/.001) for v in uv)].append((point,uv,unit(normal)))
+    errors=[]
+    for point,uv,normal in zip(points,uvs,normals):
+        normal=unit(normal);cell=tuple(math.floor(v/.001) for v in uv);dots=[]
+        for offset in product((-1,0,1),repeat=2):
+            for old,st,expected in cells.get(tuple(a+b for a,b in zip(cell,offset)),()):
+                if max(abs(a-b) for a,b in zip(uv,st))<.001 and math.dist(point,old)<position_limit:
+                    dots.append(sum(a*b for a,b in zip(normal,expected)))
+        if not dots:raise ValueError('Cooked normal has no matching source corner')
+        angle=math.degrees(math.acos(max(-1.,min(1.,max(dots)))))
+        if angle>angle_limit:raise ValueError('Cooked shading normal changed: %.3f degrees'%angle)
+        errors.append(angle)
+    return dict(corners_checked=len(errors),max_angle_degrees=max(errors),limit_degrees=angle_limit)

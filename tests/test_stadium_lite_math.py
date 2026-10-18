@@ -25,15 +25,17 @@ int main(){
  assert(nxImportedRoofProxy(vec2(7000,0),8)==1);
  assert(nxImportedRoofProxy(vec2(-7000,0),8)==1);
  for(int weather=0;weather<3;weather++)for(int winter=0;winter<2;winter++) {
+  stadium_roof_uniform_season(13,winter,values);
+  for(int i=0;i<4;i++)nxShellRoof[i]=vec4(values[i*4],values[i*4+1],values[i*4+2],values[i*4+3]);
   nxStadiumClimate=vec4(weather,winter,0,0);unsigned total=0,shade=0;
   for(int y=-3400;y<=3400;y+=50)for(int x=-5250;x<=5250;x+=50) {
    float ground=nxRoofVisibility(vec3(x,y,0));
    vec2 head=vec2(x,y)+nxSun.xy*((1+.45f*winter)*185/nxSun.z);
    assert(fabsf(ground-nxRoofVisibility(vec3(head.x,head.y,185)))<.002f);
-   if(abs(x)<2500 && abs(y)<1500)assert(ground==1);
+   if(abs(x)<2500 && abs(y)<500)assert(ground==1);
    total++;shade+=ground<.99f;
   }
-  assert(shade>total*.01f && shade<total*.20f);
+  assert(shade>total*.30f && shade<total*.40f);
  }
 }
 ''')

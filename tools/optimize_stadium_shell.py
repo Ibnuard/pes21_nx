@@ -17,7 +17,7 @@ p.add_argument('--output', required=True, type=Path)
 p.add_argument('--triangles', type=int, default=35000)
 p.add_argument('--vertex-camera-cull', action='store_true')
 a = p.parse_args(sys.argv[sys.argv.index('--') + 1:])
-if not 20000 <= a.triangles <= 100000:
+if not 10000 <= a.triangles <= 100000:
     raise ValueError('Invalid shell budget')
 profile = json.loads(a.profile.read_text())
 atlas = json.loads((a.output / 'textures/atlas.local.json').read_text())
@@ -154,8 +154,9 @@ profile['atlas'] = dict(version=1, tile_uv_channel=1, materials=[r['material'] f
 profile['optimization'] = dict(source_profile=str(a.profile.resolve()), shell_before=before,
     shell_after=reduced, materials_before=atlas['old_materials'], materials_after=len(page_names),
     crowd_rows_preserved=profile['crowd']['fitted_rows'])
-profile['blender_bounds'] = [[min(v.co[i] for v in mesh.vertices) for i in range(3)],
-                             [max(v.co[i] for v in mesh.vertices) for i in range(3)]]
+referenced = {v for poly in mesh.polygons for v in poly.vertices}
+profile['blender_bounds'] = [[min(mesh.vertices[v].co[i] for v in referenced) for i in range(3)],
+                             [max(mesh.vertices[v].co[i] for v in referenced) for i in range(3)]]
 (output / 'fbx.local.json').write_text(json.dumps(profile, indent=2) + '\n')
 bpy.ops.wm.save_as_mainfile(filepath=str(output / (key + 'Shell.blend')))
 print('PESNX_STADIUM_OPTIMIZED', key, before, reduced, atlas['old_materials'], len(page_names))

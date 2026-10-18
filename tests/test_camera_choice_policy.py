@@ -1,4 +1,4 @@
-"""Five native choices plus FootballNX, default and session/rematch selection."""
+"""Six native choices plus FootballNX while Stadium V2 is suspended."""
 from pathlib import Path
 import re
 import shutil
@@ -31,11 +31,13 @@ class CameraChoiceTests(unittest.TestCase):
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#define PESNX_STADIUM_V2_ENABLED 0
 #define PAUSE_SETTINGS_PAGE_CAMERA 1
 #define PES_PAUSE_INPUT_LEFT 5u
 static uint32_t pause_settings_page=PAUSE_SETTINGS_PAGE_CAMERA;
 static uint32_t pause_camera_dynamic_wide_custom, pause_camera_saved_valid;
 static uint32_t pause_camera_saved_dynamic_wide_custom;
+static uint32_t pause_camera_stadium_v2, pause_camera_saved_stadium_v2, pause_camera_revision;
 static unsigned char pause_camera_saved_settings[15];
 static unsigned char manager[80], resident[0x18400];
 static uint32_t pause_settings_radar, pause_settings_show_replay;
@@ -50,17 +52,18 @@ static void pause_settings_apply_camera(void *window) { assert(window==(void*)9)
 static void debugPrintf(const char *format,...) {}
 ''' + preset + table + functions + r'''
 static void assert_choice(unsigned index) {
-  const unsigned types[]={5,12,0,1,2,5}, custom[]={0,0,0,0,0,1};
-  const char *labels[]={"DYNAMIC WIDE","STADIUM","MEDIUM","LONG","WIDE","FOOTBALLNX CAM"};
+  const unsigned types[]={5,12,3,0,1,2,5}, custom[]={0,0,0,0,0,0,1};
+  const char *labels[]={"DYNAMIC WIDE","STADIUM","PITCH SIDE","MEDIUM","LONG","WIDE","FOOTBALLNX CAM"};
   uint32_t count=0;
   unsigned char *settings=pause_settings_tmpdb_camera(NULL);
-  assert(match_pause_camera_page(NULL,&count)==index && count==6);
+  assert(match_pause_camera_page(NULL,&count)==index && count==7);
   assert(settings[0]==types[index] && pause_camera_dynamic_wide_custom==custom[index]);
+  assert(!pause_camera_stadium_v2);
   assert(!strcmp(pes_controller_pause_settings_value(0),labels[index]));
 }
 int main(void) {
   void *p=resident; memcpy(manager+72,&p,sizeof(p));
-  assert(sizeof(pause_camera_presets)/sizeof(pause_camera_presets[0])==6);
+  assert(sizeof(pause_camera_presets)/sizeof(pause_camera_presets[0])==7);
   // Old persisted types must not change the app-session default.
   for(unsigned mode=0;mode<=6;++mode) {
     memcpy(resident+0x18338,&mode,4);
@@ -73,38 +76,39 @@ int main(void) {
   }
   // Production LEFT/RIGHT/DECIDE selection, including wraparound.
   apply_calls=0;
-  for(unsigned i=1;i<=18;++i) {
-    pause_settings_cycle_camera((void*)9,6); assert_choice(i%6);
+  for(unsigned i=1;i<=21;++i) {
+    pause_settings_cycle_camera((void*)9,6); assert_choice(i%7);
   }
-  for(unsigned i=1;i<=18;++i) {
+  for(unsigned i=1;i<=21;++i) {
     pause_settings_cycle_camera((void*)9,PES_PAUSE_INPUT_LEFT);
-    assert_choice((6-i%6)%6);
+    assert_choice((7-i%7)%7);
   }
-  assert(apply_calls==36);
+  assert(apply_calls==42);
   pause_settings_cycle_camera((void*)9,3); assert_choice(1);
   // Every choice survives native rematch bootstrap without importing its
   // type or copying stale per-match camera bytes into the new resident.
-  for(unsigned choice=0;choice<6;++choice) {
+  for(unsigned choice=0;choice<7;++choice) {
     unsigned char *settings=pause_settings_tmpdb_camera(NULL);
     settings[0]=pause_camera_presets[choice].native_type;
     pause_camera_dynamic_wide_custom=pause_camera_presets[choice].dynamic_wide_custom;
+    pause_camera_stadium_v2=pause_camera_presets[choice].stadium_v2;
     pause_settings_capture_camera();
     memset(settings,0x5b,15); settings[0]=13;
-    pause_camera_dynamic_wide_custom=0;
+    pause_camera_dynamic_wide_custom=0;pause_camera_stadium_v2=0;
     pause_settings_prepare_match_camera(); assert_choice(choice);
     for(unsigned j=1;j<15;++j) assert(settings[j]==0x5b);
     // Opening native camera/general page may reset tmpdb; restore our capture.
-    memset(settings,0,15); pause_camera_dynamic_wide_custom=0;
+    memset(settings,0,15); pause_camera_dynamic_wide_custom=0;pause_camera_stadium_v2=0;
     pause_settings_restore_camera((void*)9); assert_choice(choice);
     for(unsigned j=1;j<15;++j) assert(settings[j]==0x5b);
   }
   // Removed or unknown snapshot types are normalized at the match boundary.
   pause_camera_saved_settings[0]=5;
   pause_camera_saved_dynamic_wide_custom=1;
-  pause_settings_prepare_match_camera(); assert_choice(5);
-  const uint8_t removed[]={3,4,6,7,8,9,10,11,13,255};
+  pause_settings_prepare_match_camera(); assert_choice(6);
+  const uint8_t removed[]={4,6,7,8,9,10,11,13,255};
   for(unsigned i=0;i<sizeof(removed);++i) {
-    assert(pause_camera_preset_index(removed[i],1)==0);
+    assert(pause_camera_preset_index(removed[i],1,1)==0);
     pause_camera_saved_settings[0]=removed[i];
     pause_camera_saved_dynamic_wide_custom=1;
     pause_settings_prepare_match_camera(); assert_choice(0);
@@ -117,7 +121,7 @@ int main(void) {
   pause_settings_prepare_match_camera();
   pause_settings_cycle_camera((void*)9,6);
   assert(apply_calls==before);
-  uint32_t count=0; assert(match_pause_camera_page(NULL,&count)==0 && count==6);
+  uint32_t count=0; assert(match_pause_camera_page(NULL,&count)==0 && count==7);
 }
 ''')
 

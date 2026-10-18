@@ -19,45 +19,6 @@ class StadiumV11Tests(unittest.TestCase):
         build_and_run(compiler, '#include <stdint.h>\n#include <assert.h>\n'
                       '#include <string.h>\n#include <math.h>\n' + text)
 
-    def test_bias_requires_both_selected_stadium_and_live_stadium_owner(self):
-        self.run_c(r'''
-static uint32_t match_broadcast_anticipation_enabled;
-static __thread struct {void *camera;float ball[3];uint32_t ready,sampled;} match_broadcast_frame;
-static float ball[3];
-static unsigned calls;
-static const float *get_ball(void *p) {assert(p==(void*)23);return ball;}
-static const float *(*match_ball_info_get_trans)(void*)=get_ball;
-uint32_t pes_stadium_ball_target_mode(const void *camera);
-static uint32_t native(void *c,const float *b,const uint32_t *h,float *p,float *z,uint32_t a) {
-  ++calls;p[0]=-30;p[1]=2;p[2]=7;*z=0.75f;return 9;
-}
-static uint32_t (*match_ball_position_broadcast_original)(void*,const float*,const uint32_t*,float*,float*,uint32_t)=native;
-''' + '\n'.join(function(SOURCE, name) for name in (
-            'pes_stadium_ball_target_mode', 'match_broadcast_ball_tracking_ready',
-            'pes_inplay_ball_position_broadcast')) + r'''
-int main(void) {
-  unsigned char camera[0x1a0]={0};void *info=(void*)23;memcpy(camera+0x198,&info,8);
-  match_broadcast_frame.camera=camera;
-  float p[3],z;
-  for(unsigned enabled=0;enabled<2;enabled++) for(unsigned id=0;id<14;id++) {
-    memcpy(camera+8,&id,4);match_broadcast_anticipation_enabled=enabled;
-    match_broadcast_ball_tracking_ready(NULL,NULL);
-    for(unsigned frame=0;frame<5;frame++) {
-      ball[0]=frame;
-      assert(pes_inplay_ball_position_broadcast(camera,NULL,NULL,p,&z,0)==9);
-      assert(p[1]==2 && p[2]==7 && z==.75f);
-      // No post-calculation clamp: only the native selector chooses the route.
-      assert(p[0]==-30);
-      assert(pes_stadium_ball_target_mode(camera)==(enabled && id==6 && frame>=2));
-    }
-  }
-  unsigned id=6;memcpy(camera+8,&id,4);match_broadcast_anticipation_enabled=1;
-  match_broadcast_frame.camera=NULL;ball[0]=25;
-  pes_inplay_ball_position_broadcast(camera,NULL,NULL,p,&z,0);assert(p[0]==-30);
-  assert(calls==141);
-}
-''')
-
     def test_all_gameplay_helpers_are_suppressed_by_pause_and_loading_cover(self):
         start = OVERLAY.index('  const int modal_match_frontend =')
         end = OVERLAY.index('\n  // The custom selector owns', start)

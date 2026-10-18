@@ -18,10 +18,20 @@ parser.add_argument('--crowd-area', type=Path)
 parser.add_argument('--crowd-atlas', type=Path)
 parser.add_argument('--crowd-flipbook', action='store_true')
 parser.add_argument('--target-triangles', type=int)
+parser.add_argument('--output', type=Path, help='Separate output; original converted glTF stays read-only')
+parser.add_argument('--crowd-profile', type=Path, help='Preserve fitted crowd geometry from a reviewed blend')
+parser.add_argument('--meshoptimizer', type=Path)
+parser.add_argument('--node', type=Path)
+parser.add_argument('--weld-mm',type=float,default=0.,help='Offline position weld; loop UV seams stay separate')
+parser.add_argument('--floor-underlay-material',action='append',default=[])
+parser.add_argument('--polygon-python')
+parser.add_argument('--polygon-modules')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
 if not .5 <= args.triangle_ratio <= 1 or bool(args.crowd_area) != bool(args.crowd_atlas):
     raise ValueError('Use ratio .5..1 and provide both crowd area and atlas')
 work = args.work.resolve()
+output = args.output.resolve() if args.output else work
+output.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stadium_assets import asset_key, material_key
 report = json.loads((work / "conversion.local.json").read_text())
@@ -66,14 +76,23 @@ bpy.context.view_layer.objects.active = next(o for o in bpy.context.scene.object
 bpy.ops.object.join()
 shell = bpy.context.object
 shell.name = stadium_key + 'Shell'
+if args.weld_mm:
+    if not 0<args.weld_mm<=1:raise ValueError('Only submillimetre/millimetre topology repair is allowed')
+    bm=bmesh.new();bm.from_mesh(shell.data)
+    bmesh.ops.remove_doubles(bm,verts=list(bm.verts),dist=args.weld_mm/1000)
+    bm.to_mesh(shell.data);bm.free();shell.data.update()
 shell.data.calc_loop_triangles()
 original_triangles = len(shell.data.loop_triangles)
 ratio = args.triangle_ratio
 if args.target_triangles is not None:
-    if not 30000 <= args.target_triangles <= 140000:
+    if not (10000 if args.meshoptimizer or args.weld_mm else 30000) <= args.target_triangles <= 140000:
         raise ValueError('Invalid final shell triangle budget')
     ratio = min(1., args.target_triangles / original_triangles)
-if ratio < 1:
+if ratio < 1 and args.meshoptimizer:
+    from blender_stadium_reduction import reduce
+    report['border_reduction'] = reduce(shell,args.target_triangles,output,str(args.node),str(args.meshoptimizer),
+        args.floor_underlay_material,args.polygon_python,args.polygon_modules)
+elif ratio < 1:
     modifier = shell.modifiers.new('Mobile shell reduction', 'DECIMATE')
     modifier.ratio = ratio
     modifier.use_collapse_triangulate = True
@@ -81,6 +100,26 @@ if ratio < 1:
 shell.data.calc_loop_triangles()
 report['shell_triangles'] = {'original': original_triangles,
                              'reduced': len(shell.data.loop_triangles)}
+if args.crowd_profile:
+    if args.crowd_area: raise ValueError('Choose a preserved crowd or fit a new one')
+    previous=json.loads(args.crowd_profile.read_text())
+    with bpy.data.libraries.load(str(Path(previous['fbx']).with_suffix('.blend')),link=False) as (available,loaded):
+        loaded.objects=[stadium_key+'Shell']
+    crowd=loaded.objects[0];bpy.context.collection.objects.link(crowd)
+    keep={i for i,m in enumerate(crowd.data.materials) if m.name.startswith('M_crowd_seated')}
+    bm=bmesh.new();bm.from_mesh(crowd.data)
+    bmesh.ops.delete(bm,geom=[f for f in bm.faces if f.material_index not in keep],context='FACES')
+    bmesh.ops.delete(bm,geom=[v for v in bm.verts if not v.link_faces],context='VERTS')
+    bm.to_mesh(crowd.data);bm.free()
+    mat=next(crowd.data.materials[i] for i in keep);mat.name='M_crowd_seated'
+    crowd.data.materials.clear();crowd.data.materials.append(mat)
+    for poly in crowd.data.polygons:poly.material_index=0
+    while len(crowd.data.uv_layers)>1:crowd.data.uv_layers.remove(crowd.data.uv_layers[-1])
+    for field in ('crowd','crowd_flipbook'):report[field]=previous[field]
+    report['texture_files']['M_crowd_seated']=previous['texture_files'].get('M_crowd_seated') or str(args.crowd_profile.parent/'textures/crowd_seated.png')
+    report['textures']['crowd_seated']=previous['textures']['crowd_seated']
+    bpy.ops.object.select_all(action='DESELECT');shell.select_set(True);crowd.select_set(True)
+    bpy.context.view_layer.objects.active=shell;bpy.ops.object.join()
 if args.crowd_area:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from stadium_crowd import read_areas, crowd_rows
@@ -151,17 +190,17 @@ for polygon, index in zip(shell.data.polygons, indices):
     polygon.material_index = index
 bpy.context.scene.unit_settings.system = "METRIC"
 bpy.context.scene.unit_settings.scale_length = 1.0
-bpy.ops.export_scene.fbx(filepath=str(work / (stadium_key + 'Shell.fbx')),
+bpy.ops.export_scene.fbx(filepath=str(output / (stadium_key + 'Shell.fbx')),
     use_selection=True, object_types={"MESH"}, global_scale=1.0,
     apply_unit_scale=True, apply_scale_options="FBX_SCALE_NONE",
     axis_forward="-Y", axis_up="Z", use_mesh_modifiers=True,
     bake_anim=False, path_mode="ABSOLUTE", add_leaf_bones=False)
-report["fbx"] = str(work / (stadium_key + 'Shell.fbx'))
+report["fbx"] = str(output / (stadium_key + 'Shell.fbx'))
 report['close_camera_cutaway'] = True
 report['source_winding'] = 'Fox clockwise converted to counter-clockwise before reduction'
 report["material_slots"] = [m.name for m in used]
 report["blender_bounds"] = [list(min(v.co[i] for v in shell.data.vertices) for i in range(3)),
                              list(max(v.co[i] for v in shell.data.vertices) for i in range(3))]
-(work / "fbx.local.json").write_text(json.dumps(report, indent=2))
-bpy.ops.wm.save_as_mainfile(filepath=str(work / (stadium_key + 'Shell.blend')))
+(output / "fbx.local.json").write_text(json.dumps(report, indent=2))
+bpy.ops.wm.save_as_mainfile(filepath=str(output / (stadium_key + 'Shell.blend')))
 print("PESNX_STADIUM_FBX_OK", len(shell.data.polygons), len(used))

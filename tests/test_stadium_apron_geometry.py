@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip('shapely', minversion='2.1', reason='Offline apron repair requires local Shapely 2.1')
 from shapely import Polygon, box, union_all
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from stadium_apron_geometry import repair_polygons
+from stadium_apron_geometry import height_band, repair_polygons
 
 
 def test_union_preserves_native_uncovered_corner_and_floor_area():
@@ -32,3 +32,21 @@ def test_floor_union_avoids_internal_subdivision_seams():
     assert result['inside']==[] and 'absent' not in result
     assert len(result['crossing'])<16 # 768 native triangles must not multiply the shell
     assert union_all([Polygon(t) for t in result['crossing']]).intersection(box(-60,-40,60,40)).area<1e-7
+
+
+def test_sloping_floor_clips_only_band_preserving_elevated_ramp():
+    points=[(-10,-10,0.),(10,-10,.2),(-10,10,0.)]
+    band=Polygon(height_band(points,-.25,.06))
+    original=Polygon([p[:2] for p in points])
+    result=repair_polygons([list(box(-60,-40,60,40).exterior.coords)[:-1]],
+        {'slope':dict(points=[p[:2] for p in points],clip=list(band.exterior.coords)[:-1])})
+    remaining=union_all([Polygon(t) for t in result['slope']])
+    assert remaining.symmetric_difference(original.difference(band)).area<1e-7
+    assert remaining.area>0
+    assert remaining.intersection(band).area<1e-7
+
+
+def test_height_band_retains_whole_low_floor_and_excludes_high_platform():
+    low=[(0,0,0),(1,0,0),(0,1,0)]
+    assert Polygon(height_band(low,-.25,.06)).area==pytest.approx(.5)
+    assert height_band([(x,y,z+1) for x,y,z in low],-.25,.06)==[]

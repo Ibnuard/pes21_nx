@@ -12,6 +12,12 @@ Subsystem notes and historical implementation audits live here.
 - [PESDB runtime rosters](PESDB_RUNTIME_ROSTERS.md)
 - [PES21 player recreation analysis](PES21ReCreateOrderPlayerAnlisys.md)
 - [PES21 PC face transfer audit](PES21_PC_FACE_TRANSFER_AUDIT.md)
+- [Realface geometry/performance audit and Lite recommendation](REALFACE_PERFORMANCE_AUDIT.md)
+- [Realface Lite v34, stadium stair repair and Cunha skin policy](REALFACE_LITE_V34.md)
+- [Barcelona/MU: v34 device feedback and remaining realface render costs](REALFACE_RENDER_FOLLOWUP_V35.md)
+- [Realface Mobile v35 canary recipe](REALFACE_MOBILE_CANARY_V35.md) — strict head budget, merged eye atlas, and offline hair surface conversion.
+- [Realface v36 surface correction](REALFACE_SURFACE_V36.md) — isolated neutral normal map, unchanged v35 geometry and automated package validation.
+- [Realface v37 facial detail and compact hair](REALFACE_REFINEMENT_V37.md) — visible UV distortion audit, protected mouth features and joined hair under the same head budget.
 - [Barcelona realface conversion and automation plan](REALFACE_BARCA_PLAN.md)
 - [eFootball10 player conversion](EFOOTBALL10_PLAYER_CONVERSION.md)
 - [Inter Miami original-ID experiment](INTER_MIAMI_ORIGINAL_ID_EXPERIMENT.md)
@@ -26,6 +32,15 @@ Subsystem notes and historical implementation audits live here.
 
 ## Runtime, controls, and UI
 
+- [Accepted v48 performance checkpoint and startup audit](RENDER_AUDIT_V48.md) — user-reported stable 60 FPS, removed release pixel probes, and first-launch-after-update blinking still under investigation.
+- [Render stability and mixed model quality v47](RENDER_STABILITY_V47.md) — private overlay vertex state and native Standard players only when High graphics is selected.
+- [Stadium pacing and balanced faces v46](STADIUM_FACE_SWEETSPOT_V46.md) — v45 device evidence, repeated blending-state suppression and a controlled 5k head target with explicit retained originals.
+- [Remaining real-face pacing v44](REALFACE_PACING_V44.md) — v43 device feedback, explicit missing timing data and removal of release clock/TLS logging atomics without changing face quality.
+- [Whole-player blinking isolation v43](REALFACE_WHOLE_PLAYER_V43.md) — supplied A/B log findings, corrected mesh snapshots and GL cache/buffer control with v41 face quality retained.
+- [Real-face runtime isolation v42](REALFACE_RUNTIME_V42.md) — suspended V2/entrance, head-load snapshots and asynchronous GPU/CPU comparison with v41 quality retained.
+- [Wrapper overhead v45](WRAPPER_OVERHEAD_V45.md) — cached native thread IDs, single-pass buffer free lists and native pre-match preview reveal, with v41 face quality retained.
+- [Stadium V2: native Stadium framing with custom tracking](STADIUM_V2_CAMERA.md)
+- [Native Stadium and Pitch Side camera baseline v33](FL26_NATIVE_CAMERAS_V33.md)
 - [Accepted roof shadow v20 checkpoint: cheaper flat regions with the same player shading](ROOF_SHADOW_COST_V20.md)
 - [Day frame pacing v19: cached weather lighting and shader uniforms](DAY_FRAME_PACING_V19.md)
 - [Referee v18: owned Low renderer and native kickoff placement](MATCH_REVIEW_V18.md)

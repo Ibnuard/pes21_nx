@@ -61,8 +61,24 @@
 #include "stadium_lighting_policy.h"
 #include "stadium_environment.h"
 #include "stadium_roof_profiles.h"
+#include "stadium_shell_clip.h"
 #include "ue4_hooks.h"
 #include "scene_runtime_log.h"
+#include "gl_upload_budget.h"
+#include "near_camera_trace.h"
+static __thread NxUploadBudget gl_upload_budget;
+#ifdef NEAR_CAMERA_TRACE
+static uint64_t nx_near_now(void) { return armTicksToNs(armGetSystemTick()); }
+#define NX_NEAR_BEGIN() const uint64_t nx_near_start=nx_near_now()
+#define NX_NEAR_DRAW(count) nx_near_draw(nx_near_start,nx_near_now(),(count))
+#define NX_NEAR_UPLOAD(bytes,mapped) nx_near_upload(nx_near_now()-nx_near_start,(bytes),(mapped))
+#define NX_NEAR_BLEND(skipped) nx_near_blend(skipped)
+#else
+#define NX_NEAR_BEGIN() ((void)0)
+#define NX_NEAR_DRAW(count) ((void)0)
+#define NX_NEAR_UPLOAD(bytes,mapped) ((void)0)
+#define NX_NEAR_BLEND(skipped) ((void)0)
+#endif
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
 static void stadium_diag_forget(GLuint program);
@@ -141,10 +157,12 @@ static int clock_gettime_android(int clock_id, struct timespec *ts) {
     return -1;
   }
 
+#ifdef DEBUG_LOG
   static volatile unsigned int trace_count;
   if (__sync_fetch_and_add(&trace_count, 1) < 12)
     debugPrintf("clock_gettime_android(%d) -> %lld.%09ld\n", clock_id,
                 (long long)ts->tv_sec, ts->tv_nsec);
+#endif
   return 0;
 }
 
@@ -242,6 +260,10 @@ static int mc_current_slot(void) {
 }
 
 // ---------------------------------------------------------------------------
+#ifdef NEAR_CAMERA_TRACE
+#include "gpu_timestamp_probe.inc"
+#endif
+
 // GL redundant-state cache. RenderWare / GTA SA re-set the same GL state (blend,
 // depth, cull, texture bindings, active unit, program, ...) many times per frame.
 // On the Switch mesa/nouveau driver every GL call is expensive and the game is
@@ -256,7 +278,27 @@ static int mc_current_slot(void) {
 // TLS, reset it on every real eglMakeCurrent and every swap, and validate the
 // thread's mc slot above. This avoids cross-context suppression while still
 // dropping repeated state calls within one frame.
+#ifdef NEAR_CAMERA_TRACE
+#include "gl_render_probe_policy.h"
+static int glc_enabled = 1;
+static int gl_probe_native_player_class;
+static void gl_render_probe_configure(void) {
+  static unsigned configured;
+  if (configured) return;
+  configured=1; /* update_imports runs before the engine starts its threads. */
+  FILE *file=fopen("render-control.txt","rb");
+  if (!file) return;
+  char line[64]; const size_t size=fread(line,1,sizeof(line),file);
+  const int complete=!ferror(file) && size<sizeof(line);
+  fclose(file);
+  glc_enabled=!(complete && nx_gl_cache_bypass_line(line,size));
+  gl_probe_native_player_class=complete && nx_gl_native_player_class_line(line,size);
+}
+int pes_gl_probe_cache_enabled(void) { return glc_enabled; }
+int pes_gl_probe_native_player_class(void) { return gl_probe_native_player_class; }
+#else
 static const int glc_enabled = 1;
+#endif
 
 #define GLC_MAXCAPS 24
 static __thread struct { GLenum cap; GLboolean on; } glc_caps[GLC_MAXCAPS];
@@ -264,6 +306,7 @@ static __thread int glc_ncaps;
 
 static __thread struct {
   int have_blend;  GLenum bsf, bdf;
+  int have_blend_separate; GLenum bsc, bdc, bsa, bda;
   int have_dfunc;  GLenum dfunc;
   int have_dmask;  GLboolean dmask;
   int have_cull;   GLenum cull;
@@ -310,11 +353,32 @@ static void glDisable_c(GLenum cap) {
 }
 static void glBlendFunc_c(GLenum s, GLenum d) {
   if (glc_enabled && glc.have_blend && glc.bsf == s && glc.bdf == d) return;
+  glc.have_blend_separate = 0;
   glc.have_blend = 1; glc.bsf = s; glc.bdf = d;
   glBlendFunc(s, d);
 }
+static int gl_blend_factor_cacheable(GLenum factor) {
+  /* Common GLES factors only. Unknown/extension factors and constants keep
+   * native validation, including illegal constant-colour/alpha combinations.
+   * SRC_ALPHA_SATURATE is handled separately for source RGB only. */
+  return factor == GL_ZERO || factor == GL_ONE ||
+         (factor >= GL_SRC_COLOR && factor <= GL_ONE_MINUS_DST_COLOR);
+}
 static void glBlendFuncSeparate_c(GLenum sc, GLenum dc, GLenum sa, GLenum da) {
+  if (glc_enabled && glc.have_blend_separate &&
+      glc.bsc == sc && glc.bdc == dc && glc.bsa == sa && glc.bda == da) {
+    NX_NEAR_BLEND(1);
+    return;
+  }
+  NX_NEAR_BLEND(0);
   glc.have_blend = 0; // don't reconcile with the glBlendFunc cache
+  glc.have_blend_separate =
+      (gl_blend_factor_cacheable(sc) || sc == GL_SRC_ALPHA_SATURATE) &&
+      gl_blend_factor_cacheable(dc) && gl_blend_factor_cacheable(sa) &&
+      gl_blend_factor_cacheable(da);
+  glc.bsc = sc; glc.bdc = dc; glc.bsa = sa; glc.bda = da;
+  // Blend factors belong to this context. Texture/program binds still acquire
+  // shared uploads; neither is suppressed by this context-local state cache.
   glBlendFuncSeparate(sc, dc, sa, da);
 }
 static void glDepthFunc_c(GLenum f) {
@@ -370,7 +434,7 @@ static __thread struct {
   GLint location, night_location, day_location, climate_location, profile_location;
   GLint light_location, shell_roof_location;
   int light_day_value;
-  int profile_value;
+  int profile_value, roof_season_value;
   int valid, roof_value, night_value, day_value;
   uint32_t climate_key;
   uint64_t last_used;
@@ -419,6 +483,7 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].shell_roof_location = glGetUniformLocation(p, "nxShellRoof[0]");
       roof_uniforms[index].light_day_value = -1;
       roof_uniforms[index].profile_value = -1;
+      roof_uniforms[index].roof_season_value = -1;
       roof_uniforms[index].climate_key = UINT32_MAX;
       roof_uniforms[index].night_value = -1;
       roof_uniforms[index].roof_value = -1;
@@ -448,14 +513,16 @@ static void glUseProgram_c(GLuint p) {
     }
     if (roof_uniforms[index].profile_location >= 0 || roof_uniforms[index].shell_roof_location >= 0) {
       const int profile = (int)pes_controller_stadium_canary_active();
-      if (profile != roof_uniforms[index].profile_value) {
+      const int roof_season = profile==13 && pes_controller_stadium_season()==1u;
+      if (profile != roof_uniforms[index].profile_value || roof_season != roof_uniforms[index].roof_season_value) {
         if (roof_uniforms[index].profile_location >= 0)
           glUniform1f(roof_uniforms[index].profile_location, (GLfloat)profile);
         if (roof_uniforms[index].shell_roof_location >= 0) {
-          float roof[16]; stadium_roof_uniform((unsigned)profile,roof);
+          float roof[16]; stadium_roof_uniform_season((unsigned)profile,(unsigned)roof_season,roof);
           glUniform4fv(roof_uniforms[index].shell_roof_location,4,roof);
         }
         roof_uniforms[index].profile_value = profile;
+        roof_uniforms[index].roof_season_value = roof_season;
       }
     }
     if (roof_uniforms[index].climate_location >= 0 || roof_uniforms[index].light_location >= 0) {
@@ -609,6 +676,22 @@ static GLGetIntegeriVProc gl_get_integeri_v_real;
 static GLGetInteger64iVProc gl_get_integer64i_v_real;
 static GLMapBufferRangeProc gl_map_buffer_range_real;
 static GLUnmapBufferProc gl_unmap_buffer_real;
+#ifdef NEAR_CAMERA_TRACE
+static GLMapBufferRangeProc near_map_buffer_range_real;
+static GLMapBufferRangeProc near_map_buffer_range_ext_real;
+typedef void *(*GLMapBufferProc)(GLenum,GLenum);
+static GLMapBufferProc near_map_buffer_oes_real;
+static GLUnmapBufferProc near_unmap_buffer_real;
+static GLUnmapBufferProc near_unmap_buffer_oes_real;
+static void glBufferData_near(GLenum,GLsizeiptr,const void *,GLenum);
+static void glBufferSubData_near(GLenum,GLintptr,GLsizeiptr,const void *);
+static void *glMapBufferRange_near(GLenum,GLintptr,GLsizeiptr,GLbitfield);
+static void *glMapBufferRangeEXT_near(GLenum,GLintptr,GLsizeiptr,GLbitfield);
+static void *glMapBufferOES_near(GLenum,GLenum);
+static GLboolean glUnmapBuffer_near(GLenum);
+static GLboolean glUnmapBufferOES_near(GLenum);
+static GLenum glGetError_near(void);
+#endif
 
 static void gl_diag_sample_rgb(const GLint viewport[4], GLint read_format,
                                GLint read_type, unsigned int *nonzero,
@@ -781,8 +864,10 @@ static GLComposeExperiment gl_diag_prepare_compose_experiment(GLsizei count) {
   experiment.matched = 1;
   experiment.sequence = ++g_mc[slot].scene_compose_count;
   experiment.mode = 3;
+#ifdef DEBUG_LOG
   experiment.log_result = experiment.sequence <= 4 ||
                           ((experiment.sequence - 1) % 120) < 4;
+#endif
   experiment.texture = g_mc[slot].texture2d[source_unit];
   experiment.sampler = g_mc[slot].sampler[source_unit];
   experiment.source_framebuffer = g_mc[slot].scene_framebuffer;
@@ -946,6 +1031,7 @@ static void gl_diag_finish_compose_experiment(
     glActiveTexture(GL_TEXTURE0 + g_mc[slot].active_texture);
   }
 
+#ifdef DEBUG_LOG
   if (experiment->log_result) {
     const GLenum draw_error = glGetError();
     GLint read_format = 0;
@@ -971,6 +1057,7 @@ static void gl_diag_finish_compose_experiment(
                 max_value, sum, alpha_nonzero, alpha_max, alpha_sum,
                 experiment->pre_draw_error, draw_error, read_error);
   }
+#endif
 
   // Diagnostic fallback: copy the known-good scene-color FBO directly to the
   // window surface after the game's compose shader. This bypasses program 6
@@ -982,9 +1069,11 @@ static void gl_diag_finish_compose_experiment(
     GLint saved_draw_framebuffer = 0;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &saved_read_framebuffer);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &saved_draw_framebuffer);
+#ifdef DEBUG_LOG
     GLenum pre_blit_error = GL_NO_ERROR;
     if (experiment->log_result)
       pre_blit_error = glGetError();
+#endif
     glBindFramebuffer(GL_READ_FRAMEBUFFER, experiment->source_framebuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     // Program 6 normally flips texture V before presenting the offscreen
@@ -996,6 +1085,7 @@ static void gl_diag_finish_compose_experiment(
                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
+#ifdef DEBUG_LOG
     if (experiment->log_result) {
       const GLenum blit_error = glGetError();
       GLint read_format = 0;
@@ -1020,6 +1110,7 @@ static void gl_diag_finish_compose_experiment(
                   alpha_nonzero, alpha_max, alpha_sum, pre_blit_error,
                   blit_error, read_error);
     }
+#endif
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER,
                       (GLuint)saved_read_framebuffer);
@@ -1694,7 +1785,12 @@ static void glDrawArrays_diag(GLenum mode, GLint first, GLsizei count) {
 #ifdef PERF_TRACE
   const uint64_t draw_begin = perf_trace_now_ns();
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  nx_gpu_draw_begin();
+#endif
+  NX_NEAR_BEGIN();
   glDrawArrays(mode, first, count);
+  NX_NEAR_DRAW(count > 0 ? (uint64_t)count : 0);
 #ifdef PERF_TRACE
   perf_match_draw(count > 0 ? (uint64_t)count : 0, perf_trace_now_ns() - draw_begin);
 #endif
@@ -1728,12 +1824,38 @@ static void glDrawElements_diag(GLenum mode, GLsizei count, GLenum type,
 #ifdef PERF_TRACE
   const uint64_t draw_begin = perf_trace_now_ns();
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  nx_gpu_draw_begin();
+#endif
+  NX_NEAR_BEGIN();
   glDrawElements(mode, count, type, indices);
+  NX_NEAR_DRAW(count > 0 ? (uint64_t)count : 0);
 #ifdef PERF_TRACE
   perf_match_draw(count > 0 ? (uint64_t)count : 0, perf_trace_now_ns() - draw_begin);
 #endif
   gl_diag_finish_compose_experiment(&experiment);
 }
+
+#if defined(NEAR_CAMERA_TRACE) && !defined(DEBUG_LOG)
+/* Resolved core draws bypass the compositor wrapper in production. Preserve
+ * that route while measuring; instrumentation must not repair/change a draw. */
+static void glDrawArrays_near(GLenum mode,GLint first,GLsizei count) {
+#ifdef NEAR_CAMERA_TRACE
+  nx_gpu_draw_begin();
+#endif
+  NX_NEAR_BEGIN();
+  glDrawArrays(mode,first,count);
+  NX_NEAR_DRAW(count>0?(uint64_t)count:0);
+}
+static void glDrawElements_near(GLenum mode,GLsizei count,GLenum type,const void *indices) {
+#ifdef NEAR_CAMERA_TRACE
+  nx_gpu_draw_begin();
+#endif
+  NX_NEAR_BEGIN();
+  glDrawElements(mode,count,type,indices);
+  NX_NEAR_DRAW(count>0?(uint64_t)count:0);
+}
+#endif
 
 #ifndef GL_DRAW_FRAMEBUFFER
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
@@ -2049,7 +2171,12 @@ static void glDrawElementsInstanced_diag(GLenum mode, GLsizei count,
 #ifdef PERF_TRACE
   const uint64_t draw_begin = perf_trace_now_ns();
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  nx_gpu_draw_begin();
+#endif
+  NX_NEAR_BEGIN();
   gl_draw_elements_instanced_real(mode, count, type, indices, instances);
+  NX_NEAR_DRAW(count > 0 && instances > 0 ? (uint64_t)count * instances : 0);
 #ifdef PERF_TRACE
   perf_match_draw(count > 0 && instances > 0 ? (uint64_t)count * instances : 0,
                   perf_trace_now_ns() - draw_begin);
@@ -2080,7 +2207,12 @@ static void glDrawArraysInstanced_diag(GLenum mode, GLint first, GLsizei count,
 #ifdef PERF_TRACE
   const uint64_t draw_begin = perf_trace_now_ns();
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  nx_gpu_draw_begin();
+#endif
+  NX_NEAR_BEGIN();
   gl_draw_arrays_instanced_real(mode, first, count, instances);
+  NX_NEAR_DRAW(count > 0 && instances > 0 ? (uint64_t)count * instances : 0);
 #ifdef PERF_TRACE
   perf_match_draw(count > 0 && instances > 0 ? (uint64_t)count * instances : 0,
                   perf_trace_now_ns() - draw_begin);
@@ -2211,6 +2343,7 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
         if (strlen(copy) == n) {
           patched = stadium_lighting_source(copy);
           if (!patched) patched = night_lighting_source(copy);
+          if (!patched) patched = stadium_shell_clip_source(copy);
         }
         free(copy);
       }
@@ -2261,6 +2394,33 @@ eglGetProcAddress_diag(const char *name) {
     debugPrintf("eglGetProcAddress[%u](%s) -> %p\n", request,
                 name ? name : "(null)", (void *)proc);
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  if (name && proc) {
+    if (!strcmp(name,"glBufferData")) return (__eglMustCastToProperFunctionPointerType)&glBufferData_near;
+    if (!strcmp(name,"glBufferSubData")) return (__eglMustCastToProperFunctionPointerType)&glBufferSubData_near;
+    if (!strcmp(name,"glMapBufferRange")) {
+      near_map_buffer_range_real=(GLMapBufferRangeProc)proc;
+      return (__eglMustCastToProperFunctionPointerType)&glMapBufferRange_near;
+    }
+    if (!strcmp(name,"glMapBufferRangeEXT")) {
+      near_map_buffer_range_ext_real=(GLMapBufferRangeProc)proc;
+      return (__eglMustCastToProperFunctionPointerType)&glMapBufferRangeEXT_near;
+    }
+    if (!strcmp(name,"glMapBufferOES")) {
+      near_map_buffer_oes_real=(GLMapBufferProc)proc;
+      return (__eglMustCastToProperFunctionPointerType)&glMapBufferOES_near;
+    }
+    if (!strcmp(name,"glUnmapBuffer")) {
+      near_unmap_buffer_real=(GLUnmapBufferProc)proc;
+      return (__eglMustCastToProperFunctionPointerType)&glUnmapBuffer_near;
+    }
+    if (!strcmp(name,"glUnmapBufferOES")) {
+      near_unmap_buffer_oes_real=(GLUnmapBufferProc)proc;
+      return (__eglMustCastToProperFunctionPointerType)&glUnmapBufferOES_near;
+    }
+    if (!strcmp(name,"glGetError")) return (__eglMustCastToProperFunctionPointerType)&glGetError_near;
+  }
+#endif
   if (name && !strcmp(name, "glShaderSource") && proc)
     return (__eglMustCastToProperFunctionPointerType)&glShaderSource_pitch;
   if (name && !strcmp(name, "glCompileShader") && proc)
@@ -2276,6 +2436,11 @@ eglGetProcAddress_diag(const char *name) {
     return (__eglMustCastToProperFunctionPointerType)&glDrawArrays_diag;
   if (name && !strcmp(name, "glDrawElements") && proc)
     return (__eglMustCastToProperFunctionPointerType)&glDrawElements_diag;
+#elif defined(NEAR_CAMERA_TRACE)
+  if (name && !strcmp(name, "glDrawArrays") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glDrawArrays_near;
+  if (name && !strcmp(name, "glDrawElements") && proc)
+    return (__eglMustCastToProperFunctionPointerType)&glDrawElements_near;
 #endif
   if (name && !strcmp(name, "glBlitFramebuffer") && proc) {
     gl_blit_framebuffer_real = (GLBlitFramebufferProc)proc;
@@ -2547,8 +2712,29 @@ static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
                 mc_thread_key(), surface);
   }
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  const uint64_t near_swap_begin=nx_near_now();
+  nx_gpu_before_swap(completed_slot);
+  const uint64_t near_view_sample=nx_near_view_sample();
+  NxNearContext near_context={0};
+  pes_controller_near_context(&near_context);
+  if (!near_context.live) pes_controller_face_probe_report();
+  const unsigned near_width=completed_slot>=0?g_mc[completed_slot].viewport[2]:0;
+  const unsigned near_height=completed_slot>=0?g_mc[completed_slot].viewport[3]:0;
+#endif
+  const uintptr_t submitted_context=completed_slot>=0?(uintptr_t)g_mc[completed_slot].ctx:0;
+  const int presented_current=completed_slot>=0 &&
+      g_mc[completed_slot].dpy==(EGLDisplay)display &&
+      g_mc[completed_slot].draw==(EGLSurface)surface && submitted_context!=0;
   gl_state_cache_reset();
   const unsigned int result = eglSwapBuffersHook(display, surface);
+  gl_state_cache_reset(); // Direct overlay calls/callbacks cannot seed next-frame state.
+  nx_upload_presented(&gl_upload_budget,submitted_context,result && presented_current);
+#ifdef NEAR_CAMERA_TRACE
+  nx_near_swap(near_swap_begin,nx_near_now(),near_width,near_height,
+              result && presented_current,near_view_sample,&near_context);
+  if (result && presented_current) nx_gpu_after_swap(completed_slot,&near_context);
+#endif
 #ifdef PERF_TRACE
   const uint64_t swap_end_ns = perf_trace_now_ns();
   perf_match_frame(swap_begin_ns, swap_end_ns, match_perf_key);
@@ -2798,10 +2984,18 @@ static EGLBoolean eglMakeCurrent_dedup(EGLDisplay dpy, EGLSurface draw,
 static EGLBoolean eglDestroyContext_cache(EGLDisplay dpy, EGLContext ctx) {
   memset(roof_uniforms, 0, sizeof(roof_uniforms));
   for (int i = 0; i < MC_SLOTS; i++) {
-    if (g_mc[i].ctx == ctx)
+    if (g_mc[i].ctx == ctx) {
+#ifdef NEAR_CAMERA_TRACE
+      memset(&gpu_probes[i],0,sizeof(gpu_probes[i]));
+#endif
       memset(&g_mc[i], 0, sizeof(g_mc[i]));
+    }
   }
   const EGLBoolean result = eglDestroyContext(dpy, ctx);
+  if (result) {
+    nx_upload_forget(&gl_upload_budget,(uintptr_t)ctx);
+    overlay_context_destroyed(ctx);
+  }
   debugPrintf("eglDestroyContext(dpy=%p ctx=%p) -> %d\n", dpy, ctx, result);
   return result;
 }
@@ -2897,17 +3091,17 @@ static pthread_mutex_t g_nmm_mtx = PTHREAD_MUTEX_INITIALIZER;
 static void nmm_free_insert_locked(struct nmm_slab *slab,
                                    struct nmm_alloc *allocation) {
   struct nmm_alloc **link = &slab->free_list;
-  while (*link && (*link)->offset < allocation->offset)
-    link = &(*link)->next;
+  struct nmm_alloc *previous = NULL;
+  while (*link && (*link)->offset < allocation->offset) {
+    previous = *link;
+    link = &previous->next;
+  }
   allocation->next = *link;
   *link = allocation;
 
   // Coalesce adjacent ranges to avoid fragmentation under varying buffer sizes.
   struct nmm_alloc *current = allocation;
-  if (link != &slab->free_list) {
-    struct nmm_alloc *previous = slab->free_list;
-    while (previous->next != current)
-      previous = previous->next;
+  if (previous) {
     if ((uint64_t)previous->offset + previous->size == current->offset) {
       previous->size += current->size;
       previous->next = current->next;
@@ -2951,15 +3145,17 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
 
   pthread_mutex_lock(&g_nmm_mtx);
   struct nmm_slab *s = NULL;
+  struct nmm_alloc **reusable = NULL;
   // Search reusable ranges across every slab first.  Looking only at the
   // newest slab would leave freed ranges in older slabs stranded forever.
   for (int i = g_nmm_nslabs - 1; i >= 0 && !s; i--) {
     if (!g_nmm_slabs[i].bo || g_nmm_slabs[i].cache != cache)
       continue;
-    for (struct nmm_alloc *free_range = g_nmm_slabs[i].free_list;
-         free_range; free_range = free_range->next) {
-      if (free_range->size >= asz) {
+    for (struct nmm_alloc **link = &g_nmm_slabs[i].free_list;
+         *link; link = &(*link)->next) {
+      if ((*link)->size >= asz) {
         s = &g_nmm_slabs[i];
+        reusable = link; // The mutex keeps this exact first-fit link stable.
         break;
       }
     }
@@ -2972,34 +3168,29 @@ void *__wrap_nouveau_mm_allocate(void *cache, uint32_t size, void **bo, uint32_t
   }
 
   // Reuse a released range before extending the slab high-water mark.
-  if (s && s->free_list) {
-    struct nmm_alloc **link = &s->free_list;
-    while (*link && (*link)->size < asz)
-      link = &(*link)->next;
-    if (*link) {
-      struct nmm_alloc *reused = *link;
-      if (reused->size == asz) {
-        *link = reused->next;
-        free(allocation);
-        allocation = reused;
-      } else {
-        /* A coalesced 2 MiB hole must not become a 2 MiB allocation for
-         * a 256-byte menu buffer. Keep the remainder available in place. */
-        allocation->offset = reused->offset;
-        allocation->size = asz;
-        reused->offset += asz;
-        reused->size -= asz;
-      }
-      allocation->next = NULL;
-      allocation->slab = s;
-      ++s->live;
-      if (offset)
-        *offset = allocation->offset;
-      if (bo)
-        nouveau_bo_ref(s->bo, bo);
-      pthread_mutex_unlock(&g_nmm_mtx);
-      return allocation;
+  if (reusable) {
+    struct nmm_alloc *reused = *reusable;
+    if (reused->size == asz) {
+      *reusable = reused->next;
+      free(allocation);
+      allocation = reused;
+    } else {
+      /* A coalesced 2 MiB hole must not become a 2 MiB allocation for
+       * a 256-byte menu buffer. Keep the remainder available in place. */
+      allocation->offset = reused->offset;
+      allocation->size = asz;
+      reused->offset += asz;
+      reused->size -= asz;
     }
+    allocation->next = NULL;
+    allocation->slab = s;
+    ++s->live;
+    if (offset)
+      *offset = allocation->offset;
+    if (bo)
+      nouveau_bo_ref(s->bo, bo);
+    pthread_mutex_unlock(&g_nmm_mtx);
+    return allocation;
   }
   if (!s) {
     /* Empty slabs can be retired. Reuse their descriptor without moving
@@ -3089,8 +3280,14 @@ void __wrap_nouveau_mm_free_work(void *handle) {
 // The world load creates thousands of buffers/textures without presenting, so
 // mesa never flushes; force a periodic submit to bound the nouveau bo-list.
 static void gl_load_drain(void) {
-  static __thread unsigned n = 0;
-  if ((++n & 0x1ff) == 0) glFlush();
+  const int slot=mc_current_slot();
+  const uintptr_t context=slot>=0?(uintptr_t)g_mc[slot].ctx:0;
+  if (nx_upload_due(&gl_upload_budget,context)) {
+    glFlush();
+#ifdef NEAR_CAMERA_TRACE
+    nx_near_flush();
+#endif
+  }
 }
 
 static void glTexImage2D_w(GLenum t, GLint l, GLint i, GLsizei w, GLsizei h,
@@ -3132,9 +3329,63 @@ static void glCompressedTexImage2D_w(GLenum t, GLint l, GLenum i, GLsizei w,
 }
 static void glBufferData_w(GLenum target, GLsizeiptr size, const void *data,
                            GLenum usage) {
+  NX_NEAR_BEGIN();
   gl_load_drain();
   glBufferData(target, size, data, usage);
+  NX_NEAR_UPLOAD(size>0?(uint64_t)size:0,0);
 }
+#ifdef NEAR_CAMERA_TRACE
+static void glBufferData_near(GLenum target,GLsizeiptr size,const void *data,GLenum usage) {
+  NX_NEAR_BEGIN();
+  glBufferData(target,size,data,usage);
+  NX_NEAR_UPLOAD(size>0?(uint64_t)size:0,0);
+}
+static void glBufferSubData_near(GLenum target,GLintptr offset,GLsizeiptr size,const void *data) {
+  NX_NEAR_BEGIN();
+  glBufferSubData(target,offset,size,data);
+  NX_NEAR_UPLOAD(size>0?(uint64_t)size:0,0);
+}
+static void *glMapBufferRange_near(GLenum target,GLintptr offset,GLsizeiptr size,GLbitfield access) {
+  NX_NEAR_BEGIN();
+  void *result=near_map_buffer_range_real(target,offset,size,access);
+  NX_NEAR_UPLOAD(result && size>0?(uint64_t)size:0,1);
+  nx_near_map_result(result!=NULL);
+  return result;
+}
+static void *glMapBufferRangeEXT_near(GLenum target,GLintptr offset,GLsizeiptr size,GLbitfield access) {
+  NX_NEAR_BEGIN();
+  void *result=near_map_buffer_range_ext_real(target,offset,size,access);
+  NX_NEAR_UPLOAD(result && size>0?(uint64_t)size:0,1);
+  nx_near_map_result(result!=NULL);
+  return result;
+}
+static void *glMapBufferOES_near(GLenum target,GLenum access) {
+  NX_NEAR_BEGIN();
+  void *result=near_map_buffer_oes_real(target,access);
+  NX_NEAR_UPLOAD(0,1); /* Whole-buffer size is unknown; do not query/stall. */
+  nx_near_map_result(result!=NULL);
+  return result;
+}
+static GLboolean glUnmapBuffer_near(GLenum target) {
+  NX_NEAR_BEGIN();
+  const GLboolean result=near_unmap_buffer_real(target);
+  NX_NEAR_UPLOAD(0,1);
+  nx_near_unmap_result(result!=0);
+  return result;
+}
+static GLboolean glUnmapBufferOES_near(GLenum target) {
+  NX_NEAR_BEGIN();
+  const GLboolean result=near_unmap_buffer_oes_real(target);
+  NX_NEAR_UPLOAD(0,1);
+  nx_near_unmap_result(result!=0);
+  return result;
+}
+static GLenum glGetError_near(void) {
+  const GLenum result=glGetError(); /* Observe only queries the engine makes. */
+  nx_near_error_result(result);
+  return result;
+}
+#endif
 
 FILE *stderr_fake = (FILE *)&fake_sF[2];
 
@@ -3405,8 +3656,10 @@ _Static_assert((FAKE_TLS_MAX_THREADS & (FAKE_TLS_MAX_THREADS - 1)) == 0,
                "fake TLS thread table must be a power of two");
 
 static volatile unsigned int fake_tls_next_key = 1;
+#ifdef DEBUG_LOG
 static volatile unsigned int pthread_tls_get_trace_count;
 static volatile unsigned int pthread_tls_set_trace_count;
+#endif
 static unsigned char fake_tls_key_active[FAKE_TLS_MAX_KEYS];
 static void (*fake_tls_destructors[FAKE_TLS_MAX_KEYS])(void *);
 static void *fake_tls_thread_ids[FAKE_TLS_MAX_THREADS];
@@ -3491,9 +3744,11 @@ static void *pthread_getspecific_fake(pthread_key_t key) {
   if (slot < 0)
     return NULL;
   void *value = fake_tls_values[slot][key_index];
+#ifdef DEBUG_LOG
   if (value && __sync_fetch_and_add(&pthread_tls_get_trace_count, 1) < 64)
     debugPrintf("pthread_getspecific_fake(tls=%p slot=%d key=%u) -> %p\n",
                 mc_thread_key(), slot, key_index, value);
+#endif
   return value;
 }
 
@@ -3507,9 +3762,11 @@ static int pthread_setspecific_fake(pthread_key_t key, const void *value) {
   if (slot < 0)
     return EAGAIN;
   fake_tls_values[slot][key_index] = (void *)value;
+#ifdef DEBUG_LOG
   if (__sync_fetch_and_add(&pthread_tls_set_trace_count, 1) < 128)
     debugPrintf("pthread_setspecific_fake(tls=%p slot=%d key=%u value=%p)\n",
                 mc_thread_key(), slot, key_index, value);
+#endif
   return 0;
 }
 
@@ -3941,7 +4198,11 @@ DynLibFunction dynlib_functions[] = {
   { "glGenRenderbuffers", (uintptr_t)&glGenRenderbuffers },
   { "glGenTextures", (uintptr_t)&glGenTextures },
   { "glGetAttribLocation", (uintptr_t)&glGetAttribLocation },
+#ifdef NEAR_CAMERA_TRACE
+  { "glGetError", (uintptr_t)&glGetError_near },
+#else
   { "glGetError", (uintptr_t)&glGetError },
+#endif
   { "glGetBooleanv", (uintptr_t)&glGetBooleanv },
   { "glGetIntegerv", (uintptr_t)&glGetIntegerv },
   { "glGetProgramInfoLog", (uintptr_t)&glGetProgramInfoLog },
@@ -4222,7 +4483,11 @@ DynLibFunction dynlib_functions[] = {
   // -- GLESv2 functions the LCS renderer uses (native, -lGLESv2) --
   { "glBlendColor", (uintptr_t)&glBlendColor },
   { "glBlendEquationSeparate", (uintptr_t)&glBlendEquationSeparate },
+#ifdef NEAR_CAMERA_TRACE
+  { "glBufferSubData", (uintptr_t)&glBufferSubData_near },
+#else
   { "glBufferSubData", (uintptr_t)&glBufferSubData },
+#endif
   { "glCompressedTexSubImage2D", (uintptr_t)&glCompressedTexSubImage2D },
   { "glCopyTexImage2D", (uintptr_t)&glCopyTexImage2D },
   { "glCopyTexSubImage2D", (uintptr_t)&glCopyTexSubImage2D },
@@ -4510,6 +4775,9 @@ DynLibFunction dynlib_functions[] = {
 size_t dynlib_numfunctions = sizeof(dynlib_functions) / sizeof(*dynlib_functions);
 
 void update_imports(void) {
+#ifdef NEAR_CAMERA_TRACE
+  gl_render_probe_configure();
+#endif
   // only install the hook when the config option is enabled
   if (config.trilinear_filter)
     so_find_import(dynlib_functions, dynlib_numfunctions, "glTexParameteri")->func = (uintptr_t)glTexParameteriHook;

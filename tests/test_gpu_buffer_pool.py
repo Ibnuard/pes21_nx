@@ -93,6 +93,22 @@ int main(int argc,char **argv) {
     struct nmm_alloc *next=__wrap_nouveau_mm_allocate(&cache,512*1024-256,&next_bo,&off);
     assert(next && off==512 && created==1);
     release(small,&small_bo);release(next,&next_bo);release(anchor,&anchor_bo);
+  } else if(!strcmp(argv[1],"fragmented")) {
+    void *bo[1026]={0},*h[1026];
+    for(unsigned i=0;i<1024;i++)h[i]=__wrap_nouveau_mm_allocate(&cache,256,&bo[i],&off);
+    h[1024]=__wrap_nouveau_mm_allocate(&cache,4096,&bo[1024],&off);
+    const uint32_t hole=off;
+    h[1025]=__wrap_nouveau_mm_allocate(&cache,256,&bo[1025],&off);
+    for(unsigned i=0;i<1024;i+=2)release(h[i],&bo[i]);
+    release(h[1024],&bo[1024]);
+    h[1024]=__wrap_nouveau_mm_allocate(&cache,2048,&bo[1024],&off);
+    assert(off==hole && ((struct nmm_alloc*)h[1024])->size==2048);
+    release(h[1024],&bo[1024]);
+    /* Joining every remaining odd range must coalesce left and right. */
+    for(unsigned i=1;i<1024;i+=2)release(h[i],&bo[i]);
+    h[0]=__wrap_nouveau_mm_allocate(&cache,256*1024+4096,&bo[0],&off);
+    assert(off==0 && created==1);
+    release(h[0],&bo[0]);release(h[1025],&bo[1025]);
   } else if(!strcmp(argv[1],"retention")) {
     for(unsigned cycle=0;cycle<250;cycle++) {
       void *bo[48]={0},*h[48];
@@ -151,7 +167,7 @@ class GpuBufferPoolTests(unittest.TestCase):
                        check=True,capture_output=True)
 
     def test_pool_lifecycle(self):
-        for case in ('split','retention','failure','lifetime','threaded'):
+        for case in ('split','fragmented','retention','failure','lifetime','threaded'):
             with self.subTest(case=case):
                 result = subprocess.run([str(self.exe),case],capture_output=True,text=True,timeout=30)
                 self.assertEqual(result.returncode,0,result.stdout+result.stderr)

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "policy": "Explicit aliases only, with identical BaseId plus independent local biography and pinned fingerprint. Never change the runtime identity or inherit a reused donor slot.",
+  "aliases": [
+    {"base_id": 145605, "names": ["Will Osula", "William Osula"], "country_pair": [203, 204], "evidence": ["https://www.newcastleunited.com/en/teams/mens-team/william-osula-profile", "https://dbu.dk/landshold/landsholdsdatabasen/PlayerInfo/8015"], "note": "Full registered name and Danish identity; the two local snapshots disagree on the country field."},
+    {"base_id": 113907, "names": ["J. Ricner Bellegarde", "Jean Bellegarde"], "country_pair": [120, 208], "evidence": ["https://www.wolves.co.uk/teams/mens-first-team/jean-ricner-bellegarde/", "https://www.wolves.co.uk/news/mens-first-team/20250919-bellegarde-earns-monthly-award-after-haiti-takeover/"], "note": "Jean-Ricner Bellegarde; France youth to Haiti senior international."},
+    {"base_id": 143140, "names": ["Pablo", "Pablo Felipe"], "country_pair": [146, 228], "evidence": ["https://www.whufc.com/en/teams/mens-team/pablo"], "note": "Pablo Felipe, born in Portugal, Brazilian striker; 184 cm."},
+    {"base_id": 153432, "names": ["Jair Cunha", "Jair Paula"], "evidence": ["https://www.premierleague.com/en/news/4407896"], "note": "Registered full name Jair Paula da Cunha Filho."},
+    {"base_id": 173988, "names": ["Youssef Enríquez", "Youssef Lekhedim"], "evidence": ["https://www.realmadrid.com/de-DE/fussball/nachwuchs/castilla/youssef-enriquez-lekhedim"], "note": "Full name Youssef Enriquez Lekhedim."},
+    {"base_id": 9226, "names": ["Iván Cuéllar", "Pichu Cuéllar"], "evidence": ["https://www.rcdmallorca.es/ca/noticies/el-rcd-mallorca-ficha-a-ivan-pichu-cuellar"], "note": "Club explicitly identifies Ivan and Pichu as the same goalkeeper."},
+    {"base_id": 124846, "names": ["George Tsitaishvili", "Georgiy Tsitaishvili"], "evidence": ["https://www.fcmetz.com/fr/Squad/Player?id=1171&webPageId=307"], "note": "Transliterated given names for Giorgi Tsitaishvili; full surname and local biography agree."},
+    {"base_id": 125682, "names": ["Carlos Protesoni", "Carlos Benavídez"], "evidence": ["https://www.laliga.com/jugador/carlos-benavidez"], "note": "Official league profile now uses Protesoni on the former Benavidez identity."},
+    {"base_id": 140585, "names": ["Urko González de Z.", "Urko González"], "evidence": ["https://www.rcdespanyol.com/en/teams/rcd-espanyol/urko/3905"], "note": "Full surname Gonzalez de Zarate Quiros."},
+    {"base_id": 133464, "names": ["Arnaud Kalimuendo", "Arnaud Muinga"], "evidence": ["https://www.premierleague.com/en/news/4407896"], "note": "Registered full name Arnaud Kalimuendo-Muinga."}
+  ]
+}

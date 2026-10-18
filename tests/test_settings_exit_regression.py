@@ -14,9 +14,10 @@ class SettingsExitTests(unittest.TestCase):
         body = SOURCE.split("const char *pes_controller_pause_settings_value", 1)[1].split("static void match_pause_go_top_menu", 1)[0]
         self.assertIn("pause_settings_tmpdb_camera(&tmpdb_type)", body)
         self.assertIn("switch (type)", body)
-        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (12, "STADIUM")):
+        for enum, label in ((0, "MEDIUM"), (1, "LONG"), (2, "WIDE"), (3, "PITCH SIDE")):
             self.assertIn(f'case {enum}: return "{label}";', body)
         self.assertIn('? "FOOTBALLNX CAM" : "DYNAMIC WIDE"', body)
+        self.assertIn('? "STADIUM-V2" : "STADIUM"', body)
         self.assertNotIn('"WIDE DYNAMIC CUSTOM"', body)
         self.assertNotIn('"LIVE BROADCAST"', body)
         self.assertNotIn('"STADIUM CUSTOM"', body)
@@ -143,7 +144,10 @@ int main(void) {
         self.assertIn('pause_match_listener_set_camera_from_tmpdb(listener, 1u)', apply)
         self.assertIn('match_pause_camera_update_registry(window, 1u)', apply)
         self.assertIn('static const PauseCameraPreset pause_camera_presets[]', SOURCE)
-        self.assertIn('{5u, 0u}, {12u, 0u}, {0u, 0u}, {1u, 0u}, {2u, 0u},', SOURCE)
+        for preset in ('{5u, 0u, 0u}', '{12u, 0u, 0u}', '{3u, 0u, 0u}',
+                       '{0u, 0u, 0u}', '{1u, 0u, 0u}', '{2u, 0u, 0u}',
+                       '{5u, 1u, 0u}', '{12u, 0u, 1u}'):
+            self.assertIn(preset, SOURCE)
         update = function(SOURCE, 'pes_match_pause_camera_update')
         cycle = function(SOURCE, 'pause_settings_cycle_camera')
         self.assertIn('pause_settings_cycle_camera(window, action)', update)
@@ -174,8 +178,6 @@ int main(void) {
 #include <stdint.h>
 #include <string.h>
 static uint32_t pause_camera_dynamic_wide_custom;
-static uint32_t match_broadcast_anticipation_enabled;
-static uint32_t match_broadcast_ball_tracking_ready(const void *a,const float *b) {assert(!a && !b);return 0;}
 static void native_convert(void *registry, const void *tmpdb, void *resident) {
   (void)tmpdb; (void)resident;
   unsigned char *camera=registry;
@@ -204,10 +206,9 @@ int main(void) {
     tmpdb[0]=type;
     pause_camera_dynamic_wide_custom=0;
     pause_set_tmpdb_camera_settings(registry,tmpdb,(void*)1);
-    assert(match_broadcast_anticipation_enabled == (type==12));
     for (unsigned i=0;i<3;i++) {
       unsigned base=(unsigned[]){0,6,11}[i];
-      assert(registry[base+3]==((type==12)?6:2));
+      assert(registry[base+3]==2); // every native result passes through unchanged
     }
   }
 }
@@ -264,61 +265,6 @@ int main(void) {
         install = SOURCE.split('void install_ue4_hooks', 1)[1]
         self.assertIn('InplayCamera6UpdateERN4draw15CameraParameterE', install)
         self.assertIn('*inplay_camera_update_slot = (uintptr_t)&pes_inplay_camera_update;', install)
-
-    def test_stadium_native_target_arms_after_ball_motion_and_resets_on_pause(self):
-        compiler = shutil.which("gcc")
-        if not compiler: self.skipTest("gcc unavailable")
-        build_and_run(compiler, r'''
-#include <assert.h>
-#include <math.h>
-#include <stdint.h>
-''' + function(SOURCE, 'match_broadcast_ball_tracking_ready') + r'''
-int main(void) {
-  int first_ball = 1;
-  int second_ball = 2;
-  float still[3] = {10.0f, 20.0f, 0.0f};
-  float moved[3] = {10.6f, 20.0f, 0.0f};
-  float live[3] = {10.8f, 20.0f, 0.0f};
-  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, moved) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, live) == 1);
-  assert(match_broadcast_ball_tracking_ready(0, 0) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, moved) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, live) == 1);
-  assert(match_broadcast_ball_tracking_ready(&second_ball, live) == 0);
-  assert(match_broadcast_ball_tracking_ready(0, 0) == 0);
-  float lifted[3] = {10.0f, 22.0f, 0.0f};
-  float lateral[3] = {10.0f, 20.0f, 0.8f};
-  assert(match_broadcast_ball_tracking_ready(&first_ball, still) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, lifted) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, lateral) == 0);
-  assert(match_broadcast_ball_tracking_ready(&first_ball, lateral) == 1);
-}
-''')
-        root = Path(__file__).resolve().parents[1]
-        assembly = (root / 'source/cobra_pad_hook.s').read_text(encoding='utf-8')
-        wrapper = function(SOURCE, 'pes_inplay_ball_position_broadcast')
-        self.assertIn('match_ball_position_broadcast_original(', wrapper)
-        self.assertIn('(const unsigned char *)camera + 0x198', wrapper)
-        self.assertIn('match_broadcast_ball_tracking_ready(ball_info, ball_position)', wrapper)
-        self.assertNotIn('match_broadcast_limit_anticipation', SOURCE)
-        self.assertIn('match_broadcast_frame.camera == camera', wrapper)
-        self.assertIn('match_broadcast_frame.sampled = 1u',
-                      function(SOURCE, 'pes_stadium_ball_target_mode'))
-        setup = function(SOURCE, 'pes_exhibition_match_setup_data_entry')
-        self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);', setup)
-        self.assertIn('match_broadcast_ball_tracking_ready(NULL, NULL);',
-                      function(SOURCE, 'pes_match_pause_update_entry'))
-        self.assertNotIn('if (!active', wrapper)
-        self.assertNotIn('armGetSystemTick', wrapper)
-        install = SOURCE.split('void install_ue4_hooks', 1)[1]
-        self.assertIn('GetBallPositionBroadcastERKfRK8HomeAway', install)
-        self.assertIn('(uintptr_t)&pes_inplay_ball_position_broadcast', install)
-        self.assertIn('pes_inplay_ball_position_broadcast_original:', assembly)
-        self.assertIn('inplay_ball_position_broadcast_resume', assembly)
 
     def test_stamina_gate_replaces_draw_experiments(self):
         install = SOURCE.split('void install_ue4_hooks', 1)[1]

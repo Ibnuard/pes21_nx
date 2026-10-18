@@ -3,6 +3,12 @@
 12 October 2026. Local asset candidate; Switch appearance, animation and FPS
 remain unverified. This extends the [Barcelona workflow](REALFACE_BATCH_AUTOMATION.md).
 
+For the later user-reported frame-pacing issue, see the
+[13 October geometry/performance audit](REALFACE_PERFORMANCE_AUDIT.md).
+The existing v24 pack has one LOD per mesh and substantially more head/hair
+geometry than native Mobile; conversion coverage does not imply a performance
+budget pass.
+
 ## Validated v24 candidate
 
 The incremental release recovers **all 128 earlier conversion/cook holds**:

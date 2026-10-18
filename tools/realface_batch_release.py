@@ -126,10 +126,14 @@ def cook(config, selected=None):
     profiles=[row['ue_profile'] for row in pending if not row.get('restored_import')]
     # Bound the editor lifetime: FBX import retains native allocations that
     # Python/UE GC alone cannot reliably release across hundreds of players.
-    for start in range(0,len(profiles),8):
-        import_chunk(config,project,batch,profiles[start:start+8],start//8)
+    chunk_size=config.get('import_chunk_size',8)
+    if not isinstance(chunk_size,int) or not 1<=chunk_size<=32:
+        raise ValueError('Import chunks must contain 1..32 players')
+    for start in range(0,len(profiles),chunk_size):
+        import_chunk(config,project,batch,profiles[start:start+chunk_size],start//chunk_size)
     command([config['ue_editor'], project / 'PesMobile.uproject', '-run=cook', '-targetplatform=Android_ETC1',
-             '-unversioned', '-cookall', '-unattended', '-nop4', '-nosplash', '-nullrhi'], batch / 'cook.log')
+             '-unversioned', '-cookall', '-unattended', '-nop4', '-nosplash', '-nullrhi']+
+            (['-nothreading'] if config.get('serial_texture_cook',False) else []), batch / 'cook.log')
     for row in pending:
         profile = read(row['ue_profile'])
         report = read(profile['report'])
@@ -211,15 +215,16 @@ def verify_one(config, row, validator=None):
             source_map = {n.replace('_00', '.00'): 'skin' for n in
                           (profile['skin_materials'] if part == 'face' else profile['hair_skin_materials'])}
             cooked_map = {'face_' + native: 'skin'} if source_map else {}
-            if part == 'face':
+            if part == 'face' and not profile.get('opaque_eye_atlas'):
                 source_map[profile['eye_material']] = 'eye'
                 cooked_map['eye_native_' + native] = 'eye'
-            else:
+            elif part == 'hair':
                 source_map.update({n.replace('_00', '.00'): 'hair' for n in profile['hair_materials']})
                 if profile['hair_materials']: cooked_map['hair_parts_tablet_ss'] = 'hair'
             parts[part] = dict(fbx=str(fbx), cooked_mesh_json=str(doc),
                                gltf=str(work / ('gltf/Assets/character/RealFace/' + native + '_' + part + '.gltf')),
                                material_map=source_map, cooked_material_map=cooked_map,
+                               require_source_normals=bool(profile.get('opaque_eye_atlas') and part=='face'),
                                permit_exact_source_collapses=True)
         check = dict(base_id=row['base_id'], native_player_id=row['native_player_id'], native_rig=config['native_rig'],
                      cooked_rig=config['cooked_rig'], parts=parts, report=str(work / 'verified.json'))
@@ -241,8 +246,10 @@ def verify_one(config, row, validator=None):
         names = [(native + '_face', ('.uasset', '.uexp')), (native + '_hair', ('.uasset', '.uexp')),
                  (native + '_face_tablet', ('.uasset', '.uexp', '.ubulk')),
                  (native + '_hair_parts_color_tablet', ('.uasset', '.uexp', '.ubulk')),
-                 ('face_' + native, ('.uasset', '.uexp')), ('eye_native_' + native, ('.uasset', '.uexp'))]
-        if not own: names += [(native + '_eyes_tablet', ('.uasset', '.uexp', '.ubulk'))]
+                 ('face_' + native, ('.uasset', '.uexp'))]
+        if not profile.get('opaque_eye_atlas'):
+            names += [('eye_native_' + native, ('.uasset', '.uexp'))]
+            if not own: names += [(native + '_eyes_tablet', ('.uasset', '.uexp', '.ubulk'))]
         staged = destination / 'assets'
         staged.mkdir()
         for name, suffixes in names:

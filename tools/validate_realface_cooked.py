@@ -21,7 +21,7 @@ from blender_fit_realface import runtime_matrix, vertex_weights, weighted_bind_m
 from realface_reference import load_reference
 from realface_cook_policy import collapsed_triangle, audited_triangle_drop
 from realface_triangle_audit import surviving_triangles
-from realface_vertex_audit import match_vertices
+from realface_vertex_audit import match_vertices,match_normals
 
 
 def imported_weights(source):
@@ -47,7 +47,7 @@ def validate_part(spec, native, contract, contract_rows):
         if len(materials) != 1 or materials[0] not in spec['material_map']:
             raise ValueError('Unexpected FBX material: ' + str(materials))
         kind = spec['material_map'][materials[0]]
-        row = expected.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, collapsed=0, faces=[]))
+        row = expected.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, collapsed=0, faces=[],normal_corners=[]))
         base = len(row['points'])
         weights = [vertex_weights(obj, v) for v in obj.data.vertices]
         row['points'].extend(runtime_matrix(obj, w, native, contract) @ v.co
@@ -61,6 +61,9 @@ def validate_part(spec, native, contract, contract_rows):
         for loop in obj.data.loops:
             u, v = obj.data.uv_layers[0].data[loop.index].uv
             row['uv'][base + loop.vertex_index].add((u, 1-v))
+            if spec.get('require_source_normals'):
+                n=(basis.to_3x3().inverted().transposed() @ obj.data.corner_normals[loop.index].vector).normalized()
+                row['normal_corners'].append((row['bind_points'][base+loop.vertex_index],(u,1-v),tuple(n)))
         obj.data.calc_loop_triangles()
         for triangle in obj.data.loop_triangles:
             ids=[base+i for i in triangle.vertices]
@@ -83,7 +86,7 @@ def validate_part(spec, native, contract, contract_rows):
             raise ValueError('Unexpected cooked material: ' + material)
         kind = spec['cooked_material_map'][material]
         count = document['accessors'][primitive['attributes']['POSITION']]['count']
-        row = actual.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, faces=[]))
+        row = actual.setdefault(kind, dict(points=[], bind_points=[], uv=[], weights=[], triangles=0, faces=[],normals=[]))
         for index in range(start, start+count):
             weights = mesh['weights'][index]
             transform = weighted_bind_matrix(weights, native, actual_rig)
@@ -91,6 +94,7 @@ def validate_part(spec, native, contract, contract_rows):
             row['bind_points'].append(Vector(mesh['vertices'][index]))
             row['uv'].append(mesh['uv'][index])
             row['weights'].append(weights)
+            row['normals'].append(mesh['normals'][index])
         face_count=document['accessors'][primitive['indices']]['count']//3
         for ids in mesh['faces'][face_start:face_start+face_count]:
             row['faces'].append(dict(points=[mesh['vertices'][i] for i in ids],
@@ -128,15 +132,22 @@ def validate_part(spec, native, contract, contract_rows):
         for i, point in enumerate(new['bind_points']):
             reverse.insert(point, i)
         reverse.balance()
-        coverage = max(reverse.find(p)[2] for p in old['bind_points'])
+        # FBX may retain loose vertices after offline decimation. UE correctly
+        # omits those points: they support no triangle, UV corner or visible
+        # surface. Continue to require coverage of every referenced vertex.
+        referenced = [i for i, uv in enumerate(old['uv']) if uv]
+        coverage = max(reverse.find(old['bind_points'][i])[2] for i in referenced)
         if coverage >= limit:
             raise ValueError('Cooked geometry dropped source vertices: ' + kind)
         results[kind] = dict(source_vertices=len(old['points']), cooked_vertices=len(new['points']),
             source_triangles=old['triangles'], triangles=new['triangles'],
+            unused_source_vertices=len(old['bind_points'])-len(referenced),
             audited_collapsed_triangles_removed=dropped,surviving_surface_proof=surface_proof,
             comparison_space='cooked_bind_cm',max_position_error_cm=max(errors),
             max_source_coverage_error_cm=coverage, max_uv_error=max(uv_errors),
             weight_comparison='UE4_minimum_one_percent_then_8bit',max_weight_l1_error=max(weight_errors))
+        if spec.get('require_source_normals'):
+            results[kind]['normal_transfer']=match_normals(new['bind_points'],new['uv'],new['normals'],old['normal_corners'],limit)
     return dict(rig=rig, components=results)
 
 

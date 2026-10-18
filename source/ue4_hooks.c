@@ -22,8 +22,12 @@
 #include "match_environment.h"
 #include "stadium_roof_policy.h"
 #include "perf_match.h"
+#include "near_camera_trace.h"
 #include "perf_trace.h"
 #include "stadium_view_policy.h"
+#include "stadium_v2_camera.h"
+#include "experimental_features.h"
+#include "scene_runtime_log.h"
 #include "stadium_shadow_budget.h"
 #include "team_commentary_policy.h"
 #ifdef DEBUG_LOG
@@ -233,7 +237,6 @@ static uintptr_t match_result_half_update_resume;
 static uintptr_t match_tutorial_guide_update_resume;
 static uintptr_t match_flow_check_skip_fix_demo_resume;
 static uintptr_t exhibition_match_setup_data_resume;
-uintptr_t inplay_ball_position_broadcast_resume;
 static uintptr_t ue4_tickrate_resume;
 uintptr_t pes_virtual_pad_update_resume;
 uintptr_t pes_main_menu_graphics_d1_resume;
@@ -471,21 +474,7 @@ static uint32_t cup_3d_probe_result_create_calls;
 static uint32_t cup_3d_probe_demo_edges;
 static __thread uint32_t cup_3d_probe_in_ending;
 #endif
-static uint32_t (*match_ball_position_broadcast_original)(
-    void *camera, const float *blend, const uint32_t *home_away,
-    float *target_position, float *zoom, uint32_t active);
 static const float *(*match_ball_info_get_trans)(const void *ball_info);
-static uint32_t match_broadcast_ball_tracking_ready(
-    const void *ball_info, const float *ball_position);
-static uint32_t match_broadcast_anticipation_enabled;
-// Native target calculation and Update run on the same match thread. Never
-// reuse a sample from a previous Update, replay or set-piece camera path.
-static __thread struct {
-  void *camera;
-  float ball[3];
-  uint32_t ready;
-  uint32_t sampled;
-} match_broadcast_frame;
 static uint32_t (*match_goal_demo_get_goal_side)(const void *registry);
 static uint32_t (*match_goal_demo_is_cpu_goal)(void *goal_demo,
                                                const void *registry);
@@ -1522,6 +1511,9 @@ static _Alignas(4) uint32_t pause_camera_saved_valid;
 static unsigned char pause_camera_saved_settings[15];
 static _Alignas(4) uint32_t pause_camera_dynamic_wide_custom;
 static uint32_t pause_camera_saved_dynamic_wide_custom;
+static _Alignas(4) uint32_t pause_camera_stadium_v2;
+static uint32_t pause_camera_saved_stadium_v2;
+static _Alignas(4) uint32_t pause_camera_revision;
 static void pause_settings_prepare_match_camera(void);
 static void (*pause_settings_volume)(uint32_t kind, float volume);
 static uint32_t (*pause_radar_update_original)(void *radar);
@@ -1901,6 +1893,8 @@ uint32_t pes_controller_pause_settings_count(void) {
   return __atomic_load_n(&pause_settings_page, __ATOMIC_ACQUIRE) ==
                  PAUSE_SETTINGS_PAGE_CAMERA
              ? (__atomic_load_n(&pause_camera_dynamic_wide_custom,
+                                 __ATOMIC_ACQUIRE) ||
+                __atomic_load_n(&pause_camera_stadium_v2,
                                  __ATOMIC_ACQUIRE) ? 1u : 4u)
              : 7u;
 }
@@ -3675,7 +3669,6 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
               pes_controller_stadium_is_day(), pes_controller_roof_shadow_enabled());
 #endif
   match_result_extra_time_started = 0;
-  match_broadcast_ball_tracking_ready(NULL, NULL);
   memset(live_substitution_locked, 0, sizeof(live_substitution_locked));
   __atomic_store_n(&pause_settings_radar, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&match_goal_demo_seen_tick, 0, __ATOMIC_RELEASE);
@@ -3731,8 +3724,8 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
           MAIN_MENU_2P_TRANSITION_VS, __ATOMIC_RELEASE);
   // MatchSetup starts constructing native tips/cards but is not proof that a
   // cinematic or gameplay frame is ready.  Keep the custom VS surface opaque
-  // while those pages load; pes_prematch_card_need_disp or the first live
-  // ScreenTap heartbeat is the authoritative reveal point.  Clearing the
+  // while those pages load; native entrance start, pes_prematch_card_need_disp
+  // or the first live ScreenTap heartbeat reveals it. Clearing the
   // transition here leaked the native "Next Player Indicator" loading card.
   // MatchSetup reads both tmpdb::Match and matchPlan::Data immediately after
   // this hook. Publish the final two-sided squad/tactics state first, then
@@ -5136,6 +5129,21 @@ int32_t pes_controller_stadium_shadow_cascades(void) {
 }
 
 
+#ifdef NEAR_CAMERA_TRACE
+void pes_controller_near_context(NxNearContext *out) {
+  *out=(NxNearContext){
+    .live=pes_controller_match_hud_inplay(),
+    .session=pes_controller_match_hud_session(),
+    .stadium=pes_controller_stadium_canary_active(),
+    .day=pes_controller_stadium_is_day(),
+    .weather=pes_controller_stadium_weather(),
+    .season=pes_controller_stadium_season(),
+    .quality=__atomic_load_n(&main_menu_video_graphics,__ATOMIC_ACQUIRE),
+    .home=__atomic_load_n(&exhibition_home_team_id,__ATOMIC_ACQUIRE),
+    .away=__atomic_load_n(&exhibition_away_team_id,__ATOMIC_ACQUIRE),
+  };
+}
+#endif
 #ifdef PERF_TRACE
 // Render-thread snapshot: no native UObject calls or renderer readback.
 uint64_t pes_controller_stadium_perf_key(void) {
@@ -13595,6 +13603,7 @@ static void match_result_cover_reveal(void) {
 }
 
 static void kickoff_loading_reveal(void) {
+  if (!__atomic_load_n(&kickoff_loading_armed, __ATOMIC_ACQUIRE)) return;
   if (!__atomic_exchange_n(&kickoff_loading_armed, 0, __ATOMIC_ACQ_REL)) return;
   if (__atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE) !=
       MAIN_MENU_2P_TRANSITION_VS) return;
@@ -15251,161 +15260,8 @@ void pes_controller_set_piece_selector_input(uint32_t action) {
   __atomic_store_n(&match_kicker_selector_focus, focus, __ATOMIC_RELEASE);
 }
 
-uintptr_t stadium_ball_target_native_resume;
-uintptr_t stadium_ball_target_live_resume;
-extern void pes_stadium_ball_target_branch(void);
-
-// Called at GetBallPositionBroadcast's existing ball/group selector. Choose
-// its native live-ball branch BEFORE group framing, predicted receive points
-// and possession-bank interpolation. No BallInfo/TeamAI or camera flags are
-// modified. The downstream native lens, spring and speed cap remain intact.
-uint32_t pes_stadium_ball_target_mode(const void *camera) {
-  if (!camera) return 0u;
-  const unsigned char *bytes = camera;
-  uint32_t id = 0;
-  memcpy(&id, bytes + 8, sizeof(id));
-  if (id == 6u && match_broadcast_frame.camera == camera &&
-      match_broadcast_frame.ready &&
-      __atomic_load_n(&match_broadcast_anticipation_enabled, __ATOMIC_ACQUIRE)) {
-    match_broadcast_frame.sampled = 1u;
-    return 1u;
-  }
-  return bytes[0x24];
-}
-
-// ShotBroadcastBallActive can be constructed while both teams are waiting at
-// the initial kickoff. Biasing its still-uninitialised group target in those
-// frames is what made Stadium selected before kickoff jitter, although the
-// same camera was stable when selected later. Arm tracking only after the live
-// BallInfo has actually moved; changing BallInfo (new match) resets the gate.
-static uint32_t match_broadcast_ball_tracking_ready(
-    const void *ball_info, const float *ball_position) {
-  static uintptr_t owner;
-  static float anchor_x;
-  static float anchor_z;
-  static uint32_t anchor_valid;
-  static uint32_t ready;
-
-  if (!ball_info || !ball_position || !isfinite(ball_position[0]) ||
-      !isfinite(ball_position[2])) {
-#ifdef DEBUG_LOG
-    if (owner || ready)
-      debugPrintf("camera-diag: tracking-reset owner=%p ready=%u\n", (void *)owner, ready);
-#endif
-    owner = 0;
-    anchor_valid = 0u;
-    ready = 0u;
-    return 0u;
-  }
-  if (owner != (uintptr_t)ball_info || !anchor_valid) {
-    owner = (uintptr_t)ball_info;
-    anchor_x = ball_position[0];
-    anchor_z = ball_position[2];
-    anchor_valid = 1u;
-    ready = 0u;
-    return 0u;
-  }
-  if (ready)
-    return 1u;
-
-  const float moved = hypotf(ball_position[0] - anchor_x,
-                             ball_position[2] - anchor_z);
-  if (isfinite(moved) && moved > 0.5f) {
-    ready = 1u;
-    return 0u; // Warm up one native frame before applying the first bias.
-  }
-  return 0u;
-}
-
-#ifdef DEBUG_LOG
-static void stadium_diag_camera_target(void *camera, void *ball_info,
-    const float *ball, const float *before, const float *after,
-    const float *zoom, uint32_t ready, uint32_t corrected, uint32_t result,
-    uint32_t active) {
-  static StadiumDiagnosticGate gate;
-  const uint64_t now = armTicksToNs(armGetSystemTick());
-  if (!stadium_diagnostic_due(&gate, now, (uintptr_t)camera,
-                              ready, 500000000ULL)) return;
-  uint32_t id = 0;
-  memcpy(&id, (const unsigned char *)camera + 8, sizeof(id));
-  const float missing[3] = {NAN, NAN, NAN};
-  if (!ball) ball = missing;
-  debugPrintf("camera-diag: target ms=%llu camera=%p id=%u ball-info=%p "
-              "ready=%u corrected=%u result=%u active=%u "
-              "ball=%g,%g,%g native=%g,%g,%g applied=%g,%g,%g zoom=%g "
-              "error-xz=%g/%g\n",
-              (unsigned long long)(now / 1000000u), camera, id, ball_info,
-              ready, corrected, result, active,
-              ball[0], ball[1], ball[2], before[0], before[1], before[2],
-              after[0], after[1], after[2], zoom ? *zoom : NAN,
-              hypotf(before[0]-ball[0], before[2]-ball[2]),
-              hypotf(after[0]-ball[0], after[2]-ball[2]));
-}
-
-static void stadium_diag_camera_final(void *camera, const void *parameter) {
-  if (!camera || !parameter) return;
-  static StadiumDiagnosticGate gate;
-  const uint64_t now = armTicksToNs(armGetSystemTick());
-  uint32_t id = 0;
-  memcpy(&id, (const unsigned char *)camera + 8, sizeof(id));
-  if (!stadium_diagnostic_due(&gate, now, (uintptr_t)camera,
-                              id, 500000000ULL)) return;
-  float p[6];
-  memcpy(p, parameter, sizeof(p));
-  debugPrintf("camera-diag: final ms=%llu camera=%p id=%u "
-              "look=%g,%g,%g eye=%g,%g,%g day=%u roof=%u\n",
-              (unsigned long long)(now / 1000000u), camera, id,
-              p[0], p[1], p[2], p[3], p[4], p[5],
-              pes_controller_stadium_is_day(), pes_controller_roof_shadow_enabled());
-}
-#endif
-
-// Establish same-update ownership before the native target calculator. The
-// mid-function selector replaces the old post-calculation pull-back helper.
-uint32_t pes_inplay_ball_position_broadcast(
-    void *camera, const float *blend, const uint32_t *home_away,
-    float *target_position, float *zoom, uint32_t active) {
-  // tmpdb Stadium=12 converts to registry=12, then CAMERA_ID=6. The
-  // Broadcast target routine is shared: both selection AND live owner must
-  // match. Reset readiness when leaving Stadium, including a stale callback.
-  uint32_t camera_id = 0;
-  if (camera)
-    memcpy(&camera_id, (const unsigned char *)camera + 8, sizeof(camera_id));
-  void *ball_info = NULL;
-  const float *ball_position = NULL;
-  uint32_t ready = 0u;
-  if (camera_id != 6u ||
-      !__atomic_load_n(&match_broadcast_anticipation_enabled, __ATOMIC_ACQUIRE)) {
-    match_broadcast_ball_tracking_ready(NULL, NULL);
-  } else if (target_position && match_ball_info_get_trans &&
-             match_broadcast_frame.camera == camera) {
-    memcpy(&ball_info, (const unsigned char *)camera + 0x198, sizeof(ball_info));
-    ball_position = ball_info ? match_ball_info_get_trans(ball_info) : NULL;
-    ready = match_broadcast_ball_tracking_ready(ball_info, ball_position);
-  }
-  if (match_broadcast_frame.camera == camera) {
-    if (ball_position)
-      memcpy(match_broadcast_frame.ball, ball_position, sizeof(match_broadcast_frame.ball));
-    match_broadcast_frame.ready = ready;
-    match_broadcast_frame.sampled = 0u;
-  }
-  const uint32_t result = match_ball_position_broadcast_original
-      ? match_ball_position_broadcast_original(camera, blend, home_away,
-                                               target_position, zoom, active)
-      : 0u;
-#ifdef DEBUG_LOG
-  if (camera && target_position)
-    stadium_diag_camera_target(camera, ball_info, ball_position, target_position,
-                               target_position, zoom, ready,
-                               match_broadcast_frame.sampled, result, active);
-#endif
-  return result;
-}
-
-// Do not hook GetFutureMoveVec: the native tracer ALSO uses it as a camera
-// speed limit by BallTouchKind and field region. Zeroing it caused V5's hard
-// stops in midfield and inconsistent motion near goal. Only target POSITION
-// source is selected above; native velocity, acceleration and trace stay intact.
+// Native Stadium/Pitch Side retain v33's complete native pipeline. STADIUM-V2
+// is opt-in final composition, never a shared predictor/tracer patch.
 
 int pes_controller_custom_pause_active(void) {
   return !pes_controller_pause_transition() && __atomic_load_n(&match_pause_custom_active,
@@ -15474,21 +15330,29 @@ void pes_controller_pause_camera_input(uint32_t action) {
 typedef struct {
   uint8_t native_type;
   uint8_t dynamic_wide_custom;
+  uint8_t stadium_v2;
 } PauseCameraPreset;
 
-// Five native presets plus the fixed FootballNX upper-tribune view.
+// Six native presets and FootballNX; Stadium V2 is temporarily suspended.
 // Order is user-facing; the first entry is the session default/fallback.
 static const PauseCameraPreset pause_camera_presets[] = {
-    {5u, 0u}, {12u, 0u}, {0u, 0u}, {1u, 0u}, {2u, 0u}, {5u, 1u},
+    {5u, 0u, 0u}, {12u, 0u, 0u}, {3u, 0u, 0u}, {0u, 0u, 0u},
+    {1u, 0u, 0u}, {2u, 0u, 0u}, {5u, 1u, 0u},
+#if PESNX_STADIUM_V2_ENABLED
+    {12u, 0u, 1u},
+#endif
 };
 
-static uint32_t pause_camera_preset_index(uint8_t type, uint32_t custom) {
+static uint32_t pause_camera_preset_index(uint8_t type, uint32_t custom,
+                                         uint32_t stadium_v2) {
   const uint32_t count = sizeof(pause_camera_presets) /
                          sizeof(pause_camera_presets[0]);
   for (uint32_t index = 0; index < count; ++index)
     if (pause_camera_presets[index].native_type == type &&
         pause_camera_presets[index].dynamic_wide_custom ==
-            (type == 5u ? !!custom : 0u))
+            (type == 5u ? !!custom : 0u) &&
+        pause_camera_presets[index].stadium_v2 ==
+            (type == 12u ? !!stadium_v2 : 0u))
       return index;
   return 0u; // Removed/unknown camera types fall back to Dynamic Wide.
 }
@@ -15519,7 +15383,8 @@ static uint32_t match_pause_camera_page(void *window, uint32_t *count_out) {
       __atomic_load_n(&pause_camera_dynamic_wide_custom, __ATOMIC_ACQUIRE);
   if (count_out)
     *count_out = count;
-  return pause_camera_preset_index(camera_type, custom_wide);
+  return pause_camera_preset_index(camera_type, custom_wide,
+      __atomic_load_n(&pause_camera_stadium_v2, __ATOMIC_ACQUIRE));
 }
 
 static unsigned char *pause_settings_resident_work(void) {
@@ -15590,27 +15455,14 @@ static void pause_set_tmpdb_camera_settings(void *registry_camera,
     pause_set_tmpdb_camera_original(registry_camera, tmpdb_camera,
                                     resident_work);
   if (registry_camera && tmpdb_camera) {
-    const uint8_t type = *(const uint8_t *)tmpdb_camera;
 #ifdef PERF_TRACE
+    const uint8_t type = *(const uint8_t *)tmpdb_camera;
     __atomic_store_n(&stadium_perf_camera_type, type, __ATOMIC_RELEASE);
 #endif
-    const uint32_t was_enabled = __atomic_exchange_n(
-        &match_broadcast_anticipation_enabled, type == 12u, __ATOMIC_ACQ_REL);
-    if (was_enabled != (type == 12u))
-      match_broadcast_ball_tracking_ready(NULL, NULL);
-    if (type == 12u) {
-      unsigned char *fixed = (unsigned char *)registry_camera;
-      static const uint8_t copies[] = {0u, 6u, 11u};
-      for (unsigned i = 0; i < 3u; ++i)
-        fixed[copies[i] + 3u] = 6u;
-#ifdef DEBUG_LOG
-      debugPrintf("camera-diag: registry tmpdb=%u types=%u,%u,%u "
-                  "heights=%u,%u,%u distances=%u,%u,%u\n",
-                  type, fixed[0], fixed[6], fixed[11], fixed[3], fixed[9], fixed[14],
-                  fixed[2], fixed[8], fixed[13]);
-#endif
-    }
+    // Preserve all native preset bytes, including Stadium's D2/H3/P6 and
+    // Pitch Side's D2/H2/P0. In particular, do not force Stadium height 6.
   }
+
   if (!registry_camera || !tmpdb_camera ||
       !__atomic_load_n(&pause_camera_dynamic_wide_custom,
                        __ATOMIC_ACQUIRE))
@@ -15619,8 +15471,8 @@ static void pause_set_tmpdb_camera_settings(void *registry_camera,
   const unsigned char *tmpdb = (const unsigned char *)tmpdb_camera;
   if (tmpdb[0] != 5u)
     return;
-  // Original Stadium's native fixed triplet, BEFORE our fixed-height-6
-  // adjustment. Do not borrow/mutate Stadium Custom's stored slider bytes.
+  // FootballNX alone uses this fixed composition. Stadium and Pitch Side
+  // keep the original conversion; no custom-slider bytes are borrowed.
   const uint8_t distance = 2u;
   const uint8_t height = 3u;
   const uint8_t panning = 6u;
@@ -15639,22 +15491,130 @@ static void pause_set_tmpdb_camera_settings(void *registry_camera,
   }
 }
 
+typedef struct {
+  StadiumV2Camera motion;
+  uintptr_t owner;
+  uint32_t session, revision;
+  uint64_t now;
+  unsigned active, target_ready, traced;
+} StadiumV2Scope;
+static __thread StadiumV2Scope stadium_v2_scope;
+uintptr_t stadium_v2_target_resume, stadium_v2_height_page;
+extern void pes_stadium_v2_target_hook(void);
+static void (*stadium_v2_trace_original)(void *,const void *,float *,float *,
+    float *,float *,float *,const float *,float,float,float,float,bool,
+    const void *,const void *,const void *,const void *);
+static void (*stadium_v2_interpolate_original)(void *,void *);
+
+static void stadium_v2_begin(void *camera, void *parameter) {
+  StadiumV2Scope *s=&stadium_v2_scope;
+  s->active=s->target_ready=s->traced=0;
+  if (!PESNX_STADIUM_V2_ENABLED) return;
+  const uint32_t current_session=pes_controller_match_hud_session();
+  const uint32_t current_revision=__atomic_load_n(&pause_camera_revision, __ATOMIC_ACQUIRE);
+  if (s->owner!=(uintptr_t)camera || s->session!=current_session || s->revision!=current_revision) {
+    stadium_v2_suspend(&s->motion); s->owner=(uintptr_t)camera;
+    s->session=current_session; s->revision=current_revision;
+  }
+  uint32_t id=UINT32_MAX, follow_player=0; uint8_t type=0;
+  if (camera) memcpy(&id,(const char *)camera+8,sizeof(id));
+  if (parameter) memcpy(&follow_player,(const char *)parameter+0x48,sizeof(follow_player));
+  if (!camera || !parameter || id!=6u ||
+      !__atomic_load_n(&pause_camera_stadium_v2,__ATOMIC_ACQUIRE) ||
+      !pause_settings_tmpdb_camera(&type) || type!=12u || follow_player ||
+      !pes_controller_match_hud_inplay()) {
+    stadium_v2_suspend(&s->motion); return;
+  }
+  s->now=armTicksToNs(armGetSystemTick());
+  s->active=1;
+}
+
+/* Mid-function boundary after native target acquisition, before native height,
+ * zoom and projection. x26 is the GetTrans result already sampled by the game.
+ * Only its three values are copied; no registry/pointer lifetime is borrowed. */
+void pes_stadium_v2_target(void *camera,float *target,const float *actual_ball) {
+  StadiumV2Scope *s=&stadium_v2_scope;
+  if (!s->active || s->owner!=(uintptr_t)camera) return;
+  if (!target || !stadium_v2_valid_ball(actual_ball)) {
+    s->active=0; stadium_v2_suspend(&s->motion); return;
+  }
+  memcpy(target,actual_ball,3*sizeof(float)); s->target_ready=1;
+}
+
+/* Preserve the complete AAPCS64 native signature, including five stack args.
+ * Non-V2 callers use the original tracer verbatim. For V2, native framing and
+ * lens calculations have already run; only delayed/predicted tracing changes. */
+static void pes_stadium_v2_trace(void *camera,const void *trace,float *target,
+    float *trace_target,float *trace_speed,float *old_look,float *trace_accel,
+    const float *range,float limit_x,float min_z,float max_z,float speed_scale,
+    bool first,const void *snap,const void *move,const void *touching,const void *touch_kind) {
+  StadiumV2Scope *s=&stadium_v2_scope;
+  if (s->active && s->target_ready && s->owner==(uintptr_t)camera &&
+      target && old_look && trace_target && trace_speed && trace_accel) {
+    if (first) stadium_v2_suspend(&s->motion);
+    if (stadium_v2_step(&s->motion,target,limit_x,min_z,max_z,s->now)) {
+      /* Native post-trace 54/GetFSec is 2x at the owned default 27 Hz.
+       * Seeding the same clamped look prevents that second stage extrapolating.
+       * Retain coherent native trace state for later preset/native fallback. */
+      memcpy(old_look,target,3*sizeof(float));
+      memcpy(trace_target,target,3*sizeof(float));
+      memset(trace_speed,0,3*sizeof(float));
+      memset(trace_accel,0,3*sizeof(float));
+      s->traced=1; return;
+    }
+    s->active=0; stadium_v2_suspend(&s->motion);
+  }
+  if (stadium_v2_trace_original)
+    stadium_v2_trace_original(camera,trace,target,trace_target,trace_speed,old_look,
+        trace_accel,range,limit_x,min_z,max_z,speed_scale,first,snap,move,touching,touch_kind);
+}
+
+static void pes_stadium_v2_interpolate(void *camera,void *parameter) {
+  StadiumV2Scope *s=&stadium_v2_scope;
+  const int custom=s->active && s->traced && s->owner==(uintptr_t)camera && parameter;
+  float native_pose[6];
+  const float native_lens=custom ? ((float *)parameter)[13] : 0.f;
+  if (custom) memcpy(native_pose,parameter,sizeof(native_pose));
+  if (stadium_v2_interpolate_original)
+    stadium_v2_interpolate_original(camera,parameter);
+  /* Preserve native transition counters. The native pose uses our held look;
+   * optical transitions are eased separately after native interpolation. */
+  if (custom) {
+    memcpy(parameter,native_pose,sizeof(native_pose));
+    /* Use this frame's computed lens, before native interpolation can feed
+     * back a previously composed output. Native state updates still run. */
+    stadium_v2_finish(&s->motion,(float *)parameter,native_lens);
+  }
+}
+
+static void stadium_v2_end(void) {
+  stadium_v2_scope.active=stadium_v2_scope.target_ready=stadium_v2_scope.traced=0;
+}
+
 static void pes_inplay_camera_update(void *camera, void *parameter) {
 #ifdef PERF_TRACE
   if (camera && parameter)
     __atomic_store_n(&stadium_perf_camera_tick, armGetSystemTick(), __ATOMIC_RELEASE);
 #endif
-  memset(&match_broadcast_frame, 0, sizeof(match_broadcast_frame));
-  match_broadcast_frame.camera = camera;
+#if PESNX_STADIUM_V2_ENABLED
+  stadium_v2_begin(camera, parameter);
+#endif
   if (match_inplay_camera_update_original)
     match_inplay_camera_update_original(camera, parameter);
-  // Native output stays untouched for Stadium/Broadcast. Clear the whole
-  // prediction scope before any unrelated caller can see this frame's ball.
-  memset(&match_broadcast_frame, 0, sizeof(match_broadcast_frame));
-#ifdef DEBUG_LOG
-  // Snapshot native output before the FOOTBALLNX fixed tribune composition.
-  stadium_diag_camera_final(camera, parameter);
+#if PESNX_STADIUM_V2_ENABLED
+  stadium_v2_end();
 #endif
+#ifdef NEAR_CAMERA_TRACE
+  if (camera && parameter) {
+    uint32_t camera_kind=0;
+    memcpy(&camera_kind,(const char *)camera+8,sizeof(camera_kind));
+    /* Diagnostic identity only; never write this value to the native camera. */
+    if (camera_kind==6u && __atomic_load_n(&pause_camera_stadium_v2,__ATOMIC_ACQUIRE))
+      camera_kind=134u;
+    nx_near_camera(parameter,camera_kind,armTicksToNs(armGetSystemTick()));
+  }
+#endif
+  // Native choices stay untouched. V2 tracking and FootballNX are opt-in.
   if (!camera || !parameter ||
       !__atomic_load_n(&pause_camera_dynamic_wide_custom,
                        __ATOMIC_ACQUIRE))
@@ -15822,6 +15782,8 @@ static void pause_settings_capture_camera(void) {
          sizeof(pause_camera_saved_settings));
   pause_camera_saved_dynamic_wide_custom = __atomic_load_n(
       &pause_camera_dynamic_wide_custom, __ATOMIC_ACQUIRE);
+  pause_camera_saved_stadium_v2 = __atomic_load_n(
+      &pause_camera_stadium_v2, __ATOMIC_ACQUIRE);
   __atomic_store_n(&pause_camera_saved_valid, 1, __ATOMIC_RELEASE);
 }
 
@@ -15832,7 +15794,8 @@ static void pause_settings_prepare_match_camera(void) {
   uint32_t selected = 0u;
   if (__atomic_load_n(&pause_camera_saved_valid, __ATOMIC_ACQUIRE))
     selected = pause_camera_preset_index(
-        pause_camera_saved_settings[0], pause_camera_saved_dynamic_wide_custom);
+        pause_camera_saved_settings[0], pause_camera_saved_dynamic_wide_custom,
+        pause_camera_saved_stadium_v2);
   const PauseCameraPreset preset = pause_camera_presets[selected];
   // Seed the real tmpdb value before native MatchSetup consumes it. Do not
   // merely show a Dynamic Wide label over an old saved Broadcast/Custom type.
@@ -15841,6 +15804,8 @@ static void pause_settings_prepare_match_camera(void) {
   settings[0] = preset.native_type;
   __atomic_store_n(&pause_camera_dynamic_wide_custom,
                    preset.dynamic_wide_custom, __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_camera_stadium_v2,preset.stadium_v2,__ATOMIC_RELEASE);
+  __atomic_add_fetch(&pause_camera_revision,1u,__ATOMIC_ACQ_REL);
   pause_settings_capture_camera();
 }
 
@@ -15855,6 +15820,7 @@ static void pause_settings_restore_camera(void *window) {
   __atomic_store_n(&pause_camera_dynamic_wide_custom,
                    pause_camera_saved_dynamic_wide_custom,
                    __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_camera_stadium_v2,pause_camera_saved_stadium_v2,__ATOMIC_RELEASE);
   pause_settings_apply_camera(window);
   debugPrintf("input: restored pause camera type=%u customWide=%u\n",
               (uint32_t)settings[0],
@@ -15932,6 +15898,8 @@ static void pause_settings_cycle_camera(void *window, uint32_t action) {
   settings[0] = preset.native_type;
   __atomic_store_n(&pause_camera_dynamic_wide_custom,
                    preset.dynamic_wide_custom, __ATOMIC_RELEASE);
+  __atomic_store_n(&pause_camera_stadium_v2,preset.stadium_v2,__ATOMIC_RELEASE);
+  __atomic_add_fetch(&pause_camera_revision,1u,__ATOMIC_ACQ_REL);
   pause_settings_capture_camera();
   pause_settings_apply_camera(window);
   debugPrintf("input: pause camera preset %u -> %u type=%u customWide=%u\n",
@@ -16003,10 +15971,12 @@ const char *pes_controller_pause_settings_value(uint32_t index) {
       case 0: return "MEDIUM";
       case 1: return "LONG";
       case 2: return "WIDE";
+      case 3: return "PITCH SIDE";
       case 5: return __atomic_load_n(&pause_camera_dynamic_wide_custom,
                                      __ATOMIC_ACQUIRE)
                          ? "FOOTBALLNX CAM" : "DYNAMIC WIDE";
-      case 12: return "STADIUM";
+      case 12: return __atomic_load_n(&pause_camera_stadium_v2,__ATOMIC_ACQUIRE)
+                          ? "STADIUM-V2" : "STADIUM";
     }
     return "DYNAMIC WIDE";
   }
@@ -16781,9 +16751,6 @@ uintptr_t pes_match_pause_update_entry(void *window, uint32_t pad_status) {
                 trace_calls, window, pad_status);
   (void)pad_status;
   if (window) {
-    // Pause and its settings children can rebuild the native camera without
-    // replacing BallInfo. Require fresh movement again on return to play.
-    match_broadcast_ball_tracking_ready(NULL, NULL);
     match_pause_apply_owner_side();
     // Visual-only replacement. Keep native choice activation, event routing
     // and confirmation dialogs intact. Fail open if this layout is absent.
@@ -17317,9 +17284,6 @@ extern void pes_match_result_full_hook(void);
 extern void pes_match_result_half_hook(void);
 extern void pes_match_result_half_update_hook(void);
 extern void pes_exhibition_match_setup_data_hook(void);
-extern uint32_t pes_inplay_ball_position_broadcast_original(
-    void *camera, const float *blend, const uint32_t *home_away,
-    float *target_position, float *zoom, uint32_t active);
 extern void pes_main_menu_graphics_d1_hook(void);
 extern void pes_main_menu_graphics_d0_hook(void);
 extern void pes_mobile_screen_tap_entry_hook(void);
@@ -17543,6 +17507,11 @@ static uintptr_t *find_vtable_method_slot(so_module *module,
   }
   return NULL;
 }
+
+#include "fixdemo_scene_trace.inc"
+#include "native_prematch_reveal.inc"
+#include "realface_load_probe.inc"
+#include "model_quality_policy.inc"
 
 static ObjectInitializerArrayState *find_array_state(Ue4Array *array) {
   ObjectInitializerArrayState *empty = NULL;
@@ -17862,11 +17831,19 @@ static void native_pad_lab_enable_exhibition(void) {
 }
 
 void install_ue4_hooks(so_module *module) {
+  if (PESNX_ENTRANCE_CANARY_ENABLED)
+    install_fixdemo_scene_trace(module);
+  else
+    install_native_prematch_reveal(module);
+#ifdef NEAR_CAMERA_TRACE
+  install_realface_load_probe(module);
+#endif
   install_friend_press_prototype(module);
   install_native_pad_lab(module);
   install_stadium_canary(module);
   install_native_weather(module);
   install_referee_probe(module);
+  install_model_quality_policy(module);
   /* v12 uses stationary pitch weathering; no precipitation actor/tick hooks. */
   scene_runtime_note("weather surface", "v14 scene lighting + pitch remnants; lens and falling particles disabled");
   install_scoreboard_runtime(module);
@@ -19343,51 +19320,42 @@ void install_ue4_hooks(so_module *module) {
               (void *)penalty_goalkeeper_move_main_runtime,
               (void *)penalty_goalkeeper_move_main_slot);
 
-  // Set-piece charge prediction and the Broadcast target guard both read the
-  // live native BallInfo transform.
+  // Existing gameplay helpers use the native actual ball transform.
   match_ball_info_get_trans =
       (void *)so_find_addr_rx(module,
           "_ZNK5match8registry8BallInfo8GetTransEv");
 
-  // Select native live-ball targeting before group/receive-point anticipation;
-  // leave the downstream native spring, lens and final transform untouched.
-  const char *ball_position_broadcast_symbol =
-      "_ZN5match6camera6plugin12InplayCamera24GetBallPositionBroadcastERKfRK8HomeAwayPN4math7Vector3ERfb";
-  const uintptr_t ball_position_broadcast =
-      so_find_addr(module, ball_position_broadcast_symbol);
-  const uintptr_t ball_position_broadcast_runtime =
-      so_find_addr_rx(module, ball_position_broadcast_symbol);
-  static const uint32_t expected_ball_position_broadcast_entry[4] = {
-      0xd10703ff, 0x6d123bef, 0x6d1333ed, 0x6d142beb,
-  };
-  if (memcmp((void *)ball_position_broadcast,
-             expected_ball_position_broadcast_entry,
-             sizeof(expected_ball_position_broadcast_entry)) != 0)
-    fatal_error("Unexpected Broadcast ball-position entry at %p",
-                (void *)ball_position_broadcast);
-  inplay_ball_position_broadcast_resume =
-      ball_position_broadcast_runtime + 0x10;
-  match_ball_position_broadcast_original =
-      pes_inplay_ball_position_broadcast_original;
-  hook_arm64(ball_position_broadcast,
-             (uintptr_t)&pes_inplay_ball_position_broadcast);
+  // Opt-in V2 retains native Stadium's full framing/lens pipeline. Replace
+  // only target acquisition and trace timing inside a scoped live Update.
+  // Never patch the physical ball, GetFutureMoveVec or registry settings.
+  if (PESNX_STADIUM_V2_ENABLED) {
+  const char *stadium_active_symbol =
+      "_ZN5match6camera6plugin12InplayCamera23ShotBroadcastBallActiveERN4draw15CameraParameterERKNS2_7DATA_TVE";
+  const uintptr_t stadium_target_site = so_find_addr(module,stadium_active_symbol)+0x6d0;
+  const uint32_t stadium_target_words[4] = {0xbd4137e1,0x9000bf48,0xbd4eb90f,0x1e221000};
+  const uintptr_t stadium_trace_plt = (uintptr_t)module->load_base+0x385b650;
+  const uint32_t stadium_trace_words[4] = {0x9002e490,0xf946c211,0x91360210,0xd61f0220};
+  const uintptr_t stadium_interpolate_plt = (uintptr_t)module->load_base+0x3871590;
+  const uint32_t stadium_interpolate_words[4] = {0xb002e430,0xf9469211,0x91348210,0xd61f0220};
+  if (memcmp((void *)stadium_target_site,stadium_target_words,sizeof(stadium_target_words)) ||
+      memcmp((void *)stadium_trace_plt,stadium_trace_words,sizeof(stadium_trace_words)) ||
+      memcmp((void *)stadium_interpolate_plt,stadium_interpolate_words,sizeof(stadium_interpolate_words)))
+    fatal_error("Unexpected Stadium V2 native motion boundary");
+  stadium_v2_target_resume = so_find_addr_rx(module,stadium_active_symbol)+0x6e0;
+  stadium_v2_height_page = (uintptr_t)module->load_virtbase+0x7e46000;
+  stadium_v2_trace_original = (void *)so_find_addr_rx(module,
+      "_ZN5match6camera6plugin12InplayCamera20gcViewTraceBroadcastERKNS2_11TRACE_PARAMEPN4math7Vector3ES8_S8_RS7_S8_S9_ffffbRKbRKS7_SB_RKNS_13BallTouchKindE");
+  stadium_v2_interpolate_original = (void *)so_find_addr_rx(module,
+      "_ZN5match6camera6plugin12InplayCamera17UpdateInterpolateERN4draw15CameraParameterE");
+  hook_arm64(stadium_target_site,(uintptr_t)&pes_stadium_v2_target_hook);
+  hook_arm64(stadium_trace_plt,(uintptr_t)&pes_stadium_v2_trace);
+  hook_arm64(stadium_interpolate_plt,(uintptr_t)&pes_stadium_v2_interpolate);
+  }
 
-  static const uint32_t expected_ball_target_branch[4] = {
-      0x39409288, 0x35000788, 0xf940f696, 0x2a1f03e1,
-  };
-  if (memcmp((void *)(ball_position_broadcast + 0x150),
-             expected_ball_target_branch, sizeof(expected_ball_target_branch)))
-    fatal_error("Unexpected native Stadium live-ball branch");
-  stadium_ball_target_native_resume = ball_position_broadcast_runtime + 0x160;
-  stadium_ball_target_live_resume = ball_position_broadcast_runtime + 0x244;
-  hook_arm64(ball_position_broadcast + 0x150,
-             (uintptr_t)&pes_stadium_ball_target_branch);
-
-  // Leave GetFutureMoveVec and shared gcViewTraceBroadcast completely native.
-
-  // Dynamic Wide uses ShotHorizontal, which never consumes the native
-  // Panning/Angle field. Wrap only InplayCamera's virtual Update and gate the
-  // post-composition rotation on CAMERA_ID 5 plus our custom-preset flag.
+  // Wrap only InplayCamera's virtual Update. FootballNX uses live ID 5;
+  // Stadium V2 uses live ID 6 plus its explicit picker flag and live HUD gate.
+  // Replay/celebration/set-piece plugins remain native. Update runs once, with
+  // V2 scope cleared immediately on return; no global future-target bypass.
   const char *inplay_camera_update_symbol =
       "_ZN5match6camera6plugin12InplayCamera6UpdateERN4draw15CameraParameterE";
   const uintptr_t inplay_camera_update_runtime =

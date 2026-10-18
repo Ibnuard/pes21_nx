@@ -18,10 +18,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_stadium_optimization import accessor
+from stadium_apron_geometry import height_band
 
 
 def repair(profile_path, native_path, output, polygon_python, polygon_modules, floor_min_height,
-           omit_floor_decals=False, raise_floor_materials=()):
+           omit_floor_decals=False, raise_floor_materials=(), raise_floor_ranges=()):
     profile = json.loads(profile_path.read_text())
     key = profile['key']
     if output.exists():
@@ -73,9 +74,13 @@ def repair(profile_path, native_path, output, polygon_python, polygon_modules, f
                 omitted_decals.add(index)
                 continue
         if (old.materials[face.material_index].name != 'M_crowd_seated'
-                and min(p[2] for p in points) >= floor_min_height
-                and max(p[2] for p in points) <= .06 and abs(face.normal.z) >= .95):
-            eligible[str(index)] = [p[:2] for p in points]
+                and min(p[2] for p in points) <= .06
+                and max(p[2] for p in points) >= floor_min_height and abs(face.normal.z) >= .95):
+            # A long, shallow ramp may cross the native floor while its far
+            # vertex exceeds the height band. Cut only the band, retaining
+            # the elevated portion and its interpolated UVs/normals.
+            eligible[str(index)] = dict(points=[p[:2] for p in points],
+                clip=height_band(points, floor_min_height, .06))
     with tempfile.TemporaryDirectory(prefix='pesnx-apron-') as directory:
         request, result = Path(directory)/'input.json', Path(directory)/'output.json'
         request.write_text(json.dumps(dict(native=[c[0] for c in clips], faces=eligible)))
@@ -134,29 +139,50 @@ def repair(profile_path, native_path, output, polygon_python, polygon_modules, f
                     for u, layer in zip(uv_values, old.uv_layers):
                         u.append(tuple(sum(w[i]*layer.data[loops[i]].uv[c] for i in range(3)) for c in range(2)))
                 faces.append(tuple(face_ids)); materials.append(face.material_index); generated += 1
-    # Give explicitly reviewed carpet overlays 3 cm of physical separation
+    # Give explicitly reviewed opaque floor overlays 3 cm of physical separation
     # from their concrete base. Duplicate only their ground vertices so nearby
     # walls, normals, UVs and the original surface remain untouched.
     raised_faces = 0
-    if raise_floor_materials:
+    if raise_floor_materials or raise_floor_ranges:
         atlas = json.loads((profile_path.parent/'textures/atlas.local.json').read_text())
-        raise_tiles = set()
-        for name in raise_floor_materials:
+        raise_tiles = {}
+        ranges = [(name, -.25, .06) for name in raise_floor_materials]
+        ranges += [(name, float(low), float(high)) for name, low, high in raise_floor_ranges]
+        for name, low, high in ranges:
+            if not -.5 <= low < high <= 2.:
+                raise ValueError('Reviewed floor range must stay within -0.5..2 metres')
             entry = atlas['mapping'][name]
             if entry.get('masked'):
-                raise ValueError('Raised carpet must be an opaque source material')
-            raise_tiles.add((entry['material'], entry['tile']))
+                raise ValueError('Raised floor must be an opaque source material')
+            raise_tiles[(entry['material'], entry['tile'])] = (low, high)
         for index, face in enumerate(faces):
             tile = round(uv_values[1][index*3][0])
             points = np.array([vertices[v] for v in face])
             normal = np.cross(points[1]-points[0], points[2]-points[0])
-            if ((old.materials[materials[index]].name, tile) not in raise_tiles
-                    or points[:,2].min()<-.25 or points[:,2].max()>.06
+            bounds = raise_tiles.get((old.materials[materials[index]].name, tile))
+            if (bounds is None or points[:,2].min()<bounds[0] or points[:,2].max()>bounds[1]
                     or abs(normal[2])<.95*np.linalg.norm(normal)):
                 continue
             faces[index] = tuple(range(len(vertices), len(vertices)+3))
             vertices.extend((float(x),float(y),float(z)+.03) for x,y,z in points)
             raised_faces += 1
+    # A reducer may leave almost-collinear long triangles. FBX centimetre
+    # conversion/UE float rounding can turn a subset into exact degenerates,
+    # making independently cooked counts disagree. Strip only sub-0.01 mm
+    # altitudes before export, keeping all surviving corner attributes intact.
+    live=[]
+    for index,face in enumerate(faces):
+        points=np.asarray([vertices[i] for i in face],dtype=float)
+        edge=max(np.linalg.norm(points[(i+1)%3]-points[i]) for i in range(3))
+        area2=np.linalg.norm(np.cross(points[1]-points[0],points[2]-points[0]))
+        if edge>0 and area2/edge>=1e-5:live.append(index)
+        elif old.materials[materials[index]].name=='M_crowd_seated':
+            raise ValueError('Unexpected degenerate preserved crowd triangle')
+    degenerate_removed=len(faces)-len(live)
+    if degenerate_removed:
+        faces=[faces[i] for i in live];materials=[materials[i] for i in live]
+        normals=[value for i in live for value in normals[i*3:i*3+3]]
+        uv_values=[[value for i in live for value in values[i*3:i*3+3]] for values in uv_values]
     # Remove vertices made unreferenced by the cut without welding UV/bound seams.
     used = sorted({v for f in faces for v in f}); remap = {old: i for i, old in enumerate(used)}
     mesh = bpy.data.meshes.new(key+'RepairedFloor')
@@ -196,11 +222,13 @@ def repair(profile_path, native_path, output, polygon_python, polygon_modules, f
         global_scale=1., apply_unit_scale=True, apply_scale_options='FBX_SCALE_NONE',
         axis_forward='-Y', axis_up='Z', use_mesh_modifiers=True, bake_anim=False,
         path_mode='ABSOLUTE', add_leaf_bones=False, mesh_smooth_type='FACE', colors_type='LINEAR')
-    report = dict(version=2, native_triangles=len(clips), height_tolerance_m=.06,
+    report = dict(version=3, native_triangles=len(clips), height_tolerance_m=.06,
         floor_min_height_m=floor_min_height,
+        sloped_floor_band_clipping=True,
         omitted_native_floor_decal_triangles=len(omitted_decals),
         raised_floor_triangles=raised_faces, raised_floor_clearance_m=.03 if raised_faces else 0.,
         changed_faces=changed, removed_faces=removed, generated_fragments=generated,
+        removed_degenerate_faces=degenerate_removed,
         source_shell_triangles=profile['shell_triangles']['reduced'],
         result_shell_triangles=len(faces)-crowd_after, crowd_triangles=crowd_after)
     profile['fbx'] = str(fbx)
@@ -209,6 +237,10 @@ def repair(profile_path, native_path, output, polygon_python, polygon_modules, f
         profile[field] = {k: v for k, v in profile.get(field, {}).items() if k in profile['material_slots']}
     profile['atlas']['materials'] = [n for n in profile['atlas']['materials'] if n in profile['material_slots']]
     profile['shell_triangles']['reduced'] = len(faces)-crowd_after
+    # Clipping, decimation and removal of loose vertices can change extrema.
+    # The UE validation must compare the exported, referenced geometry.
+    profile['blender_bounds'] = [[min(v.co[i] for v in mesh.vertices) for i in range(3)],
+                                 [max(v.co[i] for v in mesh.vertices) for i in range(3)]]
     profile['apron_repair'] = report
     (output/'fbx.local.json').write_text(json.dumps(profile, indent=2)+'\n')
     bpy.ops.wm.save_as_mainfile(filepath=str(fbx.with_suffix('.blend')))
@@ -227,10 +259,13 @@ if __name__ == '__main__':
     parser.add_argument('--omit-native-floor-decals', action='store_true',
                         help='Omit imported ground paint/debris atlas surfaces already supplied by the native floor')
     parser.add_argument('--raise-floor-material', action='append', default=[],
-                        help='Exact opaque source atlas material whose ground carpet needs 3 cm base clearance')
+                        help='Exact opaque source atlas material whose floor overlay needs 3 cm base clearance')
+    parser.add_argument('--raise-floor-range', action='append', nargs=3, default=[],
+                        metavar=('MATERIAL', 'MIN_M', 'MAX_M'),
+                        help='Reviewed opaque platform overlay and its exact height band; adds 3 cm clearance')
     args = parser.parse_args(sys.argv[sys.argv.index('--')+1:])
     if not -.5 <= args.floor_min_height <= -.06:
         raise ValueError('Floor minimum must be -0.5..-0.06 metres')
     repair(args.profile.resolve(), args.native_pitch.resolve(), args.output.resolve(),
            args.polygon_python.resolve(), args.polygon_modules.resolve() if args.polygon_modules else None,
-           args.floor_min_height, args.omit_native_floor_decals, args.raise_floor_material)
+           args.floor_min_height, args.omit_native_floor_decals, args.raise_floor_material, args.raise_floor_range)

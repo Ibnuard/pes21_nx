@@ -1,5 +1,17 @@
 # Stadium and runtime expansion — 2026-10-10
 
+For the FL26 parameter comparison, native Pitch Side selection, and removal of
+the Stadium ball-target corrections, see
+[Native Stadium and Pitch Side v33](FL26_NATIVE_CAMERAS_V33.md).
+
+For the slowdown also reproduced in Konami in DAY/NIGHT, the corrected upload
+submission budget and deferred per-region device trace, see
+[Near-camera pacing v32](NEAR_CAMERA_PACING_V32.md).
+
+For the Konami core triangle reference, reduced geometry across all five
+retained additions, authored-material sampling changes and expanded Camp Nou
+roof band, see [Stadium near-camera v31](STADIUM_NEAR_CAMERA_V31.md).
+
 For the ten-addon registry and current Anfield Stadium naming, see
 [Stadium expansion v25](STADIUM_EXPANSION_V25.md). The sections below retain
 the earlier Anfield conversion history.

@@ -146,13 +146,22 @@ int main(void) {
   for(profile=2;profile<14;profile++) {
     const int before=shell_sets;
     glUseProgram_c(7);
-    float expected[16];stadium_roof_uniform(profile,expected);
+    float expected[16];stadium_roof_uniform_season(profile,season,expected);
     assert(!memcmp(expected,shell_applied,sizeof(expected)) && shell_sets==before+1);
     assert(shell_applied[3]>1500 && shell_applied[3]<8000);
     if(profile==12)assert(shell_applied[7]==-50 && shell_applied[11]==-1850);
     for(int draw=0;draw<1000;draw++)glUseProgram_c(7);
     assert(shell_sets==before+1);
   }
+  profile=13;season=1;
+  const int before_winter=shell_sets;
+  glUseProgram_c(7);assert(shell_sets==before_winter+1 && shell_applied[9]==-1550);
+  for(int draw=0;draw<2000;draw++)glUseProgram_c(7);
+  assert(shell_sets==before_winter+1);
+  weather=NX_WEATHER_CLOUDY;glUseProgram_c(7);
+  assert(shell_sets==before_winter+1); // weather does not resubmit geometry
+  season=0;glUseProgram_c(7);
+  assert(shell_sets==before_winter+2 && shell_applied[9]==-2200);
 }
 ''')
 

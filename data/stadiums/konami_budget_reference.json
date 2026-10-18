@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "scope": "Owned native Konami exported LOD0 structural stands/roof and audience; asset inventory, not live submitted triangles or GPU time. Excludes native pitch/perimeter and alternate Low/night-only decorative meshes.",
+  "structural": [
+    {
+      "mesh": "st029_b",
+      "triangles": 1568
+    },
+    {
+      "mesh": "st029_b_2f",
+      "triangles": 1456
+    },
+    {
+      "mesh": "st029_c",
+      "triangles": 2339
+    },
+    {
+      "mesh": "st029_c_backface",
+      "triangles": 400
+    },
+    {
+      "mesh": "st029_c_glass",
+      "triangles": 840
+    },
+    {
+      "mesh": "st029_f",
+      "triangles": 3793
+    },
+    {
+      "mesh": "st029_f_2f",
+      "triangles": 1452
+    },
+    {
+      "mesh": "st029_l",
+      "triangles": 1124
+    },
+    {
+      "mesh": "st029_l_2f",
+      "triangles": 1232
+    },
+    {
+      "mesh": "st029_r",
+      "triangles": 1174
+    },
+    {
+      "mesh": "st029_r_2f",
+      "triangles": 1216
+    }
+  ],
+  "audience": [
+    {
+      "mesh": "st029_audi_b",
+      "triangles": 880
+    },
+    {
+      "mesh": "st029_audi_f",
+      "triangles": 674
+    },
+    {
+      "mesh": "st029_audi_l",
+      "triangles": 546
+    },
+    {
+      "mesh": "st029_audi_lb",
+      "triangles": 1300
+    },
+    {
+      "mesh": "st029_audi_lf",
+      "triangles": 1360
+    },
+    {
+      "mesh": "st029_audi_r",
+      "triangles": 546
+    },
+    {
+      "mesh": "st029_audi_rb",
+      "triangles": 1300
+    },
+    {
+      "mesh": "st029_audi_rf",
+      "triangles": 1360
+    }
+  ],
+  "structural_triangles": 16594,
+  "audience_triangles": 7966,
+  "core_total_triangles": 24560
+}

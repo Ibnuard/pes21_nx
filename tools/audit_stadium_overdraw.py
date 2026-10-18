@@ -14,6 +14,7 @@ from stadium_material_policy import camera_box_hidden,camera_visible
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile',required=True,type=Path)
 p.add_argument('--output',required=True,type=Path)
+p.add_argument('--near-field',action='store_true',help='Also sample low near-touchline cameras at midfield and both goals')
 a=p.parse_args(sys.argv[sys.argv.index('--')+1:])
 profile=json.loads(a.profile.read_text())
 bpy.ops.wm.open_mainfile(filepath=str(Path(profile['fbx']).with_suffix('.blend')))
@@ -28,7 +29,10 @@ if profile.get('vertex_camera_cull'):
         bounds.append(((xy[i].uv.x*32768,(1-xy[i].uv.y)*32768,ze[i].uv.x*32768),
                        ((1-ze[i].uv.y)*32768,yz[i].uv.x*32768,(1-yz[i].uv.y)*32768)))
 reports=[]
-for name,position,target in [('near',(0,-68,28),(0,-20,0)),('far',(0,-16,28),(0,32,0))]:
+views=[('near',(0,-68,28),(0,-20,0)),('far',(0,-16,28),(0,32,0))]
+if a.near_field:
+    views += [('near-x%d-z%d'%(x,z),(x,-60,z),(x,-27,0)) for x in (0,-42,42) for z in (10,18,28)]
+for name,position,target in views:
     camera=Vector(position);forward=(Vector(target)-camera).normalized()
     right=forward.cross(Vector((0,0,1))).normalized();up=right.cross(forward).normalized()
     hidden=[camera_box_hidden(c,h,ue(camera)) for c,h in bounds] if bounds else [False]*len(mesh.polygons)
@@ -54,6 +58,8 @@ for name,position,target in [('near',(0,-68,28),(0,-20,0)),('far',(0,-16,28),(0,
                 if travelled>=350:break
             else:raise RuntimeError('Ray did not progress')
     if stats['visible_removed']:raise RuntimeError('Unsafe camera cluster rejection: '+str(stats))
+    stats['rgb_candidates_before_alpha']=stats['intersections']-stats['source_backfaces']-stats['vertex_cutaways']
+    stats['camera_rejected_rgb_candidates']=stats['fragment_cutaways']-stats['vertex_cutaways']
     reports.append(stats)
 a.output.write_text(json.dumps(dict(key=profile['key'],scope='geometric ray intersections; excludes alpha-texture tests; not a frame-time benchmark',views=reports),indent=2)+'\n')
 print(json.dumps(reports))

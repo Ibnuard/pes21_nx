@@ -55,6 +55,7 @@ class GeneralSettingsTests(unittest.TestCase):
 #include <string.h>
 static uint32_t pause_settings_page, pause_settings_focus;
 static uint32_t pause_camera_dynamic_wide_custom, pause_settings_radar;
+static uint32_t pause_camera_stadium_v2;
 static uint32_t pause_settings_chant=1, pause_settings_commentary=1;
 static uint32_t pause_settings_show_replay=1;
 static uint32_t pause_settings_show_nameplate=1;

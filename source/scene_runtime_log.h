@@ -2,6 +2,10 @@
 #define PESNX_SCENE_RUNTIME_LOG_H
 #include <stdio.h>
 #include <stdint.h>
+#include "experimental_features.h"
+#ifdef NEAR_CAMERA_TRACE
+extern int pes_gl_probe_cache_enabled(void);
+#endif
 
 static inline uint64_t scene_runtime_ms(void) {
 #if !defined(PESNX_STADIUM_CANARY_HOST_TEST) && !defined(PESNX_REFEREE_PROBE_HOST_TEST)
@@ -28,8 +32,41 @@ static inline void scene_runtime_note(const char *area, const char *message) {
 }
 static inline void scene_runtime_begin(void) {
 #if !defined(PESNX_STADIUM_CANARY_HOST_TEST) && !defined(PESNX_REFEREE_PROBE_HOST_TEST)
+  // Keep exactly one bounded prior session: a second launch must not erase
+  // the cold-start evidence needed to compare missing/blinking geometry.
+  FILE *prior=fopen("scene-runtime.log","rb");
+  if (prior) {
+    const int seek_ok=fseek(prior,0,SEEK_END)==0;
+    const long bytes=seek_ok ? ftell(prior) : -1;
+    fclose(prior);
+    if (bytes>0 && bytes<=65536) {
+      remove("scene-runtime.previous.log");
+      (void)rename("scene-runtime.log","scene-runtime.previous.log");
+    }
+  }
   FILE *file=fopen("scene-runtime.log","wb");
-  if (file) {fputs("FootballNX scene v30 session\n",file);fclose(file);}
+  if (file) {
+    fputs("FootballNX scene v48 session\n",file);
+    fputs("compat hotpaths v44: release clock/TLS trace atomics removed\n",file);
+    fputs("compat hotpaths v45: cached native thread IDs; single-pass buffer free lists; native prematch reveal\n",file);
+    fputs("compat hotpaths v46: context-local separate blend suppression; diagnostic savings counts\n",file);
+    fputs("render stability v47: private overlay vertex state; High uses Standard players\n",file);
+    fputs("render audit v48: no compositor pixel probes/error drains in ordinary or pacing builds; native stadium inventory\n",file);
+#if PESNX_STADIUM_V2_ENABLED
+    fputs("camera policy: STADIUM-V2 screen margin hold v1; smooth native zoom; no ball-centre lock\n",file);
+#else
+    fputs("camera policy: STADIUM-V2 suspended; native STADIUM retained\n",file);
+#endif
+#if !PESNX_ENTRANCE_CANARY_ENABLED
+    fputs("entrance canary hooks: suspended; restore paired baseline dt220/manifest to remove candidate assets\n",file);
+#endif
+#ifdef NEAR_CAMERA_TRACE
+    fputs("near-camera trace v43: CPU/GPU spans; corrected mesh snapshots; core/EXT/OES buffer outcomes; deferred until non-play\n",file);
+    fprintf(file,"render control: state_cache=%s (diagnostic boot setting; face PAK unchanged)\n",
+            pes_gl_probe_cache_enabled()?"enabled":"bypassed");
+#endif
+    fclose(file);
+  }
 #endif
 }
 #endif

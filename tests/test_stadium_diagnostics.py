@@ -34,38 +34,41 @@ int main(void) {
 }
 ''')
 
-    def test_camera_probes_read_only_and_rate_limited(self):
+    def test_optional_camera_snapshot_is_read_only_without_ball_probes(self):
+        self.assertNotIn('stadium_diag_camera_target(', HOOKS)
+        self.assertNotIn('stadium_diag_camera_final(', HOOKS)
         self.run_c(r'''
-#include <math.h>
-#include <stdarg.h>
+#define NEAR_CAMERA_TRACE 1
+#define DEBUG_LOG 1
 static uint64_t now;
-static int logs;
+static unsigned snapshots;
+static uint32_t pause_camera_dynamic_wide_custom;
+static uint32_t pause_camera_stadium_v2;
 static uint64_t armGetSystemTick(void) {return now;}
 static uint64_t armTicksToNs(uint64_t n) {return n;}
-static unsigned pes_controller_stadium_is_day(void) {return 1;}
-static unsigned pes_controller_roof_shadow_enabled(void) {return 0;}
-static int debugPrintf(char *format, ...) {(void)format; return ++logs;}
-''' + function(HOOKS, 'stadium_diag_camera_target') +
-            function(HOOKS, 'stadium_diag_camera_final') + r'''
+static void native_update(void *c,void *p) {(void)c;(void)p;}
+static void (*match_inplay_camera_update_original)(void*,void*)=native_update;
+static unsigned footballnx_tribune_view(float *p) {assert(0);return 0;}
+static void stadium_v2_begin(void *c,void *p) {(void)c;(void)p;} // Native choice, V2 disabled.
+static void stadium_v2_end(void) {}
+static void nx_near_camera(const float *p,unsigned id,uint64_t tick) {
+  assert(p[0]==4 && p[5]==55 && (id==1 || id==(pause_camera_stadium_v2?134u:6u)) && tick==now);
+  ++snapshots;
+}
+''' + function(HOOKS, 'pes_inplay_camera_update') + r'''
 int main(void) {
-  uint32_t camera[4] = {0,0,12,0};
-  float ball[3] = {4,2,8}, before[3] = {9,2,1}, after[3] = {6,2,5}, zoom=3;
-  float p[6] = {6,2,5,20,30,40}, saved[6];
+  uint32_t camera[8]={0}; float p[16]={4,1,8,20,30,55}, saved[16];
   memcpy(saved,p,sizeof(p));
-  stadium_diag_camera_target(camera,camera,ball,before,after,&zoom,1,1,1,0);
-  stadium_diag_camera_final(camera,p);
-  assert(logs==2);
-  now=100000000;
-  stadium_diag_camera_target(camera,camera,ball,before,after,&zoom,1,1,1,0);
-  stadium_diag_camera_final(camera,p);
-  assert(logs==2);
-  now=500000000;
-  stadium_diag_camera_target(camera,camera,ball,before,after,&zoom,1,1,1,0);
-  stadium_diag_camera_final(camera,p);
-  assert(logs==4 && !memcmp(saved,p,sizeof(p)));
-  assert(ball[0]==4 && before[0]==9 && after[0]==6 && zoom==3);
-  stadium_diag_camera_final(NULL,p); stadium_diag_camera_final(camera,NULL);
-  assert(logs==4);
+  for(unsigned frame=0;frame<1000;++frame) {
+    camera[2]=(frame&1)?1:6; now=frame*16000000ULL;
+    pause_camera_stadium_v2=!!(frame&2);
+    pes_inplay_camera_update(camera,p);
+    assert(!memcmp(p,saved,sizeof(p)));
+    assert(camera[2]==((frame&1)?1u:6u));
+  }
+  assert(snapshots==1000);
+  pes_inplay_camera_update(NULL,p);pes_inplay_camera_update(camera,NULL);
+  assert(snapshots==1000);
 }
 ''')
 

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "build_id": "e861c583ec78e9ae",
+  "hardware_tested": false,
+  "players": [
+    {
+      "base_id": 119531,
+      "native_player_id": 101329,
+      "fingerprint": "fad82fca89dbcf60bb8a",
+      "name": "Matheus Cunha",
+      "skin": 3,
+      "accepted_row_sha256": [
+        "90a83c107c66145865dcc5b674133ef201a70a7b6dddeeee115d67cad773aaa7",
+        "d1890328938740b2904af0222c93c38f49024833f61a6cfb9ab35ebee7faf234"
+      ],
+      "reason": "Invalid skin7 has no native body texture; neck swatch nearest available palette is skin3; device confirmation pending"
+    }
+  ]
+}

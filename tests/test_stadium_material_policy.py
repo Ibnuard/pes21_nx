@@ -5,6 +5,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from stadium_material_policy import crowd_uv, camera_visible, CROWD_FRAMES, CROWD_FPS
 
 
+def test_fast_hull_rejection_matches_frozen_slab_policy():
+    import math
+    import random
+    def reference(world,camera):
+        ray=[w-c for w,c in zip(world,camera)]
+        radius=math.hypot(max(abs(camera[0])-5250,0),max(abs(camera[1])-3400,0))+600
+        if sum(d*d for d in ray)<radius*radius:return False
+        ray=[d if abs(d)>=.001 else .001 for d in ray]
+        a=[(b-c)/d for b,c,d in zip((-5800,-4000,-50),camera,ray)]
+        b=[(b-c)/d for b,c,d in zip((5800,4000,260),camera,ray)]
+        return min(max(x,y) for x,y in zip(a,b))<max(1,max(min(x,y) for x,y in zip(a,b)))
+    rng=random.Random(31)
+    for _ in range(50000):
+        camera=[rng.uniform(-14000,14000),rng.uniform(-12000,12000),rng.uniform(150,8000)]
+        world=[rng.uniform(-13000,13000),rng.uniform(-10000,10000),rng.uniform(-100,7000)]
+        assert camera_visible(world,camera)==reference(world,camera)
+    for camera in ((0,7000,140),(0,0,2000),(5800,4000,260)):
+        for delta in (-.002,-.0005,0,.0005,.002):
+            world=(camera[0]+delta,camera[1]+delta,100.)
+            assert camera_visible(world,camera)==reference(world,camera)
+
+
 def test_crowd_uses_every_native_frame_without_crossing_neighbour():
     for frame in range(CROWD_FRAMES):
         for v in (-1, 0, .5, 1, 2):

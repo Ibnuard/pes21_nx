@@ -37,6 +37,13 @@ float3 ray = World - Camera;
 float2 outside = max(abs(Camera.xy) - float2(5250.0, 3400.0), 0.0);
 float lensRadius = length(outside) + 600.0;
 if (dot(ray, ray) < lensRadius * lensRadius) return 0.0;
+// The ray/box cutaway is contained in the convex hull of camera and box.
+// Most stand/roof fragments are outside even that hull's AABB. Reject that
+// possibility before the three component divisions, preserving exact rays
+// for the small foreground region that can actually cover a player.
+float3 hullMin = min(Camera, float3(-5800.0, -4000.0, -50.0));
+float3 hullMax = max(Camera, float3(5800.0, 4000.0, 260.0));
+if (all(abs(ray) >= 0.001) && (any(World < hullMin) || any(World > hullMax))) return 1.0;
 float3 safeRay = float3(abs(ray.x) < 0.001 ? 0.001 : ray.x,
                        abs(ray.y) < 0.001 ? 0.001 : ray.y,
                        abs(ray.z) < 0.001 ? 0.001 : ray.z);
@@ -86,6 +93,9 @@ def camera_visible(world, camera):
     lens_radius = math.hypot(*outside)+600
     if sum(d*d for d in ray) < lens_radius*lens_radius:
         return False
+    if all(abs(d) >= .001 for d in ray) and any(w < min(c, lo) or w > max(c, hi)
+           for w, c, lo, hi in zip(world, camera, CAMERA_BOX_MIN, CAMERA_BOX_MAX)):
+        return True
     ray = [d if abs(d) >= .001 else .001 for d in ray]
     a = [(lo-c)/d for lo, c, d in zip(CAMERA_BOX_MIN, camera, ray)]
     b = [(hi-c)/d for hi, c, d in zip(CAMERA_BOX_MAX, camera, ray)]

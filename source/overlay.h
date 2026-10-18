@@ -10,5 +10,6 @@
 // eglSwapBuffers replacement for the import table: draws the FPS counter
 // (config.show_fps) over the game's output before presenting.
 unsigned int eglSwapBuffersHook(void *display, void *surface);
+void overlay_context_destroyed(void *context);
 
 #endif

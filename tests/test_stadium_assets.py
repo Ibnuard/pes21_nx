@@ -97,3 +97,16 @@ def test_v30_manifest_retires_heavy_roofs_and_adds_owned_camp_nou():
     line=next(s for s in header.splitlines() if '/* CampNou */' in s)
     values=[float(v) for v in line.split('{')[1].split('}')[0].split(',')]
     assert values==pytest.approx(camp['roof_cm'],abs=.005)
+
+
+def test_v31_budgets_reduce_all_retained_addons_without_losing_roof_identity():
+    import json
+    root=Path(__file__).resolve().parents[1]
+    old=json.loads((root/'data/stadiums/fl26_selected_v30.json').read_text())['stadiums']
+    new=json.loads((root/'data/stadiums/fl26_selected_v31.json').read_text())['stadiums']
+    assert [r['key'] for r in new]==[r['key'] for r in old]
+    for a,b in zip(old,new):
+        assert 10000<=b['triangle_budget']<a['triangle_budget']
+        assert b['triangle_budget']+b['preserved_crowd_triangles']<=b['maximum_total_triangles']==24560
+        assert b['source_id']==a['source_id'] and b['roof_cm']==a['roof_cm']
+    assert new[-1]['roof_side_band_target_percent']==35

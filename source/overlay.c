@@ -51,6 +51,8 @@
 
 typedef void (*OverlayBindSamplerProc)(GLuint unit, GLuint sampler);
 
+#include "overlay_vertex_state.inc"
+
 // text-overlay GL objects, created lazily on first draw
 static struct {
   int ready;
@@ -1085,13 +1087,13 @@ static void prepare_native_uniform_preview(int active) {
   GLint saved_texture = 0;
   GLint saved_pack_alignment = 4;
   GLint saved_unpack_alignment = 4;
-  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &saved_framebuffer);
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &saved_framebuffer);
   glGetIntegerv(GL_ACTIVE_TEXTURE, &saved_active_texture);
   glActiveTexture(GL_TEXTURE0);
   glGetIntegerv(GL_TEXTURE_BINDING_2D, &saved_texture);
   glGetIntegerv(GL_PACK_ALIGNMENT, &saved_pack_alignment);
   glGetIntegerv(GL_UNPACK_ALIGNMENT, &saved_unpack_alignment);
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
   glPixelStorei(GL_PACK_ALIGNMENT, 1);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
@@ -1209,7 +1211,7 @@ static void prepare_native_uniform_preview(int active) {
   glPixelStorei(GL_UNPACK_ALIGNMENT, saved_unpack_alignment);
   glBindTexture(GL_TEXTURE_2D, (GLuint)saved_texture);
   glActiveTexture((GLenum)saved_active_texture);
-  glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)saved_framebuffer);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)saved_framebuffer);
 }
 
 static int decode_png_memory(const unsigned char *bytes, uint32_t byte_count,
@@ -2163,7 +2165,7 @@ static void overlay_render(void) {
     pacing.previous=0;
     if(pacing.frames>=120) {
       char message[320];
-      snprintf(message,sizeof(message),"v30 session=%u time=%s stadium=%u day_lite=%u csm=%d weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
+      snprintf(message,sizeof(message),"v33 session=%u time=%s stadium=%u day_lite=%u csm=%d weather=%s season=%u frames=%u avg_us=%llu worst_us=%llu over20ms=%u over30ms=%u viewport=%dx%d (presentation intervals)",
           pacing.session,pacing.day?"DAY":"NIGHT",pacing.stadium,pacing.day_lite,pacing.cascades,
           nx_weather_label(pacing.weather),pacing.season,pacing.frames,
           (unsigned long long)(pacing.total/pacing.frames/1000u),
@@ -9899,6 +9901,10 @@ overlay_geometry_ready:
   if (!quads)
     return;
 
+  GLint prev_vertex_array;
+  if (!overlay_vertex_begin(gl.vbo, gl.loc_pos, gl.loc_uv, &prev_vertex_array))
+    return;
+
   GLint prev_fb, prev_prog, prev_active, prev_tex0, prev_sampler = 0;
   GLint prev_array_buf, prev_viewport[4];
   GLint bsrc_rgb, bdst_rgb, bsrc_a, bdst_a, beq_rgb, beq_a;
@@ -9931,12 +9937,8 @@ overlay_geometry_ready:
     glGetIntegerv(GL_SAMPLER_BINDING, &prev_sampler);
     gl.bind_sampler(0, 0);
   }
-  GLint prev_va_pos = 0, prev_va_uv = 0;
-  glGetVertexAttribiv(gl.loc_pos, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prev_va_pos);
-  glGetVertexAttribiv(gl.loc_uv, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &prev_va_uv);
-
   atlas_ready();
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_STENCIL_TEST);
@@ -9972,10 +9974,6 @@ overlay_geometry_ready:
   glUseProgram(gl.prog);
   glBindTexture(GL_TEXTURE_2D, gl.tex);
   glUniform1i(gl.loc_tex, 0);
-  glEnableVertexAttribArray(gl.loc_pos);
-  glEnableVertexAttribArray(gl.loc_uv);
-  glVertexAttribPointer(gl.loc_pos, 2, GL_FLOAT, GL_FALSE, 16, (const void *)0);
-  glVertexAttribPointer(gl.loc_uv, 2, GL_FLOAT, GL_FALSE, 16, (const void *)8);
 
   glUniform2f(gl.loc_off, 0.0f, 0.0f);
   glUniform1f(gl.loc_image, 0.0f);
@@ -11884,12 +11882,10 @@ overlay_geometry_ready:
 #undef ADD_SWITCH_HELPER
 
 overlay_restore:
-  // restore the two attrib arrays to whatever the engine had (it uses the same
-  // low indices); leaving them forced-off would break its next draw
-  if (!prev_va_pos) glDisableVertexAttribArray(gl.loc_pos);
-  if (!prev_va_uv) glDisableVertexAttribArray(gl.loc_uv);
-
-  glBindFramebuffer(GL_FRAMEBUFFER, prev_fb);
+  // Restores the complete engine layout, including its element buffer, without
+  // re-querying or rebuilding each attribute. The read framebuffer stays native.
+  overlay_vertex_end(prev_vertex_array);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prev_fb);
   glColorMask(color_mask[0], color_mask[1], color_mask[2], color_mask[3]);
   glBlendEquationSeparate(beq_rgb, beq_a);
   glBlendFuncSeparate(bsrc_rgb, bdst_rgb, bsrc_a, bdst_a);
