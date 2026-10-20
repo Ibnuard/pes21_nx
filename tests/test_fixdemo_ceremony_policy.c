@@ -141,6 +141,71 @@ static void check_match_identity(void) {
   accepted(&context, &snapshot, &ready, 0u);
 }
 
+static void check_ending_factory_boundary(void) {
+  FixdemoCeremonySnapshot snapshot = full_time;
+  snapshot.boundary = FIXDEMO_CEREMONY_BOUNDARY_ENDING_FACTORY;
+  snapshot.original_scene = 0x70004;
+  snapshot.original_side = 0;
+  rejected(&live_final, &snapshot, &ready); /* exact native request still required */
+  snapshot.native_request_verified = 1;
+  for (uint32_t side = 0; side != 3; ++side) {
+    snapshot.original_side = side;
+    accepted(&live_final, &snapshot, &ready, 0);
+  }
+  snapshot.original_scene = 0x6000f;
+  accepted(&live_final, &snapshot, &ready, 0);
+  snapshot.home_goals = 0;
+  accepted(&live_final, &snapshot, &ready, 1); /* chosen ending side is not winner evidence */
+  snapshot.phase = 2;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot.phase = 10; snapshot.caller_verified = 0;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot.caller_verified = 1; snapshot.original_side = 3;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot.original_side = 2;
+  const uint32_t invalid[] = {0, 0x60000, 0x70000, 0x80001, UINT32_MAX};
+  for (unsigned i = 0; i != sizeof(invalid) / sizeof(invalid[0]); ++i) {
+    snapshot.original_scene = invalid[i];
+    rejected(&live_final, &snapshot, &ready);
+  }
+  snapshot = full_time; snapshot.boundary = 3;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot = full_time; snapshot.native_request_verified = 1;
+  snapshot.original_scene = 0x70004;
+  rejected(&live_final, &snapshot, &ready); /* original RESULT gate was not widened */
+}
+
+static void check_listener_result_boundary(void) {
+  FixdemoCeremonySnapshot snapshot = full_time;
+  snapshot.boundary = FIXDEMO_CEREMONY_BOUNDARY_LISTENER_RESULT;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot.native_request_verified = 1u;
+  for (uint32_t side = 0; side != 3; ++side) {
+    snapshot.original_side = side;
+    accepted(&live_final, &snapshot, &ready, 0);
+  }
+  snapshot.home_goals = 0;
+  accepted(&live_final, &snapshot, &ready, 1);
+  for (uint32_t phase = 0; phase != 12; ++phase) {
+    if (phase == 10) continue;
+    snapshot.phase = phase;
+    rejected(&live_final, &snapshot, &ready);
+  }
+  snapshot.phase = 10;
+  snapshot.original_side = 3;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot.original_side = 2;
+  snapshot.original_scene = 0x70004;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot.original_scene = 0x80001;
+  snapshot.caller_verified = 0;
+  rejected(&live_final, &snapshot, &ready);
+  snapshot = full_time;
+  snapshot.native_request_verified = 1;
+  snapshot.original_side = 0;
+  rejected(&live_final, &snapshot, &ready); /* old RESULT boundary stays neutral-only */
+}
+
 static void check_winner_evidence(void) {
   FixdemoCeremonySnapshot snapshot = full_time;
   snapshot.home_goals = 0;
@@ -245,6 +310,8 @@ static void check_one_shot(void) {
 int main(void) {
   check_result_boundary();
   check_match_identity();
+  check_ending_factory_boundary();
+  check_listener_result_boundary();
   check_winner_evidence();
   check_one_shot();
   puts("Fixdemo ceremony policy tests passed");

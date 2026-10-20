@@ -559,6 +559,53 @@ static void glDeleteProgram_c(GLuint p) {
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
 }
 
+typedef void (*GLProgramBinaryProc)(GLuint, GLenum, const void *, GLsizei);
+static GLProgramBinaryProc gl_program_binary_real;
+static GLProgramBinaryProc gl_program_binary_oes_real;
+
+/* Loading a binary is an implicit link: it can replace uniform locations and
+ * resets the values even when the same binary is loaded again. Publish the
+ * invalidation after the native call, as glLinkProgram_diag does, so another
+ * shared context cannot keep our old nx* locations/values. Failed loads also
+ * invalidate conservatively; native validation/errors remain untouched. */
+static void glProgramBinary_c(GLuint program, GLenum format, const void *binary,
+                              GLsizei length) {
+  const GLProgramBinaryProc driver =
+      __atomic_load_n(&gl_program_binary_real, __ATOMIC_ACQUIRE);
+  driver(program, format, binary, length);
+  __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
+#ifdef DEBUG_LOG
+  stadium_diag_forget(program);
+#endif
+}
+
+static void glProgramBinaryOES_c(GLuint program, GLenum format, const void *binary,
+                                 GLsizei length) {
+  const GLProgramBinaryProc driver =
+      __atomic_load_n(&gl_program_binary_oes_real, __ATOMIC_ACQUIRE);
+  driver(program, format, binary, length);
+  __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
+#ifdef DEBUG_LOG
+  stadium_diag_forget(program);
+#endif
+}
+
+static __eglMustCastToProperFunctionPointerType gl_program_binary_proc(
+    const char *name, __eglMustCastToProperFunctionPointerType proc) {
+  if (!name || !proc) return NULL;
+  if (!strcmp(name, "glProgramBinary")) {
+    __atomic_store_n(&gl_program_binary_real, (GLProgramBinaryProc)proc,
+                     __ATOMIC_RELEASE);
+    return (__eglMustCastToProperFunctionPointerType)&glProgramBinary_c;
+  }
+  if (!strcmp(name, "glProgramBinaryOES")) {
+    __atomic_store_n(&gl_program_binary_oes_real, (GLProgramBinaryProc)proc,
+                     __ATOMIC_RELEASE);
+    return (__eglMustCastToProperFunctionPointerType)&glProgramBinaryOES_c;
+  }
+  return NULL;
+}
+
 static volatile uint64_t gl_diag_draw_arrays;
 static volatile uint64_t gl_diag_draw_elements;
 static volatile uint64_t gl_diag_vertices;
@@ -2384,6 +2431,8 @@ static __eglMustCastToProperFunctionPointerType gl_cached_state_proc(const char 
 static __eglMustCastToProperFunctionPointerType
 eglGetProcAddress_diag(const char *name) {
   __eglMustCastToProperFunctionPointerType proc = eglGetProcAddress(name);
+  const __eglMustCastToProperFunctionPointerType binary = gl_program_binary_proc(name, proc);
+  if (binary) return binary;
   const __eglMustCastToProperFunctionPointerType cached = gl_cached_state_proc(name);
   if (proc && cached) return cached;
 #ifdef DEBUG_LOG

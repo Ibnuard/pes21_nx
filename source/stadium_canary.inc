@@ -208,7 +208,6 @@ static void install_stadium_canary(so_module *module) {
     stadium_available[stadium_available_count++] = id;
   }
   if (stadium_available_count == 1) return;
-  scene_runtime_begin();
   const char *root_symbol =
       "_ZN6AActor23execK2_GetRootComponentEP7UObjectR6FFramePv";
   const char *mesh_symbol =

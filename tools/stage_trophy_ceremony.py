@@ -23,7 +23,7 @@ from entrance_scene_canary import (
     payload, skeleton_audit, table_entries,
 )
 from fixdemo_scene_table import parse_scene_table, serialize_scene_table
-from prepare_loose_cpk import digest as file_digest, verify, write_manifest
+from prepare_loose_cpk import digest as file_digest, read_manifest, verify, write_manifest
 from build_barca_real_madrid_mobile_kit_canary import package_cpk, validate_cpk
 from build_madrid_preserve_order import restore_order
 
@@ -56,6 +56,173 @@ PROP_MODELS = (
 )
 BASELINE_BUILD = "e861c583ec78e9ae"
 BASELINE_DT220_SHA256 = "d83d98bfd1d25838a55a524875abf29d10693f13c9a73ee775745afa3d42a82a"
+BASELINE_MANIFEST_SHA256 = "b5121414cf7fafaa18d2865ba588bec37c48ae8607dc75d345b474fe0dc6469a"
+WALKOUT_DT220_SHA256 = "6de2492961b0286f72313a4df7fa5d704edf7529b5dd6749832cbec9d996fefa"
+TROPHY_DT220_SHA256 = "3fe2308ad07e4d776fcd1bb816cecbd2b859072b908b467b2bc56ce1b7e28cbb"
+COMBINED_SCHEMA = "PESNX_COMBINED_CINEMATICS_V1"
+
+
+def raw_member(cpk: Cpk, name: str) -> bytes:
+    """Compare stored bytes too; a recompression is not an unchanged member."""
+    row = cpk.index[name]
+    with cpk.path.open("rb") as stream:
+        stream.seek(cpk.base + row["FileOffset"])
+        data = stream.read(row["FileSize"])
+    if len(data) != row["FileSize"]:
+        raise ValueError("truncated CPK member: " + name)
+    return data
+
+
+def check_composition_members(base: Cpk, candidate: Cpk,
+                              payloads: dict[str, bytes], replaced: str) -> int:
+    """Only the named table may replace an existing row; retain all other IDs."""
+    if set(payloads) & set(base.index) != {replaced}:
+        raise ValueError("unexpected existing member replacement")
+    if set(candidate.index) != set(base.index) | set(payloads):
+        raise ValueError("candidate has missing or unrelated members")
+    if list(candidate.index) != list(base.index) + sorted(set(payloads) - set(base.index)):
+        raise ValueError("existing CPK order changed")
+    if len({row["ID"] for row in candidate.index.values()}) != len(candidate.index):
+        raise ValueError("candidate CPK member IDs collide")
+    unchanged = 0
+    for name, row in base.index.items():
+        if candidate.index[name]["ID"] != row["ID"]:
+            raise ValueError("existing CPK ID changed: " + name)
+        if name != replaced:
+            if (candidate.index[name]["FileSize"] != row["FileSize"] or
+                    candidate.index[name]["ExtractSize"] != row["ExtractSize"] or
+                    raw_member(candidate, name) != raw_member(base, name)):
+                raise ValueError("unrelated stored CPK member changed: " + name)
+            unchanged += 1
+    if any(candidate.read(name) != data for name, data in payloads.items()):
+        raise ValueError("intended scene/dependency payload differs")
+    return unchanged
+
+
+def combined_inputs(walkout_report: Path, trophy_report: Path) -> dict:
+    """Prove the two exact detached candidates, never accept arbitrary reports.
+
+    This checks only cinematic archives and their complete manifest identities.
+    The final runtime packager separately verifies all current CPKs/physique
+    overrides; it does not pretend that these old detached manifests are current.
+    """
+    reports = [json.loads(path.read_text(encoding="utf-8"))
+               for path in (walkout_report, trophy_report)]
+    expected = (("PESNX_ENTRANCE_WALKOUT_CANARY_V1", "experimental_hardware_candidate",
+                 WALKOUT_DT220_SHA256, ENTRANCE_TABLE, 50),
+                ("PESNX_TROPHY_ASSETS_V1", "asset_only_not_playable",
+                 TROPHY_DT220_SHA256, TABLE, 28))
+    base_root = Path(reports[0]["baseline_root"])
+    baseline = read_manifest(base_root)
+    base = Cpk(base_root / "LooseCpk/dt220_mobile_all.cpk")
+    if (baseline["version"] != 2 or baseline["build_id"] != BASELINE_BUILD or
+            file_digest(base.path) != BASELINE_DT220_SHA256 or
+            file_digest(base_root / "LooseCpk/manifest.txt") != BASELINE_MANIFEST_SHA256):
+        raise ValueError("unsupported native cinematic provenance")
+    archives, maps = [], []
+    for report_path, report, (schema, status, approved, table, count) in zip(
+            (walkout_report, trophy_report), reports, expected):
+        if (report.get("schema") != schema or report.get("status") != status or
+                report.get("baseline_dt220_sha256") != BASELINE_DT220_SHA256 or
+                report.get("baseline_build_id") != BASELINE_BUILD or
+                report.get("baseline_manifest_sha256") != file_digest(base_root / "LooseCpk/manifest.txt")):
+            raise ValueError("detached candidate provenance mismatch")
+        path = report_path.parent / "update/LooseCpk/dt220_mobile_all.cpk"
+        if (file_digest(path) != approved or
+                report["validation"]["candidate_sha256"] != approved or
+                report["validation"]["size"] != path.stat().st_size):
+            raise ValueError("detached candidate is not the reviewed archive")
+        candidate = Cpk(path)
+        paired = copy.deepcopy(baseline)
+        next(row for row in paired["files"] if row["name"] == path.name).update(
+            size=path.stat().st_size, sha256=approved)
+        if read_manifest(report_path.parent / "update") != paired:
+            raise ValueError("detached CPK/manifest pair differs")
+        payloads = {}
+        for row in report["payloads"]:
+            name = row["name"]
+            data = candidate.read(name)
+            if name in payloads or len(data) != row["bytes"] or digest(data) != row["sha256"]:
+                raise ValueError("detached payload evidence differs")
+            payloads[name] = data
+        if len(payloads) != count:
+            raise ValueError("detached payload count differs")
+        check_composition_members(base, candidate, payloads, table)
+        archives.append(candidate)
+        maps.append(payloads)
+    if set(maps[0]) & set(maps[1]):
+        raise ValueError("entrance/trophy payload collision requires an explicit merge")
+    if parse_scene_table(archives[0].read(ENTRANCE_TABLE), 1)["scenes"][0]["name"] != "NX_WALKOUT_CANARY_V1":
+        raise ValueError("reviewed walkout scene is missing")
+    return {"baseline": baseline, "native": base, "walkout": archives[0],
+            "trophy": archives[1], "walkout_payloads": maps[0], "trophy_payloads": maps[1]}
+
+
+def check_combined(report_path: Path) -> dict:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if (report.get("schema") != COMBINED_SCHEMA or
+            report.get("status") != "asset_only_not_playable"):
+        raise ValueError("not a combined cinematic asset report")
+    inputs = combined_inputs(Path(report["walkout_report"]), Path(report["trophy_report"]))
+    final = report_path.parent / "update/LooseCpk/dt220_mobile_all.cpk"
+    if (file_digest(final) != report["validation"]["candidate_sha256"] or
+            final.stat().st_size != report["validation"]["size"]):
+        raise ValueError("combined CPK changed")
+    candidate = Cpk(final)
+    unchanged = check_composition_members(inputs["walkout"], candidate, inputs["trophy_payloads"], TABLE)
+    if any(candidate.read(name) != data for name, data in inputs["walkout_payloads"].items()):
+        raise ValueError("combined package lost a walkout payload")
+    expected = copy.deepcopy(inputs["baseline"])
+    next(row for row in expected["files"] if row["name"] == final.name).update(
+        size=final.stat().st_size, sha256=file_digest(final))
+    if read_manifest(report_path.parent / "update") != expected:
+        raise ValueError("combined CPK/manifest pair differs")
+    return {"dt220_sha256": file_digest(final), "entrance_policy": "walkout",
+            "walkout_payloads_identical": len(inputs["walkout_payloads"]),
+            "trophy_payloads_identical": len(inputs["trophy_payloads"]),
+            "walkout_ids_and_order_preserved": True, "unchanged_walkout_members": unchanged,
+            "native_entrance_preserved": False, "working_walkout_preserved": True,
+            "scene_enabled": False}
+
+
+def merge_walkout_trophy(walkout_report: Path, trophy_report: Path, output: Path) -> dict:
+    output = output_directory(output)
+    inputs = combined_inputs(walkout_report, trophy_report)
+    base, payloads = inputs["walkout"], inputs["trophy_payloads"]
+    actions = {name: "replace" if name == TABLE else "add" for name in payloads}
+    output.mkdir(parents=True)
+    with tempfile.TemporaryDirectory(prefix="merge-", dir=output) as temp:
+        work = Path(temp)
+        paths = {}
+        for index, (name, data) in enumerate(payloads.items()):
+            path = work / f"trophy-{index}.bin"
+            path.write_bytes(data)
+            paths[name] = str(path.resolve())
+        packed = package_cpk(ROOT, work, "walkout-trophy", base.path, actions, payloads, paths)
+        update = work / "update"
+        (update / "LooseCpk").mkdir(parents=True)
+        final = update / "LooseCpk/dt220_mobile_all.cpk"
+        order = list(base.index) + sorted(set(payloads) - set(base.index))
+        restore_order(Path(packed["candidate"]), final, order)
+        validation = validate_cpk(base.path, final, actions, payloads)
+        check_composition_members(base, Cpk(final), payloads, TABLE)
+        manifest = copy.deepcopy(inputs["baseline"])
+        next(row for row in manifest["files"] if row["name"] == final.name).update(
+            size=final.stat().st_size, sha256=file_digest(final))
+        write_manifest(update, manifest)
+        update.replace(output / "update")
+    validation["candidate"] = str(output / "update/LooseCpk/dt220_mobile_all.cpk")
+    report = {"schema": COMBINED_SCHEMA, "status": "asset_only_not_playable",
+              "walkout_report": str(walkout_report.resolve()), "trophy_report": str(trophy_report.resolve()),
+              "baseline_build_id": inputs["baseline"]["build_id"],
+              "walkout_cpk_sha256": WALKOUT_DT220_SHA256, "trophy_cpk_sha256": TROPHY_DT220_SHA256,
+              "validation": validation, "entrance_policy": "walkout", "hardware_tested": False,
+              "runtime_modified": False, "scene_enabled": False}
+    report_path = output / "combined-report.json"
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    report["composition_checks"] = check_combined(report_path)
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
 
 
 def references(raw: bytes) -> tuple[str, ...]:
@@ -485,12 +652,28 @@ def probe_trophy_motions(fl26_root: Path, mobile_root: Path, native_elf: Path,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fl26-root", type=Path, required=True)
-    parser.add_argument("--mobile-root", type=Path, required=True)
+    parser.add_argument("--fl26-root", type=Path)
+    parser.add_argument("--mobile-root", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--walkout-report", type=Path,
+                        help="merge the reviewed reduced walkout with --trophy-report")
+    parser.add_argument("--trophy-report", type=Path,
+                        help="reviewed detached trophy report to merge; no scene is enabled")
     parser.add_argument("--sample-native-elf", type=Path,
                         help="optionally sample retained motions with the sealed Mobile decoder")
     args = parser.parse_args()
+    if args.walkout_report or args.trophy_report:
+        if not (args.walkout_report and args.trophy_report):
+            parser.error("merge requires both --walkout-report and --trophy-report")
+        if args.fl26_root or args.mobile_root or args.sample_native_elf:
+            parser.error("merge accepts detached reports only, not donor/probe arguments")
+        report = merge_walkout_trophy(args.walkout_report, args.trophy_report, args.output)
+        print(json.dumps({"output": str(args.output), "status": report["status"],
+                          "validation": report["validation"],
+                          "composition_checks": report["composition_checks"]}))
+        return
+    if not (args.fl26_root and args.mobile_root):
+        parser.error("stage requires --fl26-root and --mobile-root")
     report = stage(args.fl26_root, args.mobile_root, args.output)
     print(json.dumps({"output": str(args.output), "status": report["status"],
                       "assets": len(report.get("payloads", [])),

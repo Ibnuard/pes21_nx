@@ -3643,7 +3643,13 @@ static void stadium_refresh_saved_graphics_quality(void) {
     __atomic_store_n(&main_menu_video_graphics, quality, __ATOMIC_RELEASE);
 }
 
+static void fixdemo_trophy_begin_match(void);
+static void fixdemo_trophy_end_match(void);
+static int fixdemo_trophy_ui_active(void);
+static int fixdemo_trophy_request_skip(void);
+
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
+  fixdemo_trophy_begin_match();
   stadium_refresh_saved_graphics_quality();
   // MatchSetup is the lifetime boundary for presentation-only HUD state.
   // Replay, pause, and loading transitions occur inside this lifetime and
@@ -11931,6 +11937,7 @@ void pes_main_menu_simplify(void *window) {
   // actually been rebuilt. Clearing it in the Pause destructor was too early
   // and exposed the stock Pause exit animation for several frames.
   __atomic_store_n(&pause_top_menu_transition_tick, 0, __ATOMIC_RELEASE);
+  fixdemo_trophy_end_match();
   competition_frontend_cup_restore_after_match();
   competition_frontend_league_restore_after_match();
   // Dispatch on the next Pad::Update, after this new frontend finishes Init.
@@ -13646,6 +13653,10 @@ static uint32_t pes_match_outofplay_skip_main(void *unit, const void *input,
 }
 
 void pes_controller_demo_skip_request(void) {
+  /* Queue only a token here. The native listener owns manager access and
+   * consumes the request at its next safe invocation. */
+  if (fixdemo_trophy_request_skip())
+    return;
   uintptr_t owner = 0;
   const uint64_t now = armGetSystemTick();
   if (!match_native_demo_active_at(now, &owner) || !owner)
@@ -14616,7 +14627,8 @@ void pes_controller_cinematic_update(int gameplay_active, int control_mode,
 }
 
 int pes_controller_cinematic_skip_active(void) {
-  return match_native_demo_active_at(armGetSystemTick(), NULL);
+  return fixdemo_trophy_ui_active() ||
+         match_native_demo_active_at(armGetSystemTick(), NULL);
 }
 
 int pes_controller_replay_active(void) {
@@ -14665,7 +14677,11 @@ void pes_controller_surface_snapshot(PesControllerSnapshot *snapshot) {
   // Replay can be constructed before ButtonGoalPerformance has finished. The
   // InteractiveGoalDemo pad unit exists only while the A/B page is actionable,
   // so its heartbeat is more specific and must win during that overlap.
-  if (goal_active) {
+  if (fixdemo_trophy_ui_active()) {
+    // A Cup-final ceremony owns Skip while overview is held. An old goal or
+    // replay heartbeat must not route this input to a retired native owner.
+    surface = PES_CONTROLLER_SURFACE_CINEMATIC;
+  } else if (goal_active) {
     surface = PES_CONTROLLER_SURFACE_GOAL_DEMO;
     goal_player =
         __atomic_load_n(&match_goal_demo_owner_known, __ATOMIC_ACQUIRE) &&
@@ -17512,6 +17528,9 @@ static uintptr_t *find_vtable_method_slot(so_module *module,
 #include "native_prematch_reveal.inc"
 #include "realface_load_probe.inc"
 #include "model_quality_policy.inc"
+#include "fixdemo_trophy_config.inc"
+#include "fixdemo_trophy_props.inc"
+#include "fixdemo_trophy_result.inc"
 
 static ObjectInitializerArrayState *find_array_state(Ue4Array *array) {
   ObjectInitializerArrayState *empty = NULL;
@@ -17831,6 +17850,23 @@ static void native_pad_lab_enable_exhibition(void) {
 }
 
 void install_ue4_hooks(so_module *module) {
+  /* Begin once, before any boot status is published. The stadium installer
+   * must not later truncate package validation or first-launch evidence. */
+  scene_runtime_begin();
+  /* Validate the package before opting into any presentation hooks. This is
+   * the same full-loose check as the binder setup, moved ahead of optional
+   * probes so they cannot occupy the trophy canary's audited PLT entries. */
+  char loose_error[256];
+  const int loose_enabled = pes_loose_cpk_init(
+#if PES_PLAYER_MIGRATION_CANARY
+      (const char *)exhibition_player_migration_build_id,
+#else
+      NULL,
+#endif
+      PES_LOOSE_CPK_FULL, loose_error, sizeof(loose_error));
+  fixdemo_trophy_config_bootstrap(loose_enabled,
+                                  loose_enabled < 0 ? loose_error : NULL);
+  if (loose_enabled < 0) fatal_error("%s", loose_error);
   if (PESNX_ENTRANCE_CANARY_ENABLED)
     install_fixdemo_scene_trace(module);
   else
@@ -19919,6 +19955,7 @@ void install_ue4_hooks(so_module *module) {
   // exact PLT fingerprints belong to the supported mobile v5.3.0 library;
   // an unknown revision simply runs without the probe. The direct symbols
   // remain unpatched so each wrapper can forward to the original function.
+  if (!fixdemo_trophy_canary_validated) {
   const uintptr_t cup_ending_plt =
       (uintptr_t)module->load_base + 0x381e6e0;
   const uintptr_t cup_create_plt =
@@ -19963,6 +20000,7 @@ void install_ue4_hooks(so_module *module) {
   } else {
     debugPrintf("cup-3d-probe: unsupported native result signature; "
                 "hook skipped\n");
+  }
   }
 #endif
 
@@ -20398,19 +20436,26 @@ void install_ue4_hooks(so_module *module) {
   } else {
     debugPrintf("WARNING: team commentary PLT mismatch; hooks skipped\n");
   }
-  char loose_error[256];
-  const int loose_enabled = pes_loose_cpk_init(
-#if PES_PLAYER_MIGRATION_CANARY
-      (const char *)exhibition_player_migration_build_id,
-#else
-      NULL,
-#endif
-      PES_LOOSE_CPK_FULL, loose_error, sizeof(loose_error));
-  if (loose_enabled < 0) fatal_error("%s", loose_error);
   debugPrintf("loose-cpk: mode=%s\n",
               loose_enabled == 2 ? "fast-validated full loose package (24 CPKs)" :
               loose_enabled == 1 ? "fast-validated loose canary (dt200/dt241)" :
                                    "original OBB");
+  /* Both adapters must pass every ABI check before the first patch. A
+   * rejected canary retains the ordinary native result and prop factories. */
+  if (fixdemo_trophy_canary_validated) {
+    const int props_ready = fixdemo_trophy_props_prepare(module);
+    const int ending_ready = props_ready && fixdemo_trophy_result_prepare(module);
+    if (props_ready && ending_ready) {
+      fixdemo_trophy_props_commit();
+      fixdemo_trophy_result_commit();
+      fixdemo_trophy_status("enabled: final-only trophy canary");
+    } else {
+      fixdemo_trophy_canary_validated = 0;
+      fixdemo_trophy_status(props_ready ?
+          "disabled: ending ABI preflight; no trophy patches installed" :
+          "disabled: prop ABI preflight; no trophy patches installed");
+    }
+  }
   sound_cri_bind_cpk_original =
       (void *)so_find_addr_rx(module, "criFsBinder_BindCpk");
 #ifndef DEBUG_LOG

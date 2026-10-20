@@ -89,6 +89,10 @@ CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) $
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DNDEBUG \
 			-DPES_NX_VERSION=\"$(APP_VERSION)\"
 
+ifneq ($(strip $(LINK_BUILD_ID)),)
+CFLAGS	+=	-DPESNX_BUILD_ID=\"$(LINK_BUILD_ID)\"
+endif
+
 ifeq ($(DIAGNOSTICS),1)
 CFLAGS	+=	-UNDEBUG -DDEBUG_LOG=1
 endif

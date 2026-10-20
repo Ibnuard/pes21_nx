@@ -13,6 +13,12 @@ enum {
   FIXDEMO_CEREMONY_TROPHY_SCENE = 0x70007u
 };
 
+enum {
+  FIXDEMO_CEREMONY_BOUNDARY_RESULT = 0u,
+  FIXDEMO_CEREMONY_BOUNDARY_ENDING_FACTORY = 1u,
+  FIXDEMO_CEREMONY_BOUNDARY_LISTENER_RESULT = 2u
+};
+
 /* All native_*_team fields below contain logical catalog IDs in native
  * HOME/AWAY order, never raw physical native IDs (physical_team_id << 14).
  * The integration must verify the observed native IDs against the established
@@ -36,7 +42,7 @@ typedef struct {
   uint32_t original_scene;
   uint32_t original_side;
   /* Exactly 1 after reading phase, teams and match goals together at the
-   * result-factory boundary. Cached pause/result totals are never a source. */
+   * result/ending-factory boundary. Cached pause/result totals are never a source. */
   uint32_t fresh;
   /* Exactly 1 only for the exact audited caller identity. The integration
    * boundary must validate the caller; this pure policy has no native PCs. */
@@ -48,6 +54,11 @@ typedef struct {
   uint32_t shootout_only;
   int32_t home_shootout;
   int32_t away_shootout;
+  /* Distinct audited factories; the original Result gate remains unchanged.
+   * ENDING_FACTORY additionally requires the requested scene/side to match
+   * this invocation's native MatchInfo ending request under a fresh read. */
+  uint32_t boundary;
+  uint32_t native_request_verified;
 } FixdemoCeremonySnapshot;
 
 typedef struct {
@@ -80,6 +91,30 @@ static inline int fixdemo_ceremony_score_valid(int32_t score) {
   return score >= 0 && score <= 99;
 }
 
+static inline int fixdemo_ceremony_boundary_valid(
+    const FixdemoCeremonySnapshot *snapshot) {
+  if (snapshot->boundary == FIXDEMO_CEREMONY_BOUNDARY_RESULT)
+    return snapshot->original_scene == FIXDEMO_CEREMONY_RESULT_SCENE &&
+           snapshot->original_side == FIXDEMO_CEREMONY_NEUTRAL_SIDE;
+  /* MatchHalfTimeDemo also owns the full-time result background. Its audited
+   * factory passes MatchInfo.result-side, which must be freshly verified.
+   * END phase and live Cup-final evidence below still exclude halftime. */
+  if (snapshot->boundary == FIXDEMO_CEREMONY_BOUNDARY_LISTENER_RESULT)
+    return snapshot->native_request_verified == 1u &&
+           snapshot->original_scene == FIXDEMO_CEREMONY_RESULT_SCENE &&
+           snapshot->original_side <= FIXDEMO_CEREMONY_NEUTRAL_SIDE;
+  if (snapshot->boundary != FIXDEMO_CEREMONY_BOUNDARY_ENDING_FACTORY ||
+      snapshot->native_request_verified != 1u ||
+      snapshot->original_side > FIXDEMO_CEREMONY_NEUTRAL_SIDE)
+    return 0;
+  /* Native GetFullTimeDemo/GetPkEndDemo select ending scenes in these two
+   * groups. Group membership alone never establishes the ending boundary:
+   * exact caller, current request, END phase and live final are also required. */
+  const uint32_t group = snapshot->original_scene >> 16;
+  return (group == 6u || group == 7u) &&
+         (snapshot->original_scene & 0xffffu) != 0u;
+}
+
 /* Pure gate: reads caller-owned evidence and produces a plan, with no native
  * calls, scene creation, latch consumption or competition/save writes. The
  * caller must serialize planning, backend execution and success acknowledgement.
@@ -96,8 +131,7 @@ static inline int fixdemo_ceremony_plan(
       context->native_home_team == context->native_away_team ||
       snapshot->fresh != 1u || snapshot->caller_verified != 1u ||
       snapshot->phase != FIXDEMO_CEREMONY_PHASE_END ||
-      snapshot->original_scene != FIXDEMO_CEREMONY_RESULT_SCENE ||
-      snapshot->original_side != FIXDEMO_CEREMONY_NEUTRAL_SIDE ||
+      !fixdemo_ceremony_boundary_valid(snapshot) ||
       snapshot->match_token != context->match_token ||
       snapshot->native_home_team != context->native_home_team ||
       snapshot->native_away_team != context->native_away_team ||

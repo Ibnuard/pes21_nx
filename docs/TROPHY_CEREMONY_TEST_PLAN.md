@@ -2,14 +2,22 @@
 
 ## Status on 2026-10-18
 
-The user reports that the **current entrance/intro works**. Retain that runtime
-as the baseline. This does not identify or approve the separate FL26 walkout
-candidate from 2026-10-15. The accepted v48 rendering NRO is also a baseline,
-not a trophy-enabled NRO.
+The asset-only snapshot below is retained as audit history. The v49 device
+test exposed an entrance composition regression and an unused normal-final
+boundary; the current correction is documented in
+[Trophy runtime v50](TROPHY_RUNTIME_V50.md). Neither offline asset checks nor
+native ABI tests establish successful hardware playback.
+
+The user clarified that the working intro contains **players walking in and
+lining up**, not just the native stadium preview. Preserve the walkout assets
+when composing a trophy package. The accepted v48 rendering NRO is a separate
+baseline, not a trophy-enabled NRO or evidence of an installed CPK identity.
+
+## Historical asset-only audit
 
 The ceremony work has working asset preparation, rigid-prop cooking, native
 compatibility probes, a read-only live Cup-final query and a pure result policy.
-**There is still no playable trophy update.** The prop backend is probe-only;
+**At this audit checkpoint there was no playable trophy update.** The prop backend was probe-only;
 the runtime does not include it or redirect the result factory. Finishing a
 Cup with the current NRO is not a test of the new trophy assets.
 

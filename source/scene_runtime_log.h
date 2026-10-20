@@ -46,19 +46,20 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v48 session\n",file);
+    fputs("FootballNX scene v52 session\n",file);
     fputs("compat hotpaths v44: release clock/TLS trace atomics removed\n",file);
     fputs("compat hotpaths v45: cached native thread IDs; single-pass buffer free lists; native prematch reveal\n",file);
     fputs("compat hotpaths v46: context-local separate blend suppression; diagnostic savings counts\n",file);
     fputs("render stability v47: private overlay vertex state; High uses Standard players\n",file);
     fputs("render audit v48: no compositor pixel probes/error drains in ordinary or pacing builds; native stadium inventory\n",file);
+    fputs("render cache v51: core/OES program-binary loads invalidate wrapper uniform locations and values\n",file);
 #if PESNX_STADIUM_V2_ENABLED
     fputs("camera policy: STADIUM-V2 screen margin hold v1; smooth native zoom; no ball-centre lock\n",file);
 #else
     fputs("camera policy: STADIUM-V2 suspended; native STADIUM retained\n",file);
 #endif
 #if !PESNX_ENTRANCE_CANARY_ENABLED
-    fputs("entrance canary hooks: suspended; restore paired baseline dt220/manifest to remove candidate assets\n",file);
+    fputs("entrance trace: disabled; native lifecycle retained; installed CPK selects the intro\n",file);
 #endif
 #ifdef NEAR_CAMERA_TRACE
     fputs("near-camera trace v43: CPU/GPU spans; corrected mesh snapshots; core/EXT/OES buffer outcomes; deferred until non-play\n",file);

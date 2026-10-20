@@ -1,10 +1,9 @@
-/* Isolated candidate for the native DemoObject route; NOT a runtime feature.
+/* Native DemoObject adapter shared by bounded probes and the opt-in canary.
  *
- * Only probe translation units may opt into this implementation. The wrapper
- * does not include it, and the production preflight activation gate stays OFF.
- * No hooks, UObjects, renderer queues or per-frame transforms are installed.
- * A future integration still needs cooked-asset, thread/lifetime and hardware
- * validation in addition to the static ABI and bounded probes in the tests.
+ * This adapter does not install hooks. The runtime must separately validate
+ * its exact package and ABI and own the native serialized queue lifetime.
+ * Mesh completion is supplied by fixdemo_trophy_props.inc, never by Init's
+ * return value. Production without the strict canary package stays unchanged.
  *
  * Mobile A279...D187 evidence: FixDemoObject::CreateObject 0x7b8d8f8;
  * draw::DemoObject ctor 0x7e225c4, Init 0x7e22664, D0 0x7e22624.
@@ -16,7 +15,8 @@
 
 #include "fixdemo_prop_bridge.inc"
 
-#if defined(PESNX_FIXDEMO_PROP_BACKEND_PROBE) && PESNX_FIXDEMO_PROP_BACKEND_PROBE == 1
+#if (defined(PESNX_FIXDEMO_PROP_BACKEND_PROBE) && PESNX_FIXDEMO_PROP_BACKEND_PROBE == 1) || \
+    (defined(PESNX_FIXDEMO_PROP_BACKEND_RUNTIME) && PESNX_FIXDEMO_PROP_BACKEND_RUNTIME == 1)
 
 enum {
   FIXDEMO_PROP_OWNER_MIN_BYTES = 296,
@@ -156,5 +156,5 @@ static inline enum FixDemoPropBackendResult fixdemo_prop_backend_candidate(
   return result;
 }
 
-#endif /* isolated backend probe only */
+#endif /* explicit probe or package-gated runtime adapter */
 #endif

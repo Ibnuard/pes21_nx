@@ -22,7 +22,7 @@ int main(void) { scene_runtime_begin(); scene_runtime_note("test","boot complete
     subprocess.run([cc, str(source), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], cwd=tmp_path, check=True)
     current, previous = tmp_path / 'scene-runtime.log', tmp_path / 'scene-runtime.previous.log'
-    assert current.read_bytes().startswith(b'FootballNX scene v48 session')
+    assert current.read_bytes().startswith(b'FootballNX scene v52 session')
     assert not previous.exists()
     cold = b'cold start: geometry missing\n'
     current.write_bytes(cold)

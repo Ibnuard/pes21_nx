@@ -11,6 +11,15 @@ not trophy acceptance. The reproducible asset recheck, remaining integration
 gates and shortest device test sequence are maintained in
 [Trophy ceremony test plan](TROPHY_CEREMONY_TEST_PLAN.md).
 
+Runtime follow-up: the [v49 trophy canary](TROPHY_RUNTIME_V49.md) passed startup
+checks on Switch but replaced the working walkout with the stock intro and
+missed the native normal-time ending factory. The combined archive and actual
+full-time boundary are corrected in the [v50 test package](TROPHY_RUNTIME_V50.md).
+The package is verified locally; Switch playback acceptance is still pending.
+The sections below retain the earlier asset and integration audit history.
+The earlier inactive/probe-only descriptions below record the asset audit
+boundary. Hardware ceremony acceptance is still pending.
+
 ## Implemented
 
 - `tools/fixdemo_scene_table.py`: strict parser/writer for native scene, cut and
