@@ -14,9 +14,16 @@ superseded proofs. The completed main render produced 2,527 image instances
 (907 front plus 405 four-view sets); repeated fronts do not increase the
 unique inspection count. These are partial inspections, with unresolved
 material/card concerns and additional flagged heads outside the main plan.
+The subsequent flagged review has also finished: **419 heads in four views**
+(405 main plus 14 additional heads), **2,164 unique current images** including
+all 907 fronts. All 93 original flagged heads and all 87 queued source/prepared
+comparisons were actually viewed. Ten observations were manually resolved after
+four-view, identity, geometry/cook and mip checks: seven short/swept-hair or
+eye-only observations and three exact user-pinned accepted heads. **83 visual
+detail / 77 source-comparison flags remain open**. This is not final acceptance.
 The actual inspection count is recorded separately in
 `VISUAL-REVIEW-PROGRESS.json`; it must not be inferred from generated previews.
-Flagged detail/source review and PAK/ZIP packaging remain pending. Preparation, cooked validation,
+Remaining material decisions/repairs and PAK/ZIP packaging remain pending. Preparation, cooked validation,
 generated previews and visual inspection are separate counts. Do not claim
 full roster coverage, visual acceptance or 60 FPS.
 
@@ -241,6 +248,10 @@ source/prepared key, renderer/adapter and PNG/sidecar hashes. Lookup finds all
 twelve exact owners in each separate stage. The local receipt is
 `texture-diagnostic/REFERENCE-CACHE-LIVE-INTEGRATION.json`; it is diagnostic
 cache evidence, not cooked acceptance or proof of a subsequent regrouped copy.
+The later regroup integration verified 22 moved PNG/sidecar pairs byte for
+byte; the two late owners needed only four new reference render requests.
+Of 174 reference images, 170 were reused. The receipt is
+`texture-diagnostic/REFERENCE-CACHE-REGROUP-INTEGRATION.json`.
 The public-tree audit after this cache addition passed 1,189 files:
 `D:/PESNX-Cache/Logs/realface-v55-reference-cache-public-tree.log`.
 
@@ -325,6 +336,68 @@ and runs the isolated Huijsen experiment serially under the shared lock.
 It cannot promote the experiment or grant visual acceptance. Inspect both
 queue receipts before starting manual render/canary work; a failed dependency
 or changed hash stops this continuation instead of silently retrying it.
+
+Both queued continuations subsequently completed. The UV1-only Huijsen trial
+passed independent cooking at 4,978 triangles but was rejected after four-view
+inspection because crown patchwork and gaps became worse. A separate
+own-secondary-diffuse/UV1 trial (4,979 triangles) improves the gray crown color,
+but prominent plates remain; it is held and has not been promoted. These are
+different keyed recipes, not retries of the rejected UV1-only input.
+
+Rioja's fractional-alpha reference visibly softens beard plates. A separate
+native-masked 256px cook retains some finer fibers but leaves the large plates;
+hair mip storage rises from 21,852 to 87,388 bytes, so this resolution-only
+repair was rejected. A fixed-size alpha-1.5 experiment preserves RGB,
+dimensions, mesh/rig/material payloads and the current mip gate, and looks
+smoother in four views. It remains experimental: an additional hair-only render
+comparison loses 35.5-49.4% of hair-layer pixels. That measure is not the existing
+3D geometric projection gate; it does require a reasoned coverage reference
+before accepting a smoother underlying painted scalp as preserved hair.
+Stronger alpha exponents 2/3 already fail the unchanged mip gate.
+
+The full 907-head cooked-hair mip audit is pointed to by
+`texture-diagnostic/HAIR-MIP-AUDIT-LATEST.json`: 765 are visible/intentionally
+empty, 112 need the existing permitted tiny-mip protection, and **30 are held**
+for visibility outside that policy. None of those 30 belongs to the accepted
+50. These are separate packaging gates, not unavailable-player or identity
+findings, and do not establish observed device behavior. A two-owner native UE
+alpha-coverage-threshold cook for Cairns/Rioja keeps RGB and dimensions exact
+but fails the existing mip gate on both; that recipe is rejected. No mip guard,
+source asset, shared importer/renderer, accepted payload or active runtime was
+changed to turn a failed trial into a pass.
+
+An own-authored-normal audit for Rioja, Reece James and Huijsen is in
+`texture-diagnostic/AUTHORED-HAIR-NORMAL-AUDIT.json`. Some source transfer
+materials have normals departing substantially from the geometric card plane.
+The initial FBX conversion currently rebuilds custom normals; the later hair
+normal transfer can only project those already-converted directions. This is
+a separate shading hypothesis, not a demonstrated repair. The first isolated
+Reece James trial retains the original glTF hair-normal attribute and passes
+cooking at 4,820 triangles, but actual inspection finds dark facets and broken
+beard lighting; that naive preservation recipe is rejected.
+
+The source exporter compensates bind positions and includes reflections. A
+second isolated recipe transforms authored corner normals by the inverse
+transpose of that same per-vertex position map, checks reconstruction, and
+retains polygon/vertex association when reversing winding. It keeps the same
+geometry/UV/rig/texture inputs and uses the existing bounded preparation, cook
+and validation path. It passed at 4,820 triangles and all four actual views
+were inspected. Hair cooked vertices increased from 3,384 to 3,386, with the
+same face. Broad gray hair/beard plates remain; this trial is held without
+promotion or a performance claim. The public exporter/renderer is unchanged. Do not disable normal
+repair, face winding, bind compensation or any quality gate globally.
+
+A subsequent isolated Reece diagnostic bakes his explicitly referenced
+secondary albedo from UV1 into the primary UV0 atlas, averaging overlapping
+RGB samples in linear light. Every existing alpha mip, geometry, UV, normal,
+material, texture dimension and payload size remains exact. Independent payload
+roundtrip and the unchanged mip gate pass. All four actual views were inspected:
+gray plates become dark source-colored hair, but the broad beard cards remain
+an open concern. This is a scoped approximation, not a PC shader reconstruction
+or final acceptance. Its all-atlas mapping fraction also includes unused source
+texels and must not be called surface-coverage proof. Further trials may only
+use each owner's documented material/UV/texture correspondence and immutable
+alpha; no arbitrary tint, donor, global UV change or extra runtime sampler.
 
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
