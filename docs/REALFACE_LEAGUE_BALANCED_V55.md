@@ -8,14 +8,15 @@ Read `local-debug/realface-leagues-balanced-v55/RUN-STATUS.json` and the live
 log for current counts. The selected source cohort is **907** (original 897
 plus ten documented aliases). **All 907 passed preparation and independent
 cooked validation**, including all ten source additions.
-All 907 fronts have now been actually inspected. Four-view inspection has
-reached the first 264 critical heads; generation continues toward 405.
-The ledger records 252 of these at this checkpoint; one actually inspected
-sheet remains in the local backlog for a later batched record operation.
-These are partial inspections, with unresolved material/card concerns.
+All 907 fronts and all 405 main critical heads in four views have now been
+actually inspected and recorded: **2,122 unique current images**, with zero
+superseded proofs. The completed main render produced 2,527 image instances
+(907 front plus 405 four-view sets); repeated fronts do not increase the
+unique inspection count. These are partial inspections, with unresolved
+material/card concerns and additional flagged heads outside the main plan.
 The actual inspection count is recorded separately in
 `VISUAL-REVIEW-PROGRESS.json`; it must not be inferred from generated previews.
-Complete front/detail review and PAK/ZIP packaging remain pending. Preparation, cooked validation,
+Flagged detail/source review and PAK/ZIP packaging remain pending. Preparation, cooked validation,
 generated previews and visual inspection are separate counts. Do not claim
 full roster coverage, visual acceptance or 60 FPS.
 
@@ -46,7 +47,8 @@ A later preview child may own the status PID. Inspect actual ownership and
 per-batch logs before restarting. Cold UE startup has taken several minutes
 here; inactivity alone during startup does not prove conversion failure.
 Earlier cooks reported very slow access to the D: Unreal derived-data cache;
-all cooked validation is now complete. The active phase renders previews.
+all cooked validation is now complete. The main preview phase completed at
+04:38 Jakarta; the serial follow-up then began source/prepared comparisons.
 
 `RENDER-FOLLOWUP-LATEST.json` now pins a hidden render-only continuation
 waiting for the exact main process to exit. It checks successful
@@ -233,7 +235,12 @@ Unsealed old diagnostics are not silently trusted. This avoids repeating valid
 reference renders when additional flagged heads change the twelve-head groups.
 The focused reference/review/preview/worker suite passed 40 tests in 6.51 seconds;
 receipt: `D:/PESNX-Cache/Logs/realface-v55-reference-regroup-cache-tests.log`.
-Live reference-cache integration still awaits the queued render stage.
+Live reference-cache integration now verifies the first completed twelve-owner
+source and prepared batches against current config, native ID/fingerprint,
+source/prepared key, renderer/adapter and PNG/sidecar hashes. Lookup finds all
+twelve exact owners in each separate stage. The local receipt is
+`texture-diagnostic/REFERENCE-CACHE-LIVE-INTEGRATION.json`; it is diagnostic
+cache evidence, not cooked acceptance or proof of a subsequent regrouped copy.
 The public-tree audit after this cache addition passed 1,189 files:
 `D:/PESNX-Cache/Logs/realface-v55-reference-cache-public-tree.log`.
 
@@ -289,8 +296,35 @@ The later cached raw-material grouping covers the first 74 flagged owners
 helpers. Its immutable report is
 `texture-diagnostic/material-groups/125143f40a7ed911/AUDIT.json`; subsequent
 expanded metadata scopes are pointed to by `MATERIAL-GROUPS-LATEST.json`.
+The current expanded scope covers **93 owners / 191 raw FMDLs**: 60 owners
+have hair with distinct UV sets and 90 have PC eye-occlusion helpers. Every
+selected owner has its own direct raw folder; none was replaced with a donor.
 All source identities and file hashes are checked. This is metadata evidence,
 not a PC shader reconstruction, a UV repair selection, or visual acceptance.
+
+An additional read-only eight-owner UV/color sample audit is pointed to by
+`texture-diagnostic/SELECTED-HAIR-UVS-LATEST.json`. Several primary UV0 hair
+samples are nearly constant gray, while the same owner's secondary map and UV1
+contain different colors. This suggests a material approximation worth testing;
+it does not determine the PC blend equation or authorize a global UV/color fix.
+Huijsen 159586 has a separate, unapproved mesh-0 UV1 canary plan in
+`texture-diagnostic/huijsen-uv-canary/06ac906c9075045d/`: geometry, normals,
+weights, topology, skeleton bind and atlas pixels match his dense source;
+only the selected mesh UV mapping differs. The shared-lock check refused an
+export while the reference renderer was active. Export, preparation, independent
+cook and four-view inspection must succeed before considering promotion.
+The experiment uses a short local output root to avoid the previously observed
+UModel path-length failure. No league assets, accepted Barca-MU result or v54
+payload was changed by planning it.
+
+`MATERIAL-FOLLOWUP-LATEST.json` pins a second hidden continuation to the exact
+first queue process and its creation time. It waits for successful
+`awaiting_inspection` and no surviving related worker, checks pinned inputs,
+then fills the two late source comparisons through the sealed reference cache
+and runs the isolated Huijsen experiment serially under the shared lock.
+It cannot promote the experiment or grant visual acceptance. Inspect both
+queue receipts before starting manual render/canary work; a failed dependency
+or changed hash stops this continuation instead of silently retrying it.
 
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
