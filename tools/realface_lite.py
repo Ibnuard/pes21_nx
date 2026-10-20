@@ -40,7 +40,10 @@ def sources(config):
                                  fingerprint=p['fingerprint'], status=p['status'], canonical_name=p['name'])
                              for p in state['identities'].values() if p.get('status')=='active'])
     coverage = {p['base_id']: p for p in read(config['source_verification'])['players']
-                if p['status'] in ('candidate_pending_device', 'preserved_verified')}
+                if p['status'] in ('candidate_pending_device', 'preserved_verified') or
+                (p['status']=='source_ready_verified' and
+                 p.get('source_identity_evidence',{}).get('policy')=='explicit_alias_base_fingerprint_v1' and
+                 p['source_identity_evidence'].get('canonical_fingerprint')==p['fingerprint'])}
     if len(rows) != len(coverage) or len({p['base_id'] for p in rows}) != len(rows):
         raise ValueError('Source profiles must cover each accepted identity exactly once')
     for row in rows:

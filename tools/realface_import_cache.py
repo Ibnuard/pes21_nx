@@ -8,7 +8,7 @@ from realface_pipeline import sha
 
 
 def importer_key(config):
-    files=[HERE/'ue_prepare_realface.py',Path(config['ue_editor'])]
+    files=[HERE/'ue_prepare_realface.py',HERE/'realface_material_slots.py',Path(config['ue_editor'])]
     template=Path(config['ue_template'])
     for sub in ('Content/Assets/character/BaseAssets','Config'):
         files.extend(p for p in sorted((template/sub).rglob('*')) if p.is_file())

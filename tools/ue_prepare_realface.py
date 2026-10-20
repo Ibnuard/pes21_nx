@@ -8,11 +8,16 @@ Compatible with the editor's bundled Python.
 """
 import json
 import os
+import sys
 import unreal
+
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+from realface_material_slots import invisible_hair_aliases
 
 with open(os.environ['PESNX_REALFACE_IMPORT_PROFILE'],'r') as stream:
     profile=json.load(stream)
 player=str(int(profile['native_player_id']))
+hair_aliases=invisible_hair_aliases(profile)
 destination='/Game/Assets/character/RealFace'
 base='/Game/Assets/character/BaseAssets'
 skeleton=unreal.load_asset(base+'/test_body_Skeleton')
@@ -95,9 +100,10 @@ for part in ('face','hair'):
     assigned={}
     for slot in slots:
         original=str(slot.get_editor_property('imported_material_slot_name'))
-        if part=='hair' and original in profile.get('hair_skin_materials',[]):
+        classified=hair_aliases.get(original,original) if part=='hair' else original
+        if part=='hair' and classified in profile.get('hair_skin_materials',[]):
             material=skin
-        elif part=='hair' and original in profile['hair_materials']:
+        elif part=='hair' and classified in profile['hair_materials']:
             material=hair_material
         elif part=='face' and original==profile['eye_material']:
             material=eye

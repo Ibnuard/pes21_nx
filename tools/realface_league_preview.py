@@ -4,19 +4,36 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 from cooked_texture import Texture
-from realface_batch import command,valid_cache,valid_prepared_cache
+from realface_batch import command,valid_cache,valid_prepared_cache,key_of
 from realface_batch_inventory import read,write
 from realface_pipeline import sha
+from realface_material_slots import invisible_hair_aliases
 
 HERE=Path(__file__).resolve().parent
 VIEWS={'front':(0,90,0),'left':(-70,70,12),'right':(70,70,12),'above':(0,75,55)}
 
 
-def preview(config,stage='cooked',selected=None,limit=48,views=('front',),output=None):
+def preview_profile(profile):
+    aliases=invisible_hair_aliases(profile)
+    if not aliases:
+        return None
+    # The immutable FBX/profile retain their authored names. Only the preview
+    # adapter recognizes the same proven aliases as import/validation.
+    return dict(profile,hair_materials=profile['hair_materials']+sorted(aliases))
+
+
+def preview(config,stage='cooked',selected=None,limit=48,views=('front',),output=None,render_worker=None):
+    if stage not in ('source','prepared','cooked'):
+        raise ValueError('Unknown preview evidence stage')
     if not views or len(set(views))!=len(views) or any(v not in VIEWS for v in views):
         raise ValueError('Select distinct supported review views')
     work=Path(config['work_dir']);report=work/('verify-report.json' if stage=='cooked' else 'prepare-report.json')
-    rows=[r for r in read(report) if r['status'] in ('prepared','prepared_cached','validated','validated_cached')]
+    if stage=='source':
+        from realface_lite import sources
+        rows=[dict(r,folder=str(Path(r['profile']).parent),budgets={},
+                   cache_key=key_of(r['input_hashes'])) for r in sources(config)]
+    else:
+        rows=[r for r in read(report) if r['status'] in ('prepared','prepared_cached','validated','validated_cached')]
     rows=[r for r in rows if not selected or r['base_id'] in selected]
     if not selected:
         # Spread deterministic samples over the full identity range; always
@@ -29,8 +46,17 @@ def preview(config,stage='cooked',selected=None,limit=48,views=('front',),output
     output.mkdir(parents=True,exist_ok=True);targets=[];pending_proofs=[]
     for row in rows:
         prepared=Path(row['folder']);native=str(row['native_player_id']);base=str(row['base_id'])
-        if not valid_prepared_cache(prepared,row['cache_key']):raise ValueError('Prepared preview cache changed')
+        if stage=='source':
+            if any(sha(path)!=digest for path,digest in row['input_hashes'].items()):
+                raise ValueError('Original source preview inputs changed')
+        elif not valid_prepared_cache(prepared,row['cache_key']):raise ValueError('Prepared preview cache changed')
         recipe=dict(folder=row['folder'],native_rig=config['native_rig'],cooked_rig=config['cooked_rig'])
+        profile=read(row['profile'] if stage=='source' else prepared/'ue-profile.json')
+        adapted=preview_profile(profile)
+        if stage=='source':
+            recipe['ue']=profile
+        if adapted:
+            recipe['ue']=adapted
         if stage=='cooked':
             cooked=Path(row['cooked_folder'])
             if not valid_cache(cooked,row['cooked_cache_key']):raise ValueError('Cooked preview cache changed')
@@ -51,8 +77,11 @@ def preview(config,stage='cooked',selected=None,limit=48,views=('front',),output
                 pending_proofs.append((proof,provenance,image))
     write(output/'targets.json',targets)
     if targets:
-        command([config['blender'],'--background','--threads','2','--python-exit-code','1',
-                 '--python',HERE/'blender_preview_realface.py','--',output/'targets.json'],output/'render.log')
+        if render_worker is None:
+            command([config['blender'],'--background','--threads','2','--python-exit-code','1',
+                     '--python',HERE/'blender_preview_realface.py','--',output/'targets.json'],output/'render.log')
+        else:
+            render_worker(output/'targets.json',output/'render.log')
         # A failed/interrupted render must never bless an older PNG with a new
         # prepared key. Only record provenance after successful rendering.
         for proof,provenance,image in pending_proofs:
@@ -62,7 +91,8 @@ def preview(config,stage='cooked',selected=None,limit=48,views=('front',),output
     columns=max(1,8//len(views));page_size=columns*6;cell_width=150*len(views)
     for start in range(0,len(rows),page_size):
         page=rows[start:start+page_size];sheet=Image.new('RGB',(1200,((len(page)+columns-1)//columns)*202+40),'#182031')
-        label='PREPARED MESH + COOKED TEXTURES' if stage=='cooked' else 'PREPARED MESH'
+        label={'cooked':'PREPARED MESH + COOKED TEXTURES','prepared':'PREPARED MESH',
+               'source':'DENSE CONVERTED SOURCE — UNREDUCED, NOT A PC SHADER' }[stage]
         draw=ImageDraw.Draw(sheet);draw.text((12,10),label+' — offline, not a device capture',font=font,fill='white')
         for i,row in enumerate(page):
             x=(i%columns)*cell_width;y=40+(i//columns)*202
@@ -72,14 +102,14 @@ def preview(config,stage='cooked',selected=None,limit=48,views=('front',),output
             draw.text((x+3,y+167),row['name'][:max(21,len(views)*21)],font=font,fill='white')
             draw.text((x+3,y+182),str(row['base_id']),font=font,fill='#8CD5F7')
         path=output/('sheet-%02d.png'%(start//page_size+1));sheet.save(path);sheets.append(str(path))
-    write(output/'PROVENANCE.json',dict(stage=stage,mesh='prepared_fbx',texture_stage=stage,views=views,
+    write(output/'PROVENANCE.json',dict(stage=stage,mesh='source_fbx' if stage=='source' else 'prepared_fbx',texture_stage=stage,views=views,
         hardware_capture=False,players=[dict(base_id=r['base_id'],name=r['name']) for r in rows],sheets=sheets))
     print(dict(previews=str(output),players=len(rows),sheets=sheets),flush=True)
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--config',required=True)
-    parser.add_argument('--stage',choices=('prepared','cooked'),default='cooked')
+    parser.add_argument('--stage',choices=('source','prepared','cooked'),default='cooked')
     parser.add_argument('--output',type=Path,help='Separate review folder, for example for a full-cohort sheet')
     parser.add_argument('--player',action='append',type=int,default=[]);parser.add_argument('--limit',type=int,default=48)
     parser.add_argument('--views',nargs='+',choices=tuple(VIEWS),default=['front'])

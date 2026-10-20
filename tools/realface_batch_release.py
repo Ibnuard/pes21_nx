@@ -24,6 +24,7 @@ def engine_key(config):
               'realface_cook_policy.py', 'blender_fit_realface.py', 'realface_batch_release.py',
               'blender_realface_validate_worker.py', 'realface_validation_process.py',
               'realface_import_cache.py', 'realface_neck_support.py',
+              'realface_material_slots.py',
               'realface_triangle_audit.py', 'realface_vertex_audit.py')}
     for name in ('ue_editor', 'uassetgui', 'umodel'):
         files[config[name]] = sha(config[name])
@@ -219,7 +220,9 @@ def verify_one(config, row, validator=None):
                 source_map[profile['eye_material']] = 'eye'
                 cooked_map['eye_native_' + native] = 'eye'
             elif part == 'hair':
+                from realface_material_slots import invisible_hair_aliases
                 source_map.update({n.replace('_00', '.00'): 'hair' for n in profile['hair_materials']})
+                source_map.update({n: 'hair' for n in invisible_hair_aliases(profile)})
                 if profile['hair_materials']: cooked_map['hair_parts_tablet_ss'] = 'hair'
             parts[part] = dict(fbx=str(fbx), cooked_mesh_json=str(doc),
                                gltf=str(work / ('gltf/Assets/character/RealFace/' + native + '_' + part + '.gltf')),
