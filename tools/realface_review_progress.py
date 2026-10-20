@@ -203,6 +203,8 @@ def render_comparisons(config, selected=()):
     from realface_lite import sources
     from realface_preview_cache import index_views
     from realface_preview_process import PreviewProcess
+    from realface_reference_preview_cache import (header, owners, index_references,
+                                                  seed_references, seal_references)
     work = Path(config['work_dir']).resolve()
     with exclusive(work):
         work, rows, progress = context(config)
@@ -220,6 +222,14 @@ def render_comparisons(config, selected=()):
         if any((base, 'front') not in cooked_views for base in pending):
             raise ValueError('Current cooked front preview required for comparison')
         references = [image_proof(work, rows, cooked_views[(b, 'front')], b, 'front') for b in pending]
+        renderer = sha(HERE/'blender_preview_realface.py')
+        preview_tool = sha(HERE/'realface_league_preview.py')
+        all_owners = {stage: owners(stage, [rows[b] for b in pending], catalogue)
+                      for stage in ('source', 'prepared')}
+        headers = {stage: header(config, stage, renderer, preview_tool) for stage in all_owners}
+        reference_root = work/'texture-diagnostic/flagged-comparisons'
+        caches = {stage: index_references(reference_root, headers[stage], all_owners[stage])
+                  for stage in all_owners}
         results = []
         with PreviewProcess(config['blender']) as worker:
             for start in range(0, len(pending), 12):
@@ -231,8 +241,11 @@ def render_comparisons(config, selected=()):
                     preview_tool=sha(HERE/'realface_league_preview.py')))[:16]
                 output = work/'texture-diagnostic/flagged-comparisons'/key
                 for stage in ('source', 'prepared'):
+                    selected_owners = {base: all_owners[stage][base] for base in chunk}
+                    seed_references(output/stage, selected_owners, caches[stage])
                     preview(config, stage=stage, selected=set(chunk), limit=len(chunk),
                             views=('front',), output=output/stage, render_worker=worker)
+                    seal_references(output/stage, headers[stage], selected_owners)
                     results.append(dict(base_ids=chunk, stage=stage,
                         sheets=read(output/stage/'PROVENANCE.json')['sheets']))
         receipt = dict(comparisons=results, current_cooked_fronts=references, inspected_automatically=False,

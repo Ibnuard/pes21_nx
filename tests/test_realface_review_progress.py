@@ -159,7 +159,16 @@ def test_comparison_batches_are_serial_and_do_not_mark_inspection(tmp_path, monk
     def render(_, stage, selected, limit, views, output, render_worker):
         calls.append((stage, selected, render_worker))
         assert limit <= 12 and views == ('front',)
-        write(output/'PROVENANCE.json', dict(sheets=[str(output/'sheet-01.png')]))
+        for base in selected:
+            image = output/(str(base)+'-front.png'); image.parent.mkdir(parents=True, exist_ok=True)
+            image.write_bytes(b'diagnostic reference fixture')
+            from realface_batch import key_of
+            write(image.with_suffix('.json'), dict(
+                prepared_key=key_of({'own-source': str(base)}) if stage == 'source' else 'prepared-'+str(base),
+                cooked_key=None, renderer_sha256=sha(review.HERE/'blender_preview_realface.py'),
+                view='front', image_sha256=sha(image)))
+        write(output/'PROVENANCE.json', dict(stage=stage, players=[dict(base_id=b) for b in selected],
+            sheets=[str(output/'sheet-01.png')]))
     monkeypatch.setattr(realface_preview_process, 'PreviewProcess', Worker)
     monkeypatch.setattr(realface_league_preview, 'preview', render)
     result = review.render_comparisons(config, list(range(1, 26)))

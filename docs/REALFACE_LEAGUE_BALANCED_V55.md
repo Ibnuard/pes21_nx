@@ -9,7 +9,9 @@ log for current counts. The selected source cohort is **907** (original 897
 plus ten documented aliases). **All 907 passed preparation and independent
 cooked validation**, including all ten source additions.
 All 907 fronts have now been actually inspected. Four-view inspection has
-reached the first 204 critical heads; generation continues toward 405.
+reached the first 264 critical heads; generation continues toward 405.
+The ledger records 252 of these at this checkpoint; one actually inspected
+sheet remains in the local backlog for a later batched record operation.
 These are partial inspections, with unresolved material/card concerns.
 The actual inspection count is recorded separately in
 `VISUAL-REVIEW-PROGRESS.json`; it must not be inferred from generated previews.
@@ -222,6 +224,19 @@ pending flag or modify the source. Read the current IDs from the progress file.
 A cap-like shape alone does not prove lost hair:
 compare the player's own source before changing geometry or UVs.
 
+Source/prepared reference images now also have a conservative regrouping cache.
+`realface_reference_preview_cache.py` requires a completed reference receipt,
+exact stage, native ID/fingerprint, source/prepared key, config, renderer,
+preview adapter and PNG/sidecar hashes. It never reuses cooked evidence as a
+source reference, changes a render recipe, or records visual acceptance.
+Unsealed old diagnostics are not silently trusted. This avoids repeating valid
+reference renders when additional flagged heads change the twelve-head groups.
+The focused reference/review/preview/worker suite passed 40 tests in 6.51 seconds;
+receipt: `D:/PESNX-Cache/Logs/realface-v55-reference-regroup-cache-tests.log`.
+Live reference-cache integration still awaits the queued render stage.
+The public-tree audit after this cache addition passed 1,189 files:
+`D:/PESNX-Cache/Logs/realface-v55-reference-cache-public-tree.log`.
+
 The follow-up source/prepared comparisons for Ampadu, Semenyo and Mujaid Sadick have
 now been inspected in full-size fronts (six diagnostic images). Ampadu's
 angular clusters and Semenyo's broad under-chin cards already exist in the
@@ -268,6 +283,14 @@ conversion and do not reproduce the full PC eye shader. Matching wide eyes in
 two converted previews alone cannot verify original PC appearance or clear a
 flag. Multiple hair UV sets likewise do not authorize Cullen's UV switch for
 another player. No source, geometry, texture or budget policy changed in this audit.
+
+The later cached raw-material grouping covers the first 74 flagged owners
+(152 FMDLs): 47 have hair with distinct UV sets and 72 have PC eye-occlusion
+helpers. Its immutable report is
+`texture-diagnostic/material-groups/125143f40a7ed911/AUDIT.json`; subsequent
+expanded metadata scopes are pointed to by `MATERIAL-GROUPS-LATEST.json`.
+All source identities and file hashes are checked. This is metadata evidence,
+not a PC shader reconstruction, a UV repair selection, or visual acceptance.
 
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
