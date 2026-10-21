@@ -8,9 +8,8 @@ Read `local-debug/realface-leagues-balanced-v55/RUN-STATUS.json` and the live
 log for current counts. The selected source cohort is **907** (original 897
 plus ten documented aliases). **All 907 passed preparation and independent
 cooked validation**, including all ten source additions.
-All 907 fronts and all 405 main critical heads in four views have now been
-actually inspected and recorded: **2,122 unique current images**, with zero
-superseded proofs. The completed main render produced 2,527 image instances
+The main preview originally covered all 907 fronts and 405 critical heads in
+four views: **2,122 unique images**. The completed main render produced 2,527 image instances
 (907 front plus 405 four-view sets); repeated fronts do not increase the
 unique inspection count. These are partial inspections, with unresolved
 material/card concerns and additional flagged heads outside the main plan.
@@ -23,6 +22,8 @@ eye-only observations and three exact user-pinned accepted heads. **83 visual
 detail / 77 source-comparison flags remain open**. This is not final acceptance.
 The actual inspection count is recorded separately in
 `VISUAL-REVIEW-PROGRESS.json`; it must not be inferred from generated previews.
+Scoped repairs replace and supersede old image proofs; they do not add to the
+2,164 current unique count. The current ledger must have no stale proofs.
 Remaining material decisions/repairs and PAK/ZIP packaging remain pending. Preparation, cooked validation,
 generated previews and visual inspection are separate counts. Do not claim
 full roster coverage, visual acceptance or 60 FPS.
@@ -34,8 +35,9 @@ main/source/detail output was inspected and recorded. Do not treat the PIDs
 inside completed receipts as live owners or repeat 907 preparation/cook/preview
 jobs. Read `REVIEW-HANDOFF.json` and the latest material diagnostic receipt for
 current work; verify actual process ID, creation time, command and children
-before resuming any worker. No owned renderer or canary remains active at the
-08:20 Jakarta material checkpoint. The hourly continuation remains active.
+before resuming any worker. Latest eye-control work is recorded in
+`texture-diagnostic/FINAL-EYE-CONTROL-COOK-LATEST.json`; completed historical
+receipts are not live process ownership. The hourly continuation remains active.
 
 The preview shutdown regression was fixed before completion: waiting without
 draining piped stdout could block Blender teardown. The client now uses
@@ -103,6 +105,10 @@ parts. Do not call all 215 confirmed absent. The two explicit conflicts are
 Benoît Aimée/Nicolas Jackson (140870) and Bahoya (157602, conflicting foot
 metadata). No speculative donor or global identity-gate relaxation. Historical
 v40 also checked base Data CPKs without finding extra numeric face sources.
+The current audit has zero indexed face-folder members for each of the 213
+direct-source-absent IDs, rather than a partially missing texture. This proves
+absence under those direct IDs in the audited local archives; it does not
+establish a missing player's identity under some different numeric slot.
 Report unavailable, identity, geometry and visual holds separately.
 
 ## Geometry, repairs and cook gates
@@ -458,6 +464,62 @@ under `material-repairs/124855/` record the current publication/ledger state.
 Check the actual writer before any family trial; do not rebake a promoted head
 or rerun all 907 models. Four further audited neutral-eye owners are queued for
 serial prepared-only inspection before any cook is permitted.
+
+That four-owner continuation has now finished. Boyomo 140583 and Saliba 143015
+passed actual prepared inspection, independent cook/validation and all four
+full-size cooked-texture checks. Their scoped static-eye fixes were published
+serially and the two current four-view sets rebound in one ledger write.
+Together with Mujaid this replaces twelve old images; the current unique count
+remains 2,164. All three whole-head/hair concerns remain open. Static-shadow
+preparations for Nico 142261 and Lavia 147964 were held before cook because the
+bright lower-globe wedges persisted.
+
+A different prepared-only recipe measured apertures against those two final
+own skins, preserving non-eye position/UV/weight corner records at 1e-5 cm and
+1e-7 UV/weight precision. A pinned read-only replay measured custom-normal
+repacking at 0.0291 degrees; reconstruction is bounded to 0.05 degrees, with
+the independent cooked 2-degree normal gate unchanged. An initial wrapper
+incorrectly expected the helper to return its reports; it now reads the actual
+`eye-enclosure.json`. Neither failed preflight was cooked or promoted.
+
+Both prepared variants pass the existing enclosure constraints: at least 90%
+pupil visibility, at most 3% spill and at least 75% original interior coverage.
+They retain 160 eye triangles rather than 256, giving complete heads of 4,868
+and 6,880 triangles without changing the ceilings. The source-textured aperture
+is a new placement reference before reduction; the hidden original globe is
+not claimed identical. Actual front/side and four-view sheets were inspected.
+The eyes look recessed/dark and their gaze needs original-globe normal and UV
+landmark comparison. Both variants remain held before cook despite successful
+enclosure measurements. `FINAL-SKIN-APERTURE-LATEST.json` binds the latest
+recipes, actual inspection and unchanged main data. Do not repeat or promote
+these held variants, widen an aperture by guessing, or tint a neutral iris.
+
+A read-only original-globe comparison then measured cap-normal differences up
+to 36.45 degrees and actual template-pupil offsets of 0.108-0.187 cm from the
+visible opening. These observations are not proof of a lighting fix. Separate
+prepared controls retain the final cap geometry while sampling the original
+globe's frontmost shading field. A second control rotates only that reference's
+UV/normal registration by at most 7.36 degrees toward the measured opening;
+the residual pupil errors are 0.00067-0.00304 cm, below the existing 0.035 cm
+centering bound. No cap/skin positions, weights, triangle ceilings or source
+texture pixels change in these two controls. All four-view sheets and fronts
+were actually inspected: normal transfer alone is insufficient, and central
+iris placement does not establish factual iris color or whole-head approval.
+
+A third control combines the registered cap with its own black-alpha eyelid
+helper, using the same bounded static-shadow method. Both four-view sets,
+fronts and an oblique view were actually inspected. Encoded PNG pixels outside
+the two eye tiles and all opaque alpha are byte-identical. The lower exposed
+globe wedge is absent and iris placement is more central, so independent cook
+is permitted for this scoped eye evaluation. Hair-card concerns still hold
+both complete heads. These six prepared control sets are 24 diagnostic view
+instances, separate from the 2,164 current main images. Their receipts are
+`EYE-CAP-NORMAL-PUPIL-AUDIT-LATEST.json`,
+`FINAL-SKIN-EYE-REGISTRATION-LATEST.json`, and
+`FINAL-EYE-SHADOW-CONTROL-LATEST.json` under `texture-diagnostic/`.
+Do not cook an older held variant, promote from numeric centering alone or
+repeat any of these controls unchanged. The current cook receipt binds the
+two specifically inspected shadow controls; it grants no automatic promotion.
 
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
