@@ -521,6 +521,30 @@ Do not cook an older held variant, promote from numeric centering alone or
 repeat any of these controls unchanged. The current cook receipt binds the
 two specifically inspected shadow controls; it grants no automatic promotion.
 
+Both final controls subsequently passed independent cook/rig/UV/normal/mip
+validation. All eight full-size cooked views were actually inspected. Nico's
+cooked face decreases from 1,760 to 1,712 vertices and Lavia's from 1,735 to
+1,687; each complete head loses 96 triangles. Hair mesh bytes, all hair mip
+payloads and hair vertex counts remain identical, as do decoded skin mip0
+pixels outside the two eye tiles. All face mips remain opaque. The scoped
+eye aperture/registration/shadow repairs were published serially with a single
+ledger rebind for eight replacement images; `FINAL-EYE-APERTURE-PROMOTION-LATEST.json`
+and the two `material-repairs/<BaseId>/<key>/PROMOTED.json` receipts bind the
+source chain, placement, actual images, cost and unchanged pins. Five scoped
+eye repairs are now published. Whole-head flags remain 83 and current unique
+main images remain 2,164; neither hair concern nor device acceptance was cleared.
+
+The subsequent read-only `COOKED-VERTEX-COST-AUDIT-LATEST.json` covers cached
+independent validation counts for all 907 heads. Hair has more cooked vertices
+than face on 581 heads, and at least twice as many on 50. Twenty complete heads
+have over 7,000 cooked vertices despite remaining below 7,000 triangles; the
+largest has 9,363 vertices. These are separate measures, with no new vertex
+ceiling or asset change. The report prioritizes further hair-cost investigation;
+it does not prove redundant packed vertices, shader cost or device frame time.
+Any proposed exact deduplication must first compare complete packed attributes,
+including required normal/UV/tangent/bone seams. Do not erase seams, alter
+accepted Barca/MU assets or infer a performance improvement from metadata counts.
+
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
 that defect merely because source and reduced results agree. His material
