@@ -201,6 +201,8 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
     v->confirm_focus=pes_controller_pause_top_menu_confirm_focus();
   }
   if(page==FD_RESULT) {
+    v->confirm=pes_controller_result_top_menu_confirm_active();
+    v->confirm_focus=pes_controller_result_top_menu_confirm_focus();
     fd_copy(v->title,sizeof(v->title),pes_controller_match_result_heading());
     v->action_count=pes_controller_match_result_card_count();
     if(v->action_count>3u)v->action_count=3u;
@@ -346,7 +348,8 @@ static void fd_footer(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *ver
     fd_helper(ui,">","NEXT",&x,verts,quads);
   }else if(page==FD_RESULT) {
     fd_helper(ui,"A","CONFIRM",&x,verts,quads);
-    if(v->status[0])fd_helper(ui,"B",v->status,&x,verts,quads);
+    if(v->confirm)fd_helper(ui,"B","CANCEL",&x,verts,quads);
+    else if(v->status[0])fd_helper(ui,"B",v->status,&x,verts,quads);
     if(v->action_count>1u) {
       fd_helper(ui,"LEFT","PREVIOUS",&x,verts,quads);
       fd_helper(ui,">","NEXT",&x,verts,quads);
@@ -555,7 +558,7 @@ static void fd_hub(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,
       fd_text(ui,num,x+.150f,y+.003f,.025f,.0236f,-3,verts,quads);
       fd_text(ui,s->lineup[i],x+.187f,y+.003f,.227f,.025f,-2,verts,quads);
     }
-    if(!s->lineup_count)fd_text(ui,"OPEN GAME PLAN",x+.151f,.383f,.26f,.0278f,-3,verts,quads);
+    if(!s->lineup_count)fd_text(ui,"LINEUP NOT READY",x+.151f,.383f,.26f,.0278f,-3,verts,quads);
   }
   ml_ui_center_text(ui,"VS",.478f,.422f,.045f,.08f,.036f,0,-2,verts,quads);
   static const char *const labels[]={"STADIUM","KITS","KICK OFF","GAME PLAN","GENERAL SETTINGS"};
@@ -707,7 +710,7 @@ static void fd_confirm(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *ve
   fd_card(ui,.21f,.27f,.58f,.425f,0,0,verts,quads);
   fd_art(ui,2,.21f,.27f,.58f,.09f,verts,quads);
   fd_center_text(ui,"RETURN TO TOP MENU?",.24f,.315f,.52f,.038f,-1,verts,quads);
-  fd_center_text(ui,"UNFINISHED MATCH PROGRESS WILL BE LOST.",.235f,.445f,.53f,.028f,-2,verts,quads);
+  fd_center_text(ui,v->page==FD_RESULT ? "LEAVE THIS RESULT SCREEN?" : "UNFINISHED MATCH PROGRESS WILL BE LOST.",.235f,.445f,.53f,.028f,-2,verts,quads);
   for(uint32_t i=0;i<2u;i++) {
     const float x=.245f+i*.267f;
     fd_card(ui,x,.563f,.243f,.087f,v->confirm_focus==i,0,verts,quads);

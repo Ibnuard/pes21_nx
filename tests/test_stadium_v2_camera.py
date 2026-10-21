@@ -162,6 +162,10 @@ static int pes_controller_match_hud_inplay(void){return live;}
 static unsigned char *pause_settings_tmpdb_camera(uint8_t *t){*t=camera_type;return available?&camera_type:NULL;}
 static uint64_t armGetSystemTick(void){return clock_ns;}
 static uint64_t armTicksToNs(uint64_t t){return t;}
+// Retained V2 adapter is tested independently of normal Stadium acquisition.
+static void stadium_camera_begin(void *c,void *p){(void)c;(void)p;}
+static void stadium_camera_end(void){}
+static int stadium_camera_target(void *c,float *t,const float *b){(void)c;(void)t;(void)b;return 0;}
 '''
         self.run_c(stubs+scope+r'''
 static unsigned trace_calls,interpolate_calls,native_calls;
@@ -248,6 +252,12 @@ int main(void) {
         self.assertIn('stadium_target_words[4]',HOOKS)
         self.assertIn('stadium_trace_words[4]',HOOKS)
         self.assertIn('stadium_interpolate_words[4]',HOOKS)
+        # Target-only correction is shared; V2 motion hooks remain conditional.
+        target_install=HOOKS.index('hook_arm64(stadium_target_site,')
+        v2_motion=HOOKS.index('if (PESNX_STADIUM_V2_ENABLED) {',target_install)
+        self.assertLess(target_install,v2_motion)
+        self.assertGreater(HOOKS.index('hook_arm64(stadium_trace_plt,'),v2_motion)
+        self.assertGreater(HOOKS.index('hook_arm64(stadium_interpolate_plt,'),v2_motion)
         update=function(HOOKS,'pes_inplay_camera_update')
         self.assertLess(update.index('stadium_v2_begin'),update.index('match_inplay_camera_update_original(camera'))
         self.assertLess(update.index('match_inplay_camera_update_original(camera'),update.index('stadium_v2_end'))

@@ -1,7 +1,7 @@
 #ifndef PESNX_REFEREE_ANIMATION_H
 #define PESNX_REFEREE_ANIMATION_H
-/* Bounded, read-only EF motion bake. Each pose is already retargeted to the
- * native renderer's 19 slots; no EF pointers, rig or code run on Switch. */
+/* Bounded offline motion bake in the native renderer's 19 slots. v4 uses
+ * the PES21 skeleton directly; v2/v3 retain the earlier EF retarget bake. */
 #include <math.h>
 #include "runtime_assets.h"
 
@@ -14,7 +14,12 @@ typedef struct {
   float rate, speed;
   const RefereeBonePose *poses;
 } RefereeClip;
-typedef struct { RefereeClip clips[REFEREE_ANIMATION_CLIPS]; unsigned count; int valid; } RefereeAnimationBank;
+typedef struct {
+  RefereeClip clips[REFEREE_ANIMATION_CLIPS];
+  unsigned count, version;
+  float whistle_begin, whistle_end;
+  int valid;
+} RefereeAnimationBank;
 typedef struct { double gait_phase, idle_phase; float speed; int initialized; } RefereeAnimationClock;
 
 static inline float referee_animation_float(const unsigned char *p) {
@@ -25,14 +30,16 @@ static inline int referee_animation_bind(RefereeAnimationBank *bank,const void *
   if (!bytes || size<160 || size>REFEREE_ANIMATION_LIMIT) return 0;
   const unsigned char *p=bytes;
   // v1 stored animation-space rotations and deformed the skinned model.
-  // v3 adds four ordered, non-looping gestures; v2 remains locomotion-only.
+  // v3 adds four ordered gestures. v4 supplies native PES21 poses and a
+  // measured whistle-contact interval in row 4; v2 is locomotion-only.
   const unsigned version=nx_asset_u32(p+8),count=nx_asset_u32(p+12);
-  if (memcmp(p,"NXREF01\0",8) || !((version==2 && count==4)||(version==3 && count==8)) ||
+  if (memcmp(p,"NXREF01\0",8) || !((version==2 && count==4)||
+      ((version==3 || version==4) && count==8)) ||
       nx_asset_u32(p+16)!=19 || nx_asset_u32(p+20)!=32 ||
       nx_asset_hash(p+32,size-32)!=nx_asset_u64(p+24)) return 0;
   size_t cursor=32+count*32;
   if (size<cursor) return 0;
-  RefereeAnimationBank candidate={0};
+  RefereeAnimationBank candidate={.version=version,.whistle_begin=.70f,.whistle_end=1.15f};
   for (unsigned i=0;i<count;++i) {
     const unsigned char *row=p+32+i*32;
     RefereeClip *c=&candidate.clips[i];
@@ -42,7 +49,14 @@ static inline int referee_animation_bind(RefereeAnimationBank *bank,const void *
         !isfinite(c->rate) || c->rate<10 || c->rate>60 ||
         !isfinite(c->speed) || c->speed<0 || c->speed>12 ||
         (i==0 || i>=4 ? c->speed!=0 : c->speed-candidate.clips[i-1].speed<0.1f) ||
-        nx_asset_u64(row+16) || nx_asset_u64(row+24)) return 0;
+        (!(version==4 && i==4) && nx_asset_u64(row+16)) || nx_asset_u64(row+24)) return 0;
+    if (version==4 && i==4) {
+      candidate.whistle_begin=referee_animation_float(row+16);
+      candidate.whistle_end=referee_animation_float(row+20);
+      if (!isfinite(candidate.whistle_begin) || !isfinite(candidate.whistle_end) ||
+          candidate.whistle_begin<0 || candidate.whistle_end<candidate.whistle_begin ||
+          candidate.whistle_end>=(c->frames-1)/c->rate) return 0;
+    }
     const size_t count=(size_t)c->frames*REFEREE_ANIMATION_BONES;
     const size_t length=count*sizeof(RefereeBonePose);
     if (length>size-cursor || ((uintptr_t)(p+cursor)&15u)) return 0;
@@ -110,7 +124,7 @@ static inline int referee_animation_step(const RefereeAnimationBank *bank,
   return 1;
 }
 
-/* Imported EF10 gesture slots: whistle, arm up, direction, arm down. These
+/* Gesture slots: whistle, arm up, direction, arm down. These
  * clips use their original time order and clamp at the last frame. */
 typedef struct { uint32_t serial; unsigned clip, next; float elapsed; } RefereeGesture;
 static inline void referee_gesture_start(RefereeGesture *g,uint32_t serial,
@@ -120,7 +134,7 @@ static inline void referee_gesture_start(RefereeGesture *g,uint32_t serial,
   if ((reason!=4 && reason!=5 && reason!=3) || restart<1 || restart>6) return;
   g->clip=4;g->next=(restart==4 || restart==5 || restart==6)?5:6;g->elapsed=0;
 }
-/* Renderer slots 0..6 are pelvis and legs. Gestures from EF sometimes contain
+/* Renderer slots 0..6 are pelvis and legs. Signal clips sometimes contain
  * a walk-to-stop cycle: retain locomotion below the waist so that signalling
  * never stops movement or plays walking feet on a stationary actor. Align the
  * upper body about the current pelvis to retain the native bone lengths. */
@@ -147,13 +161,15 @@ static inline void referee_upper_body(RefereeBonePose pose[REFEREE_ANIMATION_BON
     referee_pose_blend(&pose[i],&pose[i],&aligned,weight);
   }
 }
-static inline void referee_gesture_whistle(RefereeGesture *g,unsigned restart) {
+static inline void referee_gesture_whistle(const RefereeAnimationBank *bank,
+                                           RefereeGesture *g,unsigned restart) {
   // A native sound request is the timing authority, including restart whistles
   // with no new OutOfPlay record. Do not replay an already-raised hand from zero.
-  // The baked stand-whistle raises its left hand during 0.2..0.7 s, holds it
-  // by the face until ~1.2 s, then lowers it. A sound arriving late must not
-  // leave the arm in the lowering tail. Timing is specific to this EF clip.
-  if (g->clip!=4 || g->elapsed<0.70f || g->elapsed>1.15f) g->elapsed=0.70f;
+  // The native bank carries its measured wrist/head contact interval, so a
+  // late sound does not use the timing of a different donor animation.
+  if (!bank || !bank->valid || bank->count<8) return;
+  if (g->clip!=4 || g->elapsed<bank->whistle_begin || g->elapsed>bank->whistle_end)
+    g->elapsed=bank->whistle_begin;
   g->clip=4;
   g->next=(restart==4 || restart==5 || restart==6)?5:6;
 }
@@ -167,7 +183,7 @@ static inline int referee_gesture_apply(const RefereeAnimationBank *bank,
   g->elapsed+=fminf(dt,0.1f);
   const float frame=fminf(g->elapsed*c->rate,(float)c->frames-1);
   const unsigned first=(unsigned)frame,second=first+1<c->frames?first+1:first;
-  // Adjacent EF signal clips are a sequence (whistle -> raise -> lower).
+  // Adjacent signal clips are a sequence (whistle -> raise -> lower).
   // Fading back to locomotion between each stage made the arm dip/pop twice.
   // Blend in only at sequence entry, and out only after its final stage.
   const float fade_in=g->clip==4?g->elapsed/0.18f:1;

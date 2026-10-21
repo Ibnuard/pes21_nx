@@ -11,12 +11,14 @@ param(
   [string]$CupCatalogHeader = "",
   [string]$LeagueCatalogHeader = "",
   [string]$MasterLeagueCatalog = "",
+  [string]$PlayerCommentaryCatalog = "",
   [switch]$DisablePesdbAuthoritativeOvr,
   [switch]$PlayerMigrationCanary,
   [switch]$LooseCpkFull,
   [switch]$Diagnostics,
   [switch]$PerfTrace,
-  [switch]$NearCameraTrace
+  [switch]$NearCameraTrace,
+  [switch]$StartupRenderAudit
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +32,7 @@ $oldWslEnv = $env:WSLENV
 $oldDiagnostics = $env:PES21_NX_DIAGNOSTICS
 $oldPerfTrace = $env:PES21_NX_PERF_TRACE
 $oldNearCameraTrace = $env:PES21_NX_NEAR_CAMERA_TRACE
+$oldStartupRenderAudit = $env:PES21_NX_STARTUP_RENDER_AUDIT
 $oldJobs = $env:PES21_NX_BUILD_JOBS
 $oldOutputRoot = $env:PES21_NX_BUILD_OUTPUT_ROOT
 $oldPesdbAuthoritativeOvr = $env:PES21_NX_PESDB_AUTHORITATIVE_OVR
@@ -43,6 +46,7 @@ $oldLeagueScorerInclude = $env:PES21_NX_LEAGUE_SCORER_INCLUDE
 $oldCupCatalogHeader = $env:PES21_NX_CUP_CATALOG_HEADER
 $oldLeagueCatalogHeader = $env:PES21_NX_LEAGUE_CATALOG_HEADER
 $oldMasterLeagueCatalog = $env:PES21_NX_MASTER_LEAGUE_CATALOG
+$oldPlayerCommentaryCatalog = $env:PES21_NX_PLAYER_COMMENTARY_CATALOG
 
 function Resolve-ProjectInput([string]$Value) {
   $candidate = if ([IO.Path]::IsPathRooted($Value)) {
@@ -54,6 +58,9 @@ function Resolve-ProjectInput([string]$Value) {
 }
 
 try {
+  if ($StartupRenderAudit -and ($Diagnostics -or $PerfTrace -or $NearCameraTrace)) {
+    throw "StartupRenderAudit must be used alone; it does not enable draw/GPU diagnostics."
+  }
   $buildOutputRoot = if ($OutputDirectory) {
     [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
   } else {
@@ -108,6 +115,7 @@ try {
   $env:PES21_NX_DIAGNOSTICS = if ($Diagnostics) { "1" } else { "0" }
   $env:PES21_NX_PERF_TRACE = if ($PerfTrace) { "1" } else { "0" }
   $env:PES21_NX_NEAR_CAMERA_TRACE = if ($NearCameraTrace) { "1" } else { "0" }
+  $env:PES21_NX_STARTUP_RENDER_AUDIT = if ($StartupRenderAudit) { "1" } else { "0" }
   $env:PES21_NX_BUILD_JOBS = if ($Jobs -gt 0) { "$Jobs" } else { "" }
   $env:PES21_NX_BUILD_OUTPUT_ROOT = $buildOutputRoot
   $env:PES21_NX_PESDB_AUTHORITATIVE_OVR = if ($DisablePesdbAuthoritativeOvr) { "0" } else { "1" }
@@ -139,13 +147,21 @@ try {
   }
 
   $env:PES21_NX_MASTER_LEAGUE_CATALOG = if ($MasterLeagueCatalog) { Resolve-ProjectInput $MasterLeagueCatalog } else { "" }
+  $env:PES21_NX_PLAYER_COMMENTARY_CATALOG = if ($PlayerCommentaryCatalog) { Resolve-ProjectInput $PlayerCommentaryCatalog } else { "" }
+  $env:WSLENV += ":PES21_NX_PLAYER_COMMENTARY_CATALOG/p"
   $env:WSLENV += ":PES21_NX_MASTER_LEAGUE_CATALOG/p"
   $env:WSLENV += ":PES21_NX_NEAR_CAMERA_TRACE"
+  $env:WSLENV += ":PES21_NX_STARTUP_RENDER_AUDIT"
 
   $buildScript = @'
 set -euo pipefail
 
-build_dir=$(mktemp -d /tmp/pes21_nx.XXXXXX)
+# Keep the active checkout outside /tmp: its WSL lifecycle can replace that
+# directory while a slow source copy is running. This private cache uses the
+# distro's own volume (D: on the development host).
+build_cache_root="$HOME/.cache/pes21-nx-builds"
+mkdir -p "$build_cache_root"
+build_dir=$(mktemp -d "$build_cache_root/build.XXXXXX")
 trap 'rm -rf "$build_dir"' EXIT
 
 tar -C "$PES21_NX_PROJECT_ROOT" \
@@ -193,6 +209,9 @@ fi
 if [[ -n "${PES21_NX_MASTER_LEAGUE_CATALOG:-}" ]]; then
   cp "$PES21_NX_MASTER_LEAGUE_CATALOG" source/master_league_catalog_generated.inc
 fi
+if [[ -n "${PES21_NX_PLAYER_COMMENTARY_CATALOG:-}" ]]; then
+  cp "$PES21_NX_PLAYER_COMMENTARY_CATALOG" source/player_commentary_roster_catalog.h
+fi
 
 export DEVKITPRO=/opt/devkitpro
 export DEVKITA64=/opt/devkitpro/devkitA64
@@ -207,6 +226,7 @@ link_build_id=$(
       "DIAGNOSTICS=${PES21_NX_DIAGNOSTICS:-0}" \
       "PERF_TRACE=${PES21_NX_PERF_TRACE:-0}" \
       "NEAR_CAMERA_TRACE=${PES21_NX_NEAR_CAMERA_TRACE:-0}" \
+      "STARTUP_RENDER_AUDIT=${PES21_NX_STARTUP_RENDER_AUDIT:-0}" \
       "PES_PESDB_AUTHORITATIVE_OVR=${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
       "PES_PLAYER_MIGRATION_CANARY=${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
       "PES_LOOSE_CPK_FULL=${PES21_NX_LOOSE_CPK_FULL:-0}" \
@@ -217,6 +237,7 @@ make -j"$jobs" \
   DIAGNOSTICS="${PES21_NX_DIAGNOSTICS:-0}" \
   PERF_TRACE="${PES21_NX_PERF_TRACE:-0}" \
   NEAR_CAMERA_TRACE="${PES21_NX_NEAR_CAMERA_TRACE:-0}" \
+  STARTUP_RENDER_AUDIT="${PES21_NX_STARTUP_RENDER_AUDIT:-0}" \
   PES_PESDB_AUTHORITATIVE_OVR="${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
   PES_PLAYER_MIGRATION_CANARY="${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
   PES_LOOSE_CPK_FULL="${PES21_NX_LOOSE_CPK_FULL:-0}" \
@@ -263,6 +284,8 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
       Select-Object FullName, Length, LastWriteTime
   }
 } finally {
+  $env:PES21_NX_PLAYER_COMMENTARY_CATALOG = $oldPlayerCommentaryCatalog
+  $env:PES21_NX_STARTUP_RENDER_AUDIT = $oldStartupRenderAudit
   $env:PES21_NX_NEAR_CAMERA_TRACE = $oldNearCameraTrace
   $env:PES21_NX_MASTER_LEAGUE_CATALOG = $oldMasterLeagueCatalog
   if ($null -eq $oldProjectRoot) {

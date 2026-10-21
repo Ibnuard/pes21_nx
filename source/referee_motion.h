@@ -5,14 +5,17 @@
  * No collision objects, player registry entries or match decisions are added. */
 #include <math.h>
 #include <stdint.h>
+#include "referee_pc_policy.h"
 
 typedef struct { float x, z; } RefereePoint;
+#define REFEREE_KICKOFF_EDGE_Z 9.15f
 typedef struct {
   RefereePoint position, velocity;
   float heading, distance;
   int initialized;
   RefereePoint last_ball, ball_velocity, target;
   int has_ball, moving, restart;
+  RefereePcField pc_field; // Valid only for the native-bank live-field snapshot.
 } RefereeMotion;
 
 static inline float referee_limit(float n, float lo, float hi) {
@@ -53,9 +56,67 @@ static inline void referee_motion_resume(RefereeMotion *m) {
   m->has_ball=m->moving=0;
 }
 
-/* Match-aware replacement for the old proportional ball follower. EF's
- * restart/active-play distinction is adapted to Mobile inputs; its newer
- * match objects and decision code are not called with PES21 pointers. */
+/* The requested near-side centre-circle/halfway intersection is a wrapper
+ * presentation policy, not the different FL26 kickoff formula. */
+static inline void referee_motion_kickoff(RefereeMotion *m) {
+  referee_motion_reset(m);
+  m->position=(RefereePoint){0,REFEREE_KICKOFF_EDGE_Z};
+  m->heading=3.141592654f;
+}
+
+static inline RefereePoint referee_motion_destination(RefereePoint ball,
+                                      int restart, RefereePcField field) {
+  RefereePoint target={referee_limit(ball.x*0.72f,-38,38),
+      referee_limit(ball.z*0.38f+10-ball.x*0.10f,-23,23)};
+  const float end=ball.x<0?-1.0f:1.0f,side=ball.z<0?-1.0f:1.0f;
+  if (restart==2) target=(RefereePoint){ball.x*0.85f,side*22};
+  else if (restart==3) target=(RefereePoint){ball.x*0.55f,10};
+  else if (restart==4) target=(RefereePoint){end*37,side*12};
+  else if (restart==5) target=(RefereePoint){ball.x-end*7,ball.z-side*8};
+  else if (restart==6) target=(RefereePoint){end*38,12};
+  else if (restart==8) target=(RefereePoint){0,10};
+  target.x=referee_limit(target.x,-42,42);
+  target.z=referee_limit(target.z,-25,25);
+  if (!restart) referee_pc_bound_live_target(&target.x,&target.z,field);
+  return target;
+}
+
+/* A hidden replay can jump to an unrelated moment. Re-enter at the current
+ * policy's destination rather than expose the stale replay-start position.
+ * Bounded clearance choices run only on that transition, never each frame. */
+static inline int referee_motion_restore(RefereeMotion *m, RefereePoint ball,
+                         const RefereePoint *players, uint32_t count, int restart) {
+  if (!m || !referee_point_valid(ball)) return 0;
+  if (!m->initialized) referee_motion_reset(m);
+  if (!restart && (fabsf(ball.x)>52.5f || fabsf(ball.z)>34.0f)) restart=1;
+  const RefereePoint target=referee_motion_destination(ball,restart,m->pc_field);
+  const RefereePoint offsets[]={{0,0},{3,0},{-3,0},{0,3},{0,-3},
+    {3,3},{-3,3},{3,-3},{-3,-3},{6,0},{-6,0},{0,6},{0,-6}};
+  RefereePoint best=target;
+  float best_clearance=-1000;
+  if (!players) count=0;
+  if (count>22) count=22;
+  for (unsigned i=0;i<sizeof(offsets)/sizeof(offsets[0]);++i) {
+    RefereePoint candidate={referee_limit(target.x+offsets[i].x,-46,46),
+                            referee_limit(target.z+offsets[i].z,-28,28)};
+    float clearance=hypotf(candidate.x-ball.x,candidate.z-ball.z)-6.f;
+    for (uint32_t p=0;p<count;++p)
+      if (referee_point_valid(players[p]))
+        clearance=fminf(clearance,hypotf(candidate.x-players[p].x,
+                                       candidate.z-players[p].z)-2.4f);
+    if (clearance>best_clearance) {best=candidate;best_clearance=clearance;}
+    if (clearance>=0) {best=candidate;break;}
+  }
+  referee_motion_resume(m);
+  m->position=best;m->target=target;m->last_ball=ball;m->has_ball=1;
+  m->restart=restart;
+  m->heading=atan2f(ball.x-best.x,ball.z-best.z);
+  return 1;
+}
+
+/* Wrapper visual movement with native match restart inputs. The verified PC
+ * target bounds are applied when a valid live FieldInfo snapshot is supplied.
+ * Target selection, avoidance and integration remain wrapper policies. */
 static inline int referee_motion_step_mode(RefereeMotion *m, RefereePoint ball,
                                       const RefereePoint *players, uint32_t count,
                                       float dt, int restart) {
@@ -87,19 +148,9 @@ static inline int referee_motion_step_mode(RefereeMotion *m, RefereePoint ball,
                                  ball.z+(restart?0:m->ball_velocity.z*0.3f)};
     // Keep a consistent diagonal viewing lane, inside the field and away
     // from goal mouths. Smooth the destination instead of chasing every touch.
-    RefereePoint desired_target={referee_limit(predicted.x*0.72f,-38,38),
-        referee_limit(predicted.z*0.38f+10-predicted.x*0.10f,-23,23)};
     // Restart identifiers are translated from PES21, never EF object offsets.
     // Use distinct viewing positions for a throw, goal kick, corner and kick.
-    const float end=ball.x<0?-1.0f:1.0f,side=ball.z<0?-1.0f:1.0f;
-    if (restart==2) desired_target=(RefereePoint){ball.x*0.85f,side*22};
-    else if (restart==3) desired_target=(RefereePoint){ball.x*0.55f,10};
-    else if (restart==4) desired_target=(RefereePoint){end*37,side*12};
-    else if (restart==5) desired_target=(RefereePoint){ball.x-end*7,ball.z-side*8};
-    else if (restart==6) desired_target=(RefereePoint){end*38,12};
-    else if (restart==8) desired_target=(RefereePoint){0,10}; // After a goal.
-    desired_target.x=referee_limit(desired_target.x,-42,42);
-    desired_target.z=referee_limit(desired_target.z,-25,25);
+    const RefereePoint desired_target=referee_motion_destination(predicted,restart,m->pc_field);
     if ((first && !i) || m->restart!=restart) m->target=desired_target;
     else if (!restart || hypotf(m->target.x-desired_target.x,m->target.z-desired_target.z)>3) {
       m->target.x+=(desired_target.x-m->target.x)*tracking;

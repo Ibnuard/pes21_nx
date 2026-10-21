@@ -5,6 +5,8 @@
 #include <string.h>
 
 #define debugPrintf(...) ((void)0)
+static unsigned notes;
+static void scene_runtime_note(const char *area,const char *note){assert(area && note);notes++;}
 #define EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES 2048u
 #define CRYPT_KEY 0xa59c43e7u
 #define TEST_COUNT 26u
@@ -78,8 +80,8 @@ static uint32_t get_my_side(const void *edit) { (void)edit; return my_side; }
 static uint32_t (*exhibition_squad_edit_get_my_side)(const void *) = get_my_side;
 static void set_my_side(void *edit, const uint32_t *side) { (void)edit; my_side = *side; }
 static void (*exhibition_squad_edit_set_my_side)(void *, const uint32_t *) = set_my_side;
-static void save_squad(void) { assert(my_side < 2u); saves[my_side]++; }
-static void (*matchplan_squad_save)(void) = save_squad;
+static int save_squad(void) { assert(my_side < 2u); saves[my_side]++; return 1; }
+static int (*matchplan_squad_save)(void) = save_squad;
 static void publish(void *p) { assert(p == plan); publishes++; }
 static void (*exhibition_matchplan_update_tmpdb)(void *) = publish;
 static void construct(void *dest, const void *src) { memcpy(dest, src, sizeof(TestSquad)); copies++; }

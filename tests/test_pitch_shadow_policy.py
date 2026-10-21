@@ -39,6 +39,7 @@ class PitchShadowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='pesnx-native-pitch-') as temp:
             c=Path(temp)/'check.c';exe=Path(temp)/'check.exe'
             c.write_text('#include "stadium_lighting_policy.h"\n'
+                '#include "stadium_shell_clip.h"\n'
                 'typedef unsigned GLuint;typedef int GLsizei;typedef int GLint;typedef char GLchar;\n'
                 '#define debugPrintf(...) ((void)0)\n'
                 'static void glShaderSource(GLuint s,GLsizei n,const GLchar*const*t,const GLint*l) {'
@@ -63,6 +64,12 @@ class PitchShadowTests(unittest.TestCase):
                         prefix,body=result.split(b'void main()',1)
                         native_prefix,native_body=original.split(b'void main()',1)
                         self.assertTrue(prefix.startswith(native_prefix))
+                        # Mowing changes only the audited diffuse, before the
+                        # original detail/light operations. Undo that edit too.
+                        body=body.replace(
+                            b'nxPitchMowing(texture(ps0,in_TEXCOORD0.xy).xyz,in_TEXCOORD8.xyz-View_PreViewTranslation)',
+                            b'texture(ps0,in_TEXCOORD0.xy).xyz')
+                        body=re.sub(rb'\n\t(v\d+)\.xyz = nxPitchMowing\(\1\.xyz,in_TEXCOORD8.xyz-View_PreViewTranslation\);',b'',body)
                         if path.stem!='M_Pitch_Default':
                             if result==original:
                                 self.assertNotIn(b'View_BufferSizeAndInvSize',original)

@@ -448,10 +448,18 @@ Selecting Konami restores a reused carrier. First test with **High quality**.
 Anfield gets an authored rectangular roof approximation without Konami
 skylights, not an exact reconstruction of its beams. Shell materials use cheap
 static hemisphere shading, not FL Day/Night shell illumination. Native pitch
-striping is retained; stadium-specific pitch patterns remain future work.
+striping remains on Konami; six imported stadiums use
+[authored mowing patterns](STADIUM_PITCH_MOWING_V62.md), including circular
+Camp Nou and alternating straight bands at Old Trafford.
 Verify scale, goal clearance, memory and frame time on Switch.
 
 ## Consolidated assets
+
+Current v61 packaging also includes the accepted player-commentary seed,
+selected-roster recordings and referee token. See
+[the v61 archive contract](MATCH_HUB_ASSETS_V61.md) for typed limits, pinned
+preservation and the two-file candidate. The flat-folder migration installer
+below predates the roster namespace and is not used to build that candidate.
 
 `FootballNX.assets`, beside the NRO, now supplies CupLogos, LeagueLogos and the
 Indonesia commentary delta. v4 adds `Animations/referee.nxra`; the prepared

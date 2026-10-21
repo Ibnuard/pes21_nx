@@ -42,6 +42,7 @@ class SceneCanaryTests(unittest.TestCase):
                                   'bad-frame-plt', 'bad-event-plt', 'bad-event-layout', 'bad-sound-plt',
                                   'bad-warp-plt', 'bad-demo-plt', 'bad-demo-layout', 'bad-flow-layout',
                                   'bad-warp-layout', 'bad-render-layout', 'bad-load-layout', 'bad-vision-layout',
+                                  'bad-field-layout', 'bad-field-destination', 'bad-field-lock',
                                   'bad-render-plt', 'bad-queue-plt', 'bad-load-plt', 'bad-quality-plt', 'missing-animation']
                 for scenario in scenarios:
                     with self.subTest(feature=feature, scenario=scenario):

@@ -28,6 +28,10 @@ static void (*match_inplay_camera_update_original)(void*,void*)=native_update;
 static unsigned footballnx_tribune_view(float *p) {++composed; p[13]=.75f; return 1;}
 static void stadium_v2_begin(void *c,void *p) {(void)c;(void)p;} // V2 disabled; adapter tested separately.
 static void stadium_v2_end(void) {}
+// This test isolates final-pose ownership; acquisition is exercised by the
+// real normal-Stadium adapter in test_stadium_camera_runtime.py.
+static void stadium_camera_begin(void *c,void *p) {(void)c;(void)p;}
+static void stadium_camera_end(void) {}
 ''' + function(SOURCE, 'pes_inplay_camera_update') + r'''
 int main(void) {
   unsigned char camera[32]={0}; float p[16];

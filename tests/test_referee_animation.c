@@ -85,14 +85,37 @@ int main(void) {
   referee_gesture_start(&gesture,4,4,4);assert(gesture.next==5);
   referee_gesture_apply(&bank,&gesture,.03f,pose);
   assert(!memcmp(pose,other,7*sizeof(*pose)));check_pose(pose);
-  referee_gesture_whistle(&gesture,5);assert(gesture.clip==4 && gesture.elapsed>=.70f);
-  gesture.elapsed=1.9f;referee_gesture_whistle(&gesture,4);
+  referee_gesture_whistle(&bank,&gesture,5);assert(gesture.clip==4 && gesture.elapsed>=.70f);
+  gesture.elapsed=1.9f;referee_gesture_whistle(&bank,&gesture,4);
   assert(gesture.elapsed==.70f && gesture.next==5); // Cue during the lowering tail.
   // Pelvis alignment translates upper-body bones with the moving character.
   RefereeBonePose translated[19];memcpy(translated,other,sizeof(translated));
   for(unsigned i=0;i<19;++i)translated[i].position[0]+=1;
   referee_upper_body(translated,other,1);
   for(unsigned i=0;i<19;++i)assert(fabsf(translated[i].position[0]-other[i].position[0]-1)<.0001f);
+  // Native bank timings are bounded by the clip, checksum-protected, and
+  // selected per bank. Legacy motion cannot silently inherit native timing.
+  fixture_word(data+8,4);
+  float begin=.025f,end=.050f;
+  memcpy(data+32+4*32+16,&begin,4);memcpy(data+32+4*32+20,&end,4);
+  sum=nx_asset_hash(data+32,size-32);memcpy(data+24,&sum,8);
+  assert(referee_animation_bind(&bank,data,size) && bank.version==4);
+  gesture.elapsed=1;referee_gesture_whistle(&bank,&gesture,5);
+  assert(gesture.elapsed==begin);
+  const float invalid_times[]={NAN,-1,.1f};
+  for(unsigned i=0;i<3;++i) {
+    memcpy(data+32+4*32+16,&invalid_times[i],4);
+    sum=nx_asset_hash(data+32,size-32);memcpy(data+24,&sum,8);
+    assert(!referee_animation_bind(&bank,data,size));
+  }
+  memcpy(data+32+4*32+16,&begin,4);
+  end=.1f;memcpy(data+32+4*32+20,&end,4);
+  sum=nx_asset_hash(data+32,size-32);memcpy(data+24,&sum,8);
+  assert(!referee_animation_bind(&bank,data,size));
+  fixture_word(data+8,3);end=0;begin=0;
+  memcpy(data+32+4*32+16,&begin,4);memcpy(data+32+4*32+20,&end,4);
+  sum=nx_asset_hash(data+32,size-32);memcpy(data+24,&sum,8);
+  assert(referee_animation_bind(&bank,data,size) && bank.version==3 && bank.whistle_begin==.70f);
   free(data);
   puts("independent referee animation and one-shot events: pass");return 0;
 }

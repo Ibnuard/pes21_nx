@@ -34,6 +34,7 @@ static const char ue_load_symbol[] = "_ZN13UEPlayerModel8LoadImplEv";
 static const char vision_symbol[] = "_ZN18VisionModelManager11VisionModelC2Ejj";
 
 static size_t symbol_offset(const char *symbol) {
+  if (!strcmp(symbol,"_ZN5match8registry14GlobalRegistry8OpenReadEv")) return 0x1100;
   if (!strcmp(symbol, root_symbol)) return 0x100;
   if (!strcmp(symbol, mesh_symbol)) return 0x400;
   if (!strcmp(symbol, model_symbol)) return 0x700;
@@ -118,6 +119,9 @@ int main(int argc, char **argv) {
   word(&module, 0xd00 + 0x44, 0xf9005a60);
   word(&module, 0xe00, 0xd102c3ff);
   word(&module, 0xf00 + 0x18, 0xb9003001);
+  word(&module, 0x1100 + 0x2a4, 0xf9650a68);
+  word(&module, 0x1100 + 0x2b8, 0x52894208);
+  word(&module, 0x1100 + 0x2c0, 0x8b080261);
   const uint32_t stadium_words[] = {0xb002e2f0,0xf9409e11,0x9104e210,0xd61f0220};
   const uint32_t draw_words[] = {0xd002e370,0xf9440211,0x91200210,0xd61f0220};
   const uint32_t create_words[] = {0x9002e3b0,0xf9436611,0x911b2210,0xd61f0220};
@@ -178,6 +182,9 @@ int main(int argc, char **argv) {
   if (!strcmp(scenario, "bad-render-layout"))word(&module, 0xd00 + 0x44, 0);
   if (!strcmp(scenario, "bad-load-layout"))word(&module, 0xe00, 0);
   if (!strcmp(scenario, "bad-vision-layout"))word(&module, 0xf00 + 0x18, 0);
+  if (!strcmp(scenario, "bad-field-layout"))word(&module, 0x1100 + 0x2a4, 0);
+  if (!strcmp(scenario, "bad-field-destination"))word(&module, 0x1100 + 0x2b8, 0);
+  if (!strcmp(scenario, "bad-field-lock"))word(&module, 0x1100 + 0x2c0, 0);
   if (!strcmp(scenario, "bad-render-plt"))word(&module, 0x391e900, 0);
   if (!strcmp(scenario, "bad-queue-plt"))word(&module, 0x384ebc0, 0);
   if (!strcmp(scenario, "bad-load-plt"))word(&module, 0x3884f40, 0);

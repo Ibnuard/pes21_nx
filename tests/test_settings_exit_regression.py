@@ -283,6 +283,9 @@ int main(void) {
         stubs = r'''
 #include <stddef.h>
 #include <string.h>
+RESULT_EXIT_HEADER
+static ResultExitConfirm match_result_top_menu_confirm;
+static uint32_t local_rematch_handoff_cover;
 static uint32_t match_result_input_action, virtual_cursor_context;
 static uint32_t match_result_surface, match_result_skin_ready;
 static uint32_t match_postmatch_custom_active, match_result_exit_requested;
@@ -294,7 +297,10 @@ static void *match_result_window;
 static uint32_t footer_calls, stats_calls, pause_calls, wait_calls, event_calls;
 static int match_result_handoff_active(void) { return match_result_handoff_tick != 0; }
 static uint64_t armGetSystemTick(void) { return 100; }
-static void debugPrintf(const char *fmt, ...) { (void)fmt; }
+    static void debugPrintf(const char *fmt, ...) { (void)fmt; }
+    static void scene_runtime_note(const char *area, const char *message) {
+      (void)area; (void)message;
+    }
 static void footer(void *w, uint32_t key) { assert(w==(void *)123 && key==0); ++footer_calls; }
 static void stats(void *w, uint32_t key) { assert(w==(void *)123 && key==0); ++stats_calls; }
 static void wait_control(void *w, uint32_t on) { assert(w==(void *)123 && on==1); ++wait_calls; }
@@ -309,6 +315,7 @@ static void (*match_result_footer_touch)(void *, uint32_t) = footer;
 static void (*match_stats_footer_touch)(void *, uint32_t) = stats;
 static void (*match_result_control_wait)(void *, uint32_t) = wait_control;
 static void reset(void) {
+  result_exit_confirm_clear(&match_result_top_menu_confirm);
   footer_calls=stats_calls=pause_calls=wait_calls=event_calls=0;
   match_result_exit_requested=0; match_result_handoff_tick=0;
   match_result_surface_focus=0; match_result_skin_ready=1;
@@ -316,7 +323,19 @@ static void reset(void) {
   local_rematch_valid=local_rematch_request=local_rematch_menu_ready=0;
 }
 '''
+        stubs = stubs.replace('RESULT_EXIT_HEADER', '#include "' +
+            (Path(__file__).resolve().parents[1] / 'source/result_exit_confirm.h').as_posix() + '"')
         body = r'''
+static void confirm_top_menu(void) {
+  assert(match_result_top_menu_confirm.active && match_result_top_menu_confirm.focus==1);
+  assert(!match_result_exit_requested && !footer_calls && !pause_calls);
+  match_result_input_action=PES_PAUSE_INPUT_LEFT;
+  match_result_process_controller_input((void *)123);
+  assert(match_result_top_menu_confirm.active && !match_result_top_menu_confirm.focus);
+  match_result_input_action=PES_PAUSE_INPUT_DECIDE;
+  match_result_process_controller_input((void *)123);
+  assert(!match_result_top_menu_confirm.active);
+}
 int main(void) {
   // A and the B shortcut must use the same native footer as a physical tap,
   // regardless of which match-ending settings led to the final result.
@@ -330,6 +349,7 @@ int main(void) {
         virtual_cursor_context=PES_VIRTUAL_CURSOR_FULL_TIME;
         match_result_input_action=input;
         match_result_process_controller_input((void *)123);
+        confirm_top_menu();
         assert(footer_calls==1 && stats_calls==0 && pause_calls==0);
         assert(wait_calls==0 && event_calls==0); // footer owns its handshake
         assert(match_result_exit_requested && pause_top_menu_transition_tick);
@@ -338,6 +358,17 @@ int main(void) {
         match_result_process_controller_input((void *)123);
         assert(footer_calls==1); // no double activation during handoff
       }
+  reset();stub_phase=MATCH_PHASE_END;match_result_final_seen=1;
+  match_result_page=MATCH_RESULT_PAGE_FINAL;match_result_surface=MATCH_RESULT_SURFACE_FULL_MENU;
+  match_result_input_action=PES_PAUSE_INPUT_BACK;
+  match_result_process_controller_input((void *)123);
+  assert(match_result_top_menu_confirm.active && match_result_top_menu_confirm.focus==1);
+  match_result_input_action=PES_PAUSE_INPUT_DECIDE;
+  match_result_process_controller_input((void *)123); // default Cancel
+  assert(!match_result_top_menu_confirm.active && !match_result_exit_requested && !footer_calls);
+  match_result_input_action=PES_PAUSE_INPUT_BACK;match_result_process_controller_input((void *)123);
+  match_result_input_action=PES_PAUSE_INPUT_BACK;match_result_process_controller_input((void *)123);
+  assert(!match_result_top_menu_confirm.active && !footer_calls && !pause_calls);
   for(uint32_t focus=0;focus<2;focus++) {
     reset(); local_rematch_valid=1; stub_phase=MATCH_PHASE_END;
     match_result_final_seen=1; match_result_page=MATCH_RESULT_PAGE_FINAL;
@@ -357,6 +388,7 @@ int main(void) {
   match_result_surface=MATCH_RESULT_SURFACE_HALF_MENU;
   match_result_input_action=PES_PAUSE_INPUT_BACK;
   match_result_process_controller_input((void *)123);
+  confirm_top_menu();
   assert(pause_calls==1 && wait_calls==1 && footer_calls==0);
   for (uint32_t full=0; full<2; ++full) {
     reset(); match_result_page=MATCH_RESULT_PAGE_STATS;

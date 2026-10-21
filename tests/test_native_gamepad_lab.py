@@ -354,7 +354,7 @@ class NativeGamepadLabTests(unittest.TestCase):
             r'static void prematch_gameplan_process_substitute\(.*?\n\}',
             self.hooks, re.S).group(0)
         save_sides = re.search(
-            r'static void exhibition_save_matchplan_sides\(.*?\n\}',
+            r'static int exhibition_save_matchplan_sides\(.*?\n\}',
             self.hooks, re.S).group(0)
         kickoff = re.search(
             r'static void main_menu_2p_prematch_hub_process_pending\(void\) '
@@ -379,7 +379,7 @@ class NativeGamepadLabTests(unittest.TestCase):
                       process_substitute)
         self.assertIn('exhibition_squad_edit_get_my_side(squad_edit)',
                       save_sides)
-        self.assertIn('exhibition_save_matchplan_sides(3u);', kickoff)
+        self.assertIn('exhibition_rebase_prepared_matchplan()', kickoff)
         self.assertIn('exhibition_capture_pre_strategy_squad_snapshot();', kickoff)
         self.assertIn('exhibition_restore_pre_strategy_squad_snapshot();',
                       strategy_footer)
@@ -495,8 +495,8 @@ class NativeGamepadLabTests(unittest.TestCase):
         self.assertIn('match_squad_data_copy_assign(', restore)
         self.assertIn('exhibition_gameplan_sides[side].squad_data', restore)
         self.assertLess(
-            kickoff.index('exhibition_capture_pre_strategy_squad_snapshot();'),
-            kickoff.index('exhibition_save_matchplan_sides(3u);'))
+            kickoff.index('exhibition_capture_pre_strategy_squad_snapshot()'),
+            kickoff.index('exhibition_rebase_prepared_matchplan()'))
         self.assertLess(
             created.index('exhibition_restore_pre_strategy_squad_snapshot()'),
             created.index('exhibition_publish_prepared_matchplan();'))

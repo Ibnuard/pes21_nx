@@ -64,14 +64,14 @@ static inline int team_commentary_plain_hca_header(
 
 /* Checksums bind a delta to the exact installed bank and catch damaged SD
  * copies. Every patch range is bounded before allocating/writing the bank. */
-static inline void *team_commentary_apply_delta(
+static inline void *commentary_apply_delta_bounded(
     const void *base, uint32_t base_size, const unsigned char *patch,
-    uint32_t patch_size, uint32_t *result_size) {
+    uint32_t patch_size, uint32_t max_patch, uint32_t *result_size) {
   if (result_size)
     *result_size = 0;
   if (!base || !patch || !result_size || base_size < 32u ||
       base_size > TEAM_COMMENTARY_MAX_BANK || patch_size < 40u ||
-      patch_size > TEAM_COMMENTARY_MAX_PATCH ||
+      patch_size > max_patch || max_patch > TEAM_COMMENTARY_MAX_BANK ||
       memcmp(patch, "NXCMT01\0", 8) || memcmp(base, "@UTF", 4) ||
       team_commentary_read_u32(patch + 8) != base_size ||
       team_commentary_read_u32(patch + 36) != 0u)
@@ -118,6 +118,13 @@ static inline void *team_commentary_apply_delta(
   }
   *result_size = size;
   return result;
+}
+
+static inline void *team_commentary_apply_delta(
+    const void *base, uint32_t base_size, const unsigned char *patch,
+    uint32_t patch_size, uint32_t *result_size) {
+  return commentary_apply_delta_bounded(base, base_size, patch, patch_size,
+                                       TEAM_COMMENTARY_MAX_PATCH, result_size);
 }
 
 static inline void *team_commentary_load_delta(const void *base,

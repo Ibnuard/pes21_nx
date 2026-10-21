@@ -1,5 +1,11 @@
 # Native Stadium and Pitch Side camera candidate v33
 
+Later candidate: [Stadium target correction v57](STADIUM_CAMERA_TARGET_V57.md)
+keeps native Stadium framing/trace/zoom while replacing contextual target
+acquisition with the sampled live ball inside a guarded gameplay update.
+V2 remains suspended. The unmodified-camera statements below describe v33,
+not a claim that v57 contains a full FL26 camera behavior port.
+
 The user asked to try FL26 Stadium/Pitch Side because the wrapper's Stadium
 view still behaves poorly, and to avoid an additional ball-tracking layer.
 The previous v32 near-camera pacing candidate has not been tested on Switch.

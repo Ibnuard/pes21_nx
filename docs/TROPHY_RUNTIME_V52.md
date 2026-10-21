@@ -130,3 +130,10 @@ Reproduce with `build-wsl.ps1`, the accepted runtime-pair inputs and `Jobs=1`,
 then `tools/build_trophy_test_package.py` using entrance policy `walkout`, the
 combined v50 cinematic report, repeated v49/v50/v51 `--upgrade-package`
 arguments and a fresh `--sd-copy-output` directory. Keep temporary output on D.
+
+## Subsequent device report, 2026-10-20
+
+The user still reports no trophy animation after winning and requests that
+ceremony work be deferred while referee/commentary work proceeds. Hardware
+acceptance has not passed. No new v52 journals accompanied this report, so the
+exact executing package and failing lifecycle boundary have not been rechecked.

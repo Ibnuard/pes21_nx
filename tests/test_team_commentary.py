@@ -34,7 +34,9 @@ class CommentaryPolicyTests(unittest.TestCase):
         compiler = shutil.which("gcc")
         if not compiler:
             self.skipTest("gcc unavailable")
-        source = f'#include <assert.h>\n#include "{HEADER_PATH}"\n'
+        source = (f'#include <assert.h>\n#include "{HEADER_PATH}"\n'
+                  f'#include "{(ROOT / "source/player_commentary_policy.h").as_posix()}"\n'
+                  '#define scene_runtime_note(area, message) ((void)0)\n')
         source += c_array("base", BASE) + c_array("patch", PATCH) + c_array("target", TARGET)
         if wrappers:
             start = HOOKS.index("static uint32_t team_commentary_indonesia_slot;")

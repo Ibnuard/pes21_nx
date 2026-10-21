@@ -1,5 +1,5 @@
 /* Opt-in visual referee follower. The native Mobile match factory creates only
- * 22 players. Load a separate HumanKind=Referee and play retargeted EF10
+ * 22 players. Load a separate HumanKind=Referee and play baked native PES21
  * clips in its OWN bone buffer with an independent animation clock.
  * Positioning is authored in the wrapper;
  * it does not replace match decisions or add a player to registries/collision.
@@ -55,6 +55,7 @@ static uint64_t referee_render_samples,referee_render_ns,referee_render_worst_ns
 static uint32_t referee_low_loads,referee_model_creations,referee_kickoff_applied;
 static uint32_t referee_kickoff_pending;
 static uint32_t referee_kickoff_ready;
+static uint32_t referee_kickoff_layout_ok;
 static uint32_t referee_demo_sequence;
 static uint64_t referee_demo_tick;
 static int32_t referee_demo_x,referee_demo_z,referee_demo_heading;
@@ -62,6 +63,7 @@ static void *referee_probe_model;
 static uint32_t referee_probe_enabled, referee_probe_frames, referee_probe_ready;
 static uint32_t referee_probe_failed, referee_probe_moved, referee_probe_has_pose;
 static uint32_t referee_probe_live_frame;
+static uint32_t referee_probe_reposition;
 static uint32_t referee_probe_teardown;
 static uint32_t referee_probe_pending, referee_probe_loaded;
 static uint64_t referee_probe_load_tick;
@@ -198,6 +200,7 @@ static void referee_probe_clear(void) {
   referee_probe_load_tick = 0;
   referee_probe_moved = referee_probe_has_pose = 0;
   referee_probe_live_frame=0;
+  referee_probe_reposition=0;
   referee_probe_stamp = referee_probe_frame = 0;
   referee_probe_tick = 0;
   referee_probe_display_valid=0;
@@ -224,6 +227,22 @@ static int referee_probe_position_warp(void *flow,const void *context) {
     if(kind==2u || kind==3u)__atomic_store_n(&referee_kickoff_pending,1,__ATOMIC_RELEASE);
   }
   return complete;
+}
+/* Read the same borrowed MatchInfo snapshot as the native match. No pointer
+ * survives this call. Unknown layouts/owners use the existing ball fallback. */
+static int referee_probe_native_kickoff(const void *registry) {
+  if(!referee_kickoff_layout_ok || !registry)return -1;
+  const void *info=NULL;
+  memcpy(&info,(const char *)registry+0x4f0,sizeof(info));
+  if(!info)return -1;
+  uint32_t status,restart;
+  memcpy(&status,(const char *)info+0x116c,sizeof(status));
+  memcpy(&restart,(const char *)info+0x1514,sizeof(restart));
+  /* GetMatchStatusString: 1=IN_PLAY, 2=OUT_OF_PLAY, 3=SET_PLAY.
+   * ToInPlay tests RestartKind 1=KICK_OFF before setting status 1.
+   * Both stopped statuses can precede publication of the centre ball. */
+  if(status<1u || status>3u || restart>7u)return -1;
+  return restart==1u && status!=1u;
 }
 static uint32_t referee_probe_quality(void) {
   const uint32_t native=referee_quality_original();
@@ -310,13 +329,15 @@ static void referee_probe_demo_transform(void *self,float *position,float *rotat
 }
 static void referee_probe_hidden_kickoff(void) {
   if(!__atomic_exchange_n(&referee_kickoff_pending,0,__ATOMIC_ACQ_REL))return;
-  referee_motion_reset(&referee_motion);
-  referee_motion.position=(RefereePoint){0,10.75f};referee_motion.heading=3.141592654f;
+  referee_motion_kickoff(&referee_motion);
   /* Native warp already placed the ball at centre. A fast kickoff may have
    * moved it before our next draw, so don't wait for a centre sample forever. */
   referee_kickoff_ready=2;
-  referee_animation_clock=(RefereeAnimationClock){0};referee_gesture=(RefereeGesture){0};
+  referee_animation_clock=(RefereeAnimationClock){0};
+  const uint64_t event=__atomic_load_n(&referee_probe_event,__ATOMIC_ACQUIRE);
+  referee_gesture=(RefereeGesture){.serial=(uint32_t)(event>>32)};
   referee_probe_tick=0;referee_probe_dt=0;referee_player_snapshot_valid=0;
+  referee_probe_reposition=0;
   __atomic_store_n(&referee_demo_tick,0,__ATOMIC_RELEASE);
   __atomic_add_fetch(&referee_kickoff_applied,1,__ATOMIC_RELAXED);
   /* No SD-card write at the transition; the count goes in the break summary. */
@@ -422,6 +443,16 @@ static void referee_probe_suspend(int visible) {
   referee_motion_resume(&referee_motion);
   referee_probe_dt=0;
 }
+static void referee_probe_presentation_suspend(void) {
+  referee_probe_suspend(0);
+  referee_probe_reposition=1;
+  /* Recorded replay owns its actors. Do not replay a delayed signal,
+   * or reuse a last cinematic transform after its camera has gone away. */
+  __atomic_store_n(&referee_demo_tick,0,__ATOMIC_RELEASE);
+  const uint64_t event=__atomic_load_n(&referee_probe_event,__ATOMIC_ACQUIRE);
+  referee_gesture=(RefereeGesture){.serial=(uint32_t)(event>>32)};
+  referee_animation_clock=(RefereeAnimationClock){0};
+}
 static void referee_probe_sound(const void *self,uint64_t handle,const uint8_t *command,
                                 uint32_t arg,const void *registry,uint32_t player) {
   referee_sound_original(self,handle,command,arg,registry,player);
@@ -456,42 +487,50 @@ static int referee_probe_follow(int scene) {
   const uint32_t whistle=__atomic_load_n(&referee_probe_whistle_serial,__ATOMIC_ACQUIRE);
   if (whistle!=referee_probe_whistle_seen) {
     referee_probe_whistle_seen=whistle;
-    referee_gesture_whistle(&referee_gesture,(unsigned)restart);
+    referee_gesture_whistle(&referee_animation_bank,&referee_gesture,(unsigned)restart);
     /* Counted in the deferred summary; synchronous SD writes here can stall
      * a native write frame on each whistle. */
   }
   if(referee_kickoff_ready) {
     const float distance_squared=ball.x*ball.x+ball.z*ball.z;
-    if(distance_squared<=1.f)referee_kickoff_ready=2;
-    else if(referee_kickoff_ready==2)referee_kickoff_ready=0;
+    /* Warp acknowledgement and OpenRead ball publication are separate. An
+     * old goal-end sample must not release the stance while native kickoff
+     * is still stopped; either scoring side uses this same scalar contract. */
+    if(referee_probe_native_kickoff(registry)==1 || distance_squared<=1.f)
+      referee_kickoff_ready=2;
+    else if(referee_kickoff_ready==2 &&
+        !(referee_gesture.clip==4 && referee_gesture.elapsed<=referee_animation_bank.whistle_end))
+      referee_kickoff_ready=0;
     if(referee_kickoff_ready) {
       referee_motion_resume(&referee_motion);
+      referee_motion.position=(RefereePoint){0,REFEREE_KICKOFF_EDGE_Z};
+      referee_motion.heading=3.141592654f;
+      referee_probe_reposition=0;
       referee_player_snapshot_valid=0;
-      return 1; // Keep the ready stance until the centre spot has been played.
+      return 1; // Stay planted through kickoff and the native mouth-whistle interval.
     }
-  }
-  const uint32_t sequence=__atomic_load_n(&referee_demo_sequence,__ATOMIC_ACQUIRE);
-  const uint64_t demo_tick=__atomic_load_n(&referee_demo_tick,__ATOMIC_ACQUIRE);
-  const RefereePoint target={__atomic_load_n(&referee_demo_x,__ATOMIC_RELAXED)*.001f,
-      __atomic_load_n(&referee_demo_z,__ATOMIC_RELAXED)*.001f};
-  const float heading=__atomic_load_n(&referee_demo_heading,__ATOMIC_RELAXED)*.001f;
-  __atomic_thread_fence(__ATOMIC_ACQUIRE);
-  if(!(sequence&1u) && sequence==__atomic_load_n(&referee_demo_sequence,__ATOMIC_RELAXED) &&
-      demo_tick && now>=demo_tick && armTicksToNs(now-demo_tick)<100000000ULL) {
-    const float travel=hypotf(target.x-referee_motion.position.x,target.z-referee_motion.position.z);
-    const float speed=referee_probe_dt>0 && travel<1.f ? travel/referee_probe_dt : 0;
-    referee_motion_resume(&referee_motion);referee_motion.position=target;
-    referee_motion.heading=heading;
-    referee_using_demo=1;
-    referee_motion.velocity=(RefereePoint){fminf(speed,3.f),0};
-    referee_player_snapshot_valid=0;
-    return 1;
   }
   // Only avoidance neighbours are sampled at 15 Hz. Ball, movement, gestures
   // and pose publication remain at native frame cadence. Store values, never
   // native pointers; invalidate on every suspension and stadium boundary.
   if (!referee_player_snapshot_valid || now<referee_player_snapshot_tick ||
       referee_elapsed_ns(referee_player_snapshot_tick,now)>=66666666ull) {
+  if (!referee_motion.initialized) referee_motion_reset(&referee_motion);
+  referee_motion.pc_field=(RefereePcField){0};
+  if (referee_animation_bank.version==4) {
+    // GlobalRegistry::OpenRead's FieldInfo read-lock pointer. Copy only the
+    // three scalar dimensions at the same bounded cadence as neighbours;
+    // retain no native FieldInfo pointer beyond this callback.
+    const void *field=NULL;
+    memcpy(&field,(const char *)registry+0x4a10,sizeof(field));
+    if (field) {
+      RefereePcField dimensions;
+      memcpy(&dimensions.half_width,(const char *)field+4,4);
+      memcpy(&dimensions.penalty_line_x,(const char *)field+0x18,4);
+      memcpy(&dimensions.penalty_half_width,(const char *)field+0x1c,4);
+      if (referee_pc_field_valid(dimensions)) referee_motion.pc_field=dimensions;
+    }
+  }
   referee_player_snapshot_count=0;
   for (uint32_t i=0;i<22;++i) {
     ++referee_perf.player_reads;
@@ -506,6 +545,13 @@ static int referee_probe_follow(int scene) {
   referee_player_snapshot_valid=1;
   }
   if (!referee_motion.initialized) referee_motion_reset(&referee_motion);
+  if (referee_probe_reposition) {
+    if (!referee_motion_restore(&referee_motion,ball,referee_player_snapshot,
+                                referee_player_snapshot_count,restart)) return 0;
+    referee_probe_reposition=0;
+    referee_probe_dt=0;
+    return 1;
+  }
   if (dt>0) referee_motion_step_mode(&referee_motion,ball,referee_player_snapshot,
                                     referee_player_snapshot_count,dt,restart);
   return 1;
@@ -553,6 +599,9 @@ static int referee_probe_all_loaded(void *manager) {
         else {
           referee_ctor(referee_probe_model,2,&load);
           referee_set_lod(referee_probe_model,2,0,0); // Native match model policy.
+          /* The initial native warp can precede this optional actor's load.
+           * Arm its first ready stance too, without waiting for another goal. */
+          __atomic_store_n(&referee_kickoff_pending,1,__ATOMIC_RELEASE);
           __atomic_add_fetch(&referee_model_creations,1,__ATOMIC_RELAXED);
           referee_probe_load_tick=armGetSystemTick();
           referee_probe_note("Referee v11 queued after native player and uniform loads drained.");
@@ -599,13 +648,19 @@ static void referee_probe_draw(void *objects) {
   if (!referee_probe_enabled || referee_probe_failed || referee_probe_teardown ||
       !__atomic_load_n(&referee_probe_scene_ready,__ATOMIC_ACQUIRE) ||
       !referee_probe_model || !referee_probe_loaded || referee_probe_pending) return;
-  referee_probe_hidden_kickoff();
-  // Replay and paused menus hold the current pose. A goal scene keeps the
-  // referee moving back toward halfway; returning from pause starts at dt=0.
+  // The optional actor is not recorded in native replay animation.
+  // Ordinary out/foul demos keep it live; pause may retain the live pose.
   // The HUD's 80 ms freshness gate is for input, not model visibility. Read
   // the native match phase and explicit pause/replay owners instead.
-  const int scene=referee_probe_scene_active(); // 0 hidden, 1 pause/replay, 2 live, 3 goal.
-  if (scene!=2 && scene!=3) { referee_probe_suspend(scene==1); return; }
+  const int scene=referee_probe_scene_active(); // 0 interval, 1 pause, 2 live, 4 replay.
+  if (scene!=2) {
+    if (scene==1) referee_probe_suspend(1);
+    else referee_probe_presentation_suspend();
+    return;
+  }
+  /* Keep the acknowledged request through replay/pause/interval owners. Only
+   * the live publisher may consume it and display its first complete pose. */
+  referee_probe_hidden_kickoff();
   // A repeated listener callback in the same upload frame cannot advance twice.
   const uint64_t stamp=referee_frame_stamp();
   const int new_frame=!referee_probe_frame || stamp!=referee_probe_stamp;
@@ -613,7 +668,9 @@ static void referee_probe_draw(void *objects) {
   if (new_frame) {
     referee_probe_stamp=stamp;
     ++referee_probe_frame;
-    if (!referee_probe_follow(scene)) { referee_probe_suspend(1); return; }
+    if (!referee_probe_follow(scene)) {
+      referee_probe_suspend(!referee_probe_reposition);return;
+    }
     referee_probe_live_frame=1;
   }
   if (!referee_probe_live_frame || !new_frame) return;
@@ -689,13 +746,36 @@ static void referee_probe_draw(void *objects) {
 }
 
 #ifndef PESNX_REFEREE_PROBE_HOST_TEST
+static int referee_probe_kickoff_contract(so_module *module) {
+  if(!module || !module->load_base)return 0;
+  const struct {const char *symbol;uint32_t offset,word;} checks[]={
+    {"_ZN5match8registry14GlobalRegistry8OpenReadEv",0x31c,0xf9427a68},
+    {"_ZN5match8registry14GlobalRegistry8OpenReadEv",0x330,0x9113c261},
+    {"_ZN5match4Flow14ExecWaitInPlayEPKN5cobra4game7ContextE",0x744,0xb9516f88},
+    {"_ZN5match4Flow14ExecWaitInPlayEPKN5cobra4game7ContextE",0x75c,0xb9551788},
+    {"_ZN5match4Flow8ToInPlayEv",0x29c,0xb9551509},
+    {"_ZN5match4Flow8ToInPlayEv",0x2a4,0x7100053f},
+    {"_ZN5match4Flow8ToInPlayEv",0x2f8,0x320003e1},
+    {"_ZN5match8registry8FlowBase9SetStatusENS_11MatchStatusE",0,0xb9000401}
+  };
+  for(unsigned i=0;i<sizeof(checks)/sizeof(checks[0]);++i) {
+    if(!so_try_find_addr_rx(module,checks[i].symbol))return 0;
+    const uintptr_t address=so_find_addr(module,checks[i].symbol);
+    const uintptr_t base=(uintptr_t)module->load_base;
+    if(address<base || address-base>module->load_size ||
+        module->load_size-(address-base)<(size_t)checks[i].offset+4u)return 0;
+    uint32_t word;memcpy(&word,(const void *)(address+checks[i].offset),4);
+    if(word!=checks[i].word)return 0;
+  }
+  return 1;
+}
 static void install_referee_probe(so_module *module) {
-  FILE *file = fopen("referee-probe.txt", "rb");
-  if (!file) return;
-  char token[25] = {0};
-  size_t length = fread(token, 1, sizeof(token) - 1, file);
-  fclose(file);
-  if (length < 22 || memcmp(token, "PESNX_REFEREE_PROBE_V1", 22)) return;
+  size_t length = 0;
+  char *token = nx_asset_read("referee-probe.txt", 128u, &length);
+  const int enabled = token && length >= 22u &&
+      !memcmp(token, "PESNX_REFEREE_PROBE_V1", 22u);
+  free(token);
+  if (!enabled) return;
   const char *create_symbol =
       "_ZN5match5Human11CreateModelERKN4draw4load11HumanLoadIdE";
   if (!so_try_find_addr_rx(module, create_symbol)) return;
@@ -714,19 +794,25 @@ static void install_referee_probe(so_module *module) {
   const char *render_symbol="_ZN6render11PlayerModel6UpdateEv";
   const char *load_symbol="_ZN13UEPlayerModel8LoadImplEv";
   const char *vision_symbol="_ZN18VisionModelManager11VisionModelC2Ejj";
+  const char *open_read_symbol="_ZN5match8registry14GlobalRegistry8OpenReadEv";
   if(!so_try_find_addr_rx(module,demo_symbol) || !so_try_find_addr_rx(module,flow_symbol) ||
       !so_try_find_addr_rx(module,warp_symbol) || !so_try_find_addr_rx(module,render_symbol) ||
-      !so_try_find_addr_rx(module,load_symbol) || !so_try_find_addr_rx(module,vision_symbol))return;
+      !so_try_find_addr_rx(module,load_symbol) || !so_try_find_addr_rx(module,vision_symbol) ||
+      !so_try_find_addr_rx(module,open_read_symbol))return;
   const uintptr_t demo=so_find_addr(module,demo_symbol),flow=so_find_addr(module,flow_symbol),
       warp=so_find_addr(module,warp_symbol),render=so_find_addr(module,render_symbol),
-      load=so_find_addr(module,load_symbol),vision=so_find_addr(module,vision_symbol);
+      load=so_find_addr(module,load_symbol),vision=so_find_addr(module,vision_symbol),
+      open_read=so_find_addr(module,open_read_symbol);
   if(*(const uint32_t *)(demo+0x7c)!=0xf94676ea ||
       *(const uint32_t *)(demo+0x80)!=0xf94672e8 ||
       *(const uint32_t *)(flow+0xc)!=0xb90cd401 ||
       *(const uint32_t *)(warp+0xc)!=0x39754808 ||
       *(const uint32_t *)(render+0x44)!=0xf9005a60 ||
       *(const uint32_t *)load!=0xd102c3ff ||
-      *(const uint32_t *)(vision+0x18)!=0xb9003001)return;
+      *(const uint32_t *)(vision+0x18)!=0xb9003001 ||
+      *(const uint32_t *)(open_read+0x2a4)!=0xf9650a68 ||
+      *(const uint32_t *)(open_read+0x2b8)!=0x52894208 ||
+      *(const uint32_t *)(open_read+0x2c0)!=0x8b080261)return;
   const uintptr_t draw_plt = (uintptr_t)module->load_base + 0x38a0b50;
   const uintptr_t create_plt = (uintptr_t)module->load_base + 0x38948e0;
   const uintptr_t loaded_plt = (uintptr_t)module->load_base + 0x3804970;
@@ -823,9 +909,10 @@ static void install_referee_probe(so_module *module) {
   referee_animation_data=nx_asset_read("Animations/referee.nxra",REFEREE_ANIMATION_LIMIT,&animation_size);
   if (!referee_animation_bind(&referee_animation_bank,referee_animation_data,animation_size)) {
     free(referee_animation_data);referee_animation_data=NULL;
-    referee_probe_note("Referee v11 requires valid EF10 clips in FootballNX.assets; disabled.");
+    referee_probe_note("Referee v54 requires a valid Animations/referee.nxra bank; disabled.");
     return;
   }
+  referee_kickoff_layout_ok=referee_probe_kickoff_contract(module);
   hook_arm64(draw_plt, (uintptr_t)referee_probe_draw);
   hook_arm64(create_plt, (uintptr_t)referee_probe_create_model);
   hook_arm64(loaded_plt, (uintptr_t)referee_probe_all_loaded);
@@ -844,6 +931,8 @@ static void install_referee_probe(so_module *module) {
   hook_arm64(load_player_plt,(uintptr_t)referee_probe_load_player);
   hook_arm64(quality_plt,(uintptr_t)referee_probe_quality);
   referee_probe_enabled = 1;
-  referee_probe_note("Referee follower v18 armed; owned low-detail native renderer, position-warp kickoff, full-rate pose.");
+  referee_probe_note(referee_animation_bank.version==4 ?
+      "Referee v54 native PES21 motions armed; PC live-target bounds, native match events." :
+      "Referee v54 legacy retarget bank armed; install native PES21 bank for the new motions.");
 }
 #endif

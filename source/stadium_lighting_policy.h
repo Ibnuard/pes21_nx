@@ -46,6 +46,27 @@ static char *stadium_lighting_source(const char *source) {
      !strstr(source,"View_PreViewTranslation"))return NULL;
   StadiumLightEdit edits[32];unsigned count=0;
   const char *begin=strchr(body,'{');if(!begin)return NULL;
+  if(scope&24u) {
+    /* These two forms are verified against the owned Day/High Night and Low
+     * Night shader maps. Change only the diffuse, before native detail/light.
+     * Never identify a sampler by name in an unaudited shader body. */
+    const char *sample="texture(ps0,in_TEXCOORD0.xy).xyz";
+    const char *at=strstr(body,sample);
+    if(at) {
+      if(strstr(at+strlen(sample),sample))return NULL;
+      edits[count].at=at;edits[count].length=strlen(sample);
+      snprintf(edits[count++].text,768,
+          "nxPitchMowing(%s,in_TEXCOORD8.xyz-View_PreViewTranslation)",sample);
+    } else if(scope==16u) {
+      NightLightingSite diffuse;
+      at=strstr(body,".xyzw = texture(ps2,");
+      if(!at || !night_lighting_site(body,at,&diffuse))return NULL;
+      edits[count].at=diffuse.end;edits[count].length=0;
+      snprintf(edits[count++].text,768,
+          "\n\t%s.xyz = nxPitchMowing(%s.xyz,in_TEXCOORD8.xyz-View_PreViewTranslation);",
+          diffuse.variable,diffuse.variable);
+    } else return NULL;
+  }
   /* Colour only, after native shading. Never alter alpha/depth, samplers or
    * native texture ownership. Night receives no Day lighting rewrite. */
   const char *output=strstr(body,"out_Target0.xyzw = ");

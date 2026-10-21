@@ -314,6 +314,8 @@ void pes_controller_result_input(uint32_t action);
 void pes_controller_fix_demo_skip_request(void);
 int pes_controller_fix_demo_skip_active(void);
 int pes_controller_custom_postmatch_active(void);
+int pes_controller_result_top_menu_confirm_active(void);
+uint32_t pes_controller_result_top_menu_confirm_focus(void);
 void pes_controller_custom_postmatch_input(uint32_t action);
 // Half/full time result surfaces. 0 = none, 1 = half stats, 2 = half menu,
 // 3 = full stats, 4 = full menu. Cards are resolved from the match state.

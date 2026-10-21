@@ -95,6 +95,9 @@ class RefereeNativeContractTests(unittest.TestCase):
         layouts = ((WARP, 0xc, 0x39754808), (RENDER, 0x44, 0xf9005a60),
                    (LOAD, 0, 0xd102c3ff),
                    ('_ZN5match4Flow9ResetFlowENS_8FlowKindE', 0xc, 0xb90cd401),
+                   ('_ZN5match8registry14GlobalRegistry8OpenReadEv', 0x2a4, 0xf9650a68),
+                   ('_ZN5match8registry14GlobalRegistry8OpenReadEv', 0x2b8, 0x52894208),
+                   ('_ZN5match8registry14GlobalRegistry8OpenReadEv', 0x2c0, 0x8b080261),
                    ('_ZN18VisionModelManager11VisionModelC2Ejj', 0x18, 0xb9003001))
         for symbol, offset, expected in layouts:
             with self.subTest(layout=symbol):

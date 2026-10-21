@@ -20,7 +20,7 @@ static uint64_t fixdemo_trophy_boot_ms;
  * tick identifies this process session; it is not a wall-clock timestamp. */
 static void fixdemo_trophy_scene_status(const char *event) {
   char line[768];
-  snprintf(line, sizeof(line), "revision=v52 app=%s build=%s boot_ms=%llu %s",
+  snprintf(line, sizeof(line), "revision=v60 app=%s build=%s boot_ms=%llu %s",
            PES_NX_VERSION, PESNX_BUILD_ID,
            (unsigned long long)fixdemo_trophy_boot_ms, event ? event : "");
   for (char *p = line; *p; ++p)
@@ -132,7 +132,7 @@ static void fixdemo_trophy_journal_begin(void) {
     return;
   }
   char header[512];
-  const int length = snprintf(header, sizeof(header), "%s\nrevision=v52 app=%s build=%s boot_ms=%llu\n",
+  const int length = snprintf(header, sizeof(header), "%s\nrevision=v60 app=%s build=%s boot_ms=%llu\n",
                               pesnx_trophy_canary_capability, PES_NX_VERSION, PESNX_BUILD_ID,
                               (unsigned long long)fixdemo_trophy_boot_ms);
   errno = 0;

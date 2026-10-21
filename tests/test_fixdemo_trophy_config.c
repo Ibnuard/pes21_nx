@@ -205,8 +205,8 @@ static void package(void) {
 }
 static void check_scene(const char *needle) {
   read_text("scene-runtime.log", scene, sizeof(scene));
-  assert(strstr(scene, "FootballNX scene v52 session\n"));
-  assert(strstr(scene, "ceremony status: revision=v52 app=test-app build=" PESNX_BUILD_ID));
+  assert(strstr(scene, "FootballNX scene v60 session\n"));
+  assert(strstr(scene, "ceremony status: revision=v60 app=test-app build=" PESNX_BUILD_ID));
   assert(strstr(scene, "boot_ms=9876000"));
   if (!strstr(scene, needle)) {
     fprintf(stderr, "Expected [%s], got:\n%s\n", needle, scene);
@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
     read_text("trophy-runtime.log", current, sizeof(current));
     read_text("trophy-runtime.previous.log", previous, sizeof(previous));
     assert(!strcmp(previous, stale));
-    assert(strstr(current, "revision=v52 app=test-app build=" PESNX_BUILD_ID));
+    assert(strstr(current, "revision=v60 app=test-app build=" PESNX_BUILD_ID));
     assert(strstr(current, "marker absent") && !strstr(current, "v49"));
   } else if (!strcmp(test, "valid-and-abi")) {
     package();
@@ -338,7 +338,7 @@ int main(int argc, char **argv) {
     check_scene("failed path=trophy-runtime.");
     assert(fixdemo_trophy_journal_ready);
     read_text("trophy-runtime.log", current, sizeof(current));
-    assert(strstr(current, "revision=v52") && !strstr(current, "v49"));
+    assert(strstr(current, "revision=v60") && !strstr(current, "v49"));
   } else if (!strncmp(test, "header-", 7)) {
     package();
     const char *op = test + 7;

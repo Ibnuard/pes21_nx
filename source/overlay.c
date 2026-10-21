@@ -2464,7 +2464,7 @@ static void overlay_render(void) {
   else if(startup_transition || result_transition || pause_transition)frontdoor_page=FD_LOADING;
   else if(pause_camera_active)frontdoor_page=FD_PAUSE_SETTINGS;
   else if(pause_skin)frontdoor_page=FD_PAUSE;
-  else if(result_skin)frontdoor_page=FD_RESULT;
+  else if(result_skin || pes_controller_result_top_menu_confirm_active())frontdoor_page=FD_RESULT;
   else if(custom_video_settings_popup)frontdoor_page=FD_VIDEO;
   else if(custom_info_popup)frontdoor_page=FD_INFO;
   else if (!custom_gameplan && !result_skin && !tutorial_play_active) {

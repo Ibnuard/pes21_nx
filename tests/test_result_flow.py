@@ -17,6 +17,7 @@ static uint32_t exhibition_settings_penalties, match_result_extra_time_started;
 static uint32_t match_result_half_menu_seen;
 static uint32_t home, away, stub_phase, stub_leg;
 static uint32_t local_rematch_valid, cup, league, career;
+static uint32_t local_rematch_transition_abi_ok=1;
 static uint32_t local_rematch_request, local_rematch_menu_ready;
 static int competition_frontend_cup_match_active(void) { return cup; }
 static int competition_frontend_league_match_active(void) { return league; }
@@ -84,6 +85,10 @@ int main(void) {
     assert(match_result_action_list(MATCH_RESULT_SURFACE_HALF_MENU,a)==3);
     assert(a[1]==MATCH_RESULT_ACTION_NEXT);
   }
+  cup=league=career=0;stub_phase=MATCH_PHASE_END;
+  local_rematch_transition_abi_ok=0;
+  assert(match_result_action_list(MATCH_RESULT_SURFACE_FULL_MENU,a)==1);
+  assert(a[0]==MATCH_RESULT_ACTION_BACK_TO_MENU);
   return 0;
 }
 """
@@ -315,4 +320,3 @@ int main(void) {
 
 if __name__ == "__main__":
     unittest.main()
-

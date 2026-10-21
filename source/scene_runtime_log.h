@@ -46,7 +46,9 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v52 session\n",file);
+    fputs("FootballNX scene v65 session\n",file);
+    fputs("match v65: native match-local HOME/AWAY team keys; checked squad publication with refusal stages\n",file);
+    fputs("match v62: native host admission and checked squad load; result exit confirmation; kickoff snapshot hold; stadium mowing\n",file);
     fputs("compat hotpaths v44: release clock/TLS trace atomics removed\n",file);
     fputs("compat hotpaths v45: cached native thread IDs; single-pass buffer free lists; native prematch reveal\n",file);
     fputs("compat hotpaths v46: context-local separate blend suppression; diagnostic savings counts\n",file);

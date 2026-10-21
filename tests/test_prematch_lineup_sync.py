@@ -24,7 +24,7 @@ class PrematchLineupSyncTests(unittest.TestCase):
         source = "\n".join([
             (ROOT / "tests/prematch_lineup_stubs.inc").read_text(),
             *[function(hooks, name) for name in (
-                "exhibition_matchplan_common_side", "exhibition_sync_prematch_lineup",
+                "exhibition_matchplan_common_side", "exhibition_prematch_commit_refused", "exhibition_sync_prematch_lineup",
                 "exhibition_save_matchplan_sides", "master_league_office_lineup_valid", "prematch_gameplan_replace_player",
                 "exhibition_prepare_team_conditions")],
             (ROOT / "tests/prematch_lineup_cases.inc").read_text(),
@@ -81,12 +81,13 @@ class PrematchLineupSyncTests(unittest.TestCase):
         self.assertIn("order < registered", restore)
         self.assertIn("exhibition_gameplan_prepare_matchplan()", kits)
         self.assertLess(refresh.index("exhibition_save_matchplan_sides(3u)"),
-                        refresh.index("exhibition_install_master_roster("))
+                        refresh.index("exhibition_seed_selected_tmpdb()"))
+        seed = function(hooks, "exhibition_seed_selected_tmpdb")
         for reset in ("exhibition_refresh_selected_tmpdb()",
                       "exhibition_matchplan_setup_tmpdb(", "matchplan_squad_load()"):
             self.assertNotIn(reset, kits)
-        self.assertLess(refresh.index("exhibition_prepare_team_conditions("),
-                        refresh.index("exhibition_set_team(&home_team_id"))
+        self.assertLess(seed.index("exhibition_prepare_team_conditions("),
+                        seed.index("exhibition_set_team(&home_team_id"))
 
 
 if __name__ == "__main__":

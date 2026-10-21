@@ -51,6 +51,8 @@ static void (*match_inplay_camera_update_original)(void*,void*)=native_update;
 static unsigned footballnx_tribune_view(float *p) {assert(0);return 0;}
 static void stadium_v2_begin(void *c,void *p) {(void)c;(void)p;} // Native choice, V2 disabled.
 static void stadium_v2_end(void) {}
+static void stadium_camera_begin(void *c,void *p) {(void)c;(void)p;}
+static void stadium_camera_end(void) {}
 static void nx_near_camera(const float *p,unsigned id,uint64_t tick) {
   assert(p[0]==4 && p[5]==55 && (id==1 || id==(pause_camera_stadium_v2?134u:6u)) && tick==now);
   ++snapshots;

@@ -260,6 +260,9 @@ static int mc_current_slot(void) {
 }
 
 // ---------------------------------------------------------------------------
+#ifdef STARTUP_RENDER_AUDIT
+#include "gl_startup_audit.inc"
+#endif
 #ifdef NEAR_CAMERA_TRACE
 #include "gpu_timestamp_probe.inc"
 #endif
@@ -573,6 +576,9 @@ static void glProgramBinary_c(GLuint program, GLenum format, const void *binary,
   const GLProgramBinaryProc driver =
       __atomic_load_n(&gl_program_binary_real, __ATOMIC_ACQUIRE);
   driver(program, format, binary, length);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(NX_START_BINARY);
+#endif
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
 #ifdef DEBUG_LOG
   stadium_diag_forget(program);
@@ -584,6 +590,9 @@ static void glProgramBinaryOES_c(GLuint program, GLenum format, const void *bina
   const GLProgramBinaryProc driver =
       __atomic_load_n(&gl_program_binary_oes_real, __ATOMIC_ACQUIRE);
   driver(program, format, binary, length);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(NX_START_BINARY_OES);
+#endif
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
 #ifdef DEBUG_LOG
   stadium_diag_forget(program);
@@ -2433,6 +2442,10 @@ eglGetProcAddress_diag(const char *name) {
   __eglMustCastToProperFunctionPointerType proc = eglGetProcAddress(name);
   const __eglMustCastToProperFunctionPointerType binary = gl_program_binary_proc(name, proc);
   if (binary) return binary;
+#ifdef STARTUP_RENDER_AUDIT
+  const __eglMustCastToProperFunctionPointerType startup=nx_start_proc(name,proc);
+  if (startup) return startup;
+#endif
   const __eglMustCastToProperFunctionPointerType cached = gl_cached_state_proc(name);
   if (proc && cached) return cached;
 #ifdef DEBUG_LOG
@@ -2544,6 +2557,9 @@ static void glCompileShader_diag(GLuint shader) {
   glCompileShader(shader);
   GLint status = GL_FALSE;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(status==GL_TRUE?NX_START_COMPILE_OK:NX_START_COMPILE_FAIL);
+#endif
   if (status == GL_TRUE) {
 #ifdef DEBUG_LOG
     __atomic_fetch_add(&gl_diag_compile_ok, 1, __ATOMIC_RELAXED);
@@ -2628,6 +2644,9 @@ static void glLinkProgram_diag(GLuint program) {
     else scene_runtime_note("GL link failed",reason);
   }
   // The upload context can relink a name already cached by the draw thread.
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(status==GL_TRUE?NX_START_LINK_OK:NX_START_LINK_FAIL);
+#endif
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
 #ifdef DEBUG_LOG
   if (status == GL_TRUE) {
@@ -2662,6 +2681,9 @@ static void glLinkProgram_diag(GLuint program) {
 // defined in movie_player.c (already referenced by the import table below).
 extern unsigned int eglSwapBuffersHook(void *display, void *surface);
 static unsigned int eglSwapBuffers_cache(void *display, void *surface) {
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_present(pes_controller_match_hud_inplay(),pes_controller_match_hud_session());
+#endif
   const int completed_slot = mc_current_slot();
   if (completed_slot >= 0) {
     memset(g_mc[completed_slot].completed_scene, 0,
@@ -3015,6 +3037,10 @@ static EGLBoolean eglMakeCurrent_dedup(EGLDisplay dpy, EGLSurface draw,
   debugPrintf("eglMakeCurrent(dpy=%p draw=%p read=%p ctx=%p%s) -> %d err=%x\n",
               dpy, real_draw, real_read, ctx,
               mapped_pbuffer ? " fake-pbuffer" : "", r, error);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(r?NX_START_MAKE_OK:NX_START_MAKE_FAIL);
+  if (!r) nx_start_failure(NX_START_MAKE_FAIL,error,0);
+#endif
   if (r) {
     if (ctx != EGL_NO_CONTEXT)
       gl_log_context_once(ctx);
@@ -3333,6 +3359,9 @@ static void gl_load_drain(void) {
   const uintptr_t context=slot>=0?(uintptr_t)g_mc[slot].ctx:0;
   if (nx_upload_due(&gl_upload_budget,context)) {
     glFlush();
+#ifdef STARTUP_RENDER_AUDIT
+    nx_start_count(NX_START_FLUSH);
+#endif
 #ifdef NEAR_CAMERA_TRACE
     nx_near_flush();
 #endif
@@ -3362,6 +3391,9 @@ static void glTexImage2D_w(GLenum t, GLint l, GLint i, GLsizei w, GLsizei h,
     }
   }
   glTexImage2D(t, l, i, w, h, b, f, y, p);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(NX_START_TEXTURE);
+#endif
   if (!p) debugPrintf("graphics-diag: TexImage allocation end\n");
 }
 static void glRenderbufferStorage_diag(GLenum target, GLenum format,
@@ -3375,12 +3407,18 @@ static void glCompressedTexImage2D_w(GLenum t, GLint l, GLenum i, GLsizei w,
                                      GLsizei h, GLint b, GLsizei s, const void *d) {
   gl_load_drain();
   glCompressedTexImage2D(t, l, i, w, h, b, s, d);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(NX_START_TEXTURE);
+#endif
 }
 static void glBufferData_w(GLenum target, GLsizeiptr size, const void *data,
                            GLenum usage) {
   NX_NEAR_BEGIN();
   gl_load_drain();
   glBufferData(target, size, data, usage);
+#ifdef STARTUP_RENDER_AUDIT
+  nx_start_count(NX_START_BUFFER);
+#endif
   NX_NEAR_UPLOAD(size>0?(uint64_t)size:0,0);
 }
 #ifdef NEAR_CAMERA_TRACE
@@ -4247,7 +4285,9 @@ DynLibFunction dynlib_functions[] = {
   { "glGenRenderbuffers", (uintptr_t)&glGenRenderbuffers },
   { "glGenTextures", (uintptr_t)&glGenTextures },
   { "glGetAttribLocation", (uintptr_t)&glGetAttribLocation },
-#ifdef NEAR_CAMERA_TRACE
+#ifdef STARTUP_RENDER_AUDIT
+  { "glGetError", (uintptr_t)&glGetError_startup },
+#elif defined(NEAR_CAMERA_TRACE)
   { "glGetError", (uintptr_t)&glGetError_near },
 #else
   { "glGetError", (uintptr_t)&glGetError },
@@ -4255,7 +4295,11 @@ DynLibFunction dynlib_functions[] = {
   { "glGetBooleanv", (uintptr_t)&glGetBooleanv },
   { "glGetIntegerv", (uintptr_t)&glGetIntegerv },
   { "glGetProgramInfoLog", (uintptr_t)&glGetProgramInfoLog },
+#ifdef STARTUP_RENDER_AUDIT
+  { "glGetProgramiv", (uintptr_t)&glGetProgramiv_startup },
+#else
   { "glGetProgramiv", (uintptr_t)&glGetProgramiv },
+#endif
   { "glGetShaderInfoLog", (uintptr_t)&glGetShaderInfoLogHook },
   { "glGetShaderiv", (uintptr_t)&glGetShaderiv },
   { "glGetString", (uintptr_t)&glGetString },

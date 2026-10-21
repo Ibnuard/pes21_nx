@@ -155,9 +155,9 @@ class FrontdoorVisualTests(unittest.TestCase):
                 self.assertEqual(sum(d['kind'] == 2 and 20 <= d['texture'] <= 37 for d in draws), helper_count)
         overlay = (ROOT / 'source/overlay.c').read_text()
         route = overlay.split('FrontdoorPage frontdoor_page=FD_NONE;', 1)[1].split('const int native_lab', 1)[0]
-        self.assertIn('else if(result_skin)frontdoor_page=FD_RESULT;', route)
-        self.assertLess(route.index('result_transition'), route.index('result_skin)frontdoor_page'))
-        self.assertLess(route.index('pause_skin)frontdoor_page'), route.index('result_skin)frontdoor_page'))
+        self.assertIn('else if(result_skin || pes_controller_result_top_menu_confirm_active())frontdoor_page=FD_RESULT;', route)
+        self.assertLess(route.index('result_transition'), route.index('else if(result_skin ||'))
+        self.assertLess(route.index('pause_skin)frontdoor_page'), route.index('else if(result_skin ||'))
 
     def test_kit_container_helpers_describe_directions_not_player_ownership(self):
         self.assertIn('v->kit_editing ? "PREV KIT" : "LEFT"', self.source)
@@ -238,7 +238,7 @@ class FrontdoorVisualTests(unittest.TestCase):
         snapshot = self.source.split('static void frontdoor_snapshot(', 1)[1].split('static void fd_rect(', 1)[0]
         # These two confirm-state accessors are read-only; "confirm" is the
         # modal's name, not a command to execute it.
-        snapshot = re.sub(r'pes_controller_pause_top_menu_confirm_(?:active|focus)\(\)', 'read_only_confirm_state', snapshot)
+        snapshot = re.sub(r'pes_controller_(?:pause|result)_top_menu_confirm_(?:active|focus)\(\)', 'read_only_confirm_state', snapshot)
         self.assertNotRegex(snapshot, r'\b(?:pes_controller|competition_frontend)_\w*(?:set_|move_|input|confirm_|activate|kickoff)\w*\s*\(')
         overlay = (ROOT / 'source/overlay.c').read_text()
         self.assertIn('frontdoor_snapshot(&view,frontdoor_page', overlay)

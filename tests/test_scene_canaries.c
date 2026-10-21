@@ -144,7 +144,7 @@ static int referee_probe_restart_active(void) { return 0; }
 #include "../source/referee_probe.inc"
 #include "referee_animation_fixture.h"
 static unsigned char human[22][0x820], animation[22][0x940];
-static unsigned char registry_data[0x500], move_data[22][0x580];
+static unsigned char registry_data[0x4a18], move_data[22][0x580];
 static int warp_complete,flow_calls,demo_calls;
 static unsigned char flow_object[0xce0];
 static unsigned char demo_object[0xcf0];
@@ -327,6 +327,7 @@ static void referee_test(void) {
   frame();assert(!published && !updates && referee_probe_pending);
   assert(!referee_probe_all_loaded((void*)1));native_loaded=1;
   assert(referee_probe_all_loaded((void*)1) && !referee_probe_pending);
+  assert(referee_kickoff_pending); // Initial native warp can predate this optional actor.
   assert(referee_owned_render==(uintptr_t)render_storage && render_lookups==1);
   assert(referee_probe_render_update(render_storage)==17 && quality_during_render==1 && queued==1);
   assert(!referee_render_scope && referee_probe_quality()==2 && native_quality==2);
@@ -350,7 +351,10 @@ static void referee_test(void) {
   assert(!referee_render_scope && !referee_queue_scope && referee_probe_quality()==2);
   test_render_isolation=0;
   unsigned char players_before[sizeof(human)];memcpy(players_before,human,sizeof(human));
-  for(int i=0;i<300;i++)frame();
+  ball_data[0]=ball_data[2]=0;frame();
+  assert(displayed && last_position.x==0 && last_position.z==9.15f && referee_kickoff_ready==2);
+  ball_data[0]=35;ball_data[2]=5;
+  for(int i=0;i<299;i++)frame();
   assert(!memcmp(players_before,human,sizeof(human))); // Referee cannot mutate players.
   assert(creations==1 && published==300 && updates==300 && displayed);
   assert(referee_perf.samples==300 && referee_perf.player_reads==150u*22u);
@@ -389,15 +393,16 @@ static void referee_test(void) {
   referee_kickoff_ready=1;assert(!referee_probe_offscreen(2,ticks));referee_kickoff_ready=0;
   referee_screen_sample=0;
   assert(last_position.x>18 && referee_motion.distance>15 && referee_probe_moved);
-  const RefereeProbeVector before=last_position;
   int old_published=published,old_updates=updates;
   const int visible_commands=display_calls;
   inplay=0;for(int i=0;i<100;i++)frame();
   assert(!referee_player_snapshot_valid && !referee_perf.samples);
   assert(display_calls==visible_commands+1);
   assert(!displayed && old_published==published && old_updates==updates);
-  inplay=2;frame();assert(fabsf(last_position.x-before.x)<0.0001f);
-  inplay=1;frame();assert(displayed); // A visible pause/replay holds the pose.
+  inplay=2;frame();assert(displayed && !referee_probe_reposition);
+  const RefereeProbeVector before=last_position;
+  assert(!referee_motion.velocity.x && !referee_motion.velocity.z);
+  inplay=1;frame();assert(displayed); // An ordinary pause holds the pose.
   inplay=2;frame();assert(fabsf(last_position.x-before.x)<0.0001f);
   // A temporary registry handover holds the last pose and position.
   registry_available=0;frame();assert(displayed); // Brief registry gap cannot blink.
@@ -478,14 +483,21 @@ static void referee_test(void) {
   referee_probe_sound((void*)3,21,&command,0x1d,(void*)4,22);
   assert(sound_calls==6 && referee_probe_whistle_serial==2);
   inplay=1;frame();assert(referee_probe_whistle_seen==2);
-  // The model stays loaded and its animation clock advances during a goal.
+  // Replay and every demo hide the optional actor without deleting it. A
+  // changed live ball position is applied before the first display on return.
   inplay=2;for(int i=0;i<240;i++)frame();
-  inplay=3;frame();const float goal_distance=referee_motion.distance;
+  inplay=4;frame();const float goal_distance=referee_motion.distance;
   const int goal_frames=published;
   for(int i=0;i<90;i++)frame();
-  assert(displayed && published==goal_frames+90 && referee_motion.distance>goal_distance+.1f);
-  assert(creations==6 && deleted==5 && referee_motion.restart==8);
-  inplay=2;
+  assert(!displayed && published==goal_frames && referee_motion.distance==goal_distance);
+  assert(creations==6 && deleted==5 && referee_probe_reposition);
+  ball_data[0]=-30;ball_data[2]=-20;
+  registry_available=0;inplay=2;frame();
+  assert(!displayed && published==goal_frames && referee_probe_reposition);
+  registry_available=1;frame();
+  assert(displayed && published==goal_frames+1 && !referee_probe_reposition);
+  assert(last_position.x<0 && !referee_motion.velocity.x && !referee_motion.velocity.z);
+  assert(!referee_gesture.clip);
   // Observe only a centre referee that really exists in the native demo.
   float demo_p[3]={0},demo_q[4]={0};
   *(void**)(demo_object+0xce0)=demo_actors;
@@ -497,24 +509,26 @@ static void referee_test(void) {
   assert(demo_calls==2 && !referee_demo_tick); // Never borrow player placement.
   referee_probe_demo_transform(demo_object,demo_p,demo_q,0x100,1,2,.3f,.5f);
   assert(demo_calls==3 && referee_demo_tick==ticks && !(referee_demo_sequence&1));
-  frame();assert(fabsf(last_position.x-12)<.0001f && fabsf(last_position.z-4)<.0001f && displayed);
-  assert(!referee_motion.velocity.x && !referee_motion.velocity.z); // A cut is not a running stride.
+  inplay=4;frame();assert(!displayed && !referee_demo_tick);
+  inplay=2;frame();assert(last_position.x<0 && displayed);
+  assert(!referee_motion.velocity.x && !referee_motion.velocity.z);
   assert(creations==6 && deleted==5);
   ticks+=150000000;frame();
-  assert(hypotf(last_position.x-12,last_position.z-4)<.581f); // Stale demo expires without teleport.
+  assert(last_position.x<0); // Never adopt a cinematic transform after return.
   // No draw occurs during the fade. Only a successful native player warp arms
   // placement; the first resumed draw publishes the ready pose before display.
   *(uint32_t*)(flow_object+0xcd4)=3;
+  const uint32_t kickoffs_before=referee_kickoff_applied;
   assert(!referee_probe_position_warp(flow_object,(void*)7) && !referee_kickoff_pending);
-  frame();assert(!referee_kickoff_ready && last_position.x>10);
+  frame();assert(!referee_kickoff_ready && last_position.x<0);
   warp_complete=1;inplay=0;
   assert(referee_probe_position_warp(flow_object,(void*)7) && referee_kickoff_pending);
   ticks+=1000000000; // Native draw listener is stopped throughout black.
   ball_data[0]=ball_data[2]=0;inplay=2;frame();
-  assert(!referee_kickoff_pending && referee_kickoff_ready==2 && referee_kickoff_applied==1);
-  assert(last_position.x==0 && last_position.z==10.75f && displayed);
+  assert(!referee_kickoff_pending && referee_kickoff_ready==2 && referee_kickoff_applied==kickoffs_before+1);
+  assert(last_position.x==0 && last_position.z==9.15f && displayed);
   for(int i=0;i<10;i++)frame();
-  assert(last_position.x==0 && last_position.z==10.75f && creations==6 && deleted==5);
+  assert(last_position.x==0 && last_position.z==9.15f && creations==6 && deleted==5);
   ball_data[0]=3;frame();assert(!referee_kickoff_ready);
   *(uint32_t*)(flow_object+0xcd4)=5;
   assert(referee_probe_position_warp(flow_object,(void*)7) && !referee_kickoff_pending);
@@ -526,13 +540,23 @@ static void referee_test(void) {
   for(unsigned i=0;i<50;i++) {
     referee_motion.position=(RefereePoint){35,-20};
     assert(referee_probe_position_warp(flow_object,(void*)7));
-    frame();assert(last_position.x==0 && last_position.z==10.75f && displayed);
+    frame();assert(last_position.x==0 && last_position.z==9.15f && displayed);
     assert(creations==6 && deleted==5 && referee_kickoff_ready==2);
   }
-  assert(referee_kickoff_applied==52);
+  assert(referee_kickoff_applied==kickoffs_before+52);
   /* A fast pass before the first resumed draw must not trap the ready stance. */
   assert(referee_probe_position_warp(flow_object,(void*)7));
-  ball_data[0]=5;frame();assert(!referee_kickoff_ready && last_position.z==10.75f);
+  ball_data[0]=5;frame();assert(!referee_kickoff_ready && last_position.z==9.15f);
+  // A native whistle arriving as the ball moves keeps the kickoff stance
+  // planted through the bank's measured mouth-contact interval, then releases.
+  assert(referee_probe_position_warp(flow_object,(void*)7));
+  ball_data[0]=0;frame();
+  referee_animation_bank.whistle_begin=0;referee_animation_bank.whistle_end=.08f;
+  referee_probe_sound((void*)3,22,&command,0x1d,(void*)4,22);
+  ball_data[0]=5;frame();
+  assert(referee_kickoff_ready && last_position.x==0 && last_position.z==9.15f);
+  frame();frame();frame();
+  assert(!referee_kickoff_ready);
   referee_probe_animation_release();referee_probe_release(NULL);
   assert(deleted==6 && !referee_kickoff_ready && !referee_demo_tick);
   assert(!referee_owned_render && !referee_owned_ue);
@@ -545,6 +569,26 @@ static void referee_test(void) {
   assert(referee_probe_all_loaded((void*)1) && referee_probe_failed && !referee_probe_pending);
   assert(creations==6 && !referee_probe_model);
   uniform_busy=0;referee_probe_release(NULL);
+  // The PC target helper receives copied live geometry only for the native
+  // bank. A missing/invalid field or legacy bank cannot retain stale bounds.
+  float field_data[18]={0};
+  field_data[1]=34.06f;field_data[6]=36.14f;field_data[7]=20.12f;
+  *(void**)(registry_data+0x4a10)=field_data;
+  referee_animation_bank.version=4;referee_player_snapshot_valid=0;
+  assert(referee_probe_follow(2));
+  assert(referee_motion.pc_field.penalty_line_x==36.14f);
+  field_data[6]=30;
+  assert(referee_motion.pc_field.penalty_line_x==36.14f); // Scalar, not borrowed pointer.
+  ticks+=70000000;assert(referee_probe_follow(2));
+  assert(referee_motion.pc_field.penalty_line_x==30);
+  field_data[6]=NAN;ticks+=70000000;assert(referee_probe_follow(2));
+  assert(!referee_pc_field_valid(referee_motion.pc_field));
+  *(void**)(registry_data+0x4a10)=NULL;
+  ticks+=70000000;assert(referee_probe_follow(2));
+  assert(!referee_pc_field_valid(referee_motion.pc_field));
+  *(void**)(registry_data+0x4a10)=field_data;field_data[6]=36.14f;
+  referee_animation_bank.version=3;ticks+=70000000;assert(referee_probe_follow(2));
+  assert(!referee_pc_field_valid(referee_motion.pc_field));
   free(animation_data);referee_animation_bank=(RefereeAnimationBank){0};
 }
 static void motion_test(void) {

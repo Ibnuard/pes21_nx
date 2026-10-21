@@ -65,5 +65,33 @@ int main(void) {
   const RefereeMotion saved=m;
   assert(!referee_motion_step_mode(&m,(RefereePoint){NAN,0},NULL,0,.03f,0));
   assert(!memcmp(&m,&saved,sizeof(m)));
+  // The native-bank PC bounds limit live targets near either goal; restart
+  // positioning and missing geometry retain their existing behavior.
+  RefereeMotion native;referee_motion_reset(&native);
+  native.pc_field=(RefereePcField){34.06f,36.14f,20.12f};
+  step(&native,(RefereePoint){51,30},1.0f/60,0);
+  assert(native.target.x<=33.141f);
+  referee_motion_reset(&native);native.pc_field=(RefereePcField){34.06f,36.14f,20.12f};
+  step(&native,(RefereePoint){-51,-30},1.0f/60,0);
+  assert(native.target.x>=-33.141f);
+  step(&native,(RefereePoint){52.5f,-34},1.0f/60,4);
+  assert(native.target.x==37); // PC live rule is not a substitute restart policy.
+  // The user-selected kickoff point is the near centre-circle edge, and a
+  // hidden replay restore is a fresh position with no accumulated velocity.
+  referee_motion_kickoff(&native);
+  assert(native.position.x==0 && native.position.z==9.15f && !native.has_ball);
+  native.distance=123;native.velocity=(RefereePoint){4,2};
+  const RefereePoint return_ball={-30,-20};
+  const RefereePoint obstruction=referee_motion_destination(return_ball,0,native.pc_field);
+  assert(referee_motion_restore(&native,return_ball,&obstruction,1,0));
+  assert(native.position.x<0 && native.distance==123 && native.has_ball);
+  assert(hypotf(native.position.x-obstruction.x,native.position.z-obstruction.z)>=2.4f);
+  assert(hypotf(native.position.x-return_ball.x,native.position.z-return_ball.z)>=6.f);
+  assert(!native.velocity.x && !native.velocity.z && !native.ball_velocity.x && !native.ball_velocity.z);
+  const RefereeMotion restored=native;
+  assert(!referee_motion_restore(&native,(RefereePoint){NAN,0},NULL,0,0));
+  assert(!memcmp(&native,&restored,sizeof(native)));
+  assert(referee_motion_restore(&native,(RefereePoint){52.5f,-34},NULL,500,4));
+  assert(native.restart==4 && native.target.x==37 && native.target.z==-12);
   puts("referee behavior scenarios: pass");
 }
