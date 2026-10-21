@@ -66,3 +66,60 @@ def test_preview_hashes_and_current_keys_are_required(tmp_path):
     metadata['cooked_key']='stale';image.with_suffix('.json').write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match='current prepared/cooked'):
         pack.validate_preview_evidence(tmp_path, [proof], review)
+
+
+def test_budget_priority_needs_explicit_current_cohort_decision(tmp_path):
+    import json
+    row, proof = rows()
+    (tmp_path/'prepare-report.json').write_text(json.dumps([row]))
+    (tmp_path/'verify-report.json').write_text(json.dumps([proof]))
+    path = tmp_path/'RELEASE-DECISION.json'
+    decision = dict(policy=pack.BUDGET_PRIORITY, user_directive='Budget first; retain existing appearance.',
+                    prepare_sha256=pack.sha(tmp_path/'prepare-report.json'),
+                    verify_sha256=pack.sha(tmp_path/'verify-report.json'), included_base_ids=[1],
+                    normal_complete_head_limit=5000, exceptional_complete_head_limit=7000,
+                    appearance_notes_advisory=True, preserve_original_cooked_mips_outside_tiny_guard=True)
+    config = dict(release_policy=pack.BUDGET_PRIORITY, release_decision=str(path))
+    path.write_text(json.dumps(decision))
+    assert pack.release_policy(config, tmp_path, [row], [proof])['preserve_cooked_outside_tiny_guard']
+    assert not pack.release_policy({}, tmp_path, [row], [proof])['preserve_cooked_outside_tiny_guard']
+    for change in [dict(user_directive=''), dict(verify_sha256='stale'), dict(included_base_ids=[2]),
+                   dict(normal_complete_head_limit=7000), dict(appearance_notes_advisory=False)]:
+        path.write_text(json.dumps(dict(decision, **change)))
+        with pytest.raises(ValueError, match='budget-priority'):
+            pack.release_policy(config, tmp_path, [row], [proof])
+
+
+def test_budget_release_preserves_rejected_mip_bytes_without_forcing_alpha(tmp_path, monkeypatch):
+    path = tmp_path/'hair.uexp'
+    path.write_bytes(b'original cooked payload')
+    path.with_suffix('.uasset').write_bytes(b'original asset header')
+    def rejected(_):
+        raise ValueError('Discarded hair mip exceeds the bounded tiny-mip policy')
+    class Texture:
+        def __init__(self, _): pass
+        def payload(self, index): return bytes([10, 20, 30, 255])
+    monkeypatch.setattr(pack, 'protect_texture', rejected)
+    monkeypatch.setattr(pack, 'Texture', Texture)
+    with pytest.raises(ValueError, match='bounded tiny-mip'):
+        pack.release_hair_mips(path, dict(preserve_cooked_outside_tiny_guard=False))
+    proof = pack.release_hair_mips(path, dict(preserve_cooked_outside_tiny_guard=True))
+    assert path.read_bytes() == b'original cooked payload'
+    assert path.with_suffix('.uasset').read_bytes() == b'original asset header'
+    assert proof['changed_mips'] == [] and proof['alpha_forced'] is False
+    assert proof['original_cooked_payloads_byte_identical']
+    def unrelated_failure(_):
+        raise ValueError('Only native BGRA is supported')
+    monkeypatch.setattr(pack, 'protect_texture', unrelated_failure)
+    with pytest.raises(ValueError, match='native BGRA'):
+        pack.release_hair_mips(path, dict(preserve_cooked_outside_tiny_guard=True))
+
+
+def test_budget_policy_cannot_hide_mutation_during_failed_mip_repair(tmp_path, monkeypatch):
+    path = tmp_path/'hair.uexp'; path.write_bytes(b'original')
+    def rejected_with_mutation(path):
+        path.write_bytes(b'changed')
+        raise ValueError('Discarded hair mip exceeds the bounded tiny-mip policy')
+    monkeypatch.setattr(pack, 'protect_texture', rejected_with_mutation)
+    with pytest.raises(ValueError, match='changed cooked bytes'):
+        pack.release_hair_mips(path, dict(preserve_cooked_outside_tiny_guard=True))

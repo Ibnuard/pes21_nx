@@ -25,6 +25,59 @@ from audit_realface_runtime_assets import dependency_names, texture_evidence
 from cooked_texture import Texture
 from realface_hair_mips import protect_texture
 
+BUDGET_PRIORITY = 'budget-priority-v1'
+
+
+def release_policy(config, work, prepared, verified):
+    """An explicit current user decision can make appearance notes advisory."""
+    policy = config.get('release_policy', 'strict-visual-v1')
+    if policy == 'strict-visual-v1':
+        return dict(policy=policy, preserve_cooked_outside_tiny_guard=False)
+    if policy != BUDGET_PRIORITY:
+        raise ValueError('Unknown league release policy')
+    path = Path(config['release_decision']).resolve()
+    if not path.is_relative_to(Path(work).resolve()):
+        raise ValueError('Release decision must be local to this cohort')
+    decision = read(path)
+    if (decision.get('policy') != BUDGET_PRIORITY or
+            not decision.get('user_directive', '').strip() or
+            decision.get('prepare_sha256') != sha(Path(work)/'prepare-report.json') or
+            decision.get('verify_sha256') != sha(Path(work)/'verify-report.json') or
+            set(decision.get('included_base_ids', [])) != {r['base_id'] for r in verified} or
+            decision.get('normal_complete_head_limit') != 5000 or
+            decision.get('exceptional_complete_head_limit') != 7000 or
+            decision.get('appearance_notes_advisory') is not True or
+            decision.get('preserve_original_cooked_mips_outside_tiny_guard') is not True):
+        raise ValueError('Explicit current budget-priority release decision required')
+    if {r['base_id'] for r in prepared} != set(decision['included_base_ids']):
+        raise ValueError('Budget release decision differs from prepared cohort')
+    return dict(policy=policy, decision=str(path), decision_sha256=sha(path),
+                preserve_cooked_outside_tiny_guard=True)
+
+
+def release_hair_mips(path, policy):
+    """Keep the strict default; budget release preserves out-of-policy mips.
+
+    This never forces medium-mip alpha or calls a failed guard a successful
+    repair. Such existing cooked chains are copied unchanged and reported.
+    """
+    preserve = policy['preserve_cooked_outside_tiny_guard']
+    before = {suffix: path.with_suffix(suffix).read_bytes()
+              for suffix in ('.uasset', '.uexp', '.ubulk')
+              if path.with_suffix(suffix).exists()} if preserve else {}
+    try:
+        return protect_texture(path)
+    except ValueError as error:
+        if not preserve or str(error) != 'Discarded hair mip exceeds the bounded tiny-mip policy':
+            raise
+        if any(path.with_suffix(suffix).read_bytes() != raw for suffix, raw in before.items()):
+            raise ValueError('Failed mip protection changed cooked bytes') from error
+        texture = Texture(path)
+        return dict(source_has_visible_hair=max(texture.payload(0)[3::4]) >= 85,
+                    changed_mips=[], policy='original_cooked_chain_preserved',
+                    warning=str(error), alpha_forced=False,
+                    original_cooked_payloads_byte_identical=True)
+
 
 def validate_completion(scope, prepared, verified, review):
     if scope.get('policy') != POLICY:
@@ -100,12 +153,14 @@ def package(config):
     if scope != scope_for(config, unique(sources(config), 'package sources')):
         raise ValueError('Final package must cover the complete pinned league scope')
     prepared = read(work / 'prepare-report.json'); verified = read(work / 'verify-report.json')
+    policy = release_policy(config, work, prepared, verified)
     review = read(work / 'VISUAL-REVIEW.json')
     if (review.get('prepare_sha256') != sha(work / 'prepare-report.json') or
             review.get('verify_sha256') != sha(work / 'verify-report.json')):
         raise ValueError('Visual review refers to a different prepared/cooked cohort')
     ready = validate_completion(scope, prepared, verified, review)
-    validate_preview_evidence(work, [r for r in verified if r['status'] in VERIFIED], review)
+    if policy['policy'] != BUDGET_PRIORITY:
+        validate_preview_evidence(work, [r for r in verified if r['status'] in VERIFIED], review)
     if not ready:
         raise ValueError('No approved offline candidates')
     baseline = read(Path(config['accepted_release']) / 'VERIFICATION.json')
@@ -117,6 +172,7 @@ def package(config):
                   verify_sha256=sha(work / 'verify-report.json'), review_sha256=sha(work / 'VISUAL-REVIEW.json'),
                   package_code_sha256=sha(__file__), v54=config['v54_pinned_files'],
                   materials=baseline['neutral_material_hashes'])
+    recipe['release_policy'] = policy
     key = key_of(recipe); job = work / 'release-builds' / key[:16]
     complete = job / 'complete.json'
     if complete.exists():
@@ -158,10 +214,12 @@ def package(config):
                     {PARENT: NEW_PARENT, GAME+PARENT: GAME+NEW_PARENT}, template)
         if dependency_names(stage, native):
             raise ValueError('Native import/material dependency differs')
-        mip = protect_texture(stage/FACE/f'{native}_hair_parts_color_tablet.uexp')
+        mip = release_hair_mips(stage/FACE/f'{native}_hair_parts_color_tablet.uexp', policy)
         textures = {part: texture_evidence(Texture(stage/FACE/(str(native)+suffix+'.uexp')))
                     for part, suffix in (('face','_face_tablet'), ('hair','_hair_parts_color_tablet'))}
-        if not textures['face']['every_mip_opaque'] or (mip['source_has_visible_hair'] and textures['hair']['fully_discarded_mips']):
+        if not textures['face']['every_mip_opaque'] or (
+                not policy['preserve_cooked_outside_tiny_guard'] and
+                mip['source_has_visible_hair'] and textures['hair']['fully_discarded_mips']):
             raise ValueError('Opaque face/visible hair mip contract failed')
         if row['base_id'] in originals:
             if any(sha(stage/name) != baseline['asset_hashes'].get(name) for name in names):
@@ -171,6 +229,8 @@ def package(config):
                             league_exception=row.get('league_exception'),
                             accepted_cohort_unchanged=row['base_id'] in originals,
                             textures=textures, hair_mip_repair=mip))
+        if len(players) % 50 == 0 or len(players) == len(ready):
+            print(dict(stage='staging_verified_heads', completed=len(players), total=len(ready)), flush=True)
     hashes = hash_tree(stage)
     if set(hashes) != private | {n for r in ready for n in asset_names(r['native_player_id'])}:
         raise ValueError('Unexpected final payload allowlist')
@@ -180,7 +240,9 @@ def package(config):
     pak.parent.mkdir(parents=True, exist_ok=True)
     response = job/'response.txt'
     response.write_text('\n'.join('"'+str(stage/n)+'" "../../../'+n+'"' for n in sorted(hashes))+'\n', encoding='utf-8')
+    print(dict(stage='creating_pak', heads=len(players)), flush=True)
     command([config['unrealpak'], pak, '-Create='+str(response), '-compress'], job/'package.log')
+    print(dict(stage='pak_test_and_independent_unpack'), flush=True)
     command([config['unrealpak'], pak, '-Test'], job/'pak-test.log')
     roundtrip = job/'roundtrip'
     command([config['repak'], 'unpack', pak, '-o', roundtrip], job/'roundtrip.log')
@@ -205,6 +267,11 @@ def package(config):
                  pak_sha256=sha(pak), pak_bytes=pak.stat().st_size, pak_roundtrip_hashes_match=True,
                  v54_unchanged_files=config['v54_pinned_files'], accepted_barca_mu_unchanged=True,
                  full_pc_referee_ai=False, hardware_accepted=False, runtime_installed=False)
+    proof['release_policy'] = policy
+    proof['appearance_notes_advisory'] = policy['policy'] == BUDGET_PRIORITY
+    proof['fresh_preview_hash_validation'] = policy['policy'] != BUDGET_PRIORITY
+    proof['preserved_cooked_mip_warning_base_ids'] = [p['base_id'] for p in players
+        if p['hair_mip_repair'].get('policy') == 'original_cooked_chain_preserved']
     write(destination/'VERIFICATION.json', proof)
     for filename, rows, fields in (
         ('PLAYER-STATUS.csv', status, ('base_id','native_player_id','name','team_ids','status','reason')),
@@ -224,8 +291,11 @@ def package(config):
         'Pemain fallback dan alasannya ada di PLAYER-STATUS.csv; anggaran ada di PLAYER-BUDGET.csv.\n'
         'Sunderland belum ada di katalog sumber ini. Angkat piala/AI wasit PC penuh tetap belum selesai.\n'
         'Validasi offline bukan jaminan animasi atau 60 FPS Switch. Simpan scene-runtime.log.\n'
+        f'Kebijakan rilis: {policy["policy"]}; catatan visual tetap tercatat, bukan klaim semua rambut sempurna.\n'
+        f'{len(proof["preserved_cooked_mip_warning_base_ids"])} rantai mip rambut dipertahankan dari hasil cook tanpa memaksa alpha; lihat VERIFICATION.json.\n'
         'Rollback: keluarkan PAK v55, pulihkan PAK dan NRO sebelumnya.\n', encoding='utf-8')
     archive = destination.with_suffix('.zip'); file_hashes = hash_tree(destination)
+    print(dict(stage='zip_and_payload_readback'), flush=True)
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for name in sorted(file_hashes): z.write(destination/name, name)
     with zipfile.ZipFile(archive) as z:

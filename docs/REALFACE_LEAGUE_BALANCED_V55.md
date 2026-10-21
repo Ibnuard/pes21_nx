@@ -2,6 +2,32 @@
 
 21 October 2026. Offline TEST work; no final candidate has been delivered.
 
+## Latest user release criteria
+
+The user subsequently clarified that the release criterion is the complete-head
+triangle budget: normally 4,500-5,000, with unique hairstyles allowed up to 7,000.
+All **907 available verified heads already meet that budget**: 848 are at most
+5,000 (including 127 below 4,500), and 59 documented exceptions reach at most
+6,996. Do not inflate a smaller valid head to reach the normal range or restart
+preparation, cooking, previews, shader reconstruction or cosmetic experiments.
+
+The existing 82 appearance observations and 76 source-comparison observations
+are advisory under this explicit decision. They are not newly cleared visual
+proofs or a claim of perfect hair. The two later Aarons/Stach flat-surface trials
+were inspected and held for boundary defects; their replacements are excluded,
+and their previous validated heads remain. Preserve already-good assets.
+
+The packager's strict policy remains the default. The separately bound local
+`package-budget-priority.local.json` selects `budget-priority-v1` through
+`RELEASE-DECISION.json`, tied to the exact preparation/cook cohort and user
+directive. Outside the existing tiny-mip repair guard, it preserves the original
+cooked hair payloads byte-for-byte and reports the warning rather than forcing
+alpha or claiming a successful repair. Identity, asset integrity, opaque face,
+section/budget checks, accepted Barca/MU bytes, pinned v54 files, PAK roundtrip
+and ZIP checks remain. No additional image acceptance or device FPS is claimed.
+The roster still has 213 IDs without direct local face folders and two unresolved
+identity conflicts; these retain native fallback rather than speculative donors.
+
 ## Current checkpoint and continuation
 
 Read `local-debug/realface-leagues-balanced-v55/RUN-STATUS.json` and the live
