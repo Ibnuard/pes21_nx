@@ -27,70 +27,31 @@ Remaining material decisions/repairs and PAK/ZIP packaging remain pending. Prepa
 generated previews and visual inspection are separate counts. Do not claim
 full roster coverage, visual acceptance or 60 FPS.
 
-The hidden continuation started as PID **187180** at 22:37 Jakarta with
-preview/recovery child **73240**. It was deliberately stopped during previews
-at 23:39 to prioritize a confirmed material defect: completed cached batches
-through 444 front heads remain reusable. This was not a cook/validation failure.
-The Cullen UV canary completed preparation, cook and independent validation.
-Its 4,718-triangle head with protected facial hair was inspected in four views
-and promoted as a bounded material fix; remaining card-detail concerns stay
-open. The main **preview-only** finalizer resumed as PID 199644 at 00:00 on
-21 October, then stopped after 708 cached fronts during worker recycling.
-Its historical logs are `D:/PESNX-Cache/Logs/realface-leagues-v55-post-uv.out.log`
-and `.err.log`. The failure was shutdown timeout after `wait(20)` and
-`terminate`/`wait(10)`, rather than a failed model or cook. Waiting without
-draining a piped stdout can block teardown. The client now uses `communicate`
-to close stdin and drain output, with bounded 20/10/30-second graceful,
-terminate and kill stages. It retains ownership and refuses worker reuse until
-the previous process is reaped. The renderer and image recipe are unchanged.
-Regression coverage includes a real child writing more than pipe capacity.
+The main preview runner and both serial follow-up queues have finished. Their
+historical receipts are `PREVIEW-RESUME-LATEST.json`,
+`RENDER-FOLLOWUP-LATEST.json` and `MATERIAL-FOLLOWUP-LATEST.json`. All required
+main/source/detail output was inspected and recorded. Do not treat the PIDs
+inside completed receipts as live owners or repeat 907 preparation/cook/preview
+jobs. Read `REVIEW-HANDOFF.json` and the latest material diagnostic receipt for
+current work; verify actual process ID, creation time, command and children
+before resuming any worker. No owned renderer or canary remains active at the
+08:20 Jakarta material checkpoint. The hourly continuation remains active.
 
-The corrected preview-only continuation started at **01:23 Jakarta**. Read
-`PREVIEW-RESUME-LATEST.json` for its owner and current stdout/stderr paths;
-do not keep polling the old failed log. Inspect actual ownership before any
-further resume. Earlier main logs:
-`D:/PESNX-Cache/Logs/realface-leagues-v55-source-extension.out.log` and `.err.log`.
-A later preview child may own the status PID. Inspect actual ownership and
-per-batch logs before restarting. Cold UE startup has taken several minutes
-here; inactivity alone during startup does not prove conversion failure.
-Earlier cooks reported very slow access to the D: Unreal derived-data cache;
-all cooked validation is now complete. The main preview phase completed at
-04:38 Jakarta; the serial follow-up then began source/prepared comparisons.
+The preview shutdown regression was fixed before completion: waiting without
+draining piped stdout could block Blender teardown. The client now uses
+`communicate` with bounded graceful/terminate/kill stages, retains ownership
+until the old process is reaped, and refuses duplicate workers. Image recipes
+and the renderer remained unchanged. Current diagnostics reuse completed
+geometry/cook evidence where payloads are exact; a changed candidate must get
+its own bound validation and actual image inspection.
 
-`RENDER-FOLLOWUP-LATEST.json` now pins a hidden render-only continuation
-waiting for the exact main process to exit. It checks successful
-`awaiting_visual_review`, unchanged config/prepare/verify hashes, a complete
-907-front/405-head side-view manifest and no surviving worker. Only then does
-it run `render-source-comparisons` followed by `render-details`, then a bounded
-Luis Rioja alpha reference diagnostic, using the shared lock and cache.
-Its own status and D: log paths are in the receipt.
-Check this owner/status before starting another review renderer. A failed or
-replaced main process prevents continuation. The queue never records inspection,
-approves a face, changes the runtime or creates a final package; after rendering
-it stops at `awaiting_inspection`.
-
-```powershell
-. D:/PESNX-Cache/use-cache.ps1
-python -B tools/realface_league_complete.py `
-  --config local-debug/realface-leagues-balanced-v55/config.local.json
-```
-
-This verifies/reuses the source-extension receipt, prepares only new heads,
-cooks/validates them, then runs bounded recovery and previews. If everything
-is already cooked, resume only previews:
-
-```powershell
-python -B tools/realface_league_finalize.py `
-  --config local-debug/realface-leagues-balanced-v55/config.local.json `
-  --from-phase preview
-```
-
-Use one runner and one Blender/editor/validator at a time. Stages share a
-Windows process-held lock. Do not duplicate an active progressing runner or
-its child. Inspect stderr and its specific import/cook/validation/render log.
-Resume unchanged successes; never repeat deterministic failures without
-changing input/recipe. Keep caches/temp/logs/output on D. Do not duplicate
-OBBs, edit source payloads, replace the installed runtime or touch other work.
+Use one serial runner and one Blender/editor/validator at a time. Stages share
+a Windows process-held lock. Inspect stderr and the specific import, cook,
+validation or render log. Resume unchanged successes; never repeat
+deterministic failures without a changed input/recipe. Source-atlas and mip
+checks are diagnostic gates, not automatic acceptance. Keep caches, temporary
+files, logs and outputs on D. Do not duplicate OBBs, edit source payloads,
+replace the installed runtime or touch other work.
 
 Existing hourly heartbeat `real-face-inggris-spanyol-5k` remains active. Do
 not duplicate it; disable it only after verified final delivery. It stays
@@ -410,17 +371,45 @@ extra gate; a matching result still provides no geometry or visual acceptance.
 Eleven synthetic regressions pass, including copied identical inputs, reused
 IDs/fingerprint mismatches, an existing own UV repair and missing local fixtures.
 
-A separate, queued Reece beard-surface canary uses only his own lower-face
-surface and native weights to support a consolidated beard layer. The skin FBX
-and opaque atlas remain byte-identical; the crown tile is copied into a
-128-square masked hair atlas, so this experiment does increase hair texture
-area while keeping its maximum dimension and two sections. It composites
-existing source beard layers offline, checks the original dense 13-view
-silhouette/workload gates and an additional 0.45 cm source-visible beard bound.
-Read `texture-diagnostic/BEARD-FOLLOWUP-LATEST.json` for the exact owner/status.
-It waits for the pinned RGB batch and all workers to finish, then validates
-input/script/plan hashes and takes the shared lock. Planning/compilation is not
-geometry, cook, visual or performance acceptance; no automatic promotion follows.
+The remaining 80-owner RGB diagnostic batch has completed: 47 rendered trials,
+32 inapplicable source-material layouts and one correspondence hold (146944).
+All 47 four-view sheets were actually inspected; with the initial three trials,
+this is 50 heads and 200 diagnostic view instances, separate from the 2,164 main
+unique images. Source color often improves, but broad beard/crown cards remain.
+None was promoted. The immutable receipt, matching script and inspection index
+are in `texture-diagnostic/own-secondary-rgb-batches/remaining-eighty/`.
+Inapplicable material layouts are not unavailable players or visual acceptance.
+
+The own-face-supported Reece beard experiment has finished and is rejected.
+Its final 4,704-triangle version passed the existing dense 13-view gates and
+additional bidirectional 0.45 cm beard-contour bounds. Independent cooked
+validation was recovered without recooking after a missing legacy `recipe.eye`
+metadata field; the parent face FBX and opaque atlas were byte-identical, and
+the canonical parent eye metadata was retained. Actual four-view inspection
+still found jagged dark beard slabs. Hair cooked vertices increased from 3,384
+to 4,630. Numeric triangle reduction therefore did not produce a useful visual
+or performance candidate. Do not promote or repeat this recipe.
+`texture-diagnostic/BEARD-VERIFICATION-RECOVERY-LATEST.json` points to its
+completed validation and explicit visual rejection.
+
+A subsequent source-geometry trial retained all hair positions, weights and
+triangles and blended beard RGB/normals toward the same player's own face only
+within 0.6 cm. Crown pixels, face FBX and opaque atlas stayed exact; a separate
+beard tile increased the hair atlas from 128x64 to 128x128. This version passed
+independent cook, rig, UV, normal and unchanged mip gates at 4,820 triangles;
+hair cooked vertices were 3,386 versus 3,384. Its four actual views and full-size
+left view were inspected. Pale roots improve, but coarse projecting cards remain;
+it is held without promotion. `texture-diagnostic/BEARD-TRANSFER-LATEST.json`
+binds the result and inspection to immutable authoring snapshots. It is an
+offline approximation, not a complete PC shader or hardware-performance proof.
+
+The read-only `texture-diagnostic/MIP-HOLD-ALPHA-EXTENTS.json` checks all 30
+separate mip holds. Most source atlases have nonzero alpha extending across
+nearly their complete bounds; simple transparent-border cropping would not
+solve them. Several lose all alpha-tested texels at 4-pixel mips; three already
+fail at 8 or 16 pixels. Keep the existing mip guard. Increasing texture size,
+forcing medium-mip alpha above the cutoff, or accepting a nonempty mip without
+checking the hairstyle is not a demonstrated repair.
 
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
@@ -498,7 +487,7 @@ it compares current masked output, fractional alpha, and the prepared-size hair
 texture for 103041, in front and left views. It reuses two verified baselines
 and needs six new renders. `RIOJA-ALPHA-LATEST.json` pins the plan, input hashes
 and dimensions. Planning and the live shared-lock exclusion check passed;
-the actual reference images still await the serial render queue. The diagnostic
+the actual reference images have been inspected. The diagnostic
 does not recreate the full PC shader, authorize a new runtime blend policy,
 provide cooked acceptance or prove device performance. Inspect the actual
 comparison before selecting any separately keyed material canary.
@@ -550,8 +539,8 @@ The complete authoring checkpoint selection then passed **122 tests** in
 74.09 seconds (`D:/PESNX-Cache/Logs/realface-v55-authoring-checkpoint-tests.log`),
 covering inventory, identity, preparation/recovery, slots, import/cache,
 previews, worker shutdown, inspection bookkeeping and packaging gates.
-The new source-comparison render action still needs live integration after
-the main renderer finishes; these unit results are not rendering proof.
+Source-comparison rendering and regroup-cache integration subsequently finished;
+actual inspection is recorded separately from these unit-test results.
 An old 124-byte mock-worker log in the repository root was moved to D: logs;
 the shutdown regression now uses its pytest temporary directory even on failure
 and checks that no render log is created while closing. Its eight tests passed
