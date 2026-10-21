@@ -592,6 +592,30 @@ approved replacement; actual four-angle inspection, unchanged quality gates,
 independent cook and costs must pass before any promotion. Accepted50/v54 and
 the main907 preparation/cook are not rerun.
 
+The scoped control `local-debug/rff55/43e6da21db54bc28` subsequently passed
+independent cook and four actual full-size cooked-texture views. The cracked
+card pattern and periodic slit are gone. Complete-head triangles decrease from
+4,979 to 4,214, and cooked hair vertices from 2,575 to 933. Packed face core
+streams and every face mip payload remain identical. Copied lower-detail mip0
+pixels are identical, hair-normal transfer stays within the unchanged two-degree
+limit (maximum 0.371 degrees), and every hair mip passes without alpha repair.
+The hair atlas grows from 128x64 to 128x128: payload bytes increase from 43,692
+to 87,380. The offline card-fragment proxy decreases from 96,548 for the previous
+v55 head to 43,630; that is not a GPU timing or FPS measurement. No shader,
+sampler, section or runtime operation is added. Receipts under
+`FLAT-SHORT-SCALP-VALIDATION-LATEST.json` bind these checks; the separate promotion
+receipt and main ledger determine whether the result is current.
+
+The first three prepared controls were held after actual four-view inspection.
+The fixes consolidate the periodic seam/pole, preserve copied FBX index winding
+through the reflected bind, and exclude above-eye facial detail from the scalp
+region. They do not erase eyebrow geometry or alter face vertices. A separate
+validation-queue metadata check was corrected to compare .NET process creation
+times on both sides; CIM had truncated two 100-nanosecond ticks. Another
+post-cook audit used the wrong component label (`face` rather than `skin`);
+correcting that reader required no asset change or recook. Do not rerun the
+rejected controls or the successful cook to repair these bookkeeping errors.
+
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
 that defect merely because source and reduced results agree. His material
