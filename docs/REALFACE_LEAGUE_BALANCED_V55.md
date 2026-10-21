@@ -411,6 +411,54 @@ fail at 8 or 16 pixels. Keep the existing mip guard. Increasing texture size,
 forcing medium-mip alpha above the cutoff, or accepting a nonempty mip without
 checking the hairstyle is not a demonstrated repair.
 
+`tools/realface_mip_reference.py` adds a read-only orthographic mask diagnostic.
+It measures destination alpha coverage, handles quantization/ties without
+forcing a nonempty pixel, and compares periodic bilinear/trilinear sampling
+against a supersampled base-mip mask on the same head geometry and skin depth.
+No texture or runtime is patched. Tests include empty/unrepresentable masks,
+UV addressing, projected footprint, skin occlusion and equal atlas coverage
+with different visible head coverage. The combined helper/unchanged mip-guard
+suite passes 14 tests. This is a sampling proxy, not a mobile GPU or shading
+simulation; neither a lower average error nor a passing mip guard is acceptance.
+
+The three actual diagnostic sheets for Robertson 101028, Cairns 101585 and
+Mbappe 110718 were inspected. Destination coverage matching makes the existing
+mip guard pass for all three. Mean projected error improves for the first two,
+but some 8-pixel directions worsen, and Mbappe's aggregate error worsens.
+`texture-diagnostic/MIP-REFERENCE-LATEST.json` binds the inputs, code snapshots,
+per-view metrics and actual inspection. No alpha change was promoted. These
+diagnostic sheets do not increase the 2,164 main image count.
+
+The five-owner `texture-diagnostic/EYE-SOURCE-POLICY-AUDIT.json` distinguishes
+the explicit shared neutral FL26 iris from a player's own native iris. Mujaid
+Sadick, Boyomo, Nico Williams, Saliba and Lavia currently use that neutral
+template. The same gray iris in a dense converted preview therefore does not
+independently establish its PC color. Do not silently tint it or call it a
+donor-player iris. Source eye geometry/guide alignment is a separate question.
+
+Their own raw `pes3DFW_EyeOcclusion` helpers reference black RGB/alpha textures;
+`EYE-OCCLUSION-METADATA.json` records the per-owner material, texture and identity
+hashes. An isolated Mujaid trial projects that source helper onto the existing
+eye surface within 0.5 cm and bakes a static eyelid shadow into the same 256px
+opaque atlas. The negative-X eye gets a separate unused 56px atlas tile, with
+an integer UV shift, so opposite lids need not share one baked shadow. This
+adds no material, sampler, surface, triangle or texture size. Skin UVs and
+encoded top-level skin pixels outside the two eye tiles remain exact, including
+after cook; every face mip stays opaque. Coarse-mip RGB averages can change
+because the previously unused tile now contains an eye.
+
+The 3,751-triangle trial passed independent cook, rig/UV/normal checks and the
+unchanged hair mip gate. Face cooked vertices remain 1,724 and hair vertices
+337. All four full-size cooked-texture views were inspected: bright globe rims
+are reduced and both irises remain present/aligned. Only the scoped static eye
+material fix is accepted; the short crown cards remain an open head-review
+concern. This is not animated gaze, a complete PC shader or factual iris color.
+`texture-diagnostic/EYE-OCCLUSION-CANARY-LATEST.json` and the promotion receipt
+under `material-repairs/124855/` record the current publication/ledger state.
+Check the actual writer before any family trial; do not rebake a promoted head
+or rerun all 907 models. Four further audited neutral-eye owners are queued for
+serial prepared-only inspection before any cook is permitted.
+
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
 that defect merely because source and reduced results agree. His material
