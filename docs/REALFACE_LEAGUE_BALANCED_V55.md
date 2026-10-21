@@ -545,6 +545,53 @@ Any proposed exact deduplication must first compare complete packed attributes,
 including required normal/UV/tangent/bone seams. Do not erase seams, alter
 accepted Barca/MU assets or infer a performance improvement from metadata counts.
 
+The subsequent constrained packed-stream audit covers all 1,814 cooked mesh
+parts. `tools/realface_packed_vertex_audit.py` reads position, both packed tangent
+basis vectors/sign, every UV channel, all stored bone indices/weights and the
+bounded primary index buffer. It has no writer. Color, section bone maps,
+morph and cloth semantics are not parsed: equal core records are candidates,
+never permission to weld. All 1,327 parts without an equal core record rule out
+exact full-record duplicates. The other 487 contain at most 1,061 potentially
+redundant core records among 3,454,020 vertices (about 0.031% of this asset
+population); 999 are hair and 62 face. No unreferenced vertex was found. This
+upper bound is too small to prioritize a risky mesh rewrite and is not a match
+frame-time estimate. `PACKED-CORE-AUDIT-LATEST.json` and
+`PACKED-CORE-COST-SUMMARY.json` bind the ignored receipts. Synthetic parser,
+vertex and performance-audit tests passed 36 checks; no proprietary fixture is
+required for the new parser tests.
+
+The read-only raw-control audit covers the 83 held owners. It finds 275
+hair-named/technique meshes, 259 with vertex colors, 256 with nonwhite RGB,
+but no varying vertex alpha. No hidden mesh group or extension header was found
+in that bounded cohort. These facts alone do not identify opacity or hidden LOD
+semantics. Local FL26 shader metadata and selected compiled programs were then
+read using the existing CPK/FSOP readers and Windows' static disassembly API;
+CPK/FSOP/DXBC are outside the available REA format route. This is ordinary
+parser/static evidence, not a REA execution trace. Original payloads and raw
+disassembly stay ignored on D:.
+
+The selected Hair2 vertex programs use RGB in their motion calculation; their
+deferred pixel programs do not use it as static albedo or opacity. The NrmUV
+variant takes diffuse alpha/normal from UV0 and secondary diffuse RGB from UV1.
+The mapped technique also has separate deferred/decal, reconstruction and
+shadow programs. Its deferred coverage depends on a screen-space texture and
+object/system constants, not only a fixed texture-alpha cutoff. Exact PC pass
+selection, reconstruction output and equivalence on Switch remain unobserved.
+`SHADER-SEMANTICS-LATEST.json` binds these specific programs and their hashes.
+This does not authorize global RGB/UV reinterpretation, native dither, a new
+runtime shader or automatic acceptance of the previous RGB trials.
+
+The user's subsequent direction explicitly favors a continuous, smooth surface
+for cracked short hair rather than the visible card pattern. An isolated
+Harwood-Bellis 132625 short-scalp control follows that direction: own-source
+outer envelope/hairline, flat color sampled from its own scalp, unchanged face
+and lower facial-hair detail, the existing masked material and a 5,000-triangle
+complete-head ceiling. `FLAT-SHORT-SCALP-LATEST.json` and the separate run receipt
+track preparation/preview/cook stages. It is not a global helmet recipe or an
+approved replacement; actual four-angle inspection, unchanged quality gates,
+independent cook and costs must pass before any promotion. Accepted50/v54 and
+the main907 preparation/cook are not rerun.
+
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
 that defect merely because source and reduced results agree. His material
