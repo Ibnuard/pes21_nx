@@ -399,6 +399,29 @@ texels and must not be called surface-coverage proof. Further trials may only
 use each owner's documented material/UV/texture correspondence and immutable
 alpha; no arbitrary tint, donor, global UV change or extra runtime sampler.
 
+The source-atlas match must also cover the prepared input recipe. The read-only
+`tools/realface_hair_atlas_correspondence.py` checks BaseId/native ID/fingerprint
+across the source, prepared job and source profile, then hashes both source FBX
+and atlas and requires the existing card UV domain. The live 83-owner audit
+finds 82 matching recipes; Cullen's promoted UV1 input intentionally differs
+from the raw UV0 catalog. His generic RGB diagnostic must not be promoted or
+used to undo the earlier repair. `RGB-PREPARED-CORRESPONDENCE.json` records this
+extra gate; a matching result still provides no geometry or visual acceptance.
+Eleven synthetic regressions pass, including copied identical inputs, reused
+IDs/fingerprint mismatches, an existing own UV repair and missing local fixtures.
+
+A separate, queued Reece beard-surface canary uses only his own lower-face
+surface and native weights to support a consolidated beard layer. The skin FBX
+and opaque atlas remain byte-identical; the crown tile is copied into a
+128-square masked hair atlas, so this experiment does increase hair texture
+area while keeping its maximum dimension and two sections. It composites
+existing source beard layers offline, checks the original dense 13-view
+silhouette/workload gates and an additional 0.45 cm source-visible beard bound.
+Read `texture-diagnostic/BEARD-FOLLOWUP-LATEST.json` for the exact owner/status.
+It waits for the pinned RGB batch and all workers to finish, then validates
+input/script/plan hashes and takes the shared lock. Planning/compilation is not
+geometry, cook, visual or performance acceptance; no automatic promotion follows.
+
 The six inspected comparisons confirm Cullen's pink/skin-colored hair plates
 already exist in the dense converted source, before reduction. Do not clear
 that defect merely because source and reduced results agree. His material
