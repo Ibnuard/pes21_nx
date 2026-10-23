@@ -1,7 +1,7 @@
 """Serial, resumable league heads using the accepted 5k Barca/MU recipe.
 
 One Blender/editor/validator at a time. A failed 5k quality gate may try the
-explicit exceptional ceiling, but complete heads must stay strictly below
+explicit exceptional ceiling, but complete heads must not exceed
 7,000 triangles. Original inputs and the delivered v54 package are immutable.
 Generated game payloads and reports belong in ignored local-debug on D.
 """
@@ -50,9 +50,14 @@ def unique(rows, label):
 def scope_for(config, catalogue):
     catalog = read(config['catalog'])
     categories = {c['key']: c for c in catalog['categories']}
-    if not set(CATEGORIES) <= categories.keys():
-        raise ValueError('Both league categories are required')
-    teams = sorted({t for key in CATEGORIES for t in categories[key]['team_ids']})
+    requested=tuple(config.get('categories',CATEGORIES))
+    if not requested or len(set(requested))!=len(requested) or not set(requested)<=categories.keys():
+        raise ValueError('Valid distinct league categories are required')
+    if config.get('team_ids'):
+        from realface_batch_inventory import selected_teams
+        teams=sorted(t['team_id'] for t in selected_teams(catalog,requested,config['team_ids']))
+    else:
+        teams=sorted({t for key in requested for t in categories[key]['team_ids']})
     owners = [r for r in read(config['source_verification'])['players']
               if set(r.get('team_ids', [])) & set(teams)]
     owners_by_id = unique(owners, 'league roster')
@@ -72,9 +77,9 @@ def scope_for(config, catalogue):
         else:
             selected.append(base)
     if set(selected) != catalogue.keys():
-        raise ValueError('Source list contains identities outside the two league rosters')
-    return dict(policy=POLICY, categories=list(CATEGORIES), teams=teams,
-                category_team_counts={key: len(categories[key]['team_ids']) for key in CATEGORIES},
+        raise ValueError('Source list contains identities outside the selected rosters')
+    return dict(policy=POLICY, categories=list(requested), teams=teams,
+                category_team_counts={key: len(categories[key]['team_ids']) for key in requested},
                 roster_count=len(owners), source_count=len(selected),
                 selected_base_ids=sorted(selected), unresolved=unresolved,
                 verification_sha256=sha(config['source_verification']),
@@ -95,8 +100,8 @@ def validate_head(row):
     folder = Path(row['folder'])
     total = trial.validate_preparation(read(folder / 'simplification.json'),
                                        read(folder / 'hair-projection.json'), cap)
-    if total != row['triangles'] or total >= 7000:
-        raise ValueError('Head must match its proof and stay strictly below 7000')
+    if total != row['triangles'] or total > 7000:
+        raise ValueError('Head must match its proof and stay at most 7000')
     if total > 5000 and not row.get('league_exception'):
         raise ValueError('Above-target head requires explicit exception provenance')
     return total
@@ -137,6 +142,20 @@ def prepare_player(config, row, worker):
     absent = [path for path in row['input_hashes'] if not Path(path).is_file()]
     if absent:
         return dict(row, status='held_source', reason='Optional original source files unavailable', missing_files=absent)
+    if row.get('profile'):
+        profile = read(row['profile'])
+        if (profile.get('native_player_id') == row['native_player_id'] and
+                profile.get('hair_skin_materials')):
+            # This supported dense source needs an explicit opaque-skin hair
+            # recipe. Keep the existing trial refusal, but checkpoint this owner
+            # instead of aborting all unrelated heads. Changed inputs stay fatal.
+            for path, digest in row['input_hashes'].items():
+                if sha(path) != digest:
+                    raise ValueError('Pinned original source changed: ' + path)
+            return dict(row, status='held_source',
+                        reason='Own-source hair carries opaque skin; scoped material recipe required',
+                        source_hold_kind='opaque_skin_in_hair',
+                        hair_skin_materials=profile['hair_skin_materials'])
     attempts, locked, count = [], False, 0
     result = None
     for cap in (5000, 7000):
@@ -172,8 +191,8 @@ def prepare_player(config, row, worker):
                 if result['triangles'] > 5000:
                     result['league_exception'] = dict(reason='5000 quality/budget attempts held',
                                                       triangles=result['triangles'], attempts=attempts[:-1])
-                if result['triangles'] >= 7000:
-                    result = dict(result, status='held_geometry', reason='Exceptional head must be strictly below 7000')
+                if result['triangles'] > 7000:
+                    result = dict(result, status='held_geometry', reason='Exceptional head must be at most 7000')
                     continue
                 validate_head(result)
                 return result
@@ -297,7 +316,7 @@ def run(config_path, limit=None):
                     from realface_budget_package import counts
                     actual = counts(read(Path(result['cooked_folder']) / 'verification.json'),
                                     result['budgets']['head_cap'])
-                    if actual['triangles'] != result['triangles'] or actual['triangles'] >= 7000:
+                    if actual['triangles'] != result['triangles'] or actual['triangles'] > 7000:
                         raise ValueError('Cooked head does not match its bounded preparation')
                 verified[result['base_id']] = result
                 write(verify_path, sorted(verified.values(), key=lambda r: r['base_id']))

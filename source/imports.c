@@ -62,6 +62,7 @@
 #include "stadium_environment.h"
 #include "stadium_roof_profiles.h"
 #include "stadium_shell_clip.h"
+#include "stadium_atmosphere.h"
 #include "ue4_hooks.h"
 #include "scene_runtime_log.h"
 #include "gl_upload_budget.h"
@@ -2397,9 +2398,12 @@ static void glShaderSource_pitch(GLuint shader, GLsizei count,
       if (copy) {
         memcpy(copy, strings[0], n); copy[n] = 0;
         if (strlen(copy) == n) {
+          const int atmosphere=stadium_atmosphere_scope(copy);
           patched = stadium_lighting_source(copy);
           if (!patched) patched = night_lighting_source(copy);
-          if (!patched) patched = stadium_shell_clip_source(copy);
+          if (!patched) patched = stadium_shell_review_source(copy);
+          char *air=stadium_atmosphere_source(patched ? patched : copy,atmosphere);
+          if(air){free(patched);patched=air;}
         }
         free(copy);
       }

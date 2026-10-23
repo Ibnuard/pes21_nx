@@ -46,12 +46,46 @@ def test_missing_source_keeps_explicit_fallback(tmp_path):
     assert result['status'] == 'held_source' and result['native_player_id'] == 7
 
 
+def test_opaque_skin_hair_is_checkpointed_without_trial_or_identity_bypass(tmp_path, monkeypatch):
+    profile = tmp_path/'profile.json'
+    put(profile, dict(native_player_id=7, hair_skin_materials=['own_skin']))
+    row = dict(base_id=1, native_player_id=7, fingerprint='identity',
+               profile=str(profile), input_hashes={str(profile): league.sha(profile)})
+    def refuse(config, source, worker):
+        raise ValueError('Unsupported identity or skin carried in source hair')
+    monkeypatch.setattr(league.trial, 'prepare_one', refuse)
+    result = league.prepare_player({}, row, None)
+    assert result['status'] == 'held_source'
+    assert result['source_hold_kind'] == 'opaque_skin_in_hair'
+    assert result['fingerprint'] == row['fingerprint']
+    with pytest.raises(ValueError, match='Unsupported identity'):
+        league.prepare_player({}, dict(row, native_player_id=8), None)
+    put(profile, dict(native_player_id=7, hair_skin_materials=['changed_skin']))
+    with pytest.raises(ValueError, match='Pinned original source changed'):
+        league.prepare_player({}, row, None)
+
+
+def test_additional_leagues_and_two_explicit_clubs(tmp_path):
+    config,owner=fixture(tmp_path)
+    config.update(categories=['ligue_1','serie_a'],team_ids=[5738,18961])
+    categories=[dict(key='ligue_1',team_ids=[1]),dict(key='serie_a',team_ids=[2])]
+    teams=[dict(team_id=i,physical_team_id=i+100) for i in (1,2,5738,18961)]
+    put(Path(config['catalog']),dict(categories=categories,teams=teams))
+    owner['team_ids']=[1]
+    put(Path(config['source_verification']),dict(players=[owner]))
+    scope=league.scope_for(config,{1:owner})
+    assert scope['teams']==[1,2,5738,18961]
+    assert scope['categories']==['ligue_1','serie_a']
+    config['team_ids'].append(99999)
+    with pytest.raises(ValueError,match='Missing selected'): league.scope_for(config,{1:owner})
+
+
 def test_duplicate_native_owner_is_rejected():
     with pytest.raises(ValueError, match='Duplicate'):
         league.unique([dict(base_id=1, native_player_id=7), dict(base_id=2, native_player_id=7)], 'scope')
 
 
-def test_5k_failures_can_use_bounded_exception_but_not_7000(tmp_path, monkeypatch):
+def test_5k_failures_can_use_bounded_exception_but_not_over_7000(tmp_path, monkeypatch):
     calls = []
     folder = tmp_path/'head'; folder.mkdir()
     def prepare(config, row, worker):
@@ -66,7 +100,7 @@ def test_5k_failures_can_use_bounded_exception_but_not_7000(tmp_path, monkeypatc
     assert calls == [5000, 5000, 5000, 7000]
     assert result['triangles'] == 6500 and result['league_exception']['attempts']
     monkeypatch.setattr(league.trial, 'prepare_one', lambda c, r, w:
-        dict(r, folder=str(folder), cache_key='bad', status='prepared', triangles=7000))
+        dict(r, folder=str(folder), cache_key='bad', status='prepared', triangles=7001))
     assert league.prepare_player({}, row, None)['status'] == 'held_geometry'
 
 
@@ -103,6 +137,8 @@ def test_head_proof_and_exception_are_mandatory(tmp_path, monkeypatch):
     assert league.validate_head(dict(row, league_exception={'reason':'explicit'})) == 6500
     with pytest.raises(ValueError, match='proof'):
         league.validate_head(dict(row, triangles=6499))
+    monkeypatch.setattr(league.trial, 'validate_preparation', lambda a,b,cap:7000)
+    assert league.validate_head(dict(row,triangles=7000,league_exception={'reason':'unique hairstyle'}))==7000
 
 
 def test_initialization_writes_only_new_output_and_preserves_v54(tmp_path, monkeypatch):

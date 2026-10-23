@@ -16,8 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def shader_math():
     text = (ROOT/'source/stadium_lite_glsl.h').read_text()
-    strings = re.findall(r'"(?:\\.|[^"\\])*"', text)
-    return ''.join(ast.literal_eval(s) for s in strings)
+    strings = re.findall(r'^\s*("(?:\\.|[^"\\])*")', text,re.MULTILINE)
+    atmosphere=(ROOT/'source/stadium_atmosphere_glsl.h').read_text()
+    air=re.findall(r'"(?:\\.|[^"\\])*"',atmosphere)
+    return ''.join(ast.literal_eval(s) for s in air+strings)
 
 
 def host_math():
@@ -34,6 +36,7 @@ static float mix(float a,float b,float t){return a+(b-a)*t;}
 static float fract(float x){return x-floorf(x);}
 static float smoothstep(float a,float b,float v){float t=clamp((v-a)/(b-a),0,1);return t*t*(3-2*t);}
 static float fwidth(float v){(void)v;return 0;}
+static float step(float edge,float value){return value<edge?0.f:1.f;}
 struct vec2 {
  float x,y; vec2(float v):x(v),y(v){} vec2(float a,float b):x(a),y(b){}
  vec2 operator+(vec2 b)const{return vec2(x+b.x,y+b.y);}
@@ -52,12 +55,14 @@ struct vec3 {
  vec3(float v):x(v),y(v),z(v),xy(v){}
  vec3(float a,float b,float c):x(a),y(b),z(c),xy(a,b){}
  vec3 operator+(vec3 b)const{return vec3(x+b.x,y+b.y,z+b.z);}
+ vec3 operator-(vec3 b)const{return vec3(x-b.x,y-b.y,z-b.z);}
  vec3 operator*(float s)const{return vec3(x*s,y*s,z*s);}
  vec3 operator*(vec3 b)const{return vec3(x*b.x,y*b.y,z*b.z);}
 };
 static vec3 mix(vec3 a,vec3 b,float t){return vec3(mix(a.x,b.x,t),mix(a.y,b.y,t),mix(a.z,b.z,t));}
 static vec3 max(vec3 a,vec3 b){return vec3(max(a.x,b.x),max(a.y,b.y),max(a.z,b.z));}
 static float dot(vec3 a,vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+static float length(vec3 v){return sqrtf(dot(v,v));}
 struct vec4 {
  float x,y,z,w;
  vec3 xyz;

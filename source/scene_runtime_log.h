@@ -46,7 +46,10 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v70 session\n",file);
+    fputs("FootballNX scene v73 session\n",file);
+    fputs("review v73: stadium-wide distance mist; bounded thin 3D rain; bottom-corner per-pad tactics panels\n",file);
+    fputs("review v72: corner-only restart and native-list guards; owned goal-kick helper; stronger Rainy Day High material mist\n",file);
+    fputs("review v71: one right corner column; conditional league added time; Rainy material mist; low shell apron preserved; scoped body palette package\n",file);
     fputs("startup v70: corner opcode guards use bounded RW backing before native RX mapping\n",file);
     fputs("corner v69: native corner presets; per-pad LEFT selector and RIGHT taker; restart-owned command lifetime\n",file);
     fputs("match v67: checked selected-Match rebuild before bench confirmation; career office and live reservations separate\n",file);

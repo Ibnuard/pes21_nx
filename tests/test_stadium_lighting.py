@@ -75,8 +75,8 @@ class StadiumLightingTests(unittest.TestCase):
                     self.assertTrue(prefix.startswith(native_prefix))
                     self.assertIn(b'nxDayStadium', result)
                     self.assertNotIn(b'nxNightFloor', result)
-                    # Undo ONLY the allowed light terms and injected assignment.
-                    # Any albedo, depth, geometry, alpha or output change fails.
+                    # Undo ONLY the allowed light/weather terms and the new
+                    # Rainy-only mist. Alpha/depth and every native read stay exact.
                     body, inserts = re.subn(
                         rb'\n\t(v\d+)\.xyz = nx(?:NeutralLight\(\1\.xyz|AmbientLight\(\1\.xyz,nxRoofLight)\);', b'', body)
                     self.assertGreater(inserts, 0)
@@ -91,6 +91,7 @@ class StadiumLightingTests(unittest.TestCase):
                         body=body.replace(b'if (nxDayStadium<0.5 && ('+coord+b'.z>0.000000e+00))',
                                           b'if (('+coord+b'.z>0.000000e+00))')
                     body=re.sub(rb'\n\thighp vec3 nxWeatherWorld=[^\n]+;\n(?:\tout_Target0.xyz=[^\n]+;\n)+',b'',body)
+                    body=body.replace(b'\n\tout_Target0.xyz=nxRainMist(out_Target0.xyz,in_TEXCOORD8.xyz-View_PreViewTranslation,View_WorldCameraOrigin);\n',b'')
                     self.assertEqual(body, native_body)
                     # All texture reads, including encoded RGBM, remain original.
                     reads = lambda s: re.findall(rb'[^\n]*= (?:texture|clamp\(texture)[^\n]*', s)

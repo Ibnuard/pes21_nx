@@ -45,7 +45,7 @@ static void editor_snapshot(EditorPanel *v,uint32_t side,int setplay) {
       v->count=pes_controller_custom_prematch_gameplan_formation_row_count(side);
       if(v->count>9u)v->count=9u;
       fd_copy(v->title,sizeof(v->title),v->picker ? "CHOOSE SHAPE" : "FORMATION");
-      snprintf(v->subtitle,sizeof(v->subtitle),"CURRENT SHAPE  /  %s",
+      snprintf(v->subtitle,sizeof(v->subtitle),"CURRENT SHAPE  -  %s",
           pes_controller_custom_prematch_gameplan_formation_label(side));
       static const char *const labels[]={"PLAYING STYLE","TEAM SHAPE","OFFSIDE TRAP","SUBSTITUTIONS"};
       for(uint32_t i=0;i<v->count;i++) {
@@ -67,7 +67,7 @@ static void editor_snapshot(EditorPanel *v,uint32_t side,int setplay) {
       v->target=pes_controller_custom_prematch_gameplan_preset_target_slot(side);
       if(v->step>=2)v->focus=v->target;
       fd_copy(v->title,sizeof(v->title),v->step ? (v->loading ? "LOAD PRESET" : "SAVE PRESET") : "TEAM PRESETS");
-      fd_copy(v->subtitle,sizeof(v->subtitle),"LINEUP / TACTICS / SET-PIECE ROLES");
+      fd_copy(v->subtitle,sizeof(v->subtitle),"SQUAD TACTICS AND ROLES");
       fd_copy(v->status,sizeof(v->status),pes_controller_custom_prematch_gameplan_preset_status(side));
       v->count=v->step ? 3u : 2u;
       for(uint32_t i=0;i<v->count;i++) {
@@ -86,7 +86,7 @@ static void editor_snapshot(EditorPanel *v,uint32_t side,int setplay) {
     const uint32_t role=pes_controller_custom_prematch_gameplan_position_focus(side);
     fd_copy(v->title,sizeof(v->title),v->picker ? "ASSIGN PLAYER" : "PLAYER ROLES");
     fd_copy(v->subtitle,sizeof(v->subtitle),v->picker
-        ? pes_controller_custom_prematch_gameplan_position_label(role) : "CAPTAIN / SET PIECES / ATTACKERS");
+        ? pes_controller_custom_prematch_gameplan_position_label(role) : "SET-PIECE ROLES");
     if(!v->picker) {
       v->focus=role;v->count=PES_PREMATCH_GAMEPLAN_POSITION_COUNT;
       for(uint32_t i=0;i<v->count;i++) {

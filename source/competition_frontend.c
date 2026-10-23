@@ -1132,7 +1132,7 @@ static void competition_describe_league_slot(uint32_t slot,
         ? save->tournament.active_matchday + 1u
         : save->tournament.matchday_count;
     snprintf(league_slot_progress[slot], sizeof(league_slot_progress[slot]),
-             "MATCHDAY %u/%u", day, save->tournament.matchday_count);
+             "MATCHDAY %u OF %u", day, save->tournament.matchday_count);
   }
 }
 
@@ -1865,7 +1865,7 @@ const char *competition_frontend_status(void) {
   if (frontend_state == COMPETITION_FRONTEND_CUP_BRACKET &&
       !competition_draft_ready(&cup_draft)) {
     static char assignment[64];
-    snprintf(assignment, sizeof(assignment), "ASSIGN TEAMS  %u / %u",
+    snprintf(assignment, sizeof(assignment), "ASSIGN TEAMS  %u OF %u",
              competition_draft_assigned_count(&cup_draft),
              cup_draft.team_count);
     return assignment;

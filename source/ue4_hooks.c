@@ -18190,7 +18190,8 @@ static void referee_probe_project(void *model) {
   const int outside=x<-.20f*width || x>1.20f*width || y<-.20f*height || y>1.20f*height;
   __atomic_store_n(&referee_screen_sample,(now<<1)|(uint64_t)outside,__ATOMIC_RELEASE);
 }
-/* Falling weather field retired in v12; native surface physics remains active. */
+/* Bounded v73 rain field; native surface physics remains active. */
+#include "weather_scene.inc"
 #include "scoreboard_runtime.inc"
 
 static int match_gauge_project_to_overlay(float *x, float *y,
@@ -18383,8 +18384,8 @@ void install_ue4_hooks(so_module *module) {
   install_native_weather(module);
   install_referee_probe(module);
   install_model_quality_policy(module);
-  /* v12 uses stationary pitch weathering; no precipitation actor/tick hooks. */
-  scene_runtime_note("weather surface", "v14 scene lighting + pitch remnants; lens and falling particles disabled");
+  install_weather_scene(module);
+  scene_runtime_note("weather surface", "v73 scene atmosphere and light 3D rain; pitch remnants retained; lens disabled");
   install_scoreboard_runtime(module);
 
   // Keep native Day/Night board choice. Only the player-shadow quality decision

@@ -11,6 +11,17 @@ from weather_field_mesh import field, write, HEIGHT, PHASES
 
 
 class WeatherFieldTests(unittest.TestCase):
+    def test_light_rain_is_a_bounded_thin_field(self):
+        vertices,uv,faces=field(light=True)
+        self.assertEqual(len(vertices),2048)
+        self.assertEqual(len(faces),1024)
+        self.assertEqual(field(light=True),(vertices,uv,faces))
+        for i in range(0,len(vertices),8):
+            drop=vertices[i:i+8]
+            self.assertAlmostEqual(max(v[2] for v in drop)-min(v[2] for v in drop),32)
+            self.assertLess(max(v[0] for v in drop)-min(v[0] for v in drop),6)
+        with self.assertRaises(ValueError):field(snow=True,light=True)
+
     def test_budget_and_rigid_motion_inside_bounds(self):
         for snow, count in ((False, 768), (True, 640)):
             with self.subTest(snow=snow):

@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "build_id": "e861c583ec78e9ae",
+  "hardware_tested": false,
+  "selection_method": "Scoped own-source neck RGB/Lab diagnostic and actual swatch inspection; six native body choices",
+  "players": [
+    {
+      "base_id": 7511,
+      "native_player_id": 7511,
+      "fingerprint": "dd75ee8b83c9bc4bf855",
+      "name": "Lionel Messi",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "da9b41fc489aad0c96c4876dd054dd299a36e79eadfa1ed8e9b2f0dab7cb5274",
+        "c7bb5f501243a78d0cc3ee088b88c1327d666269f8b64c5e9553987518b4be2c"
+      ],
+      "reason": "Own face/neck texture and six native body swatches inspected; skin1 closest; preserve face payload; device confirmation pending",
+      "neck_roi": [
+        0.3,
+        0.88,
+        0.7,
+        0.96
+      ],
+      "measured_neck_rgb": [
+        183,
+        142,
+        129
+      ],
+      "prior_skin": 5
+    },
+    {
+      "base_id": 109329,
+      "native_player_id": 109329,
+      "fingerprint": "03a788821a09d04f7496",
+      "name": "Harry Maguire",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "51e535a132f2899cbb17b7dbbb5cc6f99e94834c9ede7a3aa3c54069d419b266",
+        "268429a2d90209cf50ceeb1b61e5b299bc32a9b1c64e0b9e9a4d403127fbbb0f"
+      ],
+      "reason": "Own face/neck texture and six native body swatches inspected; skin1 closest; preserve face payload; device confirmation pending",
+      "neck_roi": [
+        0.3,
+        0.88,
+        0.7,
+        0.96
+      ],
+      "measured_neck_rgb": [
+        181,
+        142,
+        123
+      ],
+      "prior_skin": 6
+    },
+    {
+      "base_id": 101355,
+      "native_player_id": 101355,
+      "fingerprint": "3c00425dc7fc089d4ee1",
+      "name": "Tom Heaton",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "d30e9c06604d544cc4732f3b853f364f51307b7e6cc5561139146689fc11610c",
+        "fdf5044377b4ad7f717733914919641e11e6f59f942363ba7194627b90973816"
+      ],
+      "reason": "Own face/neck texture and six native body swatches inspected; skin1 closest; preserve face payload; device confirmation pending",
+      "neck_roi": [
+        0.3,
+        0.88,
+        0.7,
+        0.96
+      ],
+      "measured_neck_rgb": [
+        165,
+        122,
+        104
+      ],
+      "prior_skin": 7
+    },
+    {
+      "base_id": 123592,
+      "native_player_id": 123592,
+      "fingerprint": "e51a34fe7282a4281e5a",
+      "name": "Altay Bay\u0131nd\u0131r",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "c711c893c39f0964358ab5822b79207e22b6db0ed2dcef66b213a7fcc6ebeb8d",
+        "fca9e2c5e1de4fcadaa7e3c0b6fbedc09995be7e0ee37c97f8105ca15c9d130d"
+      ],
+      "reason": "Own face/neck texture and six native body swatches inspected; skin1 closest; preserve face payload; device confirmation pending",
+      "neck_roi": [
+        0.3,
+        0.88,
+        0.7,
+        0.96
+      ],
+      "measured_neck_rgb": [
+        186,
+        139,
+        117
+      ],
+      "prior_skin": 4
+    },
+    {
+      "base_id": 134931,
+      "native_player_id": 134931,
+      "fingerprint": "4fcd88f2bbfb6e80d8b7",
+      "name": "Senne Lammens",
+      "skin": 1,
+      "accepted_row_sha256": [
+        "d40fe5caedff553f819846beb1cd3c57e958ba7652aae7ad01a420e4cd893651",
+        "ff7b79b119cf54caada1e8459329ee891da72a9743f113235814a133e824e4f9"
+      ],
+      "reason": "Own face/neck texture and six native body swatches inspected; skin1 closest; preserve face payload; device confirmation pending",
+      "neck_roi": [
+        0.3,
+        0.88,
+        0.7,
+        0.96
+      ],
+      "measured_neck_rgb": [
+        177,
+        139,
+        121
+      ],
+      "prior_skin": 7
+    },
+    {
+      "base_id": 119531,
+      "native_player_id": 101329,
+      "fingerprint": "fad82fca89dbcf60bb8a",
+      "name": "Matheus Cunha",
+      "skin": 3,
+      "accepted_row_sha256": [
+        "90a83c107c66145865dcc5b674133ef201a70a7b6dddeeee115d67cad773aaa7",
+        "d1890328938740b2904af0222c93c38f49024833f61a6cfb9ab35ebee7faf234"
+      ],
+      "reason": "Invalid skin7 has no native body texture; neck swatch nearest available palette is skin3; device confirmation pending"
+    }
+  ]
+}

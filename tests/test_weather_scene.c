@@ -78,13 +78,13 @@ int main(void){
    weather_scene_kind=match%3;weather_scene_loaded(NULL);
    const int before=spawn_count;
    for(int frame=0;frame<30;++frame){pause_mode=frame>=10&&frame<20;weather_scene_tick(world,0,1.f/60);}
-   assert(spawn_count==before+(weather_scene_kind!=0));
+   assert(spawn_count==before+(weather_scene_kind==1));
    if(match%2)weather_scene_unload(NULL);else weather_scene_destroy(NULL);
    assert(!weather_scene_first_tick);
    weather_scene_tick(world,0,1.f/60);assert(!alive);
  }
  assert(spawn_count==destroy_count&&native_exits==60&&tick_count==1860);
- assert(first_begin==40&&first_return==40);
+ assert(first_begin==20&&first_return==20);
  assert(location_calls==0); // Stable camera does not enqueue transform updates.
  /* LoadedCall can precede player/uniform readiness by an arbitrary duration.
   * No weather asset allocation is allowed during that interval, even on a
@@ -102,7 +102,7 @@ int main(void){
  live_ready=0;
  for(int i=0;i<40;++i)weather_scene_tick(world,0,1.f/60);
  assert(alive&&spawn_count==spawn_before+1&&weather_scene_first_tick);
- assert(first_begin==41&&first_return==41);
+ assert(first_begin==21&&first_return==21);
  weather_scene_destroy(NULL);
  weather_scene_loaded(NULL);weather_scene_tick(world,0,1.f/60);
  assert(!alive&&!weather_scene_attempted); // Fresh match must wait again.

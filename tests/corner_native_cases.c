@@ -42,7 +42,7 @@ static void init(void) {
     u32(ai[p],0xb8a8,8);u32(ai[p],0xb8ac,4);u32(ai[p],0xb8b0,0);
     uintptr_t vp=corner_native_vptr[p];memcpy(units[p],&vp,sizeof(vp));
     ptr(lists[p],0x3bf8+(70+p)*sizeof(uintptr_t),units[p]);
-    assert(corner_native_observe(lists[p],inputs[p],p)==70+p);
+    assert(corner_native_observe(lists[p],inputs[p],p,0)==70+p);
   }
 }
 static void select_up(unsigned pad) {
@@ -64,24 +64,52 @@ int main(int argc,char **argv) {
     uint32_t value;memcpy(&value,ai[0]+0xb8a8,4);assert(value==8); /* No direct AI patch. */
   } else if(!strcmp(argv[1],"role-switch")) {
     select_up(0);u32(info,0x16fc,13);
-    assert(!corner_native_observe(lists[0],inputs[0],0)); /* Wrong dormant vptr. */
+    assert(!corner_native_observe(lists[0],inputs[0],0,0)); /* Wrong dormant vptr. */
     assert(!corner_native_units[0]);FnxCornerView v;fnx_corner_view(0,clock_ms,&v);assert(!v.available);
   } else if(!strcmp(argv[1],"not-ready")) {
-    select_up(0);ready=0;assert(!corner_native_observe(lists[0],inputs[0],0));
+    select_up(0);ready=0;assert(!corner_native_observe(lists[0],inputs[0],0,0));
     FnxCornerView v;fnx_corner_view(0,clock_ms,&v);assert(!v.available);
   } else if(!strcmp(argv[1],"match-generation")) {
     select_up(0);match_hud_session_serial++;
-    assert(corner_native_observe(lists[0],inputs[0],0)==70);
+    assert(corner_native_observe(lists[0],inputs[0],0,0)==70);
     assert(!corner_native_main(units[0],inputs[0],70,original));
   } else if(!strcmp(argv[1],"single-player")) {
-    two_player=0;assert(!corner_native_observe(lists[1],inputs[1],1));
-    assert(corner_native_observe(lists[0],inputs[0],0)==70);
+    two_player=0;assert(!corner_native_observe(lists[1],inputs[1],1,0));
+    assert(corner_native_observe(lists[0],inputs[0],0,0)==70);
   } else if(!strcmp(argv[1],"abi-fallback")) {
     corner_native_enabled=0;install_corner_tactics(NULL);assert(!corner_native_enabled);
     assert(corner_native_main(units[0],inputs[0],70,original)==0x6e);
   } else if(!strcmp(argv[1],"out-of-play")) {
-    select_up(0);u32(info,0x116c,2);assert(!corner_native_observe(lists[0],inputs[0],0));
+    select_up(0);u32(info,0x116c,2);assert(!corner_native_observe(lists[0],inputs[0],0,0));
     FnxCornerView v;fnx_corner_view(0,clock_ms,&v);assert(!v.available);
+  } else if(!strcmp(argv[1],"restart-kinds")) {
+    for(uint32_t restart=0;restart<8;restart++) {
+      u32(info,0x1514,restart);
+      for(uint32_t pad=0;pad<2;pad++) {
+        uint32_t kind=corner_native_observe(lists[pad],inputs[pad],pad,0);
+        assert((kind!=0)==(restart==4));
+        FnxCornerView v;fnx_corner_view(pad,clock_ms,&v);
+        assert((v.available!=0)==(restart==4));
+      }
+    }
+  } else if(!strcmp(argv[1],"conflicting-restart")) {
+    select_up(0);
+    assert(!corner_native_observe(lists[0],inputs[0],0,1));
+    uint32_t command;uint8_t option;
+    assert(!fnx_corner_take(0,corner_native_epochs[0],clock_ms,&command,&option));
+    FnxCornerView v;fnx_corner_view(0,clock_ms,&v);assert(!v.available);
+  } else if(!strcmp(argv[1],"other-restart-list")) {
+    const uint32_t kinds[]={62,64,72,75,91,92,93};
+    for(unsigned i=0;i<sizeof(kinds)/sizeof(kinds[0]);i++) {
+      for(unsigned pad=0;pad<2;pad++) {
+        u32(lists[pad],0,1);u32(lists[pad],4,kinds[i]);
+        assert(!corner_native_observe(lists[pad],inputs[pad],pad,0));
+        FnxCornerView v;fnx_corner_view(pad,clock_ms,&v);assert(!v.available);
+      }
+    }
+    /* A corner's body-angle unit can coexist with its corner selector. */
+    u32(lists[0],0,2);u32(lists[0],4,62);u32(lists[0],8,65);
+    assert(corner_native_observe(lists[0],inputs[0],0,0)==70);
   } else abort();
   puts("actual native adapter command/owner/lifecycle passed");return 0;
 }

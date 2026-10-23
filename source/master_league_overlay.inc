@@ -213,7 +213,7 @@ static void ml_ui_feed_summary(MasterLeagueRender *ui,const MlView *v,float x,fl
     ml_ui_center_text(ui,score,x+w*.39f,y+.069f,w*.22f,.061f,.0444f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->home,x+.009f,y+.132f,w*.43f,.036f,.0236f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->away,x+w*.55f,y+.132f,w*.43f,.036f,.0236f,0,-1,verts,quads);
-    snprintf(footer,sizeof(footer),"DAY %u / %s",s->result_day+1u,s->competition);
+    snprintf(footer,sizeof(footer),"DAY %u OF %s",s->result_day+1u,s->competition);
   }else {
     if(v->feed_index==0u)ml_ui_image(ui,gl.badge_tex,s->club_badge,x+.022f,y+.078f,.044f,.0782f,verts,quads);
     else ml_ui_header_icon(ui,v->feed_index==2u ? ML_HEADER_RANKING : v->feed_index==3u ? ML_HEADER_TRANSFER : ML_HEADER_MATCH,
@@ -221,9 +221,9 @@ static void ml_ui_feed_summary(MasterLeagueRender *ui,const MlView *v,float x,fl
     ml_ui_text(ui,v->feed_index==1u ? "NO MATCHES PLAYED YET" : s->headline,x+.087f,y+.079f,w-.110f,.0347f,0,-1,0,1,verts,quads);
     ml_ui_text(ui,v->feed_index==1u ? "Results appear after play or simulate" : s->summary,x+.087f,y+.131f,w-.110f,.025f,2,-1,0,1,verts,quads);
     if(v->feed_index==1u)snprintf(footer,sizeof(footer),"OPEN MATCH CENTRE");
-    else if(v->feed_index==2u)snprintf(footer,sizeof(footer),"POSITION %s / TARGET %s",s->stat_value[0],s->stat_value[1]);
-    else if(v->feed_index==3u)snprintf(footer,sizeof(footer),"WINDOW %s / %s COMPLETED DEALS",s->stat_value[0],s->stat_value[1]);
-    else snprintf(footer,sizeof(footer),"SEASON %s / %s",s->stat_value[0],s->stat_value[1]);
+    else if(v->feed_index==2u)snprintf(footer,sizeof(footer),"POSITION %s - TARGET %s",s->stat_value[0],s->stat_value[1]);
+    else if(v->feed_index==3u)snprintf(footer,sizeof(footer),"WINDOW %s OF %s COMPLETED DEALS",s->stat_value[0],s->stat_value[1]);
+    else snprintf(footer,sizeof(footer),"SEASON %s OF %s",s->stat_value[0],s->stat_value[1]);
   }
   ml_ui_text(ui,footer,x+.021f,y+.185f,w-.102f,.021f,0,-1,0,1,verts,quads);
   for(uint32_t i=content;i<ui->draw_count;i++)ui->draws[i].color[3]*=v->feed_opacity;
@@ -251,7 +251,7 @@ static void ml_ui_feature(MasterLeagueRender *ui,const MlView *v,uint32_t item,
     ml_ui_text(ui,"VS",x+w*.47f,y+.105f,.04f,.030f,0,-1,0,1,verts,quads);
     ml_ui_center_text(ui,v->next.home,x+w*.015f,y+.145f,w*.43f,.036f,.025f,0,-1,verts,quads);
     ml_ui_center_text(ui,v->next.away,x+w*.555f,y+.145f,w*.43f,.036f,.025f,0,-1,verts,quads);
-    char match[112];snprintf(match,sizeof(match),"%s  /  %.65s",v->next.day,v->next.competition);
+    char match[112];snprintf(match,sizeof(match),"%s  -  %.65s",v->next.day,v->next.competition);
     ml_ui_text(ui,match,x+.021f,y+.188f,w-.04f,.021f,0,-1,0,1,verts,quads);
   } else {
     ml_ui_text(ui,r->detail,x+.021f,y+.100f,w-.05f,.0278f,2,-1,0,1,verts,quads);
@@ -418,7 +418,7 @@ static void ml_ui_primary(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     ml_ui_center_text(ui,v->empty,x+.02f,.655f,w-.04f,.060f,.036f,2,-3,verts,quads);
   }else if(!v->count)for(uint32_t i=0;i<8u;i++)ml_ui_text(ui,v->info[i],x+.028f,.306f+i*.058f,w-.056f,.0292f,2,-2,0,1,verts,quads);
   if(v->total>5u && !setting) {
-    char count[40];snprintf(count,sizeof(count),"%u-%u / %u",v->total ? v->first+1u : 0u,v->first+v->count,v->total);
+    char count[40];snprintf(count,sizeof(count),"%u-%u OF %u",v->total ? v->first+1u : 0u,v->first+v->count,v->total);
     ml_ui_text(ui,count,x+.019f,.805f,w-.04f,.0236f,2,-3,0,1,verts,quads);
   }
   for(uint32_t i=0;i<v->action_count;i++) {
@@ -504,7 +504,7 @@ static void ml_ui_primary(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
       ml_ui_button(ui,dx+.027f,.759f,dw-.054f,.056f,d->confirm_selected,1,verts,quads);
       ml_ui_center_text(ui,d->confirm_label[0] ? d->confirm_label : "CONFIRM",dx+.027f,.759f,dw-.054f,.056f,.030f,0,-1,verts,quads);
     } else if(!d->confirm && d->total) {
-      char count[40];snprintf(count,sizeof(count),"%u-%u / %u",d->total ? d->first+1u : 0u,d->first+d->count,d->total);
+      char count[40];snprintf(count,sizeof(count),"%u-%u OF %u",d->total ? d->first+1u : 0u,d->first+d->count,d->total);
       ml_ui_text(ui,count,dx+.018f,.805f,dw-.036f,.0236f,2,-3,0,1,verts,quads);
       if(d->total>5u) {
         ml_ui_rect(ui,dx+dw-.009f,.289f,.003f,.454f,.83f,.88f,.94f,1,-1,0,1,verts,quads);
@@ -555,7 +555,7 @@ static void ml_ui_table(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
       ml_ui_center_text(ui,number,xs[j],y,.041f,.075f,.0306f,j==7u ? 0 : 2,ink,verts,quads);
     }
   }
-  char pages[48];snprintf(pages,sizeof(pages),"%u-%u / %u CLUBS",v->first+1u,v->first+v->table_count,v->total);
+  char pages[48];snprintf(pages,sizeof(pages),"%u-%u OF %u CLUBS",v->first+1u,v->first+v->table_count,v->total);
   ml_ui_text(ui,pages,.062f,.839f,.50f,.025f,2,-3,0,1,verts,quads);
 }
 static void ml_ui_bracket(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
@@ -581,7 +581,7 @@ static void ml_ui_bracket(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
       ml_ui_text(ui,m->complete ? score : "-",x+.235f,yy+.005f,.025f,.0264f,0,-2,0,1,verts,quads);
     }
   }
-  char pages[80];snprintf(pages,sizeof(pages),"SECTION %u / %u    UP / DOWN: BRACKET SECTION",v->bracket_page+1u,v->bracket_pages);
+  char pages[80];snprintf(pages,sizeof(pages),"SECTION %u OF %u    D-PAD: BRACKET SECTION",v->bracket_page+1u,v->bracket_pages);
   ml_ui_text(ui,pages,.062f,.839f,.86f,.025f,2,-3,0,1,verts,quads);
 }
 static void ml_ui_toast_card(MasterLeagueRender *ui,const char *text,float slide,GLfloat *verts,int *quads) {
@@ -646,7 +646,7 @@ static void ml_ui_story(MasterLeagueRender *ui,float slide,GLfloat *verts,int *q
   ml_ui_panel(ui,kickers[v->feed_index],ML_HEADER_NEWS,x,.205f,.90f,.630f,0,verts,quads);
   ml_ui_art(ui,v->feed_index==1u ? 1u : v->feed_index==2u ? 0u : 3u,hx,.297f,hw,.518f,verts,quads);
   ml_ui_text(ui,"CLUB STORIES",hx+.024f,.321f,hw-.048f,.025f,0,-1,0,1,verts,quads);
-  char number[32];snprintf(number,sizeof(number),"%02u / %02u",v->feed_index+1u,v->feed_count);
+  char number[32];snprintf(number,sizeof(number),"%02u OF %02u",v->feed_index+1u,v->feed_count);
   ml_ui_text(ui,number,hx+.024f,.758f,hw-.048f,.036f,1,-1,0,1,verts,quads);
   if(v->feed_index==1u && s->has_result) {
     ml_ui_image(ui,gl.badge_tex,s->home_badge,hx+.050f,.405f,.080f,.1422f,verts,quads);
@@ -655,7 +655,7 @@ static void ml_ui_story(MasterLeagueRender *ui,float slide,GLfloat *verts,int *q
     ml_ui_center_text(ui,score,hx+.130f,.427f,hw-.260f,.09f,.0667f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->home,hx+.012f,.575f,.176f,.080f,.0306f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->away,hx+.212f,.575f,.176f,.080f,.0306f,0,-1,verts,quads);
-    char result[64];snprintf(result,sizeof(result),"FULL TIME / %s",s->result);
+    char result[64];snprintf(result,sizeof(result),"FULL TIME - %s",s->result);
     ml_ui_center_text(ui,result,hx+.02f,.662f,hw-.04f,.036f,.0278f,0,-1,verts,quads);
     ml_ui_center_text(ui,s->competition,hx+.02f,.709f,hw-.04f,.030f,.0236f,0,-1,verts,quads);
   }else {
@@ -679,7 +679,7 @@ static void ml_ui_story(MasterLeagueRender *ui,float slide,GLfloat *verts,int *q
     }
   }else if(s->history_count) {
     if(v->feed_index==3u) {
-      char caption[80];snprintf(caption,sizeof(caption),"WINDOW %s / %s RECENT COMPLETIONS",s->stat_value[0],s->stat_value[1]);
+      char caption[80];snprintf(caption,sizeof(caption),"WINDOW %s OF %s RECENT COMPLETIONS",s->stat_value[0],s->stat_value[1]);
       ml_ui_text(ui,caption,rx,.783f,rw,.0236f,0,-3,0,1,verts,quads);
     }
     for(uint32_t i=0;i<s->history_count;i++)ml_ui_row(ui,&s->history[i],rx,.421f+i*.113f,rw,.100f,0,0,verts,quads);

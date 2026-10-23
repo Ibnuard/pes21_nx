@@ -61,7 +61,7 @@ static void weather_scene_loaded(void *loader) {
     weather_weak_set(&weather_match_world,*weather_world);
     weather_scene_active=1;
     const uint32_t kind=__atomic_load_n(&weather_scene_kind,__ATOMIC_ACQUIRE);
-    if (kind==1 || kind==2)
+    if (kind==1)
       scene_runtime_note("weather field","waiting for first live match frame; no allocation during prematch loading");
   }
 }
@@ -94,9 +94,9 @@ static NxWeatherVec weather_focus(void *world) {
   return position;
 }
 static void weather_scene_spawn(void *world,uint32_t kind) {
+  if(kind!=1)return;
   weather_scene_attempted=1;
-  const char *name=kind==2 ? "/Game/FootballNX/Weather/SnowField.SnowField" :
-                           "/Game/FootballNX/Weather/RainField.RainField";
+  const char *name="/Game/FootballNX/WeatherLight/RainField.RainField";
   uint16_t wide[96];
   for (size_t i=0;i<=strlen(name);++i) wide[i]=(uint8_t)name[i];
   void *asset=weather_load(weather_mesh_class(),NULL,wide,NULL,0,NULL,1,NULL);
@@ -135,7 +135,7 @@ static void weather_scene_spawn(void *world,uint32_t kind) {
   weather_weak_set(&weather_component,component);
   weather_weak_set(&weather_material,material);
   weather_last_focus=p;
-  scene_runtime_note("weather field",kind==2?"Snow mesh spawned (640 flakes)":"Rain mesh spawned (768 drops)");
+  scene_runtime_note("weather field","light rain mesh spawned (256 thin drops, 1024 triangles)");
 }
 static void weather_scene_tick(void *world,int level_tick,float seconds) {
   const int first=weather_scene_active && !weather_scene_first_tick &&
@@ -151,7 +151,7 @@ static void weather_scene_tick(void *world,int level_tick,float seconds) {
   if (!owner) { weather_scene_retire();return; }
   if (owner!=world) return;
   const uint32_t kind=__atomic_load_n(&weather_scene_kind,__ATOMIC_ACQUIRE);
-  if (kind!=1 && kind!=2) return;
+  if (kind!=1) return; // Winter keeps its accepted stationary snow remnants.
   const int paused=pes_controller_pause_skin_active() || pes_controller_pause_transition();
   if (!weather_scene_attempted && !paused && pes_controller_match_hud_inplay())
     weather_scene_spawn(world,kind);
@@ -174,13 +174,13 @@ static void weather_scene_tick(void *world,int level_tick,float seconds) {
     memcpy(&registered,(const char *)component+0xac,1);
     char message[192];
     snprintf(message,sizeof(message),"%s mesh registered=%u proxy=%d clock=%.2f focus=(%.0f,%.0f,0)",
-        kind==2?"Snow":"Rain",registered&1u,proxy!=NULL,weather_clock,p.x,p.y);
+        "Light Rain",registered&1u,proxy!=NULL,weather_clock,p.x,p.y);
     scene_runtime_note("weather field",message);++weather_scene_reports;
   }
 }
 #ifndef PESNX_WEATHER_SCENE_HOST_TEST
 static void install_weather_scene(so_module *module) {
-  FILE *f=fopen("PesMobile/Content/Paks/PesMobile-Weather-Android_ETC1_P.pak","rb");
+  FILE *f=fopen("PesMobile/Content/Paks/PesMobile-WeatherLight-v73-Android_ETC1_P.pak","rb");
   if (!f) return;
   fclose(f);
   const uintptr_t base=(uintptr_t)module->load_base;
@@ -236,6 +236,6 @@ static void install_weather_scene(so_module *module) {
   hook_arm64(base+0x38dd250,(uintptr_t)weather_scene_unload);
   hook_arm64(base+0x38cf4a0,(uintptr_t)weather_scene_destroy);
   hook_arm64(base+0x3924490,(uintptr_t)weather_scene_tick);
-  scene_runtime_note("weather field","v11 native mesh precipitation installed; deferred until live match");
+  scene_runtime_note("weather field","v73 light rain mesh installed; one component, deferred until live match");
 }
 #endif

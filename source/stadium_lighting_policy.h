@@ -79,6 +79,16 @@ static char *stadium_lighting_source(const char *source) {
         "\tout_Target0.xyz=nxPitchWeather(out_Target0.xyz%s,nxWeatherWorld);\n",
         scope==16u ? "*nxRainLightScale()" : "");
   }
+  /* Known colour shaders already publish linear radiance to Target0. Preserve
+   * their alpha/depth and bind the existing Rainy uniform; no compositor draw.
+   * Unknown/depth-only shaders never enter this allowlisted material path. */
+  if(output && strstr(source,"View_WorldCameraOrigin")) {
+    const char *end=strchr(output,';');if(!end)return NULL;
+    edits[count].at=end+1;edits[count].length=0;
+    snprintf(edits[count++].text,768,
+        "\n\tout_Target0.xyz=nxRainMist(out_Target0.xyz,"
+        "in_TEXCOORD8.xyz-View_PreViewTranslation,View_WorldCameraOrigin);\n");
+  }
   if(scope==16u) {
     if(!strstr(source,"MobileDirectionalLight_DirectionalLightDirectionAndShadowTransition"))return NULL;
     goto finish_edits;
@@ -179,9 +189,10 @@ finish_edits:
     if(edits[j].at<edits[i].at){StadiumLightEdit tmp=edits[i];edits[i]=edits[j];edits[j]=tmp;}
   for(unsigned i=1;i<count;++i)
     if(edits[i].at<edits[i-1].at+edits[i-1].length)return NULL;
-  char *result=malloc(strlen(source)+sizeof(stadium_lite_geometry_glsl)+sizeof(stadium_lite_helpers_glsl)+count*768u+1u);
+  char *result=malloc(strlen(source)+sizeof(stadium_atmosphere_glsl)+sizeof(stadium_lite_geometry_glsl)+sizeof(stadium_lite_helpers_glsl)+count*768u+1u);
   if(!result)return NULL;
   size_t used=(size_t)(body-source);memcpy(result,source,used);
+  memcpy(result+used,stadium_atmosphere_glsl,sizeof(stadium_atmosphere_glsl)-1);used+=sizeof(stadium_atmosphere_glsl)-1;
   memcpy(result+used,stadium_lite_geometry_glsl,sizeof(stadium_lite_geometry_glsl)-1);used+=sizeof(stadium_lite_geometry_glsl)-1;
   memcpy(result+used,stadium_lite_helpers_glsl,sizeof(stadium_lite_helpers_glsl)-1);used+=sizeof(stadium_lite_helpers_glsl)-1;
   const char *from=body;

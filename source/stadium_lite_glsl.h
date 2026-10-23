@@ -1,5 +1,6 @@
 #ifndef PES_STADIUM_LITE_GLSL_H
 #define PES_STADIUM_LITE_GLSL_H
+#include "stadium_atmosphere_glsl.h"
 
 /* Authored analytic roof proxy, in UE centimetres. It is shared by pitch,
  * bodies and faces: moving receivers intersect the same elevated plane.
@@ -81,8 +82,6 @@ static const char stadium_lite_geometry_glsl[] =
 
 static const char stadium_lite_helpers_glsl[] =
   "uniform highp float nxNightIndirect;\n"
-  "uniform highp float nxDayStadium;\n"
-  "uniform highp vec4 nxStadiumClimate;\n"
   "uniform highp vec4 nxStadiumLight[3];\n"
   "uniform highp float nxStadiumProfile;\n"
   "highp vec3 nxNeutralLight(highp vec3 light) {\n"

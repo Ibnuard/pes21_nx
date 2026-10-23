@@ -28,7 +28,7 @@ static void ml_history_view(MlView *v) {
   const char *title=page==ML_PAGE_HISTORY ? "CAREER ARCHIVE" : page==ML_PAGE_CAREER_STATS ? "ARCHIVED SEASON TOTALS" : "SEASON REVIEW";
   snprintf(v->title,64,"%s",title);snprintf(v->left_title,64,"%s",title);
   snprintf(v->caption,96,"%s",career.history.count ?
-      "Season-end club records / only archived seasons are included" :
+      "Season-end club records - only archived seasons are included" :
       "Finish a season and start the next to create your first archive");
   if(page==ML_PAGE_HISTORY) {
     v->total=career.history.count+1u;
@@ -41,9 +41,9 @@ static void ml_history_view(MlView *v) {
         r->emblem=3u;
       } else {
         const MlSeasonRecord *s=&career.history.seasons[career.history.count-i];
-        snprintf(r->label,64,"SEASON %u / %u TROPHIES",s->season,ml_honour_count(s->honours));
+        snprintf(r->label,64,"SEASON %u OF %u TROPHIES",s->season,ml_honour_count(s->honours));
         snprintf(r->detail,96,"%s",exhibition_team_catalog_name(s->club));
-        snprintf(r->value,48,"RANK %u / %u",s->rank,s->team_count);
+        snprintf(r->value,48,"RANK %u OF %u",s->rank,s->team_count);
         r->badge=exhibition_team_catalog_badge(s->club);
       }
     }
@@ -61,43 +61,43 @@ static void ml_history_view(MlView *v) {
     const char *labels[]={"ARCHIVE COVERAGE","TROPHIES","LEAGUE RECORD","LEAGUE GOALS","SEASON OPERATING TOTALS"};
     v->count=v->total=5u;v->first=0u;
     for(uint32_t i=0;i<5u;i++){snprintf(v->rows[i].label,64,"%s",labels[i]);v->rows[i].enabled=1;}
-    if(career.history.count)snprintf(v->rows[0].detail,96,"SEASONS %u - %u / %u RECORDS",career.history.seasons[0].season,
+    if(career.history.count)snprintf(v->rows[0].detail,96,"SEASONS %u - %u OF %u RECORDS",career.history.seasons[0].season,
         career.history.seasons[career.history.count-1u].season,career.history.count);
     else snprintf(v->rows[0].detail,96,"No earlier results are inferred from legacy saves");
     snprintf(v->rows[1].value,48,"%u",trophies);
-    snprintf(v->rows[1].detail,96,"LEAGUE %u / CUP %u / CONTINENTAL + NATIONAL %u",league,cup,other);
+    snprintf(v->rows[1].detail,96,"LEAGUE %u - CUP %u - CONTINENTAL + NATIONAL %u",league,cup,other);
     snprintf(v->rows[2].detail,96,"P %u   W %u   D %u   L %u",played,wins,draws,losses);
-    snprintf(v->rows[3].detail,96,"FOR %u / AGAINST %u / GD %+d",gf,ga,(int)gf-(int)ga);
+    snprintf(v->rows[3].detail,96,"FOR %u - AGAINST %u - GD %+d",gf,ga,(int)gf-(int)ga);
     char earned[32],paid[32];ml_money(earned,sizeof(earned),income);ml_money(paid,sizeof(paid),expenses);
-    snprintf(v->rows[4].detail,96,"MATCH + PRIZE %s / WAGES %s",earned,paid);
+    snprintf(v->rows[4].detail,96,"MATCH + PRIZE %s - WAGES %s",earned,paid);
   } else {
     const MlSeasonRecord *s=&career.history.seasons[career.history.count-history_selected];
-    snprintf(v->left_title,64,"SEASON %u / %u TROPHIES",s->season,ml_honour_count(s->honours));
-    snprintf(v->caption,96,"%s / season-end club record",exhibition_team_catalog_name(s->club));
+    snprintf(v->left_title,64,"SEASON %u OF %u TROPHIES",s->season,ml_honour_count(s->honours));
+    snprintf(v->caption,96,"%s - season-end club record",exhibition_team_catalog_name(s->club));
     v->total=8u+s->scorer_count;
     for(uint32_t i=v->first;i<v->total && v->count<5u;i++) {
       MlViewRow *r=&v->rows[v->count++];r->enabled=1;
       if(!i) {
-        snprintf(r->label,64,"LEAGUE RECORD");snprintf(r->value,48,"RANK %u / %u",s->rank,s->team_count);
-        snprintf(r->detail,96,"P %u W %u D %u L %u / GF %u GA %u / %u PTS",s->standing.played,s->standing.wins,
+        snprintf(r->label,64,"LEAGUE RECORD");snprintf(r->value,48,"RANK %u OF %u",s->rank,s->team_count);
+        snprintf(r->detail,96,"P %u W %u D %u L %u - GF %u GA %u OF %u PTS",s->standing.played,s->standing.wins,
             s->standing.draws,s->standing.losses,s->standing.goals_for,s->standing.goals_against,s->standing.points);
       } else if(i<6u) {
         const char *labels[]={"LEAGUE CHAMPION","DOMESTIC CUP CHAMPION","CONTINENTAL CHAMPION","REGIONAL CHAMPION","WORLD CUP CHAMPION"};
         const uint32_t teams[]={s->league_champion,s->cup_champion,s->continental_champion,s->regional_champion,s->world_champion};
         snprintf(r->label,64,"%s",labels[i-1u]);
-        snprintf(r->detail,96,"%s",teams[i-1u] ? exhibition_team_catalog_name(teams[i-1u]) : "NOT HELD / NO RECORDED WINNER");
+        snprintf(r->detail,96,"%s",teams[i-1u] ? exhibition_team_catalog_name(teams[i-1u]) : "NOT HELD - NO RECORDED WINNER");
         r->badge=teams[i-1u] ? exhibition_team_catalog_badge(teams[i-1u]) : 0u;
       } else if(i<6u+s->scorer_count) {
         const LeagueScorer *p=&s->scorers[i-6u];
-        snprintf(r->label,64,"TOP SCORER %u / %.38s",i-5u,p->name);
-        snprintf(r->detail,96,"%s",p->team ? exhibition_team_catalog_name(p->team) : "MULTIPLE CLUBS / COMBINED SEASON TOTAL");
+        snprintf(r->label,64,"TOP SCORER %u - %.38s",i-5u,p->name);
+        snprintf(r->detail,96,"%s",p->team ? exhibition_team_catalog_name(p->team) : "MULTIPLE CLUBS - COMBINED SEASON TOTAL");
         snprintf(r->value,48,"%u GOALS",p->goals);r->portrait=p->portrait_id;
       } else if(i==6u+s->scorer_count) {
         snprintf(r->label,64,"CLOSING CASH");ml_money(r->value,48,s->closing_cash);
         snprintf(r->detail,96,"Before the next season operating grant");
       } else {
         char earned[32],paid[32];ml_money(earned,sizeof(earned),s->match_income+s->prize_income);ml_money(paid,sizeof(paid),s->wages_paid);
-        snprintf(r->label,64,"SEASON OPERATING TOTALS");snprintf(r->detail,96,"MATCH + PRIZE %s / WAGES %s",earned,paid);
+        snprintf(r->label,64,"SEASON OPERATING TOTALS");snprintf(r->detail,96,"MATCH + PRIZE %s - WAGES %s",earned,paid);
       }
     }
   }

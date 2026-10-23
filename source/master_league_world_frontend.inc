@@ -108,8 +108,8 @@ static void ml_world_calendar(MlView *v) {
     cell->kind=kind;cell->badge=exhibition_team_catalog_badge(other);
     snprintf(cell->label,16,"%.15s",exhibition_team_catalog_name(other));
     if(done)snprintf(cell->detail,24,"%s %u-%u",own_home ? "H" : "A",own_home ? hg : ag,own_home ? ag : hg);
-    else snprintf(cell->detail,24,"%s / %s",own_home ? "HOME" : "AWAY",ml_event_is_national(kind) ? "INTL" : "CUP");
-    if(cell->selected)snprintf(v->calendar_detail,112,"%s / %.42s / %s",ml_world_name(&career,kind),exhibition_team_catalog_name(other),cell->detail);
+    else snprintf(cell->detail,24,"%s OF %s",own_home ? "HOME" : "AWAY",ml_event_is_national(kind) ? "INTL" : "CUP");
+    if(cell->selected)snprintf(v->calendar_detail,112,"%s - %.42s - %s",ml_world_name(&career,kind),exhibition_team_catalog_name(other),cell->detail);
   }
 }
 static void ml_world_view(MlView *v) {
@@ -123,7 +123,7 @@ static void ml_world_view(MlView *v) {
   if((page==ML_PAGE_NEXT || page==ML_PAGE_ADVANCE) && ml_event_is_national(pending.kind))national_context=1;
   const uint32_t header_team=national_context ? career.world.national_team : career.settings.club;
   v->badge=header_team ? exhibition_team_catalog_badge(header_team) : 0u;
-  snprintf(v->caption,96,"%s / SEASON %u / DAY %u",header_team ? exhibition_team_catalog_name(header_team) : "FEDERATION INVITATIONS",
+  snprintf(v->caption,96,"%s - SEASON %u - DAY %u",header_team ? exhibition_team_catalog_name(header_team) : "FEDERATION INVITATIONS",
     career.season,(page==ML_PAGE_ADVANCE ? calendar_day : career.day)+1u);
   if(national_context) {
     v->annual_budget[0]=v->transfer_budget[0]=0;
@@ -142,14 +142,14 @@ static void ml_world_view(MlView *v) {
     v->helper_key[0]="A";v->helper_key[1]="B";v->helper_label[0]="SELECT";v->helper_label[1]="BACK";
     snprintf(v->title,64,"%s",page==ML_PAGE_COMPETITIONS ? "CUP COMPETITIONS" : page==ML_PAGE_QUALIFIERS ? "WORLD CUP QUALIFIERS" :
       ml_national_offers_page() ? "NATIONAL OFFERS" : "NATIONAL TEAM");
-    snprintf(v->left_title,64,"%s",page==ML_PAGE_QUALIFIERS ? "QUALIFYING GROUP / TOP 2 ADVANCE" : v->title);
+    snprintf(v->left_title,64,"%s",page==ML_PAGE_QUALIFIERS ? "QUALIFYING GROUP - TOP 2 ADVANCE" : v->title);
     if(page==ML_PAGE_COMPETITIONS) {
       v->count=v->total=3u;
       for(uint32_t i=0;i<3u;i++) {
         MlViewRow *r=&v->rows[i];r->enabled=1;r->emblem=i==2u ? 2u : 1u;
         snprintf(r->label,64,"%s",i==0u ? ml_cup_name() : i==1u ? ml_world_name(&career,ML_EVENT_CONTINENTAL) : "INTERNATIONAL MANAGEMENT");
         snprintf(r->detail,96,"%s",i==0u ? (career.cup_enabled ? "Domestic knockout bracket" : "No supported domestic pool") :
-          i==1u ? (career.world.continental.human_count ? "Qualified / compact career knockout format" : "Top 4 qualify / compact career format") : "Club and country on one calendar");
+          i==1u ? (career.world.continental.human_count ? "Qualified - compact career knockout format" : "Top 4 qualify - compact career format") : "Club and country on one calendar");
       }
     }else if(ml_national_offers_page()) {
       v->count=v->total=career.world.national_count;
@@ -159,13 +159,13 @@ static void ml_world_view(MlView *v) {
         r->enabled=1;r->unread=ml_national_offer_unread(&career,i);
         r->badge=exhibition_team_catalog_badge(o->team);
         snprintf(r->label,64,"%s",exhibition_team_catalog_name(o->team));
-        snprintf(r->detail,96,"%s / REPLY BY DAY %u",ml_national_reply_label(status),o->expiry+1u);
+        snprintf(r->detail,96,"%s - REPLY BY DAY %u",ml_national_reply_label(status),o->expiry+1u);
       }
       if(!v->count)snprintf(v->empty,96,"No National Offers Yet");
     }else if(page==ML_PAGE_NATIONAL) {
         snprintf(v->left_title,64,"%s",exhibition_team_catalog_name(career.world.national_team));
         const char *labels[]={"INTERNATIONAL FRIENDLIES","WORLD CUP QUALIFIERS",ml_world_name(&career,ML_EVENT_REGIONAL),"WORLD CUP FINALS","FEDERATION OFFERS"};
-        const char *details[]={"National roster / no transfer or wage budget","Four-team group / six matches / top two advance","Regional knockout tournament","Eight-team career finals after qualification","Review your appointment decisions"};
+        const char *details[]={"National roster - no transfer or wage budget","Four-team group - six matches - top two advance","Regional knockout tournament","Eight-team career finals after qualification","Review your appointment decisions"};
         v->count=v->total=5u;
         for(uint32_t i=0;i<5u;i++) {
           MlViewRow *r=&v->rows[i];r->enabled=1;r->emblem=i<2u ? 2u : 1u;
@@ -188,7 +188,7 @@ static void ml_world_view(MlView *v) {
         const LeagueFixture *f=&career.world.friendlies[i];MlViewRow *r=&v->rows[i];r->enabled=1;
         const uint32_t other=f->home==career.world.national_team ? f->away : f->home;
         r->badge=exhibition_team_catalog_badge(other);snprintf(r->label,64,"%s",exhibition_team_catalog_name(other));
-        snprintf(r->detail,96,"DAY %u / %s / FRIENDLY",ml_world_day(&career,ML_EVENT_FRIENDLY,i)+1u,f->home==career.world.national_team ? "HOME" : "AWAY");
+        snprintf(r->detail,96,"DAY %u OF %s - FRIENDLY",ml_world_day(&career,ML_EVENT_FRIENDLY,i)+1u,f->home==career.world.national_team ? "HOME" : "AWAY");
         if(f->complete)snprintf(r->value,48,"%u - %u",f->home_goals,f->away_goals);
         else snprintf(r->value,48,"UPCOMING");
       }

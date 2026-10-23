@@ -109,4 +109,51 @@ static inline char *stadium_shell_clip_source(const char *source) {
       !stadium_shell_clip_scope(body)) return NULL;
   return stadium_shell_clip_transform(source);
 }
+
+/* v71: preserve the low apron outside the playable field. Only the camera
+ * scalar changes before the existing cutout-alpha multiplication. Raised
+ * walls, original alpha, RGB gradients and output values remain native. */
+static inline char *stadium_shell_floor_transform(const char *source) {
+  if(!source || !strstr(source,"nxShellEarlyClip") ||
+      strstr(source,"nxShellFloorPreserve") ||
+      !strstr(source,"View_PreViewTranslation")) return NULL;
+  const char *body=strstr(source,"void main()");
+  const char *discard=body ? strstr(body,"discard;") : NULL;
+  if(!discard) return NULL;
+  const char *line=discard;
+  while(line>body && line[-1]!='\n' && line[-1]!='\r') --line;
+  const char *condition=line;
+  while(isspace((unsigned char)*condition)) ++condition;
+  if(strncmp(condition,"if (",4)) return NULL;
+  condition+=3;
+  while(*condition=='(' || isspace((unsigned char)*condition)) ++condition;
+  if(*condition!='h') return NULL;
+  char variable[24];size_t n=0;
+  variable[n++]=*condition++;
+  while(isdigit((unsigned char)*condition) && n+1<sizeof(variable)) variable[n++]=*condition++;
+  variable[n]=0;
+  if(n<2 || (*condition!='+' && *condition!='*') ||
+      !strstr(condition,"+-4.000000e-01")) return NULL;
+  char edit[640];
+  int added=snprintf(edit,sizeof(edit),
+      "\t/* nxShellFloorPreserve v71 */\n"
+      "\thighp vec3 nxShellFloorWorld=in_TEXCOORD8.xyz-View_PreViewTranslation;\n"
+      "\tif(nxShellFloorWorld.z>=-30.0 && nxShellFloorWorld.z<=10.0 && "
+      "(abs(nxShellFloorWorld.x)>5300.0 || abs(nxShellFloorWorld.y)>3450.0)) %s=1.0;\n",variable);
+  if(added<0 || (size_t)added>=sizeof(edit)) return NULL;
+  size_t length=strlen(source),prefix=(size_t)(line-source);
+  if(length>2u*1024u*1024u) return NULL;
+  char *out=malloc(length+(size_t)added+1);
+  if(!out) return NULL;
+  memcpy(out,source,prefix);memcpy(out+prefix,edit,(size_t)added);
+  memcpy(out+prefix+(size_t)added,line,length-prefix+1);
+  return out;
+}
+static inline char *stadium_shell_review_source(const char *source) {
+  char *early=stadium_shell_clip_source(source);
+  if(!early) return NULL;
+  char *floor=stadium_shell_floor_transform(early);
+  if(floor){free(early);return floor;}
+  return early;
+}
 #endif

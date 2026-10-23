@@ -202,7 +202,7 @@ def package(config):
             raise ValueError('Prepared cache changed')
         total = validate_head(row)
         actual = counts(read(cooked/'verification.json'), row['budgets']['head_cap'])
-        if total != actual['triangles'] or total >= 7000:
+        if total != actual['triangles'] or total > 7000:
             raise ValueError('Cooked complete head budget differs')
         native = row['native_player_id']; names = asset_names(native)
         if {p.name for p in (cooked/'assets').iterdir()} != {Path(n).name for n in names}:
@@ -262,7 +262,7 @@ def package(config):
                        reason=p['league_exception']['reason']) for p in players if p['triangles'] > 5000]
     proof = dict(policy=POLICY, players_in_package=players, players=status,
                  roster_count=len(status), teams=scope['teams'], category_team_counts=scope['category_team_counts'],
-                 target_head_triangles=5000, exceptional_head_limit_exclusive=7000, exceptions=exceptions,
+                 target_head_triangles=5000, exceptional_head_limit_inclusive=7000, exceptions=exceptions,
                  actual_max_triangles=max(p['triangles'] for p in players), asset_hashes=hashes,
                  pak_sha256=sha(pak), pak_bytes=pak.stat().st_size, pak_roundtrip_hashes_match=True,
                  v54_unchanged_files=config['v54_pinned_files'], accepted_barca_mu_unchanged=True,
@@ -281,7 +281,7 @@ def package(config):
     (destination/'BACA-DULU.txt').write_text(
         f'FootballNX NRO v54 + real face liga Inggris/Spanyol v55\n'
         f'{len(players)} kandidat dari {len(status)} pemain di {len(scope["teams"])} tim katalog aktif.\n'
-        f'Target 5000 segitiga; {len(exceptions)} pengecualian, maksimum aktual {proof["actual_max_triangles"]}; selalu <7000.\n'
+        f'Target 5000 segitiga; {len(exceptions)} pengecualian, maksimum aktual {proof["actual_max_triangles"]}; maksimal 7000.\n'
         'Tutup game. Cadangkan NRO dan PAK wajah lama di luar folder Paks.\n'
         'Pindahkan SEMUA PAK wajah tambahan lama keluar folder Paks agar tidak bertabrakan.\n'
         'Salin seluruh folder switch ke ROOT SD, gabungkan dan timpa.\n'

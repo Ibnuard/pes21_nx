@@ -43,7 +43,9 @@ static int corner_native_context(const void *input,uint32_t pad,
   memcpy(&status,(const char *)info+0x116c,4);
   memcpy(&out->restart,(const char *)info+0x1514,4);
   memcpy(&out->kicker,(const char *)info+0x16fc,4);
-  if(status!=3 || (out->restart!=4 && out->restart!=5) ||
+  /* Pinned native RestartKind table: 2 throw, 3 goal kick, 4 corner,
+   * 5 free kick. A generic set-play animation is not corner evidence. */
+  if(status!=3 || out->restart!=4 ||
       out->kicker>21)return 0;
   const void *anime=corner_get_anime(registry,out->kicker);
   if(!anime || !corner_is_setplay_anime(*((const uint8_t *)anime+1)))return 0;
@@ -63,10 +65,26 @@ static int corner_native_same(const CornerNativeContext *a,
   return a->match==b->match && a->session==b->session &&
       a->restart==b->restart && a->kicker==b->kicker && a->mode==b->mode;
 }
-static uint32_t corner_native_observe(void *list,const void *input,uint32_t pad) {
+static int corner_native_list_conflicts(const void *list) {
+  if(!list)return 1;
+  uint32_t count;memcpy(&count,list,4);
+  if(count>97)return 1;
+  int throw_angle=0,corner=0;
+  for(uint32_t i=0;i<count;i++) {
+    uint32_t kind;memcpy(&kind,(const char *)list+4+i*4,4);
+    if(kind==64 || kind==72 || kind==75 || (kind>=91 && kind<=93))return 1;
+    throw_angle|=kind==62;corner|=kind==65 || kind==70 || kind==71;
+  }
+  /* Reject an actual throw list even if MatchInfo still contains its prior
+   * corner. Corner body-angle lists carry their own corner unit as well. */
+  return throw_angle && !corner;
+}
+static uint32_t corner_native_observe(void *list,const void *input,uint32_t pad,
+                                      int conflicting_restart) {
   CornerNativeContext context;
   if(pad>1)return 0;
-  int valid=corner_native_context(input,pad,&context);
+  int valid=corner_native_context(input,pad,&context) &&
+      !conflicting_restart && !corner_native_list_conflicts(list);
   uint32_t kind=valid && context.mode==FNX_CORNER_DEFENCE ? 71 : 70;
   uintptr_t unit=0,vptr=0;
   if(valid && list) {

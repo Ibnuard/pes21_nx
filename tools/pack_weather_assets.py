@@ -8,14 +8,17 @@ import subprocess
 import tempfile
 from pack_stadium_shell import material_shader_versions
 
-def pack(cooked,repak,output):
-    namespace=Path('PesMobile/Content/FootballNX/Weather')
+def pack(cooked,repak,output,light=False):
+    namespace=Path('PesMobile/Content/FootballNX/WeatherLight' if light else 'PesMobile/Content/FootballNX/Weather')
     source=cooked/namespace
-    names=[name+suffix for name in ('RainField','SnowField','M_RainField','M_SnowField') for suffix in ('.uasset','.uexp')]
-    names += [name+'.ubulk' for name in ('RainField','SnowField') if (source/(name+'.ubulk')).is_file()]
+    objects=('RainField','M_RainField') if light else ('RainField','SnowField','M_RainField','M_SnowField')
+    meshes=('RainField',) if light else ('RainField','SnowField')
+    materials=('M_RainField.uexp',) if light else ('M_RainField.uexp','M_SnowField.uexp')
+    names=[name+suffix for name in objects for suffix in ('.uasset','.uexp')]
+    names += [name+'.ubulk' for name in meshes if (source/(name+'.ubulk')).is_file()]
     if any(not (source/n).is_file() for n in names):
         raise ValueError('Cooked rain/snow or materials missing')
-    for name in ('M_RainField.uexp','M_SnowField.uexp'):
+    for name in materials:
         if material_shader_versions(source/name)!={'100','310 es'}:
             raise ValueError('Weather requires embedded ES2 and ES3.1 shaders')
     output.parent.mkdir(parents=True,exist_ok=True)
@@ -40,4 +43,5 @@ def pack(cooked,repak,output):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for arg in ('cooked','repak','output'):p.add_argument('--'+arg,type=Path,required=True)
-    a=p.parse_args();print(json.dumps(pack(a.cooked,a.repak,a.output),indent=2))
+    p.add_argument('--light-rain',action='store_true')
+    a=p.parse_args();print(json.dumps(pack(a.cooked,a.repak,a.output,a.light_rain),indent=2))

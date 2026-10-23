@@ -9,7 +9,8 @@ from ue_editor_properties import object_ptr, ref, set_value, bind, P
 
 extend_bounds = bind(C.CDLL('UE4Editor-Engine.dll'), '?CalculateExtendedBounds@UStaticMesh@@QEAAXXZ', None, [P])
 
-destination = '/Game/FootballNX/Weather'
+light=os.environ.get('NX_WEATHER_LIGHT')=='1'
+destination = '/Game/FootballNX/WeatherLight' if light else '/Game/FootballNX/Weather'
 assets = unreal.AssetToolsHelpers.get_asset_tools()
 lib = unreal.MaterialEditingLibrary
 
@@ -55,8 +56,9 @@ def material(name, snow):
 float phase=(floor(UV.x)+0.5)/128.0;
 float fall=(frac(phase-Clock/%.1f)-phase)*1800.0;
 float sway=sin(Clock*6.2831853/6.0+phase*6.2831853)*%.1f;
-return float3(sway,0.0,fall);
-''' % (period, 24.0 if snow else 6.0), unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+return %s;
+''' % (period, 24.0 if snow else 6.0,
+       'float3(fall*0.10,fall*0.025,fall)' if light else 'float3(sway,0.0,fall)'), unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                  [('UV', uv), ('Clock', clock)])
     world = lib.create_material_expression(mat, unreal.MaterialExpressionWorldPosition)
     shape = custom(mat, '''
@@ -64,10 +66,11 @@ float2 q=float2(frac(UV.x),UV.y)*2.0-1.0;
 float shape=%s;
 float pitch=step(abs(World.x),5350.0)*step(abs(World.y),3450.0);
 return shape*pitch*step(5.0,World.z);
-''' % ('step(dot(q,q),0.55)' if snow else 'step(abs(q.x),0.66)'),
+''' % ('step(abs(q.x),0.60*(1.0-abs(q.y)*0.70))' if light else
+       'step(dot(q,q),0.55)' if snow else 'step(abs(q.x),0.66)'),
                    unreal.CustomMaterialOutputType.CMOT_FLOAT1, [('UV', uv), ('World', world)])
     color = lib.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector)
-    color.set_editor_property('constant', unreal.LinearColor(.72, .78, .84, 1))
+    color.set_editor_property('constant', unreal.LinearColor(.30,.34,.37,1) if light else unreal.LinearColor(.72,.78,.84,1))
     # UE4.22 marks WPO's enum entry Hidden, so Python cannot use the enum.
     # Set the same reflected input that ConnectMaterialProperty would set.
     set_value(object_ptr(mat), 'Material', 'WorldPositionOffset',
@@ -82,7 +85,7 @@ return shape*pitch*step(5.0,World.z);
 
 
 report = {}
-for name in ('Rain', 'Snow'):
+for name in (('Rain',) if light else ('Rain','Snow')):
     mat = material('M_' + name + 'Field', name == 'Snow')
     options = unreal.FbxImportUI()
     for key, value in [('import_as_skeletal', False), ('import_mesh', True),
@@ -107,11 +110,11 @@ for name in ('Rain', 'Snow'):
     # UV's integer phase and fractional mask must both survive the import.
     # Bounds include the entire authored 18 m column; extend for sway/wrap ends.
     for field in ('PositiveBoundsExtension', 'NegativeBoundsExtension'):
-        set_value(object_ptr(mesh), 'StaticMesh', field, '(X=32,Y=32,Z=80)')
+        set_value(object_ptr(mesh), 'StaticMesh', field, '(X=200,Y=80,Z=80)' if light else '(X=32,Y=32,Z=80)')
     extend_bounds(object_ptr(mesh))
     bounds = mesh.get_bounds()
     extent = bounds.box_extent
-    if not (2700 < extent.x < 2900 and 2000 < extent.y < 2200 and 850 < extent.z < 1050):
+    if not (2700 < extent.x < (3200 if light else 2900) and 2000 < extent.y < (2400 if light else 2200) and 850 < extent.z < 1050):
         raise RuntimeError('Weather OBJ scale/axis mismatch: ' + str(bounds))
     unreal.EditorAssetLibrary.save_asset(mesh.get_path_name())
     report[name] = {'mesh': mesh.get_path_name(), 'extent_cm': [extent.x, extent.y, extent.z]}

@@ -107,7 +107,7 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
       s->active=!v->exhibition || side==active;
       s->ready=pes_controller_2p_team_selector_confirmed(side);
       s->ready_mix=ready_mix ? ready_mix[side] : 1.f;
-      fd_copy(s->owner,sizeof(s->owner),side ? (v->exhibition ? "COM / AWAY" : "P2 / AWAY") : "P1 / HOME");
+      fd_copy(s->owner,sizeof(s->owner),side ? (v->exhibition ? "COM AWAY" : "P2 AWAY") : "P1 HOME");
       if(picker) {
         const CompetitionEntryDraft *draft=competition_frontend_cup_draft();
         const uint32_t slot=competition_frontend_cup_bracket_slot_focus();
@@ -151,7 +151,7 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
       s->kit_index=pes_controller_2p_prematch_hub_kit_index(side);
       s->kit_number=pes_controller_2p_prematch_hub_kit_number(side);
     }
-    snprintf(v->subtitle,sizeof(v->subtitle),"%s / %s / %s",
+    snprintf(v->subtitle,sizeof(v->subtitle),"%s OF %s - %s",
         pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
         pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
         nx_weather_label(pes_controller_stadium_weather()));
@@ -169,8 +169,8 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
     v->row_count=v->total_rows=6;
     fd_copy(v->status,sizeof(v->status),
         pes_controller_stadium_weather() >= NX_WEATHER_RAIN
-          ? (pes_controller_stadium_season() ? "WET SURFACE / THIN SNOW REMNANTS" : "WET SURFACE / DARK WATER PATCHES")
-          : "GRASS / PITCH AFFECT BALL SURFACE; WINTER CHANGES SEASON");
+          ? (pes_controller_stadium_season() ? "WET SURFACE WITH SNOW REMNANTS" : "WET SURFACE WITH WATER PATCHES")
+          : "GRASS AND PITCH AFFECT BALL SURFACE; WINTER CHANGES SEASON");
     for(uint32_t i=0;i<6u;i++) {
       fd_copy(v->rows[i].label,sizeof(v->rows[i].label),labels[i]);
       fd_copy(v->rows[i].value,sizeof(v->rows[i].value),values[i]);
@@ -493,7 +493,7 @@ static void fd_stars(MasterLeagueRender *ui,uint32_t grade,float x,float y,GLflo
   }
 }
 static void fd_selector(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
-  fd_header(ui,"SELECT TEAMS",v->side_count==1 ? "CHOOSE A TEAM FOR THIS SLOT" : v->exhibition ? "EXHIBITION / HOME & AWAY" : "LOCAL MATCH / PLAYER 1 & PLAYER 2",ML_HEADER_SQUAD,verts,quads);
+  fd_header(ui,"SELECT TEAMS",v->side_count==1 ? "CHOOSE A TEAM FOR THIS SLOT" : v->exhibition ? "EXHIBITION HOME AND AWAY" : "LOCAL MATCH",ML_HEADER_SQUAD,verts,quads);
   for(uint32_t side=0;side<v->side_count && side<2u;side++) {
     const FrontdoorSide *s=&v->sides[side];
     const float x=v->side_count==1 ? .275f : side ? .525f : .035f,w=.44f;
@@ -531,7 +531,7 @@ static void fd_selector(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *v
     }else if(s->phase==PES_2P_TEAM_SELECTOR_PHASE_TEAM) {
       fd_text(ui,"RATINGS UNAVAILABLE",x+.151f,cy+.128f,.255f,.0264f,ink,verts,quads);
     }else {
-      fd_text(ui,"LEAGUE / REGION",x+.151f,cy+.105f,.255f,.0264f,ink,verts,quads);
+      fd_text(ui,"COMPETITION",x+.151f,cy+.105f,.255f,.0264f,ink,verts,quads);
       fd_text(ui,"CONFIRM TO VIEW TEAMS",x+.151f,cy+.164f,.255f,.0236f,ink,verts,quads);
     }
     if(s->ready) {
@@ -572,7 +572,7 @@ static void fd_hub(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,
   }
 }
 static void fd_kits(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
-  fd_header(ui,"SELECT KITS","MATCH HUB / HOME & AWAY UNIFORMS",ML_HEADER_SQUAD,verts,quads);
+  fd_header(ui,"SELECT KITS","HOME AND AWAY UNIFORMS",ML_HEADER_SQUAD,verts,quads);
   for(uint32_t side=0;side<2u;side++) {
     const float x=side ? .525f : .035f;const FrontdoorSide *s=&v->sides[side];const int selected=v->focus==side;
     if(selected && !v->kit_editing) {
@@ -604,7 +604,7 @@ static void fd_kits(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts
 }
 static void fd_settings(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
   fd_header(ui,v->page==FD_STADIUM ? "STADIUM" : v->title[0] ? v->title : "GENERAL SETTINGS",
-      v->page==FD_VIDEO ? "DISPLAY / PERFORMANCE" : v->page==FD_PAUSE_SETTINGS ? "PAUSE / MATCH PREFERENCES" : "MATCH HUB / MATCH PREFERENCES",ML_HEADER_SETTINGS,verts,quads);
+      v->page==FD_VIDEO ? "DISPLAY SETTINGS" : v->page==FD_PAUSE_SETTINGS ? "MATCH PREFERENCES" : "MATCH PREFERENCES",ML_HEADER_SETTINGS,verts,quads);
   const float h=.032f+v->row_count*.09f,y=.20f+(.664f-h)*.5f;
   fd_card(ui,.11f,y,.78f,h,0,0,verts,quads);
   for(uint32_t i=0;i<v->row_count && i<6u;i++) {
@@ -625,7 +625,7 @@ static void fd_settings(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *v
     fd_center_text(ui,v->status,.12f,.852f,.76f,.023f,-3,verts,quads);
 }
 static void fd_info(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
-  fd_header(ui,v->title[0] ? v->title : "CREDITS","FOOTBALLNX / ANDROSWITCH PROJECT",ML_HEADER_MESSAGES,verts,quads);
+  fd_header(ui,v->title[0] ? v->title : "CREDITS","FOOTBALLNX ANDROSWITCH PROJECT",ML_HEADER_MESSAGES,verts,quads);
   fd_card(ui,.16f,.244f,.68f,.578f,0,0,verts,quads);
   fd_brand(ui,.34f,.295f,.32f,verts,quads);
   for(uint32_t i=0;i<v->row_count && i<6u;i++)

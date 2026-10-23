@@ -32,6 +32,7 @@ PROFILES = {
                   size=(164, 88), layout="stacked rectangular 70:50:44 cells",
                   names=((78, 33.1), (78, 77.1)), scores=((135.3, 31.3), (135.3, 75.3)),
                   clock=(3, 75.3), clock_cell=(6, 64, 76, 108),
+                  text_y_offset=-3, added_time_cell=(6, 114, 54, 138), added_time_relation="below",
                   name_cells=((76, 20, 121, 64), (76, 64, 121, 108)),
                   score_cells=((126, 20, 170, 64), (126, 64, 170, 108)),
                   kits=((121, 26), (126, 70)), ink=(2, 3, 16)),
@@ -40,6 +41,7 @@ PROFILES = {
                     names=((26, 31.1), (240, 31.1)), scores=((108, 29.3), (189, 29.3)),
                     clock=(121, 61.3), clock_cell=(114, 60, 204, 84),
                     name_width=78, added_time_cell=(204, 60, 252, 84),
+                    added_time_relation="right",
                     text_y_offset=-3,  # Optical lift requested after native font device review.
                     name_cells=((6, 20, 98, 60), (220, 20, 312, 60)),
                     score_cells=((98, 20, 138, 60), (180, 20, 220, 60)),
@@ -48,6 +50,7 @@ PROFILES = {
                    size=(164, 110), layout="full-height blue Ligue 1 mark, stacked rows, lower clock tab",
                    names=((78, 33.1), (78, 77.1)), scores=((135.3, 31.3), (135.3, 75.3)),
                    clock=(3, 108.3), clock_cell=(6, 108, 76, 130),
+                   text_y_offset=-3, added_time_cell=(6, 136, 54, 160), added_time_relation="below",
                    name_cells=((70, 20, 121, 64), (70, 64, 121, 108)),
                    score_cells=((126, 20, 170, 64), (126, 64, 170, 108)),
                    kits=((121, 26), (126, 70)), ink=(2, 3, 16)),
@@ -55,6 +58,7 @@ PROFILES = {
                   size=(320, 60), layout="blue horizontal bar, white diagonal score center, cyan lower clock tab",
                   names=((22, 26.7), (250, 26.7)), scores=((130, 24.3), (177, 24.3)),
                   clock=(3, 52.3), clock_cell=(6, 52, 76, 80),
+                  text_y_offset=-3, added_time_cell=(76, 54, 124, 78), added_time_relation="right",
                   name_cells=((6, 20, 118, 50), (214, 20, 326, 50)),
                   score_cells=((118, 20, 166, 50), (166, 20, 214, 50)),
                   kits=((101, 23), (231, 23)), ink=(0, 12, 83)),
@@ -184,13 +188,12 @@ def patch_score(data, profile):
             write(row, "scale16", "hh", [round(v * SCALE * 32768) for v in row["scale16"]])
         if parent == 27 and "scale16" in row:
             write(row, "scale16", "hh", [round(v * SCALE * 32768) for v in row["scale16"]])
-    if profile == "england":
-        patch_england_added_time(output, placements(bytes(output)))
+    patch_added_time(output, placements(bytes(output)), spec)
     return bytes(output), verify_geometry(placements(bytes(output)), spec)
 
 
-def patch_england_added_time(output, rows):
-    """Use only the native conditional loss-time clip beside the clock.
+def patch_added_time(output, rows, spec):
+    """Use only the native conditional loss-time clip in the profile's cell.
 
     Depth 13 is the *ordinary* clock background, not an added-time on/off
     plate. It shares an image with plate_lossTime; moving its instance out of
@@ -210,7 +213,8 @@ def patch_england_added_time(output, rows):
             struct.pack_into("<ii", output, row["translate_offset"], -256 * 20, -128 * 20)
         elif parent == 28 and depth == 56 and "translate" in row:
             # plate_lossTime's image child has the native (-2,-2) offset.
-            struct.pack_into("<ii", output, row["translate_offset"], 206 * 20, 62 * 20)
+            cell=spec["added_time_cell"]
+            struct.pack_into("<ii", output, row["translate_offset"], (cell[0]+2)*20, (cell[1]+2)*20)
         elif parent == 24 and depth == 3:
             if "translate" in row:
                 struct.pack_into("<ii", output, row["translate_offset"], 5 * 20,
@@ -263,9 +267,13 @@ def verify_geometry(rows, spec):
         left, top = (a + b for a, b in zip(root, child))
         cell = spec["added_time_cell"]
         clock = spec["clock_cell"]
-        if (left, top, left + 48, top + 24) != cell or (
-                cell[0] != clock[2] or cell[1::2] != clock[1::2]):
-            raise ValueError("added-time plate does not abut the clock's right edge")
+        if (left, top, left + 48, top + 24) != cell:
+            raise ValueError("added-time plate leaves its profile cell at the clock's right edge or lower band")
+        if spec.get("added_time_relation")=="right":
+            if cell[0]!=clock[2] or cell[1]+cell[3]!=clock[1]+clock[3]:
+                raise ValueError("added-time plate does not abut the clock's right edge")
+        elif cell[0]!=clock[0] or cell[1]<=clock[3]:
+            raise ValueError("added-time plate does not occupy the reserved lower clock band")
         for row in rows:
             if row["parent"] == 28 and row["depth"] == 13 and "translate" in row:
                 x, y = row["translate"]
@@ -276,7 +284,7 @@ def verify_geometry(rows, spec):
             **({"added_time_cell": list(spec["added_time_cell"]),
                 "added_time_visibility": "native losstime clip; ordinary clock background instance offscreen",
                 "added_time_ink": "black wrapper multiplier covers dynamic UIR and bitmap children",
-                "name_field_pixels": spec["name_width"] * SCALE,
+                "name_field_pixels": spec.get("name_width",60) * SCALE,
                 "text_optical_y_offset_pixels": spec.get("text_y_offset", 0),
                 "text_optical_calibration": "user native-render direction; magnitude awaits Switch check"}
                if "added_time_cell" in spec else {})}

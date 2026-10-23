@@ -27,7 +27,7 @@ def test_native_score_fields_fit_compact_cells_for_all_authored_frames(mobile,pr
     assert report['clock_minute_states']==[1,2,3]
     proof=profiles.field_edit_report(score.data,changed)
     assert proof['scripts_labels_frames_bindings_identical']
-    assert proof['scripts_labels_frames_bindings_flags_identical'] == (profile != 'england')
+    assert not proof['scripts_labels_frames_bindings_flags_identical']
     assert proof['edits'] and not proof['pc_animation_imported']
     # The independent verifier must reject a field moved across its boundary.
     bad=bytearray(changed)

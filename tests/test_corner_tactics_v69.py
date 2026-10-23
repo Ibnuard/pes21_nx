@@ -51,7 +51,8 @@ def native_binary(tmp_path_factory):
     return out
 
 @pytest.mark.parametrize('case',['commands','role-switch','not-ready','match-generation',
-    'single-player','abi-fallback','out-of-play'])
+    'single-player','abi-fallback','out-of-play','restart-kinds',
+    'conflicting-restart','other-restart-list'])
 def test_actual_native_adapter(native_binary,case):
     subprocess.run([str(native_binary),case],check=True,capture_output=True,text=True)
 

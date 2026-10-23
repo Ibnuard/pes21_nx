@@ -110,7 +110,7 @@ static void ml_scan_saves(void) {
     snprintf(slot_club[i],sizeof(slot_club[i]),"%s",slot_valid[i]
         ? exhibition_team_catalog_name(snapshot->settings.club) : "NO COMPATIBLE SAVE");
     if (slot_valid[i]) snprintf(slot_progress[i],sizeof(slot_progress[i]),
-        "%s  /  SEASON %u  /  DAY %u",snapshot->manager_name,snapshot->season,snapshot->day+1u);
+        "%s  -  SEASON %u  -  DAY %u",snapshot->manager_name,snapshot->season,snapshot->day+1u);
     else slot_progress[i][0]=0;
   }
   free(snapshot);
@@ -601,7 +601,7 @@ static void ml_dashboard_view(MlView *v) {
   v->rank=ml_rank(&career);v->board_target=career.target_rank;
   v->squad_size=club ? club->count : 0u;
   ml_money(v->balance,sizeof(v->balance),club ? club->cash : 0);
-  snprintf(v->season_summary,sizeof(v->season_summary),"SEASON %u  /  DAY %u",career.season,career.day+1u);
+  snprintf(v->season_summary,sizeof(v->season_summary),"SEASON %u  -  DAY %u",career.season,career.day+1u);
   MlEvent next={0};ml_next_event(&career,&next);
   snprintf(v->next.competition,sizeof(v->next.competition),"%s",next.kind>=ML_EVENT_CONTINENTAL ? ml_world_name(&career,next.kind) : next.kind==ML_EVENT_CUP ? ml_cup_name() : ml_competition_name());
   snprintf(v->next.day,sizeof(v->next.day),"DAY %u",next.day+1u);
@@ -621,7 +621,7 @@ static void ml_dashboard_view(MlView *v) {
       const uint32_t opponent=fixture->home==team ? fixture->away : fixture->home;
       MlViewRow *row=&v->fixtures[v->fixture_count++];
       snprintf(row->label,sizeof(row->label),"%s",exhibition_team_catalog_name(opponent));
-      snprintf(row->detail,sizeof(row->detail),"MATCHDAY %u  /  %s",day+1u,fixture->home==team ? "HOME" : "AWAY");
+      snprintf(row->detail,sizeof(row->detail),"MATCHDAY %u OF %s",day+1u,fixture->home==team ? "HOME" : "AWAY");
       if(fixture->complete) snprintf(row->value,sizeof(row->value),"%u - %u",fixture->home_goals,fixture->away_goals);
       else snprintf(row->value,sizeof(row->value),"VS");
       row->badge=exhibition_team_catalog_badge(opponent);break;
@@ -641,7 +641,7 @@ static void ml_dashboard_view(MlView *v) {
     const MlPlayer *p=&career.players[club->players[i]];
     MlViewRow *row=&v->squad[v->squad_count++];
     snprintf(row->label,sizeof(row->label),"%s",p->name);
-    snprintf(row->detail,sizeof(row->detail),"%s  /  #%u",ml_role(p->position),p->shirt);
+    snprintf(row->detail,sizeof(row->detail),"%s  -  #%u",ml_role(p->position),p->shirt);
     snprintf(row->value,sizeof(row->value),"%u",p->overall);
   }
 }
@@ -665,10 +665,10 @@ static void ml_base_view(MlView *v) {
   snprintf(v->left_title,sizeof(v->left_title),"CAREER");
   snprintf(v->right_title,sizeof(v->right_title),"CLUB OFFICE");
   if (session_ready) {
-    snprintf(v->caption,sizeof(v->caption),"%s  /  SEASON %u  /  DAY %u",career.manager_name,career.season,career.day+1u);
+    snprintf(v->caption,sizeof(v->caption),"%s  -  SEASON %u  -  DAY %u",career.manager_name,career.season,career.day+1u);
     snprintf(v->info[0],96,"%s",exhibition_team_catalog_name(career.settings.club));
     snprintf(v->info[1],96,"%s",ml_competition_name());
-    snprintf(v->info[2],96,"LEAGUE POSITION  %u / %u",ml_rank(&career),career.league.team_count);
+    snprintf(v->info[2],96,"LEAGUE POSITION  %u OF %u",ml_rank(&career),career.league.team_count);
     snprintf(v->info[3],96,"BOARD TARGET  TOP %u",career.target_rank);
     const MlClub *club=ml_find_club(&career,career.settings.club);
     char cash[32]; ml_money(cash,sizeof(cash),club ? club->cash : 0);
@@ -717,7 +717,7 @@ static void ml_base_view(MlView *v) {
         snprintf(v->rows[0].detail,96,"%.38s VS %.38s",exhibition_team_catalog_name(next.home),exhibition_team_catalog_name(next.away));
       else {
         snprintf(v->rows[0].label,64,"%s",next.kind==ML_EVENT_SEASON_END ? "SEASON REVIEW" : "NEXT EVENT");
-        snprintf(v->rows[0].detail,96,"%s",next.kind==ML_EVENT_SEASON_END ? "REVIEW YOUR SEASON AND CONTINUE" : "REST DAY / ADVANCE THE MATCHDAY");
+        snprintf(v->rows[0].detail,96,"%s",next.kind==ML_EVENT_SEASON_END ? "REVIEW YOUR SEASON AND CONTINUE" : "REST DAY - ADVANCE THE MATCHDAY");
       }
       snprintf(v->rows[0].value,48,"DAY %u",next.day+1u);
       v->rows[0].badge=v->badge;
@@ -768,11 +768,11 @@ static void ml_base_view(MlView *v) {
       snprintf(v->rows[4].value,48,"%s",setup.condition==5u ? "RANDOM" : "NORMAL");
       snprintf(v->info[0],96,"EXISTING CLUB CAREER");
       snprintf(v->info[1],96,"FIXED LEAGUE PARTICIPANTS");
-      snprintf(v->info[2],96,"HOME & AWAY / BY STANDINGS");
-      snprintf(v->info[4],96,"LEFT / RIGHT TO CHANGE");
+      snprintf(v->info[2],96,"HOME & AWAY - BY STANDINGS");
+      snprintf(v->info[4],96,"USE D-PAD TO CHANGE");
       snprintf(v->info[5],96,"A ON CLUB TO BROWSE TEAMS");
       snprintf(v->info[6],96,"SUPPORTED PLAYABLE POOL");
-      snprintf(v->info[7],96,"NO PROMOTION / RELEGATION YET");
+      snprintf(v->info[7],96,"PROMOTION AND RELEGATION UNAVAILABLE");
     }
     v->helper_count=2u; return;
   }
@@ -793,7 +793,7 @@ static void ml_base_view(MlView *v) {
       snprintf(v->info[2],96,"TRANSFER FEE: %s",fee);
       snprintf(v->info[3],96,"CONTRACT: %u YEARS",years);
       snprintf(v->info[4],96,"WEEKLY WAGE: %u",p->wage ? p->wage : 1000u+(p->overall>40u ? p->overall-40u : 1u)*(p->overall>40u ? p->overall-40u : 1u)*15u);
-      snprintf(v->info[6],96,"LEFT / RIGHT: CONTRACT DURATION");
+      snprintf(v->info[6],96,"D-PAD: CONTRACT DURATION");
       snprintf(v->info[7],96,"GAME ECONOMY, NOT REAL SALARIES");
     }
     v->helper_count=2u; return;
@@ -801,10 +801,10 @@ static void ml_base_view(MlView *v) {
   if (page==ML_PAGE_FINANCES) {
     v->count=5u; v->first=0u; v->total=5u;
     const MlClub *club=ml_find_club(&career,career.settings.club);
-    const char *labels[]={"CASH BALANCE","WEEKLY WAGES / BUDGET","WAGES PAID THIS SEASON","MATCH REVENUE","PRIZE MONEY"};
+    const char *labels[]={"CASH BALANCE","WEEKLY WAGES - BUDGET","WAGES PAID THIS SEASON","MATCH REVENUE","PRIZE MONEY"};
     for (uint32_t i=0;i<5u;i++) { snprintf(v->rows[i].label,64,"%s",labels[i]); v->rows[i].enabled=1; }
     ml_money(v->rows[0].value,48,club->cash);
-    snprintf(v->rows[1].detail,96,"%u / %u",ml_weekly_wage(&career,club->team),club->wage_budget);
+    snprintf(v->rows[1].detail,96,"%u OF %u",ml_weekly_wage(&career,club->team),club->wage_budget);
     ml_money(v->rows[2].value,48,career.wages_paid);
     ml_money(v->rows[3].value,48,career.match_income);
     ml_money(v->rows[4].value,48,career.prize_income);
@@ -829,8 +829,8 @@ static void ml_base_view(MlView *v) {
         snprintf(row->detail,96,"%s",index ? "LOAD ONE OF THREE CAREER SAVES" : "BUILD YOUR CLUB ACROSS SEASONS");
         row->enabled=index || league_count; v->helper_count=2u;
         snprintf(v->info[0],96,"EXISTING CLUB CAREER");
-        snprintf(v->info[2],96,"SQUAD / TRANSFERS / CONTRACTS");
-        snprintf(v->info[3],96,"LEAGUE / DOMESTIC CUP");
+        snprintf(v->info[2],96,"SQUAD TRANSFERS AND CONTRACTS");
+        snprintf(v->info[3],96,"LEAGUE AND DOMESTIC CUP");
         snprintf(v->info[4],96,"PLAY OR SIMULATE");
         snprintf(v->info[6],96,"THREE INDEPENDENT SAVE SLOTS");
         break;
@@ -853,13 +853,13 @@ static void ml_base_view(MlView *v) {
         const MlPlayer *p=&career.players[row_players[index]];
         snprintf(v->title,64,"%s",page==ML_PAGE_SQUAD ? "SQUAD" : page==ML_PAGE_CONTRACTS ? "CONTRACTS" : "TRANSFER MARKET");
         snprintf(row->label,64,"%s",p->name);
-        snprintf(row->detail,96,"%s  /  STR %u  /  #%u  /  CONTRACT S%u",ml_role(p->position),p->overall,p->shirt,p->contract_end);
+        snprintf(row->detail,96,"%s  -  STR %u  -  #%u  -  CONTRACT S%u",ml_role(p->position),p->overall,p->shirt,p->contract_end);
         if (page==ML_PAGE_SQUAD) snprintf(row->value,48,"%s",index==selected_player ? "SELECTED" : index<11u ? "STARTER" : "RESERVE");
         else ml_money(row->value,48,ml_transfer_value(p));
         row->portrait=p->portrait_id;
         if (page==ML_PAGE_SQUAD) {
           v->helper_label[0]=selected_player==ML_INVALID_INDEX ? "CHOOSE PLAYER" : "SWAP";
-          snprintf(v->info[6],96,"FORMATION / PRESETS: GAME PLAN");
+          snprintf(v->info[6],96,"FORMATION AND PRESETS: GAME PLAN");
           snprintf(v->info[7],96,"AVAILABLE BEFORE EACH KICKOFF");
         }
         break;
@@ -870,7 +870,7 @@ static void ml_base_view(MlView *v) {
       }
       case ML_PAGE_CALENDAR: {
         snprintf(v->title,64,"SEASON CALENDAR");
-        snprintf(row->label,64,"MATCHDAY %u / %u",index+1u,career.league.matchday_count);
+        snprintf(row->label,64,"MATCHDAY %u OF %u",index+1u,career.league.matchday_count);
         const uint32_t n=career.league.matchday_fixture_count[index];
         const LeagueFixture *own=NULL;
         for(uint32_t i=0;i<n;i++) {
@@ -879,7 +879,7 @@ static void ml_base_view(MlView *v) {
         }
         if(own) {
           const uint32_t opponent=own->home==career.settings.club ? own->away : own->home;
-          snprintf(row->detail,96,"%s  /  %s",own->home==career.settings.club ? "HOME" : "AWAY",exhibition_team_catalog_name(opponent));
+          snprintf(row->detail,96,"%s OF %s",own->home==career.settings.club ? "HOME" : "AWAY",exhibition_team_catalog_name(opponent));
           row->badge=exhibition_team_catalog_badge(opponent);
           if(own->complete) snprintf(row->value,48,"%u - %u",own->home_goals,own->away_goals);
           else snprintf(row->value,48,"PENDING");
@@ -917,7 +917,7 @@ static void ml_base_view(MlView *v) {
           const LeagueScorer *s=&career.league.scorers[scorers[index]];
           snprintf(row->label,64,"%u  %s",index+1u,s->name); snprintf(row->detail,96,"%s",exhibition_team_catalog_name(s->team));
           const uint32_t clubs=league_tournament_scorer_clubs(&career.league,scorers[index]);
-          if(clubs>1u)snprintf(row->detail,96,"%u CLUBS / COMBINED SEASON TOTAL",clubs);
+          if(clubs>1u)snprintf(row->detail,96,"%u CLUBS - COMBINED SEASON TOTAL",clubs);
           snprintf(row->value,48,"%u GOALS",league_tournament_scorer_goals(&career.league,scorers[index])); row->portrait=s->portrait_id;
           row->badge=clubs>1u ? 0u : exhibition_team_catalog_badge(s->team);
         } else {

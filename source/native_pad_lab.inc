@@ -1603,7 +1603,8 @@ static void native_lab_list_update(void *list, const void *input,
   const uint32_t setplay_context =
       native_lab_setplay_context(stock + 1, stock[0]);
 #ifndef NATIVE_PAD_LAB_HOST_TEST
-  const uint32_t corner_kind=corner_native_observe(list,input,binding.pad);
+  const uint32_t corner_kind=corner_native_observe(list,input,binding.pad,
+      setplay_context!=PES_SETPLAY_NONE && setplay_context!=PES_SETPLAY_CORNER);
 #else
   const uint32_t corner_kind=0;
 #endif

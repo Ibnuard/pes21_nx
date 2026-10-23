@@ -4202,7 +4202,7 @@ static void overlay_render(void) {
                  pes_controller_custom_prematch_gameplan_formation_label(
                      side));
         if (shape_picker) {
-          snprintf(formation, sizeof(formation), "CURRENT %s   |   %u / 11",
+          snprintf(formation, sizeof(formation), "CURRENT %s   |   %u OF 11",
               pes_controller_custom_prematch_gameplan_formation_label(side),
               pes_controller_custom_prematch_gameplan_formation_focus(side) + 1u);
         }
@@ -4669,10 +4669,10 @@ static void overlay_render(void) {
       } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_ROOT) {
         footer_labels[side][0] = "SELECT";
         footer_labels[side][1] = pes_controller_live_gameplan_active()
-                                     ? "READY / PAUSE"
+                                     ? "PAUSE"
                                      : (side ? "READY" : ml_frontend_plan_editor() ? "SAVE & BACK" : "HUB");
       } else if (page == PES_PREMATCH_GAMEPLAN_PAGE_SUBSTITUTE) {
-        footer_labels[side][0] = "SELECT / SWAP";
+        footer_labels[side][0] = "SWAP";
         footer_labels[side][1] = "BACK";
         if (pes_controller_custom_prematch_gameplan_substitute_area(side) ==
             PES_PREMATCH_GAMEPLAN_AREA_FIELD) {
@@ -5679,7 +5679,7 @@ static void overlay_render(void) {
         if (compact_bracket || pages_this_round <= 1u)
           snprintf(round_heading, sizeof(round_heading), "%s", round_name);
         else
-          snprintf(round_heading, sizeof(round_heading), "%s  %u / %u",
+          snprintf(round_heading, sizeof(round_heading), "%s  %u OF %u",
                    round_name, first / 2u + 1u, pages_this_round);
         quads += emit_efootball_fit_line(
             round_heading, (int)strlen(round_heading), child_x,
@@ -7450,7 +7450,7 @@ static void overlay_render(void) {
         const uint32_t count =
             pes_controller_2p_prematch_hub_kit_count(row);
         snprintf(kit_value, sizeof(kit_value), "KIT %u%s%u",
-                 kit_number ? kit_number : 1u, count > 1 ? " / " : "",
+                 kit_number ? kit_number : 1u, count > 1 ? " - " : "",
                  count > 1 ? count : 0u);
         if (count <= 1)
           snprintf(kit_value, sizeof(kit_value), "KIT %u",
@@ -8882,18 +8882,18 @@ static void overlay_render(void) {
                          debug_y, debug_gw, debug_gh, verts + quads * 24);
       if (native_debug.context == PES_SETPLAY_FREE_KICK)
         snprintf(debug_line, sizeof(debug_line),
-                 "LS=CURL + HEIGHT   RS=CAMERA / AIM");
+                 "LS=TRAJECTORY   RS=CAMERA");
       else if (native_debug.context == PES_SETPLAY_THROW_IN)
-        snprintf(debug_line, sizeof(debug_line), "LS=THROW DIRECTION/AIM");
+        snprintf(debug_line, sizeof(debug_line), "LS=THROW DIRECTION");
       else
         snprintf(debug_line, sizeof(debug_line),
-                 "LS=CURL + HEIGHT   RS=CAMERA / AIM");
+                 "LS=TRAJECTORY   RS=CAMERA");
       quads += emit_line(debug_line, (int)strlen(debug_line), 12.0f,
                          debug_y + debug_step, debug_gw, debug_gh,
                          verts + quads * 24);
       if (native_debug.context == PES_SETPLAY_FREE_KICK)
         snprintf(debug_line, sizeof(debug_line),
-                 "B=PASS   A=LOB/CROSS   Y=SHOOT   %s=KICKER",
+                 "B=PASS   A=CROSS   Y=SHOOT   %s=KICKER",
                  single_joy_setplay ? "L1+R1" : "RIGHT");
       else if (native_debug.context == PES_SETPLAY_CORNER)
         snprintf(debug_line, sizeof(debug_line),
@@ -9096,22 +9096,6 @@ static void overlay_render(void) {
 
     const float gh = helper_text_gh;
     cinematic_helper_text_first_quad = quads;
-    if (horizontal_dual) {
-      const float slash_x = first_x + helper_radius * 1.42f;
-      int slash_quads = emit_efootball_line(
-          "/", 1, slash_x,
-          (cinematic_goal_actions ? skip_y : generic_y) - gh * 0.5f,
-          gh, EFOOTBALL_FONT_REGULAR, verts + quads * 24);
-      cinematic_helper_text_quads += slash_quads;
-      quads += slash_quads;
-      if (cinematic_goal_actions) {
-        slash_quads = emit_efootball_line(
-            "/", 1, slash_x, celebrate_y - gh * 0.5f,
-            gh, EFOOTBALL_FONT_REGULAR, verts + quads * 24);
-        cinematic_helper_text_quads += slash_quads;
-        quads += slash_quads;
-      }
-    }
     const float label_x = (horizontal_dual ? second_x : first_x) +
                           helper_radius * 1.55f;
     int label_quads = emit_efootball_line(
@@ -9130,10 +9114,26 @@ static void overlay_render(void) {
       quads += label_quads;
     }
   }
-  const char *setplay_keys[5] = {NULL, NULL, NULL, NULL, NULL};
-  const char *setplay_labels[5] = {NULL, NULL, NULL, NULL, NULL};
+  FnxCornerView corner_views[2]={{0}};
+  unsigned corner_open_count=0,corner_available_count=0;
+  static uint64_t corner_open_tick[2];
+  const uint64_t corner_now=armTicksToNs(armGetSystemTick())/1000000u;
+  if(native_lab && (setplay_context==PES_SETPLAY_NONE || setplay_context==PES_SETPLAY_CORNER) &&
+     !frontdoor_page && !set_piece_selector && !custom_gameplan &&
+     !custom_2p_transition && virtual_cursor_context==PES_VIRTUAL_CURSOR_NONE &&
+     controller_snapshot.surface!=PES_CONTROLLER_SURFACE_REPLAY &&
+     controller_snapshot.surface!=PES_CONTROLLER_SURFACE_GOAL_DEMO &&
+     controller_snapshot.surface!=PES_CONTROLLER_SURFACE_CINEMATIC) {
+    for(uint32_t pad=0;pad<(pes_controller_native_pad_lab_two_player()?2u:1u);pad++) {
+      fnx_corner_view(pad,corner_now,&corner_views[pad]);
+      corner_available_count+=corner_views[pad].available!=0;
+      corner_open_count+=corner_views[pad].open!=0;
+    }
+  }
+  const char *setplay_keys[7] = {NULL};
+  const char *setplay_labels[7] = {NULL};
   const char *setplay_camera_key = single_joy_setplay ? "SR+LS" : "RS";
-  const char *setplay_camera_label = single_joy_setplay ? "HOLD: CAMERA / AIM" : "CAMERA / AIM";
+  const char *setplay_camera_label = single_joy_setplay ? "HOLD: CAMERA" : "CAMERA";
   unsigned int setplay_helper_count = 0;
   const int offside_free_kick =
       setplay_context == PES_SETPLAY_FREE_KICK &&
@@ -9151,18 +9151,20 @@ static void overlay_render(void) {
       setplay_context == PES_SETPLAY_GOAL_KICK) {
     setplay_keys[0] = "L";
     setplay_labels[0] = "POSITION SHIFT";
-    setplay_helper_count = 1;
+    setplay_helper_count =
+        (native_debug.stock_mask & PES_NATIVE_LAB_STOCK_GOALKICK_SUPPORT) ? 1u : 0u;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_CORNER) {
-    setplay_keys[0] = "L";
-    setplay_labels[0] = "SHORT CORNER";
-    setplay_keys[1] = setplay_taker_key;
-    setplay_labels[1] = "SET PIECE TAKER";
-    setplay_keys[2] = "LS";
-    setplay_labels[2] = "HEIGHT / CURL";
-    setplay_keys[3] = setplay_camera_key;
-    setplay_labels[3] = setplay_camera_label;
-    setplay_helper_count = 4;
+    if(!corner_available_count) {
+      setplay_keys[setplay_helper_count] = "L";
+      setplay_labels[setplay_helper_count++] = "SHORT CORNER";
+    }
+    setplay_keys[setplay_helper_count] = setplay_taker_key;
+    setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
+    setplay_keys[setplay_helper_count] = "LS";
+    setplay_labels[setplay_helper_count++] = "TRAJECTORY";
+    setplay_keys[setplay_helper_count] = setplay_camera_key;
+    setplay_labels[setplay_helper_count++] = setplay_camera_label;
   } else if (native_far_free_kick) {
     // Far free kicks retain the stock overhead camera, but taker selection is
     // still our native-controller action rather than the old ZR touch legend.
@@ -9174,14 +9176,14 @@ static void overlay_render(void) {
     setplay_keys[0] = setplay_taker_key;
     setplay_labels[0] = "SET PIECE TAKER";
     setplay_keys[1] = "LS";
-    setplay_labels[1] = "HEIGHT / CURL";
+    setplay_labels[1] = "TRAJECTORY";
     setplay_keys[2] = setplay_camera_key;
     setplay_labels[2] = setplay_camera_label;
     setplay_helper_count = 3;
   } else if (native_setplay_debug &&
              setplay_context == PES_SETPLAY_THROW_IN) {
     setplay_keys[0] = setplay_taker_key;
-    setplay_labels[0] = "SET THROWER";
+    setplay_labels[0] = "SELECT THROWER";
     setplay_helper_count = 1;
   } else if (!native_setplay_debug && !native_lab &&
       setplay_context == PES_SETPLAY_GOAL_KICK) {
@@ -9206,7 +9208,7 @@ static void overlay_render(void) {
     setplay_helper_count = 1;
   } else if (setplay_context == PES_SETPLAY_THROW_IN) {
     setplay_keys[0] = setplay_taker_key;
-    setplay_labels[0] = "SET THROWER";
+    setplay_labels[0] = "SELECT THROWER";
     setplay_helper_count = 1;
   } else if (setplay_options && !native_lab) {
     // Unknown context is not evidence of a goal kick. A raw PositionShift
@@ -9217,6 +9219,16 @@ static void overlay_render(void) {
       setplay_labels[setplay_helper_count++] = "SET PIECE TAKER";
     }
   }
+  /* The corner entry uses the same sprite/text row and right anchor as every
+   * set-play helper, including the local defending side without a Mobile HUD. */
+  if(corner_available_count==1 && !corner_open_count) {
+    for(uint32_t pad=0;pad<2;pad++)if(corner_views[pad].available && setplay_helper_count<7) {
+      setplay_keys[setplay_helper_count]=android_controller_profile(pad)==PES_CONTROLLER_PROFILE_FULL ? "LEFT" : "LS";
+      setplay_labels[setplay_helper_count++]=corner_available_count==1 ? "CORNER TACTICS" :
+          corner_views[pad].mode==FNX_CORNER_DEFENCE ? "DEFENCE TACTICS" : "ATTACK TACTICS";
+    }
+  }
+  if(corner_open_count)setplay_helper_count=0;
   const int penalty_helper_active =
       (penalty_role_p1 != PES_PENALTY_NONE ||
        penalty_role_p2 != PES_PENALTY_NONE) &&
@@ -9260,6 +9272,7 @@ static void overlay_render(void) {
   }
   // One sprite group plus a measured label per row. Rail-button chords use
   // real SL/SR art, not the old text-only L1/R1 badges.
+  if(corner_open_count)setplay_helper_count=0;
   if (setplay_helper_count) {
     const float size = screen_height * 0.045f;
     const float gh = helper_text_gh;
@@ -9273,8 +9286,11 @@ static void overlay_render(void) {
     for (uint32_t i = 0; i < setplay_helper_count; ++i)
       label_w = fmaxf(label_w, measure_efootball_line(setplay_labels[i],
           (int)strlen(setplay_labels[i]), gh, EFOOTBALL_FONT_BOLD));
-    const float x = 0.955f * screen_width - label_w - gap - group_w;
-    const float start_y = 0.925f * screen_height -
+    const int corner_pair=corner_available_count>1;
+    const int left_corner=corner_pair && corner_views[0].mode!=FNX_CORNER_DEFENCE;
+    const float x = left_corner ? .012f*screen_width :
+        (corner_available_count ? .988f : .955f)*screen_width-label_w-gap-group_w;
+    const float start_y = (corner_pair ? .900f : corner_available_count ? .965f : .925f) * screen_height -
                           (setplay_helper_count - 1u) * step;
     for (uint32_t i = 0; i < setplay_helper_count; ++i) {
       const int rail = !strcmp(setplay_keys[i], "L1+R1");
@@ -9901,20 +9917,15 @@ static void overlay_render(void) {
     }
   }
 
-  if(native_lab && !frontdoor_page && !set_piece_selector && !custom_gameplan &&
-     !custom_2p_transition &&
-     virtual_cursor_context==PES_VIRTUAL_CURSOR_NONE) {
-    PesControllerSnapshot corner_surface;pes_controller_surface_snapshot(&corner_surface);
-    if(corner_surface.surface!=PES_CONTROLLER_SURFACE_REPLAY &&
-       corner_surface.surface!=PES_CONTROLLER_SURFACE_GOAL_DEMO &&
-       corner_surface.surface!=PES_CONTROLLER_SURFACE_CINEMATIC) {
-      uint64_t now=armTicksToNs(armGetSystemTick())/1000000u;
-      for(uint32_t pad=0;pad<(pes_controller_native_pad_lab_two_player() ? 2u : 1u);pad++) {
-        FnxCornerView view;fnx_corner_view(pad,now,&view);
-        corner_tactics_emit(&corner_ui,pad,&view,
-            android_controller_profile(pad)!=PES_CONTROLLER_PROFILE_FULL,verts,&quads);
-      }
-    }
+  for(uint32_t pad=0;pad<2;pad++) {
+    if(corner_available_count>1)
+      corner_tactics_entry(&corner_ui,pad,&corner_views[pad],
+          android_controller_profile(pad)==PES_CONTROLLER_PROFILE_FULL ? "LEFT" : "LS",verts,&quads);
+    if(!corner_views[pad].open){corner_open_tick[pad]=0;continue;}
+    if(!corner_open_tick[pad] || corner_now<corner_open_tick[pad])corner_open_tick[pad]=corner_now;
+    const float progress=fminf(1.f,(float)(corner_now-corner_open_tick[pad])/140.f);
+    corner_tactics_emit(&corner_ui,pad,pes_controller_native_pad_lab_two_player()?2u:1u,
+        &corner_views[pad],progress,verts,&quads);
   }
 overlay_geometry_ready:
   if (!quads)

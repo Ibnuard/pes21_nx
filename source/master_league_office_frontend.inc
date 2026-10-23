@@ -255,7 +255,7 @@ static void ml_office_drawer(MlView *v) {
     MlOffer *o=ml_selected_offer();if(!o)return;
     snprintf(d->title,64,"%s",ml_offer_status(o->status));snprintf(d->subtitle,96,"%s",career.players[o->player].name);
     char fee[32],wage[32];ml_term_money(fee,sizeof(fee),o->fee,0);ml_term_money(wage,sizeof(wage),o->wage,1);
-    snprintf(d->detail,96,"%u YEARS / WAGE %s",o->years,wage);snprintf(d->value,96,"FEE %s",fee);
+    snprintf(d->detail,96,"%u YEARS - WAGE %s",o->years,wage);snprintf(d->value,96,"FEE %s",fee);
     d->count=d->total=ml_offer_action_count(o);d->first=0u;d->confirm=2;d->modal=2;
     d->badge=exhibition_team_catalog_badge(o->incoming ? o->to : o->from);
     snprintf(d->body,sizeof(d->body),"%s",o->status==ML_OFFER_EXPIRED ? "Only this transfer offer expired. Your player's contract is separate." :
@@ -268,7 +268,7 @@ static void ml_office_drawer(MlView *v) {
   }else if(drawer_kind==ML_DRAWER_MY_PLAYER) {
     const MlPlayer *p=&career.players[transaction_player];char fee[32];ml_money(fee,sizeof(fee),ml_release_value(&career,transaction_player));
     snprintf(d->title,64,"PLAYER CONTRACT");snprintf(d->subtitle,96,"%s",p->name);d->badge=exhibition_team_catalog_badge(p->club);
-    snprintf(d->detail,96,"%s / CONTRACT UNTIL SEASON %u",ml_role(p->position),p->contract_end);
+    snprintf(d->detail,96,"%s - CONTRACT UNTIL SEASON %u",ml_role(p->position),p->contract_end);
     snprintf(d->value,96,"RELEASE COMPENSATION %s",fee);
     snprintf(d->body,sizeof(d->body),"%s",p->contract_end<=career.season ? "Contract expires this season. Renew to keep this player." :
       "Renew the player's contract or release them into the free-agent pool.");
@@ -324,7 +324,7 @@ static void ml_office_view(MlView *v) {
     for(uint32_t i=0;i<5u && v->first+i<player_rows;i++) {
       MlViewRow *r=&v->rows[v->count++];const MlPlayer *p=&career.players[row_players[v->first+i]];
       ml_player_row(r,p);
-      if(p->contract_end<=career.season)snprintf(r->value,48,"EXPIRING / RENEW CONTRACT");
+      if(p->contract_end<=career.season)snprintf(r->value,48,"EXPIRING - RENEW CONTRACT");
       else snprintf(r->value,48,"Contract until season %u",p->contract_end);
     }
     v->helper_count=4u;v->helper_key[0]="A";v->helper_label[0]="PLAYER OPTIONS";v->helper_key[1]="B";v->helper_label[1]="BACK";
@@ -395,7 +395,7 @@ static void ml_office_view(MlView *v) {
     if(!v->count)snprintf(v->empty,96,"No Players Available");
     if(page==ML_PAGE_MARKET_PLAYERS && market_club)snprintf(v->left_title,64,"%s",exhibition_team_catalog_name(market_club));
     else if(page==ML_PAGE_MARKET_PLAYERS && player_rows && career.players[row_players[0]].club)
-      snprintf(v->left_title,64,"WEAK POSITION / %s",ml_role(ml_weak_position(&career)));
+      snprintf(v->left_title,64,"WEAK POSITION - %s",ml_role(ml_weak_position(&career)));
   }
   if(page==ML_PAGE_OFFERS || page==ML_PAGE_MANAGER_OFFICE || page==ML_PAGE_MESSAGES || page==ML_PAGE_JOBS) {
     memset(v->rows,0,sizeof(v->rows));v->count=0u;v->first=focus/5u*5u;v->selected=focus;v->action_count=0u;
@@ -411,7 +411,7 @@ static void ml_office_view(MlView *v) {
         r->unread=ml_offer_unread(&career,offer_indices[index]);
         r->badge=exhibition_team_catalog_badge(offers_incoming ? o->to : o->from);
         snprintf(r->label,64,"%s",career.players[o->player].name);
-        snprintf(r->detail,96,"%s / DAY %u / %.42s",ml_offer_status(o->status),o->status==ML_OFFER_WAITING ? o->due+1u : o->updated+1u,
+        snprintf(r->detail,96,"%s - DAY %u - %.42s",ml_offer_status(o->status),o->status==ML_OFFER_WAITING ? o->due+1u : o->updated+1u,
           exhibition_team_catalog_name(offers_incoming ? o->to : o->from));
         ml_money(r->value,48,o->fee);r->portrait=career.players[o->player].portrait_id;
       }else if(page==ML_PAGE_MANAGER_OFFICE) {
@@ -420,10 +420,10 @@ static void ml_office_view(MlView *v) {
         r->emblem=index==2u ? 2u : index ? 4u : 3u;
       }else if(page==ML_PAGE_MESSAGES) {
         const MlNotice *n=&career.office.notices[career.office.notice_count-1u-index];
-        snprintf(r->label,64,"SEASON %u / DAY %u",n->season,n->day+1u);snprintf(r->detail,96,"%s",n->text);
+        snprintf(r->label,64,"SEASON %u - DAY %u",n->season,n->day+1u);snprintf(r->detail,96,"%s",n->text);
       }else {
         snprintf(r->label,64,"%s",exhibition_team_catalog_name(career.office.job_team));r->badge=exhibition_team_catalog_badge(career.office.job_team);
-        snprintf(r->detail,96,"Manager offer / reply by day %u",career.office.job_expiry+1u);
+        snprintf(r->detail,96,"Manager offer - reply by day %u",career.office.job_expiry+1u);
       }
     }
     if(!v->count)snprintf(v->empty,96,"%s",page==ML_PAGE_OFFERS ? "No Transfer Offers Yet" : page==ML_PAGE_MESSAGES ? "No Messages Yet" : "No Job Offers Yet");

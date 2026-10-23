@@ -60,7 +60,7 @@ static void league_ui_landing(MasterLeagueRender *ui,GLfloat *verts,int *quads) 
   ml_ui_rect(ui,.04f,.657f,.522f,.243f,.012f,.085f,.18f,.94f,-1,0,1,verts,quads);
   cup_ui_text(ui,"EVERY MATCHDAY MATTERS",.065f,.692f,.470f,.042f,-1,verts,quads);
   ml_ui_text(ui,"Build the league. Write the season.",.065f,.763f,.470f,.029f,2,-1,0,1,verts,quads);
-  cup_ui_text(ui,"1-8 PLAYERS   /   ONE TITLE RACE",.065f,.850f,.470f,.025f,-1,verts,quads);
+  cup_ui_text(ui,"1-8 PLAYERS   -   ONE TITLE RACE",.065f,.850f,.470f,.025f,-1,verts,quads);
   const uint32_t focus=competition_frontend_focus();
   for(uint32_t i=0;i<2u;i++) {
     const float y=.190f+i*.365f;
@@ -82,7 +82,7 @@ static void league_ui_settings(MasterLeagueRender *ui,int general,GLfloat *verts
   league_ui_art(ui,2,.051f,.287f,.296f,.305f,verts,quads);
   league_ui_logo(ui,.073f,.311f,.252f,.254f,verts,quads);
   cup_ui_text(ui,competition_frontend_league_name(),.061f,.632f,.276f,.0333f,-2,verts,quads);
-  snprintf(info,sizeof(info),"%u TEAMS   /   %u PLAYERS",competition_frontend_league_team_count(),competition_frontend_league_player_count());
+  snprintf(info,sizeof(info),"%u TEAMS   -   %u PLAYERS",competition_frontend_league_team_count(),competition_frontend_league_player_count());
   cup_ui_text(ui,info,.061f,.691f,.276f,.027f,-3,verts,quads);
   cup_ui_text(ui,competition_frontend_league_system()==LEAGUE_SYSTEM_STANDINGS ? "CHAMPION BY STANDINGS" : "LEAGUE + KNOCKOUT",.061f,.751f,.276f,.026f,-2,verts,quads);
   cup_ui_text(ui,competition_frontend_league_home_away() ? "HOME & AWAY" : "SINGLE ROUND ROBIN",.061f,.831f,.276f,.025f,-3,verts,quads);
@@ -100,7 +100,7 @@ static void league_ui_settings(MasterLeagueRender *ui,int general,GLfloat *verts
     ml_ui_row(ui,&row,.400f,.298f+(i-start)*.093f,.543f,.078f,focus==i,0,verts,quads);
   }
   if(general) {
-    snprintf(info,sizeof(info),"PAGE %u / %u",start/5u+1u,(count+4u)/5u);
+    snprintf(info,sizeof(info),"PAGE %u OF %u",start/5u+1u,(count+4u)/5u);
     cup_ui_text(ui,info,.404f,.839f,.29f,.025f,-3,verts,quads);
   } else {
     ml_ui_button(ui,.706f,.812f,.236f,.065f,focus==5u,1,verts,quads);
@@ -129,7 +129,7 @@ static void league_ui_news(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const CompetitionEntryDraft *d=competition_frontend_league_draft();
   const uint32_t story=competition_frontend_league_news_index(),champion=league_ui_champion();
   char tag[48]="SEASON OVERVIEW",headline[112]="THE SEASON STARTS WITH YOU",detail[112];
-  snprintf(detail,sizeof(detail),"%u / %u teams assigned. %u players in the league.",competition_draft_assigned_count(d),d->team_count,d->player_count);
+  snprintf(detail,sizeof(detail),"%u OF %u teams assigned. %u players in the league.",competition_draft_assigned_count(d),d->team_count,d->player_count);
   if(story==1u) {
     uint32_t home=0,away=0;snprintf(tag,sizeof(tag),"MATCHDAY WATCH");
     if(league_ui_next_teams(&home,&away)) {
@@ -153,7 +153,7 @@ static void league_ui_news(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
       uint8_t slots[LEAGUE_MAX_TEAMS];league_tournament_ranked_slots(l,slots);
       const LeagueStanding *leader=&l->standings[slots[0]];
       snprintf(headline,sizeof(headline),"%s",cup_ui_team(leader->team));
-      snprintf(detail,sizeof(detail),"%u POINTS   /   %u PLAYED   /   %+d GOAL DIFFERENCE",leader->points,leader->played,(int)leader->goals_for-(int)leader->goals_against);
+      snprintf(detail,sizeof(detail),"%u POINTS   -   %u PLAYED   -   %+d GOAL DIFFERENCE",leader->points,leader->played,(int)leader->goals_for-(int)leader->goals_against);
     }
   } else if(story==3u) {
     snprintf(tag,sizeof(tag),champion ? "LEAGUE CHAMPIONS" : "THE TITLE RACE");
@@ -194,7 +194,7 @@ static void league_ui_next(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
       uint32_t round=0,index=0;league_tournament_next_human(l,NULL,&round,&index);
       const CupFixture *f=cup_tournament_fixture(&l->knockout,round,index);
       snprintf(label,sizeof(label),"%s%s",league_ui_round(round),l->knockout.home_away && round+1u<l->knockout.round_count
-          ? f && f->first_leg_complete ? " / LEG 2" : " / LEG 1" : "");
+          ? f && f->first_leg_complete ? " - LEG 2" : " - LEG 1" : "");
     }
     cup_ui_text(ui,label,.653f,.292f,.288f,.024f,-3,verts,quads);
     for(uint32_t side=0;side<2u;side++) {
@@ -218,7 +218,7 @@ static void league_ui_home(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   static const char *titles[]={"TEAMS","STANDINGS","SETTINGS","SAVE LEAGUE"};
   const CompetitionEntryDraft *d=competition_frontend_league_draft();
   const LeagueTournament *l=competition_frontend_league_tournament();
-  char assigned[48];snprintf(assigned,sizeof(assigned),"%u / %u ASSIGNED",competition_draft_assigned_count(d),d->team_count);
+  char assigned[48];snprintf(assigned,sizeof(assigned),"%u OF %u ASSIGNED",competition_draft_assigned_count(d),d->team_count);
   const char *details[]={l->first_match_started ? "PARTICIPANTS" : assigned,l->knockout.round_count ? "TABLE & KNOCKOUT" : "THE TITLE RACE","MATCH RULES","3 SAVE SLOTS"};
   for(uint32_t i=0;i<4u;i++) {
     const float x=.04f+i*.2375f;
@@ -230,7 +230,7 @@ static void league_ui_home(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
 static void league_ui_teams(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const CompetitionEntryDraft *d=competition_frontend_league_draft();
   const uint32_t focus=competition_frontend_league_team_slot_focus(),start=focus/8u*8u;
-  char title[80];snprintf(title,sizeof(title),"PARTICIPANTS    /    %u OF %u",start/8u+1u,(d->team_count+7u)/8u);
+  char title[80];snprintf(title,sizeof(title),"PARTICIPANTS    -    %u OF %u",start/8u+1u,(d->team_count+7u)/8u);
   ml_ui_panel(ui,title,ML_HEADER_SQUAD,.04f,.190f,.92f,.710f,0,verts,quads);
   /* Keep the four-row grid on partial pages too: paging must not resize
    * badges, cards or move the same slot to a different vertical rhythm. */
@@ -245,15 +245,15 @@ static void league_ui_teams(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   }
   /* Unused grid slots stay empty, exactly as on a full participant page.
    * Do not replace the right column with decorative artwork. */
-  snprintf(title,sizeof(title),"%u / %u TEAMS ASSIGNED%s",competition_draft_assigned_count(d),d->team_count,
-      competition_frontend_league_teams_editing() ? "" : "    /    LINE-UP LOCKED");
+  snprintf(title,sizeof(title),"%u OF %u TEAMS ASSIGNED%s",competition_draft_assigned_count(d),d->team_count,
+      competition_frontend_league_teams_editing() ? "" : "    -    LINE-UP LOCKED");
   cup_ui_text(ui,title,.061f,.861f,.87f,.025f,-3,verts,quads);
 }
 static void league_ui_table(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   const LeagueTournament *l=competition_frontend_league_tournament();
   const CompetitionEntryDraft *d=competition_frontend_league_draft();
   const uint32_t page=competition_frontend_league_table_page(),start=page*ML_TABLE_PAGE_ROWS;
-  char label[80];snprintf(label,sizeof(label),"STANDINGS    /    PAGE %u OF %u",page+1u,(d->team_count+ML_TABLE_PAGE_ROWS-1u)/ML_TABLE_PAGE_ROWS);
+  char label[80];snprintf(label,sizeof(label),"STANDINGS    -    PAGE %u OF %u",page+1u,(d->team_count+ML_TABLE_PAGE_ROWS-1u)/ML_TABLE_PAGE_ROWS);
   ml_ui_panel(ui,label,ML_HEADER_RANKING,.04f,.190f,.92f,.710f,0,verts,quads);
   static const char *cols[]={"P","W","D","L","GF","GA","GD","PTS"};
   static const float cx[]={.468f,.522f,.576f,.630f,.684f,.738f,.792f,.866f};
@@ -285,7 +285,7 @@ static void league_ui_table(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     }
   }
   if(qualifiers)snprintf(label,sizeof(label),"TOP %u QUALIFY FOR KNOCKOUT",qualifiers);
-  else snprintf(label,sizeof(label),champion ? "FINAL LEAGUE TABLE" : "3 POINTS FOR A WIN   /   1 FOR A DRAW");
+  else snprintf(label,sizeof(label),champion ? "FINAL LEAGUE TABLE" : "3 POINTS FOR A WIN   -   1 FOR A DRAW");
   cup_ui_text(ui,label,.062f,.850f,.75f,.022f,-3,verts,quads);
   cup_ui_text(ui,league_tournament_tiebreak_rules((LeagueTiebreak)l->reserved[1]),.062f,.879f,.86f,.019f,-3,verts,quads);
 }
@@ -312,9 +312,9 @@ static void league_ui_matches(MasterLeagueRender *ui,GLfloat *verts,int *quads) 
   const LeagueTournament *l=competition_frontend_league_tournament();
   const uint32_t day=competition_frontend_league_view_matchday(),page=competition_frontend_league_schedule_page();
   const uint32_t count=day<l->matchday_count ? l->matchday_fixture_count[day] : 0u;
-  char label[80];snprintf(label,sizeof(label),"MATCH CENTRE    /    MATCHDAY %u",count ? day+1u : 1u);
+  char label[80];snprintf(label,sizeof(label),"MATCH CENTRE    -    MATCHDAY %u",count ? day+1u : 1u);
   ml_ui_panel(ui,label,ML_HEADER_CALENDAR,.04f,.190f,.92f,.710f,0,verts,quads);
-  snprintf(label,sizeof(label),"FIXTURES    /    PAGE %u OF %u",page+1u,count ? (count+3u)/4u : 1u);
+  snprintf(label,sizeof(label),"FIXTURES    -    PAGE %u OF %u",page+1u,count ? (count+3u)/4u : 1u);
   cup_ui_text(ui,label,.061f,.299f,.87f,.026f,-3,verts,quads);
   for(uint32_t i=0;i<4u && page*4u+i<count;i++) {
     const LeagueFixture *f=league_tournament_matchday_fixture(l,day,page*4u+i);
@@ -351,7 +351,7 @@ static void league_ui_scorers(MasterLeagueRender *ui,GLfloat *verts,int *quads) 
     cup_ui_text(ui,label,x+.116f,y+.023f,.232f,.023f,-3,verts,quads);
     cup_ui_text(ui,r->name,x+.116f,y+.077f,.243f,.030f,-2,verts,quads);
     const uint32_t clubs=league_tournament_scorer_clubs(l,slots[i]);
-    snprintf(label,sizeof(label),"%u CLUBS / SEASON TOTAL",clubs);
+    snprintf(label,sizeof(label),"%u CLUBS - SEASON TOTAL",clubs);
     ml_ui_text(ui,clubs>1u ? label : cup_ui_team(r->team),x+.116f,y+.140f,.243f,.024f,2,-3,0,1,verts,quads);
     snprintf(label,sizeof(label),"%u",league_tournament_scorer_goals(l,slots[i]));ml_ui_center_text(ui,label,x+.363f,y+.067f,.049f,.086f,.048f,0,-2,verts,quads);
     cup_ui_text(ui,"GOALS",x+.363f,y+.175f,.050f,.022f,-3,verts,quads);
@@ -372,9 +372,9 @@ static void league_ui_bracket(MasterLeagueRender *ui,GLfloat *verts,int *quads) 
   const CupTournament *cup=&competition_frontend_league_tournament()->knockout;
   const uint32_t round=competition_frontend_league_bracket_round(),first=competition_frontend_league_bracket_page()*2u;
   const uint32_t count=cup_tournament_fixture_count(cup,round);char title[96];
-  snprintf(title,sizeof(title),"KNOCKOUT    /    %s",league_ui_round(round));
+  snprintf(title,sizeof(title),"KNOCKOUT    -    %s",league_ui_round(round));
   ml_ui_panel(ui,title,ML_HEADER_TROPHY,.04f,.190f,.92f,.710f,0,verts,quads);
-  snprintf(title,sizeof(title),"ROUND %u / %u    -    PAGE %u / %u",round+1u,cup->round_count,first/2u+1u,(count+1u)/2u);
+  snprintf(title,sizeof(title),"ROUND %u OF %u    -    PAGE %u OF %u",round+1u,cup->round_count,first/2u+1u,(count+1u)/2u);
   cup_ui_text(ui,title,.061f,.299f,.87f,.025f,-3,verts,quads);
   if(round+1u==cup->round_count) {
     league_ui_knockout_card(ui,round,0,.06f,.352f,.425f,.290f,verts,quads);

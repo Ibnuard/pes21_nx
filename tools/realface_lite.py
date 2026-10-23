@@ -39,8 +39,12 @@ def sources(config):
     registry = dict(players=[dict(ef_base_id=p['base_id'], native_player_id=p['native_player_id'],
                                  fingerprint=p['fingerprint'], status=p['status'], canonical_name=p['name'])
                              for p in state['identities'].values() if p.get('status')=='active'])
+    dense_policy = config.get('source_preparation_policy') == 'identity-bound-dense-v1'
+    dense_inventory = read(config['dense_inventory']) if dense_policy else None
+    dense_inventory_sha = sha(config['dense_inventory']) if dense_policy else None
     coverage = {p['base_id']: p for p in read(config['source_verification'])['players']
                 if p['status'] in ('candidate_pending_device', 'preserved_verified') or
+                (dense_policy and p['status']=='dense_source_verified') or
                 (p['status']=='source_ready_verified' and
                  p.get('source_identity_evidence',{}).get('policy')=='explicit_alias_base_fingerprint_v1' and
                  p['source_identity_evidence'].get('canonical_fingerprint')==p['fingerprint'])}
@@ -51,6 +55,9 @@ def sources(config):
         accepted = coverage.get(row['base_id'])
         if not accepted or any(accepted[k] != row[k] for k in ('native_player_id','fingerprint')):
             raise ValueError('Accepted face identity differs: '+str(row['base_id']))
+        if accepted['status']=='dense_source_verified':
+            from realface_dense_source_proof import validate
+            validate(config, row, accepted, dense_inventory, dense_inventory_sha)
         row['name'] = owner['canonical_name']
     return rows
 

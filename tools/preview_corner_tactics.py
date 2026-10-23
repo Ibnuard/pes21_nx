@@ -20,15 +20,28 @@ static void capture(const char *name,unsigned mode,int split) {
   for(int i=4096*24;i<4096*24+8;i++)vertices[i]=12345.f;
   FnxCornerView v={.available=1,.open=1,.mode=mode,.short_allowed=mode!=3,.current=0};
   const FnxCornerView before=v;
-  corner_tactics_emit(&ui,0,&v,0,vertices,&quads);
+  corner_tactics_emit(&ui,0,split?2:1,&v,1.f,vertices,&quads);
   assert(ui.draws[0].round.radius==ui.draws[1].round.radius);
   assert(ui.draws[2].round.radius==0 && ui.draws[3].round.radius==0);
-  if(split){v.mode=3;v.short_allowed=0;v.current=3;corner_tactics_emit(&ui,1,&v,0,vertices,&quads);}
+  if(split){v.mode=3;v.short_allowed=0;v.current=3;corner_tactics_emit(&ui,1,2,&v,1.f,vertices,&quads);}
   else assert(!memcmp(&v,&before,sizeof(v)));
   assert(quads<1024 && ui.draw_count<80);
   for(int i=4096*24;i<4096*24+8;i++)assert(vertices[i]==12345.f);
   for(int i=0;i<quads*24;i+=4){assert(isfinite(vertices[i]) && isfinite(vertices[i+1]));
-    assert(fabsf(vertices[i])<=1.002f && fabsf(vertices[i+1])<=1.002f);}
+    assert(fabsf(vertices[i])<=1.002f && fabsf(vertices[i+1])<=1.002f);
+    if(!split)assert(vertices[i]>=.455f); /* Compact one-player right edge. */}
+  /* Both owner panels have one bottom baseline, with equal edge inset. */
+  if(split){
+    MasterLeagueRender a={0},b={0};GLfloat av[4096*24],bv[4096*24];int aq=0,bq=0;
+    corner_tactics_emit(&a,0,2,&v,1.f,av,&aq);
+    corner_tactics_emit(&b,1,2,&v,1.f,bv,&bq);
+    assert(aq==bq);
+    for(int i=0;i<aq*24;i+=4){
+      assert(fabsf(av[i+1]-bv[i+1])<.00001f);
+      /* Font glyphs snap to pixel centres; the panel's first quad is exact. */
+      assert(fabsf((bv[i]-av[i])-1.432f)<(i<24 ? .00001f : .004f));
+    }
+  }
   char path[80];snprintf(path,sizeof(path),"%s.json",name);
   frame=fopen(path,"w");assert(frame);fprintf(frame,"[");draw_count=0;
   memset(uniforms,0,sizeof(uniforms));bound_texture=0;
@@ -40,6 +53,10 @@ int main(void) {
   fprintf(f,"P5\n%d %d\n255\n",EFOOTBALL_FONT_ATLAS_W,EFOOTBALL_FONT_ATLAS_H);
   fwrite(efootball_font_atlas_alpha,1,sizeof(efootball_font_atlas_alpha),f);fclose(f);
   capture("attack",1,0);capture("short",2,0);capture("defence",3,0);capture("two-player",1,1);
+  {MasterLeagueRender ui={0};GLfloat vertices[24];int quads=0;
+   FnxCornerView closed={.available=1,.open=0};
+   corner_tactics_emit(&ui,0,1,&closed,1.f,vertices,&quads);
+   assert(!quads && !ui.draw_count); /* Closed entry belongs to the helper list. */}
   return 0;
 }
 '''
@@ -63,7 +80,8 @@ def main():
             '-lm','-o',(temp/'preview.exe').as_posix()]
         result=subprocess.run(command,capture_output=True,text=True)
         if result.returncode:raise SystemExit(result.stderr)
-        result=subprocess.run([str(temp/'preview.exe')],cwd=temp,capture_output=True,text=True,check=True)
+        result=subprocess.run([str(temp/'preview.exe')],cwd=temp,capture_output=True,text=True)
+        if result.returncode:raise RuntimeError(result.stderr)
         assets={2:Image.open(temp/'font.pgm').convert('RGB')}
         import re
         header=(ROOT/'source/switch_button_assets.h').read_text()
