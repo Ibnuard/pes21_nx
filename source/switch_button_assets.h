@@ -3,7 +3,8 @@
 #define SWITCH_BUTTON_ASSETS(X) \
   X(x, "X") X(y, "Y") X(l, "L") X(r, "R") X(zl, "ZL") X(zr, "ZR") \
   X(sl, "SL") X(sr, "SR") X(ls, "LS") X(rs, "RS") X(right, ">") \
-  X(up, "UP") X(down, "DOWN") X(left, "LEFT")
+  X(up, "UP") X(down, "DOWN") X(left, "LEFT") \
+  X(b_dark, "B_DARK") X(x_dark, "X_DARK")
 #define SWITCH_DECLARE(name, key) \
   extern const uint8_t switch_button_##name##_bin[]; \
   extern const uint8_t switch_button_##name##_bin_end[];

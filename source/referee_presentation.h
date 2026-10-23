@@ -4,6 +4,14 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Visibility follows the native lifecycle, including a paused replay with no
+ * input heartbeat or live draw. Only its own ModeEnd (or scene teardown) may
+ * retire this owner. It is independent of the optional offside layout. */
+static uintptr_t referee_recorded_replay_owner;
+static inline int referee_recorded_replay_active(void) {
+  return __atomic_load_n(&referee_recorded_replay_owner,__ATOMIC_ACQUIRE)!=0;
+}
+
 static inline int referee_offside_presentation(const void *registry) {
   if (!registry) return 0;
   const unsigned char *demo = NULL, *fixed = NULL;

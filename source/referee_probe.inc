@@ -6,6 +6,7 @@
  * Enable with the exact token in referee-probe.txt. */
 #include "referee_motion.h"
 #include "referee_animation.h"
+#include "referee_presentation.h"
 #include "match_environment.h"
 #include "scene_runtime_log.h"
 typedef struct { uint64_t words[21]; } RefereeProbeLoadId;
@@ -56,6 +57,7 @@ static uint32_t referee_low_loads,referee_model_creations,referee_kickoff_applie
 static uint32_t referee_kickoff_pending;
 static uint32_t referee_kickoff_ready;
 static uint32_t referee_kickoff_layout_ok;
+static uint32_t referee_kickoff_native_stopped;
 static uint32_t referee_demo_sequence;
 static uint64_t referee_demo_tick;
 static int32_t referee_demo_x,referee_demo_z,referee_demo_heading;
@@ -208,6 +210,8 @@ static void referee_probe_clear(void) {
   referee_probe_dt=0;
   __atomic_store_n(&referee_kickoff_pending,0,__ATOMIC_RELEASE);
   referee_kickoff_ready=0;
+  referee_kickoff_native_stopped=0;
+  __atomic_store_n(&referee_recorded_replay_owner,0,__ATOMIC_RELEASE);
   __atomic_store_n(&referee_demo_tick,0,__ATOMIC_RELEASE);
   referee_gesture=(RefereeGesture){0};
   referee_probe_whistle_seen=0;
@@ -453,6 +457,19 @@ static void referee_probe_presentation_suspend(void) {
   referee_gesture=(RefereeGesture){.serial=(uint32_t)(event>>32)};
   referee_animation_clock=(RefereeAnimationClock){0};
 }
+/* Replay can render without another live ObjectList draw. Retire the last
+ * displayed pose at its native entry, before replay starts publishing actors.
+ * ModeEnd leaves it hidden until the live publisher supplies a fresh pose. */
+static inline void referee_probe_replay_enter(void *replay) {
+  if(!replay || !referee_probe_enabled || referee_probe_teardown)return;
+  __atomic_store_n(&referee_recorded_replay_owner,(uintptr_t)replay,__ATOMIC_RELEASE);
+  if(referee_probe_model)referee_probe_presentation_suspend();
+}
+static inline void referee_probe_replay_end(void *replay) {
+  uintptr_t expected=(uintptr_t)replay;
+  __atomic_compare_exchange_n(&referee_recorded_replay_owner,&expected,0,0,
+                             __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);
+}
 static void referee_probe_sound(const void *self,uint64_t handle,const uint8_t *command,
                                 uint32_t arg,const void *registry,uint32_t player) {
   referee_sound_original(self,handle,command,arg,registry,player);
@@ -473,6 +490,19 @@ static int referee_probe_follow(int scene) {
   if (!trans) return 0;
   const RefereePoint ball={trans[0],trans[2]};
   if (!referee_point_valid(ball)) return 0;
+  const int native_kickoff=referee_probe_native_kickoff(registry);
+  if(native_kickoff>=0) {
+    const int entered=native_kickoff && !referee_kickoff_native_stopped;
+    referee_kickoff_native_stopped=(uint32_t)native_kickoff;
+    /* A warp can precede both the ball AND MatchInfo read publication. If an
+     * old IN_PLAY snapshot consumed its request, the actual stopped kickoff
+     * edge restores the same placement. Ordinary out/foul restarts never arm
+     * this edge, and a held kickoff never resets its pose or whistle again. */
+    if(entered && !referee_kickoff_ready) {
+      __atomic_store_n(&referee_kickoff_pending,1,__ATOMIC_RELEASE);
+      referee_probe_hidden_kickoff();
+    }
+  }
   const uint64_t now=armGetSystemTick();
   referee_using_demo=0;
   float dt=referee_probe_ready && referee_probe_tick && now>=referee_probe_tick?
@@ -496,7 +526,12 @@ static int referee_probe_follow(int scene) {
     /* Warp acknowledgement and OpenRead ball publication are separate. An
      * old goal-end sample must not release the stance while native kickoff
      * is still stopped; either scoring side uses this same scalar contract. */
-    if(referee_probe_native_kickoff(registry)==1 || distance_squared<=1.f)
+    /* A missing borrowed snapshot cannot contradict the last known stopped
+     * kickoff. Retain that hold until a valid native state replaces it;
+     * unsupported layouts without a stopped observation keep ball fallback. */
+    if(native_kickoff==1 ||
+        (native_kickoff<0 && referee_kickoff_native_stopped) ||
+        distance_squared<=1.f)
       referee_kickoff_ready=2;
     else if(referee_kickoff_ready==2 &&
         !(referee_gesture.clip==4 && referee_gesture.elapsed<=referee_animation_bank.whistle_end))

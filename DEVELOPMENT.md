@@ -6,6 +6,11 @@ It is not yet hardware-validated and does not replace the deployed stable build.
 
 ## Architecture
 
+For a memory-constrained build host, use `./build-wsl.ps1 -Jobs 1 -LtoJobs 1`.
+The two limits control compilation and link-time optimization separately;
+`-Jobs 1` alone does not limit the default automatic LTO workers. `LtoJobs`
+defaults to automatic selection. This keeps O3 and LTO enabled.
+
 PES 2021 NX is a native compatibility wrapper, not an Android emulator. The
 NRO reserves a region for the original arm64 ELF objects, maps and relocates
 them, resolves Android/Bionic imports against libnx-backed shims, installs the

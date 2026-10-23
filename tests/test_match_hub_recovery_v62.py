@@ -55,6 +55,7 @@ static void (*exhibition_matchplan_setup_tmpdb)(void *)=setup;
 static int native_load(void){loads++;assert(owner_get()==0);if(fail_load)return 0;loaded_generation=actual_user;return 1;}
 static int (*matchplan_squad_load)(void)=native_load;
 static int exhibition_refresh_selected_tmpdb(void){refreshed++;return 1;}
+static int exhibition_gameplan_init_fixture(void *p){assert(p==plan);return 1;}
 static void native_lab_assign_matchplan_pads(void *p){assert(p==plan);}
 static void exhibition_apply_cpu_level(uint32_t v,void *p){(void)v;assert(!p);}
 static void exhibition_apply_match_settings(void *p){assert(!p);}

@@ -50,9 +50,9 @@ int main(void){
  const uint32_t classifier[]={0x52802f48,0x72a00068,0x6b08001f,0x1a9f17e0,0xd65f03c0};
  memcpy(code,id,sizeof(id));memcpy(code+0x100,exec,sizeof(exec));
  memcpy(code+0x200,scene,sizeof(scene));memcpy(code+0x300,classifier,sizeof(classifier));
- put32(code+0x508,0xf941b119);put32(code+0x510,0xf9400108);
- put32(code+0x514,0xf9420108);put32(code+0x53c,0xb9400c00);
- /* Flow's +108 and sound's +10 overlap independent synthetic symbol spans. */
+ put32(code+0x508,0xf941b119);put32(code+0x50c,0xf9400108);
+ put32(code+0x510,0xf9420108);put32(code+0x53c,0xb9400c00);
+ /* Flow's +108 and sound's +0c overlap independent synthetic symbol spans. */
  symbols[4]=m.load_virtbase+0x600;put32(code+0x708,0xf941b119);
  referee_presentation_install(&m);assert(referee_presentation_layout_ok);
  unsigned char *p=demo;memcpy(registry+0x360,&p,sizeof(p));
@@ -68,7 +68,7 @@ int main(void){
  put32(demo,0x3017a);assert(referee_offside_presentation_active());
  p=NULL;memcpy(registry+0x400,&p,sizeof(p));assert(!referee_offside_presentation_active());
  assert(!referee_offside_presentation(NULL));
- const unsigned sites[]={0,0x100,0x200,0x300,0x708,0x510,0x514,0x53c};
+ const unsigned sites[]={0,0x100,0x200,0x300,0x708,0x50c,0x510,0x53c};
  for(unsigned i=0;i<sizeof(sites)/sizeof(sites[0]);i++){
   code[sites[i]]^=1;referee_presentation_install(&m);assert(!referee_presentation_layout_ok);
   code[sites[i]]^=1;referee_presentation_install(&m);assert(referee_presentation_layout_ok);

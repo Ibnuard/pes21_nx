@@ -24,6 +24,7 @@
 #include "libc_shim.h"
 #include "perf_trace.h"
 #include "ue4_hooks.h"
+#include "corner_tactics.h"
 #include "util.h"
 
 #define AINPUT_EVENT_TYPE_KEY 1
@@ -1618,6 +1619,8 @@ static void queue_native_setplay_action(const PesControllerSnapshot *ui,
     pes_controller_setplay_request(action, ui->generation);
 }
 
+#include "corner_tactics_hid.inc"
+
 static void queue_native_lab_setplay_action(const PesControllerSnapshot *ui,
                                             uint32_t pad, int connected,
                                             u64 buttons,
@@ -2383,6 +2386,20 @@ void android_input_poll(void) {
                                      !penalty_active &&
                                      !cinematic_active && cursor_active;
 
+  const int corner_input_allowed=native_pad_lab_active && gameplay_active &&
+      !context_changed && !cinematic_active && !penalty_active &&
+      !gameplan_cursor_active && !set_piece_selector_isolated &&
+      !inmatch_tutorial_isolated && !pause_camera_active &&
+      !custom_prematch_gameplan_active && !custom_postmatch_active &&
+      !two_player_custom_frontend_active;
+  const uint32_t corner_input_p1=corner_tactics_hid(0,now_ms,
+      corner_input_allowed,controller_connected,profile_p1,buttons,menu_buttons,
+      axis_x,axis_y,right_axis_x,right_axis_y);
+  const uint32_t corner_input_p2=corner_tactics_hid(1,now_ms,
+      corner_input_allowed && pes_controller_native_pad_lab_two_player(),
+      controller_connected_p2,profile_p2,buttons_p2,menu_buttons_p2,
+      axis_x_p2,axis_y_p2,right_axis_x_p2,right_axis_y_p2);
+
   HidTouchScreenState touch_state;
   memset(&touch_state, 0, sizeof(touch_state));
   const int has_touch = hidGetTouchScreenStates(&touch_state, 1) > 0 &&
@@ -2397,7 +2414,8 @@ void android_input_poll(void) {
   const int physical_was_active =
       touch_state_find(&active_touch_state, FAKE_POINTER_PHYSICAL) >= 0;
   const int compact_main_menu_active = main_menu_controller_active;
-  if (set_piece_selector_isolated || two_player_custom_frontend_active) {
+  if (set_piece_selector_isolated || two_player_custom_frontend_active ||
+      ((corner_input_p1|corner_input_p2)&FNX_CORNER_CAPTURE)) {
     physical_touch_tracking = 0;
   } else if (physical_active) {
     physical_touch_last_x = touch_x;
@@ -2534,9 +2552,11 @@ void android_input_poll(void) {
       }
     } else {
       if (native_pad_lab_active && gameplay_active) {
+        if(!(corner_input_p1&FNX_CORNER_CAPTURE))
         queue_native_lab_setplay_action(
             &controller_snapshot, 0, controller_connected, buttons,
             previous_hid_buttons, profile_p1);
+        if(!(corner_input_p2&FNX_CORNER_CAPTURE))
         queue_native_lab_setplay_action(
             &controller_snapshot, 1, controller_connected_p2, buttons_p2,
             previous_hid_buttons_p2, profile_p2);
@@ -2867,6 +2887,10 @@ void android_input_poll(void) {
   {
     u64 native_buttons = buttons;
     u64 native_buttons_p2 = buttons_p2;
+    if((corner_input_p1&FNX_CORNER_AVAILABLE) && profile_p1==PES_CONTROLLER_PROFILE_FULL)
+      native_buttons&=~HidNpadButton_Left;
+    if((corner_input_p2&FNX_CORNER_AVAILABLE) && profile_p2==PES_CONTROLLER_PROFILE_FULL)
+      native_buttons_p2&=~HidNpadButton_Left;
     // Pause is dispatched as a stock frontend event, not through a gameplay
     // ThinkUnit. Keep +/- out of Cobra history to prevent duplicate handling.
     native_buttons &= ~(HidNpadButton_Plus | HidNpadButton_Minus);
@@ -2885,10 +2909,15 @@ void android_input_poll(void) {
         native_buttons_p2 &= ~(HidNpadButton_L | HidNpadButton_R |
                                HidNpadButton_AnySL | HidNpadButton_AnySR);
     }
-    emit_native_lab_pad_input(0, &left_stick, &right_stick,
-                              controller_connected, native_buttons);
-    emit_native_lab_pad_input(1, &left_stick_p2, &right_stick_p2,
-                              controller_connected_p2, native_buttons_p2);
+    HidAnalogStickState corner_neutral_stick={0};
+    const int corner_capture_p1=(corner_input_p1&FNX_CORNER_CAPTURE)!=0;
+    const int corner_capture_p2=(corner_input_p2&FNX_CORNER_CAPTURE)!=0;
+    emit_native_lab_pad_input(0,corner_capture_p1 ? &corner_neutral_stick : &left_stick,
+        corner_capture_p1 ? &corner_neutral_stick : &right_stick,
+        controller_connected,corner_capture_p1 ? 0 : native_buttons);
+    emit_native_lab_pad_input(1,corner_capture_p2 ? &corner_neutral_stick : &left_stick_p2,
+        corner_capture_p2 ? &corner_neutral_stick : &right_stick_p2,
+        controller_connected_p2,corner_capture_p2 ? 0 : native_buttons_p2);
   }
   else if (!gameplay_active && menu_controller_active)
     emit_menu_pad_input(&left_stick, have_left_stick, menu_buttons,

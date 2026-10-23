@@ -43,6 +43,7 @@
 #include "team_rating_star.h"
 #include "team_select_background.h"
 #include "ue4_hooks.h"
+#include "corner_tactics.h"
 #include "util.h"
 
 #ifndef GL_SAMPLER_BINDING
@@ -1844,6 +1845,7 @@ static int emit_gameplan_condition_arrow(float cx, float cy, float size,
 #include "league_overlay.inc"
 #include "frontdoor_overlay.inc"
 #include "gameplan_panels.inc"
+#include "corner_tactics_overlay.inc"
 
 // The source mask is supersampled and downscaled offline. Drawing it as one
 // linearly filtered quad gives the small Switch UI stars clean edges; u_limit
@@ -2673,6 +2675,8 @@ static void overlay_render(void) {
   static MasterLeagueRender frontdoor_ui;
   static MasterLeagueRender editor_ui;
   memset(&editor_ui,0,sizeof(editor_ui));
+  static MasterLeagueRender corner_ui;
+  memset(&corner_ui,0,sizeof(corner_ui));
   static FrontdoorMenuMotion frontdoor_menu_motion;
   fd_menu_motion_step(&frontdoor_menu_motion,frontdoor_page==FD_MENU,
       custom_main_menu_row,armTicksToNs(armGetSystemTick()));
@@ -9897,6 +9901,21 @@ static void overlay_render(void) {
     }
   }
 
+  if(native_lab && !frontdoor_page && !set_piece_selector && !custom_gameplan &&
+     !custom_2p_transition &&
+     virtual_cursor_context==PES_VIRTUAL_CURSOR_NONE) {
+    PesControllerSnapshot corner_surface;pes_controller_surface_snapshot(&corner_surface);
+    if(corner_surface.surface!=PES_CONTROLLER_SURFACE_REPLAY &&
+       corner_surface.surface!=PES_CONTROLLER_SURFACE_GOAL_DEMO &&
+       corner_surface.surface!=PES_CONTROLLER_SURFACE_CINEMATIC) {
+      uint64_t now=armTicksToNs(armGetSystemTick())/1000000u;
+      for(uint32_t pad=0;pad<(pes_controller_native_pad_lab_two_player() ? 2u : 1u);pad++) {
+        FnxCornerView view;fnx_corner_view(pad,now,&view);
+        corner_tactics_emit(&corner_ui,pad,&view,
+            android_controller_profile(pad)!=PES_CONTROLLER_PROFILE_FULL,verts,&quads);
+      }
+    }
+  }
 overlay_geometry_ready:
   if (!quads)
     return;
@@ -11638,6 +11657,7 @@ overlay_geometry_ready:
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   /* Toasts are true foreground overlays, including above shoulder glyphs. */
+  if(corner_ui.draw_count)master_league_draw(&corner_ui);
   if (master_league_ui.draw_count) master_league_draw_layer(&master_league_ui,1);
   if (result_transition) {
     // Drawn last so it covers the custom result skin as well as the native

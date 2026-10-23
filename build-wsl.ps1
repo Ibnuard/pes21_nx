@@ -1,6 +1,7 @@
 param(
   [string]$Distro = "Ubuntu",
   [int]$Jobs = 0,
+  [ValidateRange(0,64)][int]$LtoJobs = 0,
   [string]$OutputDirectory = "",
   [long]$ExpectedPatchObbSize = 0,
   [string]$LooseManifest = "",
@@ -34,6 +35,7 @@ $oldPerfTrace = $env:PES21_NX_PERF_TRACE
 $oldNearCameraTrace = $env:PES21_NX_NEAR_CAMERA_TRACE
 $oldStartupRenderAudit = $env:PES21_NX_STARTUP_RENDER_AUDIT
 $oldJobs = $env:PES21_NX_BUILD_JOBS
+$oldLtoJobs = $env:PES21_NX_LTO_JOBS
 $oldOutputRoot = $env:PES21_NX_BUILD_OUTPUT_ROOT
 $oldPesdbAuthoritativeOvr = $env:PES21_NX_PESDB_AUTHORITATIVE_OVR
 $oldPlayerMigrationCanary = $env:PES21_NX_PLAYER_MIGRATION_CANARY
@@ -117,6 +119,7 @@ try {
   $env:PES21_NX_NEAR_CAMERA_TRACE = if ($NearCameraTrace) { "1" } else { "0" }
   $env:PES21_NX_STARTUP_RENDER_AUDIT = if ($StartupRenderAudit) { "1" } else { "0" }
   $env:PES21_NX_BUILD_JOBS = if ($Jobs -gt 0) { "$Jobs" } else { "" }
+  $env:PES21_NX_LTO_JOBS = if ($LtoJobs -gt 0) { "$LtoJobs" } else { "auto" }
   $env:PES21_NX_BUILD_OUTPUT_ROOT = $buildOutputRoot
   $env:PES21_NX_PESDB_AUTHORITATIVE_OVR = if ($DisablePesdbAuthoritativeOvr) { "0" } else { "1" }
   $env:PES21_NX_PLAYER_MIGRATION_CANARY = if ($PlayerMigrationCanary) { "1" } else { "0" }
@@ -152,6 +155,7 @@ try {
   $env:WSLENV += ":PES21_NX_MASTER_LEAGUE_CATALOG/p"
   $env:WSLENV += ":PES21_NX_NEAR_CAMERA_TRACE"
   $env:WSLENV += ":PES21_NX_STARTUP_RENDER_AUDIT"
+  $env:WSLENV += ":PES21_NX_LTO_JOBS"
 
   $buildScript = @'
 set -euo pipefail
@@ -219,6 +223,7 @@ export PATH=/opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/usr/bin:/bin
 
 make clean
 jobs="${PES21_NX_BUILD_JOBS:-$(nproc)}"
+lto_jobs="${PES21_NX_LTO_JOBS:-auto}"
 link_build_id=$(
   {
     find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
@@ -227,6 +232,7 @@ link_build_id=$(
       "PERF_TRACE=${PES21_NX_PERF_TRACE:-0}" \
       "NEAR_CAMERA_TRACE=${PES21_NX_NEAR_CAMERA_TRACE:-0}" \
       "STARTUP_RENDER_AUDIT=${PES21_NX_STARTUP_RENDER_AUDIT:-0}" \
+      "LTO_JOBS=$lto_jobs" \
       "PES_PESDB_AUTHORITATIVE_OVR=${PES21_NX_PESDB_AUTHORITATIVE_OVR:-1}" \
       "PES_PLAYER_MIGRATION_CANARY=${PES21_NX_PLAYER_MIGRATION_CANARY:-0}" \
       "PES_LOOSE_CPK_FULL=${PES21_NX_LOOSE_CPK_FULL:-0}" \
@@ -234,6 +240,7 @@ link_build_id=$(
   } | sha256sum | cut -c1-40
 )
 make -j"$jobs" \
+  LTOFLAGS="-flto=$lto_jobs -fuse-linker-plugin" \
   DIAGNOSTICS="${PES21_NX_DIAGNOSTICS:-0}" \
   PERF_TRACE="${PES21_NX_PERF_TRACE:-0}" \
   NEAR_CAMERA_TRACE="${PES21_NX_NEAR_CAMERA_TRACE:-0}" \
@@ -284,6 +291,7 @@ cp pes21_nx.nacp "$PES21_NX_BUILD_OUTPUT_ROOT/"
       Select-Object FullName, Length, LastWriteTime
   }
 } finally {
+  $env:PES21_NX_LTO_JOBS = $oldLtoJobs
   $env:PES21_NX_PLAYER_COMMENTARY_CATALOG = $oldPlayerCommentaryCatalog
   $env:PES21_NX_STARTUP_RENDER_AUDIT = $oldStartupRenderAudit
   $env:PES21_NX_NEAR_CAMERA_TRACE = $oldNearCameraTrace

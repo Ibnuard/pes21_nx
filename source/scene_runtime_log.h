@@ -46,7 +46,11 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v65 session\n",file);
+    fputs("FootballNX scene v70 session\n",file);
+    fputs("startup v70: corner opcode guards use bounded RW backing before native RX mapping\n",file);
+    fputs("corner v69: native corner presets; per-pad LEFT selector and RIGHT taker; restart-owned command lifetime\n",file);
+    fputs("match v67: checked selected-Match rebuild before bench confirmation; career office and live reservations separate\n",file);
+    fputs("match v66: fresh prematch edit lifecycle; replay visibility bridge; compact league scoreboards\n",file);
     fputs("match v65: native match-local HOME/AWAY team keys; checked squad publication with refusal stages\n",file);
     fputs("match v62: native host admission and checked squad load; result exit confirmation; kickoff snapshot hold; stadium mowing\n",file);
     fputs("compat hotpaths v44: release clock/TLS trace atomics removed\n",file);

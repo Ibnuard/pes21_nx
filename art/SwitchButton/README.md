@@ -9,3 +9,8 @@ Run `python tools/render_switch_buttons.py` to regenerate the PNGs and their
 packaged `.bin` copies. This requires Pillow and CairoSVG. The icons were
 previously rasterized at 32×32; the larger derivatives retain detail when
 scaled in the 1280×720 UI.
+
+`B_Button_Dark` and `X_Button_Dark` are project colour derivatives of the
+same credited SVGs: navy fill and a pale glyph, with the original paths and
+alpha silhouette retained. `python tools/render_switch_buttons.py --dark-only`
+regenerates only those two variants without changing the white icons.

@@ -1602,6 +1602,11 @@ static void native_lab_list_update(void *list, const void *input,
   }
   const uint32_t setplay_context =
       native_lab_setplay_context(stock + 1, stock[0]);
+#ifndef NATIVE_PAD_LAB_HOST_TEST
+  const uint32_t corner_kind=corner_native_observe(list,input,binding.pad);
+#else
+  const uint32_t corner_kind=0;
+#endif
   const int native_setplay = setplay_context != PES_SETPLAY_NONE;
   const int native_penalty_kicker =
       native_lab_has_kind(stock + 1, stock[0], 91);
@@ -1643,6 +1648,12 @@ static void native_lab_list_update(void *list, const void *input,
   if (native_lab_has_kind(stock + 1, stock[0], 75))
     stock_mask |= PES_NATIVE_LAB_STOCK_FREEKICK_POSITION;
   uint32_t entries[97], count = 0, changed = 0;
+  /* Optional dormant defence unit is admitted independently of the required
+   * gameplay suite. Command selection gets first priority; idle returns zero. */
+  if(corner_kind) {
+    if(!native_lab_append(entries,&count,corner_kind))return;
+    changed++;
+  }
   const int live_attack = native_lab_has_kind(stock + 1, stock[0], 78) ||
                           native_lab_has_kind(stock + 1, stock[0], 79);
   const int live_defence = native_lab_has_kind(stock + 1, stock[0], 85) ||
@@ -1682,6 +1693,7 @@ static void native_lab_list_update(void *list, const void *input,
       native_lab_has_kind(stock + 1, stock[0], 90);
   for (uint32_t i = 0; i < stock[0]; i++) {
     uint32_t kind = stock[1+i];
+    if(corner_kind && (kind==70 || kind==71))continue;
     if (kind >= 78 && kind <= 89) {
       changed++;
       switch (kind) {

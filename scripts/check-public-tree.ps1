@@ -57,6 +57,9 @@ $allowedBinaries = @(
   "data/switch_button_sr.bin",
   "data/switch_button_up.bin",
   "data/switch_button_x.bin",
+  # Project-generated dark colour derivatives of the credited UI SVGs.
+  "data/switch_button_b_dark.bin",
+  "data/switch_button_x_dark.bin",
   "data/switch_button_y.bin",
   "data/switch_button_zl.bin",
   "data/switch_button_zr.bin"

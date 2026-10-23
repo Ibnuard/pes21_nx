@@ -20,6 +20,7 @@
 #include "error.h"
 #include "so_util.h"
 #include "ue4_hooks.h"
+#include "corner_tactics.h"
 #include "util.h"
 #include "loose_cpk.h"
 #include "match_environment.h"
@@ -257,6 +258,9 @@ static void (*exhibition_matchplan_setup_team)(void *data,
                                                 const uint32_t *team_id,
                                                 uint32_t home_away);
 static void (*exhibition_matchplan_setup_tmpdb)(void *data);
+static void (*exhibition_matchplan_common_init)(void *common);
+static void (*exhibition_matchplan_additional_construct)(void *additional);
+static void (*exhibition_squad_edit_begin_mode)(uint32_t mode, uint32_t side);
 static void (*exhibition_matchplan_update_tmpdb)(void *data);
 static void (*exhibition_matchplan_set_pad_port)(void *data,
                                                  uint32_t home_away,
@@ -534,6 +538,8 @@ static uint32_t (*match_replay_mode_main_original)(void *replay,
                                                    const void *context);
 static uint32_t (*match_replay_mode_end_original)(void *replay,
                                                   const void *context);
+static inline void referee_probe_replay_enter(void *replay);
+static inline void referee_probe_replay_end(void *replay);
 static uint32_t (*match_demo_skip_main_original)(void *unit,
                                                  const void *input,
                                                  uint32_t kind);
@@ -3765,6 +3771,7 @@ uintptr_t pes_exhibition_match_setup_data_entry(void) {
   // Replay, pause, and loading transitions occur inside this lifetime and
   // therefore must not replay the HUD entrance animation.
   __atomic_fetch_add(&match_hud_session_serial, 1u, __ATOMIC_ACQ_REL);
+  fnx_corner_reset();
   match_hud_reset_ball_motion();
   __atomic_store_n(&match_stamina_active_mask, 0u, __ATOMIC_RELEASE);
   __atomic_store_n(&match_hud_inplay_tick, 0u, __ATOMIC_RELEASE);
@@ -8404,7 +8411,8 @@ static int prematch_gameplan_replace_player(
       !match_squad_data_copy_construct || !match_squad_data_copy_assign ||
       !match_squad_data_destruct) {
     debugPrintf("ml-v5-diag: substitute rejected before native replacement side=%u live=%u squad=%p\n",side,live_gameplan_window!=NULL,squad_data);
-    return 0;
+    return exhibition_prematch_commit_refused("swap-bindings", side,
+        UINT32_MAX, live_gameplan_window != NULL, 0u);
   }
   const uint32_t field_order = match_squad_data_get_order_no(squad_data, field_player_id);
   const uint32_t bench_order = match_squad_data_get_order_no(squad_data, bench_player_id);
@@ -8415,7 +8423,8 @@ static int prematch_gameplan_replace_player(
         (bench_order == 0xffu && bench_member == 0xffu)) ||
       field_order == bench_order || field_member == bench_member) {
     debugPrintf("ml-v5-diag: substitute invalid registration side=%u field=%u/%u bench=%u/%u\n",side,field_order,field_member,bench_order,bench_member);
-    return 0;
+    return exhibition_prematch_commit_refused("swap-registration", side,
+        field_member, bench_order, bench_member);
   }
   debugPrintf("ml-v5-diag: substitute native begin side=%u field=%u/%u bench=%u/%u\n",side,field_order,field_member,bench_order,bench_member);
   _Alignas(8) unsigned char before[EXHIBITION_PRE_STRATEGY_SQUAD_SNAPSHOT_BYTES] = {0};
@@ -8434,6 +8443,10 @@ static int prematch_gameplan_replace_player(
       (ml_frontend_plan_editor() ? master_league_office_lineup_valid(side,squad_data)
                                  : exhibition_sync_prematch_lineup(side, squad_data));
   if (!committed) {
+    if (match_squad_data_get_order_no(squad_data, field_player_id) != bench_order ||
+        match_squad_data_get_order_no(squad_data, bench_player_id) != field_order)
+      exhibition_prematch_commit_refused("native-replace", side, field_member,
+          match_squad_data_get_order_no(squad_data, bench_player_id), field_order);
     match_squad_data_copy_assign(squad_data, before);
     debugPrintf("prematch-lineup-v3: replacement rolled back side=%u "
                 "field=%u/%u bench=%u/%u\n", side, field_order, field_member,
@@ -8706,6 +8719,12 @@ static void prematch_gameplan_swap(uint32_t side) {
   char bench_name[sizeof(bench->name)];
   memcpy(field_name, field->name, sizeof(field_name));
   memcpy(bench_name, bench->name, sizeof(bench_name));
+  char note[160];
+  snprintf(note,sizeof(note),"v67 bench confirmation side=%u live=%u office=%u field-order=%u bench-order=%u",
+      side,live_gameplan_window!=NULL,ml_frontend_plan_editor()!=0,
+      match_squad_data_get_order_no(state->squad_data,field->player_id),
+      match_squad_data_get_order_no(state->squad_data,bench->player_id));
+  scene_runtime_note("prematch",note);
   if (live_gameplan_window) {
     // Native in-match drag uses reservation, not immediate roster replacement.
     // CanReserved / SetMemberChangeReserved enforce the game's substitution rules.
@@ -8715,6 +8734,16 @@ static void prematch_gameplan_swap(uint32_t side) {
     if (!reserved)
       return;
   } else {
+    /* Training data-sync can overwrite raw Match after the hub has admitted
+     * its selected SquadData. Kick Off already repairs this boundary, but a
+     * bench edit validates the raw records earlier and otherwise rolls the
+     * native replacement back. Rebuild/rebind BEFORE changing either key;
+     * keep the edited SquadData and never reload the native editor here.
+     * A career-office edit has no playable Match and keeps its own policy. */
+    if (!ml_frontend_plan_editor() && !exhibition_rebase_prepared_matchplan()) {
+      scene_runtime_note("prematch", "v67 bench edit source rebuild refused; selection retained");
+      return;
+    }
     if (!prematch_gameplan_replace_player(side, state->squad_data,
                                           field->player_id, bench->player_id))
       return;
@@ -8722,6 +8751,7 @@ static void prematch_gameplan_swap(uint32_t side) {
   state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
   state->selected_index = PREMATCH_GAMEPLAN_NO_SELECTION;
   prematch_gameplan_save_and_refresh(side);
+  scene_runtime_note("prematch","v67 bench edit accepted; native lineup refreshed");
   debugPrintf("native 2P Game Plan: side=%u swapped %s <-> %s\n",
               side, field_name, bench_name);
 }
@@ -9091,6 +9121,35 @@ static int exhibition_prematch_editor_owned(void) {
           MAIN_MENU_2P_PREMATCH_BOOT_HUB;
 }
 
+/* SetupDataFromTmpdbMatch populates an existing plan; it is not a new-fixture
+ * reset. In particular it retains player eligibility/leaving flags and all
+ * MemberChangeInfo entries. The stock pre-match flow also calls the native
+ * SetSquadMode utility (Init + mode 11 + owner) before loading SquadEdit.
+ * Reproduce those lifetimes once, before the first setup/load of a fixture.
+ * Never use this for a prepared-plan reopen/rebase or the live Pause loader. */
+static int exhibition_gameplan_init_fixture(void *data) {
+  if (!data || live_gameplan_window ||
+      __atomic_load_n(&exhibition_plan_ready, __ATOMIC_ACQUIRE) ||
+      !exhibition_matchplan_common_init || !exhibition_matchplan_additional_construct ||
+      !exhibition_squad_edit_begin_mode)
+    return exhibition_prematch_commit_refused("fixture-init-bindings",
+        UINT32_MAX, UINT32_MAX, 0u, 1u);
+  for (uint32_t side = 0; side < 2u; ++side) {
+    /* Audited native Data constructor: CommonDataInfo +0x14/stride 0x218,
+     * AdditionalDataInfo +0x448/stride 0x340. AdditionalDataInfo has borrowed
+     * player refs and inline values only; reconstruct it through the native
+     * constructor, which initializes six changes and forty player infos.
+     * Its Init method alone skips both arrays and leaves them stale. */
+    unsigned char *common = (unsigned char *)data + 0x14u + side * 0x218u;
+    unsigned char *additional = (unsigned char *)data + 0x448u + side * 0x340u;
+    exhibition_matchplan_common_init(common);
+    exhibition_matchplan_additional_construct(additional);
+  }
+  exhibition_squad_edit_begin_mode(11u, 0u);
+  scene_runtime_note("prematch", "v66 new fixture: native plan eligibility, reservations and editor mode initialized");
+  return 1;
+}
+
 static int exhibition_gameplan_prepare_matchplan(void) {
   debugPrintf("native 2P Game Plan: prepare begin\\n");
   const int plan_ready =
@@ -9117,6 +9176,7 @@ static int exhibition_gameplan_prepare_matchplan(void) {
   }
 
   if (!plan_ready) {
+    if (!exhibition_gameplan_init_fixture(data)) return 0;
     const uint32_t strategy_mode = 2;
     memcpy((unsigned char *)data + 8, &strategy_mode,
            sizeof(strategy_mode));
@@ -13807,11 +13867,12 @@ static void match_replay_publish(void *replay) {
 
 static uint32_t pes_match_replay_mode_init(void *replay,
                                            const void *context) {
+  match_replay_publish(replay);
+  referee_probe_replay_enter(replay);
   const uint32_t result = match_replay_mode_init_original
                               ? match_replay_mode_init_original(replay,
                                                                 context)
                               : 0;
-  match_replay_publish(replay);
   return result;
 }
 
@@ -13820,6 +13881,7 @@ static uint32_t pes_match_replay_mode_main(void *replay,
   // Publish before the native Main call so the Android input poll can expose
   // Cobra's replay skip bit during the same frame.
   match_replay_publish(replay);
+  referee_probe_replay_enter(replay);
   return match_replay_mode_main_original
              ? match_replay_mode_main_original(replay, context)
              : 0;
@@ -13830,6 +13892,7 @@ static uint32_t pes_match_replay_mode_end(void *replay,
   const uint32_t result = match_replay_mode_end_original
                               ? match_replay_mode_end_original(replay, context)
                               : 0;
+  referee_probe_replay_end(replay);
   uintptr_t expected = (uintptr_t)replay;
   if (__atomic_compare_exchange_n(&match_replay_owner, &expected, 0, 0,
                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
@@ -15151,11 +15214,13 @@ static uint32_t pes_match_goalkick_main(void *unit, const void *input,
   return result;
 }
 
+static uintptr_t *find_vtable_method_slot(so_module *,const char *,uintptr_t,uint32_t);
+#include "corner_tactics_native.inc"
+
 static uint32_t pes_match_corner_main(void *unit, const void *input,
                                       uint32_t kind) {
-  const uint32_t result = match_corner_main_original
-                              ? match_corner_main_original(unit, input, kind)
-                              : 0;
+  const uint32_t result = corner_native_main(unit,input,kind,
+                                             match_corner_main_original);
   if (unit && input) {
     match_native_setplay_publish(PES_SETPLAY_CORNER);
   }
@@ -18066,7 +18131,7 @@ static void referee_presentation_install(so_module *module) {
       !memcmp(scene,scene_guard,sizeof(scene_guard)) &&
       !memcmp(classifier,classifier_guard,sizeof(classifier_guard)) &&
       !memcmp(flow+0x108u,&demo_ptr,sizeof(demo_ptr)) &&
-      !memcmp(sound+0x10u,fixed_ptr,sizeof(fixed_ptr)) &&
+      !memcmp(sound+0x0cu,fixed_ptr,sizeof(fixed_ptr)) &&
       !memcmp(sound+0x3cu,&current_scene,sizeof(current_scene));
   scene_runtime_note("referee presentation", referee_presentation_layout_ok
       ? "v61 offside fixed-demo layout admitted" : "offside layout unavailable; recorded replay only");
@@ -18085,7 +18150,7 @@ static int referee_probe_scene_active(void) {
   // cover ordinary throw-ins, fouls and set pieces: hiding for those owners
   // made the referee disappear at every stoppage. Keep its live actor there.
   // Replay takes priority over stale pause/cursor flags during its handoff.
-  if (pes_controller_replay_active() || referee_offside_presentation_active()) return 4;
+  if (referee_recorded_replay_active() || referee_offside_presentation_active()) return 4;
   if (pes_controller_pause_skin_active() || pes_controller_pause_transition() ||
       pes_controller_match_result_skin() || pes_controller_match_result_transition()) return 1;
   const int cursor=pes_controller_virtual_cursor_context();
@@ -18550,6 +18615,12 @@ void install_ue4_hooks(so_module *module) {
   exhibition_matchplan_setup_tmpdb =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan4Data23SetupDataFromTmpdbMatchEv");
+  exhibition_matchplan_common_init = (void *)so_find_addr_rx(module,
+      "_ZN9matchPlan14CommonDataInfo4InitEv");
+  exhibition_matchplan_additional_construct = (void *)so_find_addr_rx(module,
+      "_ZN9matchPlan18AdditionalDataInfoC2Ev");
+  exhibition_squad_edit_begin_mode = (void *)so_find_addr_rx(module,
+      "_ZN10onlinemode22UtilityMyClubSquadEdit12SetSquadModeEN5tmpdb9SquadEdit10SQUAD_MODEE8HomeAway");
   exhibition_matchplan_update_tmpdb =
       (void *)so_find_addr_rx(module,
           "_ZN9matchPlan4Data24UpdateTmpdbMatchTeamDataEv");
@@ -20014,6 +20085,7 @@ void install_ue4_hooks(so_module *module) {
       (void *)so_find_addr_rx(
           module,
           "_ZNK5match8registry14GlobalRegistry13GetTeamAIInfoE8HomeAway");
+  install_corner_tactics(module);
   match_team_parameter_get_role =
       (void *)so_find_addr_rx(
           module,

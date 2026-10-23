@@ -21,7 +21,7 @@ enum {PES_VIRTUAL_CURSOR_NONE=0,PES_VIRTUAL_CURSOR_SET_PIECE_TAKER=7};
 static unsigned phase=1,replay,var,goal,cinematic,fixdemo,pause,transition,result,result_transition,cursor;
 static uint32_t match_result_current_phase(void){return phase;}
 #define FLAG(fn,var) static int fn(void){return var;}
-FLAG(pes_controller_replay_active,replay) FLAG(pes_controller_goal_demo_active,goal)
+FLAG(referee_recorded_replay_active,replay) FLAG(pes_controller_goal_demo_active,goal)
 FLAG(pes_controller_cinematic_skip_active,cinematic) FLAG(pes_controller_fix_demo_skip_active,fixdemo)
 FLAG(pes_controller_pause_skin_active,pause) FLAG(pes_controller_pause_transition,transition)
 FLAG(pes_controller_match_result_skin,result) FLAG(pes_controller_match_result_transition,result_transition)

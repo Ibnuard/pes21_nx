@@ -16,8 +16,8 @@ class PauseV19Tests(unittest.TestCase):
             self.skipTest('Host C compiler required')
         with tempfile.TemporaryDirectory(prefix='pes-pause-v19-') as folder:
             cfile, exe = Path(folder) / 'test.c', Path(folder) / 'test.exe'
-            cfile.write_text(source, encoding='utf-8')
-            subprocess.run([compiler, '-std=c11', str(cfile), '-o', str(exe)], check=True)
+            cfile.write_text('#include <stdio.h>\n#include "gameplan_preset.h"\n'+source, encoding='utf-8')
+            subprocess.run([compiler, '-std=c11', '-I', str(ROOT/'source'), str(cfile), '-o', str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 
     def test_portraits_load_with_cold_cache_without_blocking(self):
@@ -191,7 +191,13 @@ int main(void) {
         code += r'''
 static PrematchGameplanSide exhibition_gameplan_sides[2], authoritative;
 static void *live_gameplan_window=(void*)1;
-static unsigned allowed=1,reserves,saves,replacements,pending;
+static unsigned allowed=1,reserves,saves,replacements,pending,rebases;
+static int ml_frontend_plan_editor(void){return 0;}
+static int exhibition_rebase_prepared_matchplan(void){assert(!live_gameplan_window);rebases++;return 1;}
+static void scene_runtime_note(const char *area,const char *note){assert(area && note);}
+static int prematch_gameplan_replace_player(uint32_t side,void *s,const void *a,const void *b){
+ (void)side;(void)s;(void)a;(void)b;assert(!live_gameplan_window);replacements++;return 1;
+}
 static uint64_t live_substitution_locked[2];
 static const uint8_t *(*live_squad_reservation_info)(const void *, uint32_t);
 static void (*live_squad_cancel_reservation)(void *, uint32_t);
@@ -234,13 +240,13 @@ int main(void) {
  assert(exhibition_gameplan_sides[0].players[1].starting);
  // Same two displayed players selected again cancels the pending change.
  prematch_gameplan_swap(0);
- assert(reserves==2 && saves==2 && !pending && replacements==0);
+ assert(reserves==2 && saves==2 && !pending && replacements==0 && rebases==0);
  assert(exhibition_gameplan_sides[0].players[0].starting);
  allowed=0; prematch_gameplan_swap(0);
  assert(reserves==2 && saves==2 && !pending && replacements==0);
  // Before-match still uses the ordinary roster edit, not live reservations.
  live_gameplan_window=NULL; prematch_gameplan_swap(0);
- assert(replacements==1 && reserves==2 && saves==3);
+ assert(replacements==1 && reserves==2 && saves==3 && rebases==1);
  return 0;
 }
 '''

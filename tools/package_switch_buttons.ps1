@@ -9,6 +9,7 @@ $taskButtons = @{
   up = 'Directional_Button_Up.png'
   down = 'Directional_Button_Down.png'
   left = 'Directional_Button_Left.png'
+  b_dark = 'B_Button_Dark.png'; x_dark = 'X_Button_Dark.png'
 }
 foreach ($key in $taskButtons.Keys) {
   Copy-Item -LiteralPath (Join-Path $taskRoot "art/SwitchButton/$($taskButtons[$key])") -Destination (Join-Path $taskRoot "data/switch_button_$key.bin")
