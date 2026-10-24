@@ -55,13 +55,14 @@ PROFILES = {
                    score_cells=((126, 20, 170, 64), (126, 64, 170, 108)),
                    kits=((121, 26), (126, 70)), ink=(2, 3, 16)),
     "italy": dict(key=10, source="Italy", sha256="60d42f819d44bbc24f69f7dfecc815d6302040e1111b712ff9f874a6825e612a",
-                  size=(320, 60), layout="blue horizontal bar, white diagonal score center, cyan lower clock tab",
-                  names=((22, 26.7), (250, 26.7)), scores=((130, 24.3), (177, 24.3)),
-                  clock=(3, 52.3), clock_cell=(6, 52, 76, 80),
-                  text_y_offset=-3, added_time_cell=(76, 54, 124, 78), added_time_relation="right",
-                  name_cells=((6, 20, 118, 50), (214, 20, 326, 50)),
-                  score_cells=((118, 20, 166, 50), (166, 20, 214, 50)),
-                  kits=((101, 23), (231, 23)), ink=(0, 12, 83)),
+                  size=(320, 70), bar_height=40,
+                  layout="40px blue horizontal bar, white diagonal score center, cyan lower clock tab",
+                  names=((22, 31.7), (250, 31.7)), scores=((130, 29.3), (177, 29.3)),
+                  clock=(3, 62.3), clock_cell=(6, 62, 76, 90),
+                  text_y_offset=-3, added_time_cell=(76, 64, 124, 88), added_time_relation="right",
+                  name_cells=((6, 20, 118, 60), (214, 20, 326, 60)),
+                  score_cells=((118, 20, 166, 60), (166, 20, 214, 60)),
+                  kits=((101, 28), (231, 28)), ink=(0, 12, 83)),
 }
 
 
@@ -95,10 +96,11 @@ def panel_for(profile, owned):
     elif profile == "italy":
         original = crop((475, 737, 956, 781))
         panel = Image.new("RGBA", spec["size"])
-        panel.alpha_composite(original.resize((320, 30), Image.Resampling.LANCZOS))
+        bar_height = spec["bar_height"]
+        panel.alpha_composite(original.resize((320, bar_height), Image.Resampling.LANCZOS))
         # Keep the actual source clock's diagonal edge and cyan colour.
         timer = crop((716, 458, 851, 504))
-        panel.alpha_composite(timer.resize((80, 28), Image.Resampling.LANCZOS), (0, 32))
+        panel.alpha_composite(timer.resize((80, 28), Image.Resampling.LANCZOS), (0, bar_height + 2))
     else:
         # The PC score tree verifies a horizontal home/score/score/away layout
         # and central emblem. The lion geometry comes from its owned header.

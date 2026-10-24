@@ -72,3 +72,24 @@ def test_england_native_name_boxes_center_in_their_own_cells():
     for point,cell in zip(spec['names'],spec['name_cells']):
         native_box_center=point[0]+spec.get('name_width',60)*profiles.SCALE/2
         assert native_box_center==(cell[0]+cell[2])/2
+
+
+def test_italy_plate_and_native_fields_share_the_taller_band(mobile):
+    spec=profiles.PROFILES['italy']
+    assert spec['bar_height']==40
+    assert spec['size']==(320,70)
+    score=next(m for m in read_movies(mobile) if m.name=='game2d_score')
+    changed,_=profiles.patch_score(score.data,'italy')
+    for row in placements(changed):
+        if row['parent']!=28 or 'translate' not in row:
+            continue
+        depth=row['depth']
+        if depth in (61,63,65,67):
+            height=(26 if depth in (61,63) else 32)*profiles.SCALE
+            # The optical lift is kept, while the actual plate gains headroom.
+            assert 20<=row['translate'][1]
+            assert row['translate'][1]+height<=20+spec['bar_height']
+        elif depth in (77,78):
+            assert row['translate'][1]>20+spec['bar_height']
+    assert spec['clock_cell'][1]==20+spec['bar_height']+2
+    assert spec['added_time_cell'][0]==spec['clock_cell'][2]
