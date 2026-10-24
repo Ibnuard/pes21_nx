@@ -26,15 +26,16 @@ field exclusion and containment in the original source floor. Nonfinite
 coordinates, unreviewed transforms and changed source selection are rejected.
 `restore_stadium_backing.py` preserves the reviewed base geometry,
 crowd, UV channels, colours and material slots, then adds the original
-backing positions with inward-facing winding. It never edits the owned FPK.
+wall positions with inward-facing winding and the clipped source floor with
+upward-facing winding. It never edits the owned FPK.
 
 The added faces use the existing plain-concrete atlas tile and its source
-material policy. No atlas image, texture, shader graph, material section or
+material policy. No atlas image, texture payload, shader graph, material section or
 camera cutaway is added or replaced. This is a lightweight conversion of
 source backing into the port's established unlit concrete material, rather
 than a port of the PC temporary-view lighting technique.
 
-The candidate contains 24,458 total triangles, including all 9,250 crowd
+The independently unpacked candidate contains 24,458 total triangles, including all 9,250 crowd
 triangles and the same five material sections, below the 24,560 reference
 budget. It does not assume that v34 was installed on the user's Switch.
 Other stadium PAKs are outside this change.
@@ -45,3 +46,20 @@ Geometric coverage and offline rendering are not Switch appearance or FPS
 acceptance. The canonical replacement PAK retains the existing Camp Nou
 filename and namespace so it replaces the old shell rather than stacking
 another override.
+
+The matched offline frame changes all 1,873 sampled sky-colour pixels in the
+reported entrance strip into source-backed concrete. The actual cooked mesh
+matches the 130 backing triangles within the recorded source coordinates;
+5,120 rays from five supplied-side camera positions and 4,096 rays across
+four field directions have no coverage misses under the existing camera
+policy. This is host evidence, not a Switch screenshot acceptance claim.
+
+The canonical PAK is 3,650,006 bytes, SHA-256
+`1deb80ef2f72dee098d4a4e5bda10148a22d92e59fd0f71c4ed7987339adb380`.
+Its 36 members pass namespace allowlisting, UnrealPak Test, independent
+unpack/hash comparison, protected-apron audit and authored-shader validation.
+All five compiled shader-body sets, sixteen texture export/bulk members and
+eight decoded RGBA images match the v34 baseline exactly. The eight texture
+`.uasset` headers are not byte-identical: their sole differences are the
+16-byte `FPackageFileSummary.Guid` fields, checked against the installed
+UE4.22 serialization layout. No pixel or mip payload changed.
