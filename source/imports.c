@@ -436,7 +436,8 @@ static void glBindTexture_c(GLenum target, GLuint tex) {
 static __thread struct {
   GLuint program;
   GLint location, night_location, day_location, climate_location, profile_location;
-  GLint light_location, shell_roof_location;
+  GLint light_location, shell_roof_location, cloud_location;
+  uint32_t cloud_key;
   int light_day_value;
   int profile_value, roof_season_value;
   int valid, roof_value, night_value, day_value;
@@ -485,6 +486,8 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].profile_location = glGetUniformLocation(p, "nxStadiumProfile");
       roof_uniforms[index].light_location = glGetUniformLocation(p, "nxStadiumLight[0]");
       roof_uniforms[index].shell_roof_location = glGetUniformLocation(p, "nxShellRoof[0]");
+      roof_uniforms[index].cloud_location = glGetUniformLocation(p, "nxCloudMotion");
+      roof_uniforms[index].cloud_key = UINT32_MAX;
       roof_uniforms[index].light_day_value = -1;
       roof_uniforms[index].profile_value = -1;
       roof_uniforms[index].roof_season_value = -1;
@@ -493,6 +496,16 @@ static void glUseProgram_c(GLuint p) {
       roof_uniforms[index].roof_value = -1;
       roof_uniforms[index].day_value = -1;
       roof_uniforms[index].valid = 1;
+    }
+    if (roof_uniforms[index].cloud_location >= 0) {
+      const int enabled = pes_controller_stadium_weather()==NX_WEATHER_CLOUDY && pes_controller_stadium_is_day();
+      const uint32_t step = enabled ? pes_controller_cloud_shadow_step() : 0u;
+      const uint32_t key = step + (enabled ? 1024u : 0u);
+      if (roof_uniforms[index].cloud_key != key) {
+        /* At most four updates/sec per active pitch program; no per-draw time upload. */
+        glUniform2f(roof_uniforms[index].cloud_location,(GLfloat)step/960.0f,(GLfloat)enabled);
+        roof_uniforms[index].cloud_key=key;
+      }
     }
     if (roof_uniforms[index].location >= 0) {
       const int disabled = pes_controller_stadium_is_day() && !pes_controller_roof_shadow_enabled();

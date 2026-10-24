@@ -45,7 +45,8 @@ int main(void) {
     for(unsigned i=0;i<sizeof(snapshot);++i)
       if(!(i>=8&&i<16)&&!(i>=0x78&&i<0x80)) assert(snapshot[i]==0x5a);
     weather_apply_native(&actual,(void*)1);assert(!memcmp(&actual,&e,sizeof(e)));
-    assert(weather_scene_kind==(choice>=NX_WEATHER_RAIN?e.weather:0));
+    assert(weather_scene_kind==(choice>=NX_WEATHER_RAIN?(season?2u:1u):0));
+    assert(e.weather==(choice==NX_WEATHER_RAIN)); // Snow is presentation only.
     if(choice>=NX_WEATHER_RAIN) assert(actual.raining && actual.wet && actual.condition==2);
     else assert(!actual.raining && actual.condition==condition);
     assert(actual.season==season);

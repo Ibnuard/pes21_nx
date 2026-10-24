@@ -534,6 +534,7 @@ uint32_t pes_controller_stadium_canary_active(void);
 uint32_t pes_controller_stadium_is_day(void);
 uint32_t pes_controller_night_lighting_balance_enabled(void);
 uint32_t pes_controller_stadium_weather(void);
+uint32_t pes_controller_cloud_shadow_step(void);
 uint32_t pes_controller_stadium_season(void);
 uint32_t pes_controller_stadium_turf_length(void);
 uint32_t pes_controller_stadium_pitch_condition(void);

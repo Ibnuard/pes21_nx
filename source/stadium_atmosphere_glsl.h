@@ -14,9 +14,12 @@ static const char stadium_atmosphere_glsl[] =
   "  highp vec3 ray=world-camera;\n"
   "  highp float density=(nxAirDensity(camera.z)+4.0*nxAirDensity((camera.z+world.z)*0.5)+nxAirDensity(world.z))/6.0;\n"
   "  highp float day=step(0.5,nxDayStadium);\n"
+  "  highp float winter=step(0.5,nxStadiumClimate.y);\n"
   "  highp float optical=length(ray)*mix(0.000035,0.000055,day)*density;\n"
-  "  highp float amount=min(mix(0.32,0.42,day),optical/(1.0+optical));\n"
+  "  optical*=mix(1.0,0.35,winter);\n"
+  "  highp float amount=min(mix(mix(0.32,0.42,day),mix(0.12,0.18,day),winter),optical/(1.0+optical));\n"
   "  highp vec3 haze=mix(vec3(0.09,0.10,0.12),vec3(0.34,0.37,0.40),day);\n"
+  "  haze=mix(haze,mix(vec3(0.12,0.14,0.17),vec3(0.44,0.48,0.53),day),winter);\n"
   "  return mix(color,haze,amount);\n"
   "}\n";
 #endif

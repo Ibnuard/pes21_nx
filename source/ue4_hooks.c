@@ -18385,7 +18385,7 @@ void install_ue4_hooks(so_module *module) {
   install_referee_probe(module);
   install_model_quality_policy(module);
   install_weather_scene(module);
-  scene_runtime_note("weather surface", "v73 scene atmosphere and light 3D rain; pitch remnants retained; lens disabled");
+  scene_runtime_note("weather surface", "v75 fixed world-space rain/snow; v74 Cloudy shadows and thin Winter haze retained");
   install_scoreboard_runtime(module);
 
   // Keep native Day/Night board choice. Only the player-shadow quality decision

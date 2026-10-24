@@ -26,6 +26,8 @@ typedef float GLfloat;
 static int binds, queries, sets, night_sets, day_sets, day=1, enabled=1, high=1;
 static int climate_sets, profile_sets, profile, light_sets;
 static int shell_sets;
+static int cloud_sets;static unsigned cloud_step;
+static float cloud_phase,cloud_enabled;
 static float shell_applied[16];
 static unsigned weather, season, turf=1, condition=1;
 static float applied, night_applied, day_applied;
@@ -44,6 +46,7 @@ static unsigned pes_controller_stadium_weather(void) {return weather;}
 static unsigned pes_controller_stadium_season(void) {return season;}
 static unsigned pes_controller_stadium_turf_length(void) {return turf;}
 static unsigned pes_controller_stadium_pitch_condition(void) {return condition;}
+static unsigned pes_controller_cloud_shadow_step(void) {return cloud_step;}
 static void glUseProgram(GLuint p) {(void)p; ++binds;}
 static void glDeleteProgram(GLuint p) {(void)p;}
 static GLint glGetUniformLocation(GLuint p, const char *name) {
@@ -54,6 +57,7 @@ static GLint glGetUniformLocation(GLuint p, const char *name) {
   if(!strcmp(name,"nxStadiumProfile"))return p==7 ? 6 : -1;
   if(!strcmp(name,"nxStadiumLight[0]"))return (p==7 || p==135) ? 7 : -1;
   if(!strcmp(name,"nxShellRoof[0]"))return p==7 ? 8 : -1;
+  if(!strcmp(name,"nxCloudMotion"))return p==7 ? 9 : -1;
   assert(!strcmp(name,"nxNightIndirect")); return p==7 ? 3 : -1;
 }
 static void glUniform1f(GLint loc, float value) {
@@ -61,6 +65,9 @@ static void glUniform1f(GLint loc, float value) {
   else if(loc==4) {++day_sets;day_applied=value;}
   else if(loc==6) {++profile_sets;profile_applied=value;}
   else {assert(loc==3);++night_sets;night_applied=value;}
+}
+static void glUniform2f(GLint loc,float phase,float enabled) {
+ assert(loc==9);++cloud_sets;cloud_phase=phase;cloud_enabled=enabled;
 }
 static void glUniform4fv(GLint loc, int count, const GLfloat *value) {
   if(loc==8) {assert(count==4);++shell_sets;memcpy(shell_applied,value,sizeof(shell_applied));return;}
@@ -72,15 +79,15 @@ static void glUniform4fv(GLint loc, int count, const GLfloat *value) {
 }
 ''' + function(SOURCE,'glUseProgram_c') + function(SOURCE,'glDeleteProgram_c') + r'''
 int main(void) {
-  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==7);
+  glUseProgram_c(7); assert(applied==0 && binds==1 && queries==8);
   assert(light_sets==1 && light_applied[0]==1 && light_applied[6]==1);
   assert(night_sets==1 && night_applied==0);
   assert(day_sets==1 && day_applied==1);
   assert(climate_sets==1 && profile_sets==1 && profile_applied==0);
   for(int i=0;i<4;i++)assert(climate_applied[i]==0);
-  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==2 && queries==7);
+  enabled=0; glUseProgram_c(7); assert(applied==1 && binds==2 && queries==8);
   assert(night_sets==1);
-  day=0; glUseProgram_c(7); assert(applied==0 && binds==3 && queries==7);
+  day=0; glUseProgram_c(7); assert(applied==0 && binds==3 && queries==8);
   assert(light_sets==2); // time change uploads even with identical climate key
   assert(night_sets==2 && night_applied==1);
   assert(day_sets==2 && day_applied==0);
@@ -93,7 +100,7 @@ int main(void) {
   assert(sets==3); // unchanged roof setting never resubmitted per draw
   assert(light_sets==stable_light_sets);
   assert(shell_sets==stable_shell_sets); // geometry upload is never per draw
-  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==21 && night_sets==4);
+  glDeleteProgram_c(7); glUseProgram_c(7); assert(queries==24 && night_sets==4);
   high=0;day=0;glUseProgram_c(7);assert(night_applied==0 && night_sets==4);
   high=1;glUseProgram_c(7);assert(night_applied==1 && night_sets==5);
   assert(climate_sets==2 && profile_sets==2);
@@ -102,16 +109,16 @@ int main(void) {
   assert(climate_sets==3 && profile_sets==3 && profile_applied==1);
   assert(climate_applied[0]==1 && climate_applied[1]==1);
   assert(climate_applied[2]==-1 && climate_applied[3]==1);
-  glUseProgram_c(7);assert(climate_sets==3 && profile_sets==3 && queries==21);
+  glUseProgram_c(7);assert(climate_sets==3 && profile_sets==3 && queries==24);
   float expected_light[12];stadium_environment_light_uniform(climate_applied,high && day,expected_light);
   assert(!memcmp(expected_light,light_applied,sizeof(expected_light)));
   weather=season=0;turf=condition=1;profile=0;
   glUseProgram_c(7);assert(climate_sets==4 && profile_sets==4);
   for(int i=0;i<4;i++)assert(climate_applied[i]==0);
-  glUseProgram_c(0); assert(queries==21);
+  glUseProgram_c(0); assert(queries==24);
   // Relink/delete on the upload context invalidates this thread's locations.
   __atomic_add_fetch(&gl_program_generation,1,__ATOMIC_RELEASE);
-  glUseProgram_c(7); assert(queries==28 && climate_sets==5);
+  glUseProgram_c(7); assert(queries==32 && climate_sets==5);
   // Reused program distinguishes Rainy from Cloudy, even with Wet selected.
   weather=NX_WEATHER_RAIN;season=1;condition=2;
   glUseProgram_c(7);assert(climate_sets==6 && climate_applied[0]==2);
@@ -162,6 +169,20 @@ int main(void) {
   assert(shell_sets==before_winter+1); // weather does not resubmit geometry
   season=0;glUseProgram_c(7);
   assert(shell_sets==before_winter+2 && shell_applied[9]==-2200);
+  // Cloud phase uploads only when its quarter-second step changes. Reused
+  // draws, Night, Fine, Rainy and programs with no pitch receiver stay quiet.
+  day=1;weather=NX_WEATHER_CLOUDY;cloud_step=120;glUseProgram_c(7);
+  assert(cloud_enabled==1 && cloud_phase==.125f);
+  const int before_cloud=cloud_sets;
+  for(int draw=0;draw<4000;draw++)glUseProgram_c(7);
+  assert(cloud_sets==before_cloud);
+  cloud_step++;glUseProgram_c(7);assert(cloud_sets==before_cloud+1);
+  day=0;glUseProgram_c(7);assert(cloud_enabled==0);
+  const int at_night=cloud_sets;
+  cloud_step++;glUseProgram_c(7);assert(cloud_sets==at_night);
+  day=1;weather=NX_WEATHER_RAIN;glUseProgram_c(7);assert(cloud_sets==at_night);
+  weather=NX_WEATHER_FINE;glUseProgram_c(7);assert(cloud_sets==at_night);
+  weather=NX_WEATHER_CLOUDY;glUseProgram_c(135);assert(cloud_sets==at_night);
 }
 ''')
 

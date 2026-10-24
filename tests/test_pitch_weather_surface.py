@@ -44,9 +44,11 @@ int main(){
 }
 ''')
 
-    def test_particle_hooks_are_not_installed(self):
+    def test_native_surface_remains_separate_from_legacy_particle_emitters(self):
         source = (ROOT / 'source/ue4_hooks.c').read_text()
-        self.assertNotIn('#include "weather_scene.inc"', source)
-        self.assertNotIn('install_weather_scene(module);', source)
         self.assertIn('install_native_weather(module);', source)
         self.assertNotIn('NX_WEATHER_SNOW', (ROOT/'source/match_environment.h').read_text())
+        # V73 introduced a single ordinary mesh, not the retired emitter path.
+        scene=(ROOT/'source/weather_scene.inc').read_text()
+        for legacy in ('SpawnEmitter', 'ParticleSystem', 'Niagara'):
+            self.assertNotIn(legacy,scene)

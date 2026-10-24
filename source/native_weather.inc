@@ -30,7 +30,8 @@ static void weather_apply_native(void *env, const void *match) {
   weather_env_change(env, e.change);
   weather_env_wet(env, e.wet);
   weather_env_rain(env, e.raining);
-  __atomic_store_n(&weather_scene_kind, e.raining ? e.weather : 0u, __ATOMIC_RELEASE);
+  /* Presentation chooses snow in Winter; native wet/rain physics stay exact. */
+  __atomic_store_n(&weather_scene_kind, e.raining ? (e.season ? 2u : 1u) : 0u, __ATOMIC_RELEASE);
   weather_ball_logged = 0;
   char detail[160];
   snprintf(detail, sizeof(detail), "%s time=%s season=%u turf=%u pitch=%u rain=%u change=%u",

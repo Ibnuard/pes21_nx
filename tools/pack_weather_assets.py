@@ -8,12 +8,14 @@ import subprocess
 import tempfile
 from pack_stadium_shell import material_shader_versions
 
-def pack(cooked,repak,output,light=False):
-    namespace=Path('PesMobile/Content/FootballNX/WeatherLight' if light else 'PesMobile/Content/FootballNX/Weather')
+def pack(cooked,repak,output,light=False,snow=False,world=False):
+    if snow and not light:raise ValueError('Scoped snow packing requires light policy')
+    if world and (not light or snow):raise ValueError('World field requires both bounded seasonal assets')
+    namespace=Path('PesMobile/Content/FootballNX/WeatherWorld' if world else 'PesMobile/Content/FootballNX/WeatherLight' if light else 'PesMobile/Content/FootballNX/Weather')
     source=cooked/namespace
-    objects=('RainField','M_RainField') if light else ('RainField','SnowField','M_RainField','M_SnowField')
-    meshes=('RainField',) if light else ('RainField','SnowField')
-    materials=('M_RainField.uexp',) if light else ('M_RainField.uexp','M_SnowField.uexp')
+    objects=('RainField','SnowField','M_RainField','M_SnowField') if world else ('SnowField','M_SnowField') if snow else ('RainField','M_RainField') if light else ('RainField','SnowField','M_RainField','M_SnowField')
+    meshes=('RainField','SnowField') if world else ('SnowField',) if snow else ('RainField',) if light else ('RainField','SnowField')
+    materials=('M_RainField.uexp','M_SnowField.uexp') if world else ('M_SnowField.uexp',) if snow else ('M_RainField.uexp',) if light else ('M_RainField.uexp','M_SnowField.uexp')
     names=[name+suffix for name in objects for suffix in ('.uasset','.uexp')]
     names += [name+'.ubulk' for name in meshes if (source/(name+'.ubulk')).is_file()]
     if any(not (source/n).is_file() for n in names):
@@ -43,5 +45,8 @@ def pack(cooked,repak,output,light=False):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for arg in ('cooked','repak','output'):p.add_argument('--'+arg,type=Path,required=True)
-    p.add_argument('--light-rain',action='store_true')
-    a=p.parse_args();print(json.dumps(pack(a.cooked,a.repak,a.output,a.light_rain),indent=2))
+    mode=p.add_mutually_exclusive_group()
+    mode.add_argument('--light-rain',action='store_true')
+    mode.add_argument('--light-snow',action='store_true')
+    mode.add_argument('--world-field',action='store_true')
+    a=p.parse_args();print(json.dumps(pack(a.cooked,a.repak,a.output,a.light_rain or a.light_snow or a.world_field,a.light_snow,a.world_field),indent=2))

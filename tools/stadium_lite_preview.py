@@ -38,7 +38,7 @@ static float smoothstep(float a,float b,float v){float t=clamp((v-a)/(b-a),0,1);
 static float fwidth(float v){(void)v;return 0;}
 static float step(float edge,float value){return value<edge?0.f:1.f;}
 struct vec2 {
- float x,y; vec2(float v):x(v),y(v){} vec2(float a,float b):x(a),y(b){}
+ float x,y; vec2(float v=0):x(v),y(v){} vec2(float a,float b):x(a),y(b){}
  vec2 operator+(vec2 b)const{return vec2(x+b.x,y+b.y);}
  vec2 operator-(vec2 b)const{return vec2(x-b.x,y-b.y);}
  vec2 operator*(vec2 b)const{return vec2(x*b.x,y*b.y);}
