@@ -1,6 +1,7 @@
-"""Package verified league heads with the byte-identical delivered v54 runtime.
+"""Package verified league heads with an explicitly pinned delivered runtime.
 
-Requires completed preparation/cook results and explicit offline visual review.
+Requires completed preparation/cook results and explicit offline visual review
+by default; a bound human budget-priority decision can use integrity review.
 No source donor substitution, geometry fallback, runtime installation or NRO
 rebuild is performed here. Proprietary outputs must remain ignored on D.
 """
@@ -9,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+import re
 import shutil
 import zipfile
 
@@ -43,13 +45,13 @@ def release_policy(config, work, prepared, verified):
             not decision.get('user_directive', '').strip() or
             decision.get('prepare_sha256') != sha(Path(work)/'prepare-report.json') or
             decision.get('verify_sha256') != sha(Path(work)/'verify-report.json') or
-            set(decision.get('included_base_ids', [])) != {r['base_id'] for r in verified} or
+            set(decision.get('included_base_ids', [])) != {r['base_id'] for r in verified if r['status'] in VERIFIED} or
             decision.get('normal_complete_head_limit') != 5000 or
             decision.get('exceptional_complete_head_limit') != 7000 or
             decision.get('appearance_notes_advisory') is not True or
             decision.get('preserve_original_cooked_mips_outside_tiny_guard') is not True):
         raise ValueError('Explicit current budget-priority release decision required')
-    if {r['base_id'] for r in prepared} != set(decision['included_base_ids']):
+    if not set(decision['included_base_ids']) <= {r['base_id'] for r in prepared if r['status'] in READY}:
         raise ValueError('Budget release decision differs from prepared cohort')
     return dict(policy=policy, decision=str(path), decision_sha256=sha(path),
                 preserve_cooked_outside_tiny_guard=True)
@@ -79,7 +81,7 @@ def release_hair_mips(path, policy):
                     original_cooked_payloads_byte_identical=True)
 
 
-def validate_completion(scope, prepared, verified, review):
+def validate_completion(scope, prepared, verified, review, policy='strict-visual-v1'):
     if scope.get('policy') != POLICY:
         raise ValueError('Explicit league policy required')
     selected = set(scope['selected_base_ids'])
@@ -95,8 +97,10 @@ def validate_completion(scope, prepared, verified, review):
         if result['cache_key'] != owners[base]['cache_key']:
             raise ValueError('Cook result changed its preparation recipe')
     ready = {b for b, r in proofs.items() if r['status'] in VERIFIED}
-    if (review.get('decision') != 'offline_candidate_reviewed' or
-            set(review.get('reviewed_base_ids', [])) != ready or
+    budget_review = policy == BUDGET_PRIORITY and review.get('decision') == 'budget_integrity_reviewed'
+    if ((not budget_review and review.get('decision') != 'offline_candidate_reviewed') or
+            set(review.get('budget_reviewed_base_ids' if budget_review else 'reviewed_base_ids', [])) != ready or
+            (budget_review and review.get('new_visual_acceptance') is not False) or
             not set(review.get('held_base_ids', [])) <= ready or
             any(not review.get('held_reasons', {}).get(str(base)) for base in review.get('held_base_ids', []))):
         raise ValueError('Complete offline preview review required')
@@ -104,18 +108,53 @@ def validate_completion(scope, prepared, verified, review):
 
 
 def copy_v54(config, destination):
-    root = Path(config['v54_candidate']).resolve()
-    for name, proof in config['v54_pinned_files'].items():
+    root, pins = runtime_binding(config)
+    for name, proof in pins.items():
         source = root / name
         target = destination / name
         if (not source.resolve().is_relative_to(root) or
                 not target.resolve().is_relative_to(destination.resolve()) or
                 sha(source) != proof['sha256'] or source.stat().st_size != proof['bytes']):
-            raise ValueError('Delivered v54 payload changed')
+            raise ValueError('Delivered runtime payload changed')
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         if sha(target) != proof['sha256']:
-            raise ValueError('v54 payload copy changed')
+            raise ValueError('Runtime payload copy changed')
+
+
+def runtime_binding(config):
+    if 'runtime_candidate' in config or 'runtime_pinned_files' in config:
+        if not config.get('runtime_candidate') or not config.get('runtime_pinned_files'):
+            raise ValueError('Complete explicit runtime binding required')
+        return Path(config['runtime_candidate']).resolve(), config['runtime_pinned_files']
+    return Path(config['v54_candidate']).resolve(), config['v54_pinned_files']
+
+
+def release_name(config):
+    name = config.get('release_directory_name', 'FootballNX-v54-LEAGUE-FACES-v55-SIAP-COPY')
+    if not isinstance(name, str) or not re.fullmatch(r'FootballNX-[A-Za-z0-9_-]+', name):
+        raise ValueError('Safe FootballNX release directory name required')
+    return name
+
+
+def preserved_heads(config):
+    path = config.get('preserved_release_verification')
+    if not path:
+        return None
+    proof = read(path)
+    players = unique(proof['players_in_package'], 'preserved released heads')
+    if len(players) != config['preserved_head_count']:
+        raise ValueError('Preserved released head count changed')
+    return dict(players=players, hashes=proof['asset_hashes'], verification_sha256=sha(path))
+
+
+def validate_preserved_head(row, preservation, hashes):
+    if not preservation or row['base_id'] not in preservation['players']:
+        return
+    assert_owner(row, preservation['players'][row['base_id']])
+    if any(hashes.get(name) != preservation['hashes'].get(name)
+           for name in asset_names(row['native_player_id'])):
+        raise ValueError('Preserved released head bytes changed: ' + str(row['base_id']))
 
 
 def validate_preview_evidence(work, proofs, review):
@@ -158,7 +197,7 @@ def package(config):
     if (review.get('prepare_sha256') != sha(work / 'prepare-report.json') or
             review.get('verify_sha256') != sha(work / 'verify-report.json')):
         raise ValueError('Visual review refers to a different prepared/cooked cohort')
-    ready = validate_completion(scope, prepared, verified, review)
+    ready = validate_completion(scope, prepared, verified, review, policy['policy'])
     if policy['policy'] != BUDGET_PRIORITY:
         validate_preview_evidence(work, [r for r in verified if r['status'] in VERIFIED], review)
     if not ready:
@@ -168,10 +207,16 @@ def package(config):
     originals = set(original_heads)
     if not originals <= {r['base_id'] for r in ready}:
         raise ValueError('Accepted Barca/MU coverage must remain complete')
+    preservation = preserved_heads(config)
+    if preservation and not preservation['players'].keys() <= {r['base_id'] for r in ready}:
+        raise ValueError('Preserved released coverage must remain complete')
+    _, runtime_pins = runtime_binding(config)
     recipe = dict(policy=POLICY, prepare_sha256=sha(work / 'prepare-report.json'),
                   verify_sha256=sha(work / 'verify-report.json'), review_sha256=sha(work / 'VISUAL-REVIEW.json'),
-                  package_code_sha256=sha(__file__), v54=config['v54_pinned_files'],
+                  package_code_sha256=sha(__file__), runtime=runtime_pins,
                   materials=baseline['neutral_material_hashes'])
+    recipe['preserved_release_sha256'] = preservation['verification_sha256'] if preservation else None
+    recipe['release_directory_name'] = release_name(config)
     recipe['release_policy'] = policy
     key = key_of(recipe); job = work / 'release-builds' / key[:16]
     complete = job / 'complete.json'
@@ -224,6 +269,7 @@ def package(config):
         if row['base_id'] in originals:
             if any(sha(stage/name) != baseline['asset_hashes'].get(name) for name in names):
                 raise ValueError('Accepted Barca/MU asset bytes changed')
+        validate_preserved_head(row, preservation, {name: sha(stage/name) for name in names})
         players.append(dict(**{k: row[k] for k in ('base_id', 'native_player_id', 'fingerprint', 'name')},
                             **actual, team_ids=owners[row['base_id']]['team_ids'],
                             league_exception=row.get('league_exception'),
@@ -234,7 +280,7 @@ def package(config):
     hashes = hash_tree(stage)
     if set(hashes) != private | {n for r in ready for n in asset_names(r['native_player_id'])}:
         raise ValueError('Unexpected final payload allowlist')
-    destination = job/'FootballNX-v54-LEAGUE-FACES-v55-SIAP-COPY'
+    destination = job/release_name(config)
     copy_v54(config, destination)
     pak = destination/'switch/pes21_nx/PesMobile/Content/Paks/PesMobile-League-Faces-Balanced-v55-Android_ETC1_P.pak'
     pak.parent.mkdir(parents=True, exist_ok=True)
@@ -265,9 +311,13 @@ def package(config):
                  target_head_triangles=5000, exceptional_head_limit_inclusive=7000, exceptions=exceptions,
                  actual_max_triangles=max(p['triangles'] for p in players), asset_hashes=hashes,
                  pak_sha256=sha(pak), pak_bytes=pak.stat().st_size, pak_roundtrip_hashes_match=True,
-                 v54_unchanged_files=config['v54_pinned_files'], accepted_barca_mu_unchanged=True,
+                 runtime_unchanged_files=runtime_pins, accepted_barca_mu_unchanged=True,
+                 preserved_released_heads=len(preservation['players']) if preservation else len(originals),
+                 preserved_released_head_bytes_exact=True,
                  full_pc_referee_ai=False, hardware_accepted=False, runtime_installed=False)
     proof['release_policy'] = policy
+    if 'runtime_candidate' not in config:
+        proof['v54_unchanged_files'] = runtime_pins
     proof['appearance_notes_advisory'] = policy['policy'] == BUDGET_PRIORITY
     proof['fresh_preview_hash_validation'] = policy['policy'] != BUDGET_PRIORITY
     proof['preserved_cooked_mip_warning_base_ids'] = [p['base_id'] for p in players
@@ -278,15 +328,17 @@ def package(config):
         ('PLAYER-BUDGET.csv', players, ('base_id','native_player_id','name','triangles','face_triangles','hair_triangles','vertices','sections'))):
         with (destination/filename).open('w', newline='', encoding='utf-8-sig') as stream:
             writer=csv.DictWriter(stream, fieldnames=fields, extrasaction='ignore'); writer.writeheader(); writer.writerows(rows)
+    modern = 'runtime_candidate' in config
     (destination/'BACA-DULU.txt').write_text(
-        f'FootballNX NRO v54 + real face liga Inggris/Spanyol v55\n'
+        (f'{release_name(config)}\n' if modern else 'FootballNX NRO v54 + real face liga Inggris/Spanyol v55\n') +
         f'{len(players)} kandidat dari {len(status)} pemain di {len(scope["teams"])} tim katalog aktif.\n'
         f'Target 5000 segitiga; {len(exceptions)} pengecualian, maksimum aktual {proof["actual_max_triangles"]}; maksimal 7000.\n'
         'Tutup game. Cadangkan NRO dan PAK wajah lama di luar folder Paks.\n'
         'Pindahkan SEMUA PAK wajah tambahan lama keluar folder Paks agar tidak bertabrakan.\n'
         'Salin seluruh folder switch ke ROOT SD, gabungkan dan timpa.\n'
-        'Pertahankan PAK game utama, stadion/weather, OBB, LooseCpk, intro dan save yang sudah ada.\n'
-        'NRO, animasi wasit, token dan commentary identik dengan kandidat v54.\n'
+        'Pertahankan PAK game utama, stadion/weather, OBB, LooseCpk, intro dan save yang sudah ada.\n' +
+        ('SELURUH payload runtime terbaru pada VERIFICATION.json dipertahankan byte-identik.\n' if modern else
+         'NRO, animasi wasit, token dan commentary identik dengan kandidat v54.\n') +
         'Tes Exhibition, kamera biasa/STADIUM, DAY/NIGHT, rematch dan close-up.\n'
         'Pemain fallback dan alasannya ada di PLAYER-STATUS.csv; anggaran ada di PLAYER-BUDGET.csv.\n'
         'Sunderland belum ada di katalog sumber ini. Angkat piala/AI wasit PC penuh tetap belum selesai.\n'

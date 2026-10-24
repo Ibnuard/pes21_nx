@@ -82,6 +82,10 @@ def test_budget_priority_needs_explicit_current_cohort_decision(tmp_path):
     config = dict(release_policy=pack.BUDGET_PRIORITY, release_decision=str(path))
     path.write_text(json.dumps(decision))
     assert pack.release_policy(config, tmp_path, [row], [proof])['preserve_cooked_outside_tiny_guard']
+    # Held sources are still bound by the complete report hash and remain
+    # native fallbacks; they are not falsely listed as included cooked heads.
+    held = dict(row, base_id=2, native_player_id=8, status='held_source')
+    assert pack.release_policy(config, tmp_path, [row, held], [proof])['preserve_cooked_outside_tiny_guard']
     assert not pack.release_policy({}, tmp_path, [row], [proof])['preserve_cooked_outside_tiny_guard']
     for change in [dict(user_directive=''), dict(verify_sha256='stale'), dict(included_base_ids=[2]),
                    dict(normal_complete_head_limit=7000), dict(appearance_notes_advisory=False)]:
@@ -123,3 +127,56 @@ def test_budget_policy_cannot_hide_mutation_during_failed_mip_repair(tmp_path, m
     monkeypatch.setattr(pack, 'protect_texture', rejected_with_mutation)
     with pytest.raises(ValueError, match='changed cooked bytes'):
         pack.release_hair_mips(path, dict(preserve_cooked_outside_tiny_guard=True))
+
+
+def test_budget_review_is_explicit_and_never_claims_new_visual_acceptance():
+    row, proof = rows()
+    held = dict(row, base_id=2, native_player_id=8, status='held_geometry')
+    scope = dict(policy=POLICY, selected_base_ids=[1, 2])
+    review = dict(decision='budget_integrity_reviewed', budget_reviewed_base_ids=[1],
+                  held_base_ids=[], new_visual_acceptance=False)
+    assert pack.validate_completion(scope, [row, held], [proof], review, pack.BUDGET_PRIORITY) == [proof]
+    for bad in [dict(review, budget_reviewed_base_ids=[]), dict(review, new_visual_acceptance=True)]:
+        with pytest.raises(ValueError, match='review'):
+            pack.validate_completion(scope, [row, held], [proof], bad, pack.BUDGET_PRIORITY)
+    with pytest.raises(ValueError, match='review'):
+        pack.validate_completion(scope, [row, held], [proof], review)
+    with pytest.raises(ValueError, match='independent cook'):
+        pack.validate_completion(scope, [row, held], [], review, pack.BUDGET_PRIORITY)
+
+
+def test_explicit_runtime_pins_override_historical_v54_and_keep_every_file(tmp_path):
+    original = tmp_path/'latest'
+    names = ['switch/pes21_nx/pes21_nx.nro', 'switch/pes21_nx/new-weather.pak']
+    pins = {}
+    for i, name in enumerate(names):
+        p = original/name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(bytes([i])*8)
+        pins[name] = dict(bytes=8, sha256=pack.sha(p))
+    config = dict(runtime_candidate=str(original), runtime_pinned_files=pins,
+                  v54_candidate='must-never-be-read', v54_pinned_files={'wrong': {}})
+    output = tmp_path/'release'
+    pack.copy_v54(config, output)
+    assert all(pack.sha(output/n) == pins[n]['sha256'] for n in names)
+    with pytest.raises(ValueError, match='Complete explicit'):
+        pack.runtime_binding(dict(config, runtime_pinned_files={}))
+
+
+def test_all_preserved_heads_reject_texture_mutation_and_changed_identity():
+    row, _ = rows()
+    hashes = {n: 'exact' for n in pack.asset_names(row['native_player_id'])}
+    preservation = dict(players={1: row}, hashes=hashes)
+    pack.validate_preserved_head(row, preservation, hashes)
+    changed = dict(hashes)
+    changed[next(iter(changed))] = 'mutated'
+    with pytest.raises(ValueError, match='bytes changed'):
+        pack.validate_preserved_head(row, preservation, changed)
+    with pytest.raises(ValueError, match='identity'):
+        pack.validate_preserved_head(dict(row, fingerprint='donor'), preservation, hashes)
+
+
+@pytest.mark.parametrize('name', ['../outside', 'FootballNX-../../outside', 'D:/FootballNX-test'])
+def test_release_directory_cannot_escape_staging(name):
+    with pytest.raises(ValueError, match='Safe FootballNX'):
+        pack.release_name(dict(release_directory_name=name))

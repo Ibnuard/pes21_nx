@@ -64,7 +64,9 @@ def source_part_proof(config,row):
     from realface_material_atlas import build_atlas
     from realface_invisible_slot_policy import classify_triangles
     from PIL import Image
-    root=Path(__file__).resolve().parents[1]/'local-inputs/realface-cache-v1/inputs-v2'/str(row['base_id'])
+    source_root=config.get('source_input_root')
+    root=(Path(source_root) if source_root else
+          Path(__file__).resolve().parents[1]/'local-inputs/realface-cache-v1/inputs-v2')/str(row['base_id'])
     manifest=root/'extraction.json'
     if not manifest.is_file():return None
     extraction=read(manifest)

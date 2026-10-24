@@ -99,7 +99,7 @@ def recover(config, prepared, verified, catalogue):
                 else:
                     result = trial.prepare_one(job, source, worker)
                 tries.append({k: result.get(k) for k in ('status', 'reason', 'triangles', 'cache_key', 'folder', 'budgets')})
-                if result['status'] in READY and result['triangles'] < 7000:
+                if result['status'] in READY and result['triangles'] <= 7000:
                     result['facial_hair_policy'] = old.get('facial_hair_policy', {})
                     result['league_attempts'] = old.get('league_attempts', []) + tries
                     result['hold_recovery'] = dict(previous_cache_key=old['cache_key'], previous_reason=reason,

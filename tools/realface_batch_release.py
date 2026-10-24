@@ -18,6 +18,21 @@ from realface_batch_inventory import read, write
 from realface_pipeline import sha
 
 
+def validation_path(config, path):
+    """Short aliases help legacy exporters without changing the cooked bytes."""
+    root = config.get('validation_canonical_root')
+    alias = config.get('validation_root_alias')
+    if root is None and alias is None:
+        return Path(path)
+    if not root or not alias or Path(alias).resolve() != Path(root).resolve():
+        raise ValueError('Validation alias must resolve to the same canonical root')
+    try:
+        relative = Path(path).resolve().relative_to(Path(root).resolve())
+    except ValueError as error:
+        raise ValueError('Validation input is outside the bound canonical root') from error
+    return Path(alias) / relative
+
+
 def engine_key(config):
     files = {str(HERE / name): sha(HERE / name) for name in
              ('ue_prepare_realface.py', 'validate_realface_cooked.py', 'audit_realface_rig.py',
@@ -194,11 +209,11 @@ def verify_one(config, row, validator=None):
         if row['status'] == 'cooked_cached':
             return dict(row, status='held_cook_validation', reason='Cooked cache changed since cook report')
     if row['status'] != 'cooked_pending_verification': return row
-    work = Path(config['work_dir']) / 'verification' / (str(row['base_id']) + '-' + row['cooked_cache_key'][:16])
+    work = validation_path(config, Path(config['work_dir']) / 'verification' / (str(row['base_id']) + '-' + row['cooked_cache_key'][:16]))
     work.mkdir(parents=True, exist_ok=True)
     try:
         profile = read(row['ue_profile'])
-        content = Path(row['cooked_content'])
+        content = validation_path(config, row['cooked_content'])
         assets = content / 'Assets/character/RealFace'
         native = str(row['native_player_id'])
         parts = {}
@@ -238,6 +253,11 @@ def verify_one(config, row, validator=None):
         else:
             validator(work / 'profile.json', work / 'validate.log')
         checked = read(work / 'verified.json')
+        if config.get('validation_root_alias'):
+            checked['validation_path_alias'] = dict(
+                canonical_root=str(Path(config['validation_canonical_root']).resolve()),
+                alias=config['validation_root_alias'], same_physical_root=True,
+                cooked_bytes_rewritten=False, factory_sha256=sha(__file__))
         checked['validation_source_sha256'] = {
             name: sha(HERE / name) for name in
             ('validate_realface_cooked.py', 'audit_realface_rig.py', 'realface_cook_policy.py',

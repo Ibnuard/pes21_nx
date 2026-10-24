@@ -68,3 +68,22 @@ def test_cook_resumes_failed_records_and_never_clears_them_for_preview(tmp_path,
         with pytest.raises(RuntimeError,match='lack independent cook validation'):
             finish.cook_missing(dict(work_dir=str(tmp_path)),{1:row},verified)
     assert len(calls)==1 and verified[1]['status']==result_status
+
+
+@pytest.mark.parametrize('triangles,accepted', [(7000, True), (7001, False)])
+def test_recovery_honours_inclusive_human_ceiling(tmp_path, monkeypatch, triangles, accepted):
+    import realface_league_finalize as finish
+    from types import SimpleNamespace
+    profile = tmp_path / 'source.json'
+    profile.write_text('{}')
+    owner = dict(base_id=1, native_player_id=1, fingerprint='current', name='Test', profile=str(profile))
+    old = dict(owner, status='held_geometry', cache_key='old',
+               reason='Experimental complete head cap exceeded: 7100')
+    rows = {1: old}
+    monkeypatch.setattr(finish, 'PreparationProcess', lambda *a: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(finish, 'status', lambda *a, **kw: None)
+    monkeypatch.setattr(finish, 'validate_head', lambda *a: None)
+    monkeypatch.setattr(trial, 'prepare_one', lambda *a: dict(
+        owner, status='prepared', triangles=triangles, cache_key='new', folder='scoped'))
+    finish.recover(dict(work_dir=str(tmp_path), blender='unused'), rows, {}, {1: owner})
+    assert (rows[1]['status'] == 'prepared') is accepted

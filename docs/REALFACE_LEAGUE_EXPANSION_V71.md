@@ -67,5 +67,45 @@ The league runner now records that owner as a source/material hold and continues
 the other heads. It does not bypass the trial guard or turn this into a
 successful preparation. Pinned-input changes and native-owner mismatches remain
 fatal. Existing prepared and cooked rows are resumed from their checkpoints.
-The latest verified gameplay set is now the eight-file v73 candidate documented
-in `ATMOSPHERE_CORNER_V73.md`; the v71 gameplay path above is historical.
+The first budget cohort is terminal: 703 new heads passed independent cooking,
+31 remain geometry holds and three require a scoped source/material recipe.
+The 907 earlier heads remain intact. Bounded recovery runs in a separate work
+directory, carrying every successful preparation and cooked proof. Source
+invisibility requires the same player's raw material/geometry proof; an empty
+raster alone is insufficient. The exceptional ceiling includes exactly 7,000.
+
+For this explicit human budget-priority release, the bound review records
+identity, rig, two sections, integrity and cooked counts without claiming new
+image inspection or visual acceptance. Held sources remain native fallbacks.
+The packager's default remains strict visual review. Expanded packages pin the
+latest runtime explicitly and compare all 907 previously released head payloads,
+including textures, byte for byte.
+
+Legacy exporters can silently omit dependencies when deeply nested recovery
+paths exceed the Windows path limit, producing `dummy_material_0` even though
+the cooked material exists. The validation-only alias must resolve to the same
+canonical work root and retain every relative asset path. Existing cooked bytes
+can then be independently revalidated without cooking them again. An alias to
+another directory or an input outside the bound root is rejected; material,
+rig, normal, triangle and section checks are unchanged.
+
+The latest verified gameplay is the ten-payload v75 set documented in
+`WEATHER_WORLD_ANCHOR_V75.md`. The earlier v71/v73 paths above are historical;
+never let their NRO/CPK pins replace the current runtime. The serial combined
+pipeline and its dependency receipts are under the ignored expansion work root.
+
+The final host-verified candidate contains 731 new heads from the 1,144 audited
+expansion identities, together with all 907 previous heads byte-identical:
+1,638 heads across the combined 78-team, 2,266-identity scope. Of 743 source
+candidates, 738 reached dense preparation and 731 passed bounded reduction and
+independent cooking. Five dense and seven material/UV/source-slot holds remain.
+The other expansion fallbacks are 199 locally absent sources, 201 unresolved
+source identities and one ambiguous identity; these are not global absence.
+
+The combined package has 1,534 heads at or below 5,000 triangles and 104 explicit
+exceptions, with an actual maximum of 6,996. All ten v75 runtime payloads remain
+exact. PAK allowlist/Test, independent extraction, all 907 prior head hashes,
+ZIP CRC/member hashes and the native C loose-CPK/marker validator passed, along
+with 89 focused tests and the 1,319-file public-tree check. Fifty-one cooked hair
+mip chains retain advisory warnings without forced alpha. These results do not
+claim new visual acceptance, full roster coverage or device frame-time proof.
