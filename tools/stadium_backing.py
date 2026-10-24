@@ -1,0 +1,163 @@
+"""Select explicitly reviewed backing from an owned shell glTF.
+
+The input is a local intermediate export, not committed geometry. Upright
+panels require an exact height band. An explicit underground-floor receipt
+may restore the source outline only outside the protected field rectangle.
+Roof and unreviewed geometry remain excluded.
+"""
+import hashlib
+import json
+from pathlib import Path
+
+
+def clip_floor_triangles(positions, indices, *, plane_m, expected_source_triangles,
+                        protected_half_x_m=58., protected_half_z_m=40.):
+    """Clip only an owned planar underground floor, preserving its outline.
+
+    Runs in the host Python with optional Shapely, before the Blender stage.
+    The protected rectangle becomes a real hole, not an overlapping overlay.
+    """
+    import numpy as np
+    from shapely import polygons, union_all, box, constrained_delaunay_triangles
+    p=np.asarray(positions,dtype=float);ids=np.asarray(indices)
+    if (not np.isfinite(p).all() or not -15 <= plane_m < -.25 or
+            not 53.5 <= protected_half_x_m <= 65 or not 35 <= protected_half_z_m <= 45):
+        raise ValueError('Unreviewed underground backing plane')
+    tri=p[ids]
+    selected=np.all(abs(tri[:,:,1]-plane_m)<.002,axis=1)
+    if int(selected.sum())!=expected_source_triangles:
+        raise ValueError('Owned floor selection changed')
+    footprint=union_all(polygons(tri[selected][:,:,[0,2]]),grid_size=.00001)
+    protected=box(-protected_half_x_m,-protected_half_z_m,protected_half_x_m,protected_half_z_m)
+    region=footprint.difference(protected)
+    rows=[]
+    for triangle in constrained_delaunay_triangles(region).geoms:
+        points=np.array([[x,plane_m,z] for x,z in list(triangle.exterior.coords)[:3]])
+        n=np.cross(points[1]-points[0],points[2]-points[0])
+        if np.linalg.norm(n)<1e-8:continue
+        if n[1]<0:points=points[[0,2,1]]
+        rows.append(dict(positions=points.tolist(),normal=[0.,1.,0.],uv=[(.5,.5)]*3,
+                         source_triangle=None,winding_flipped=False))
+    if not 1<=len(rows)<=148 or region.intersection(protected).area>1e-8:
+        raise ValueError('Unbounded or overlapping clipped backing')
+    return rows,dict(source_triangles=int(selected.sum()),clipped_triangles=len(rows),plane_m=plane_m,
+                     source_area_m2=float(footprint.area),retained_area_m2=float(region.area),
+                     protected_half_x_m=protected_half_x_m,protected_half_z_m=protected_half_z_m,
+                     protected_overlap_m2=float(region.intersection(protected).area))
+
+
+def select_triangles(positions, indices, *, bottom_m, top_m, expected_triangles,
+                     protected_half_x_m=58., protected_half_z_m=40.):
+    import numpy as np
+    from stadium_geometry import overlaps_pitch
+    positions = np.asarray(positions, dtype=float)
+    indices = np.asarray(indices)
+    if (positions.ndim != 2 or positions.shape[1] != 3 or
+            indices.ndim != 2 or indices.shape[1] != 3 or
+            not np.issubdtype(indices.dtype, np.integer) or
+            not np.isfinite(positions).all() or not len(indices) or
+            indices.min() < 0 or indices.max() >= len(positions)):
+        raise ValueError('Malformed backing geometry')
+    if not -15 <= bottom_m < top_m <= 100 or not 1 <= expected_triangles <= 232:
+        raise ValueError('Unbounded backing selection')
+    selected = []
+    for index, tri in enumerate(positions[indices]):
+        normal = np.cross(tri[1]-tri[0], tri[2]-tri[0])
+        area = float(np.linalg.norm(normal))
+        # Source float32 positions can give a nominally vertical pane a
+        # 0.003 degree residual tilt. Horizontal/roof faces remain excluded.
+        if area < 1e-9 or abs(normal[1])/area > 1e-4:
+            continue
+        if abs(tri[:, 1].min()-bottom_m) > .002 or abs(tri[:, 1].max()-top_m) > .002:
+            continue
+        if overlaps_pitch(tri, protected_half_x_m, protected_half_z_m):
+            raise ValueError('Reviewed backing overlaps the protected field')
+        # This is the inward side of the source exterior wall, used behind
+        # open entrances. Determine the winding geometrically, without
+        # applying the unrelated source technique's face-culling convention.
+        centre = tri.mean(axis=0)
+        if float(normal[[0, 2]] @ centre[[0, 2]]) > 0:
+            tri = tri[[0, 2, 1]]
+            normal = -normal
+            flipped = True
+        else:
+            flipped = False
+        normal /= area
+        selected.append(dict(source_triangle=index, positions=tri.tolist(),
+                             normal=normal.tolist(), winding_flipped=flipped))
+    if len(selected) != expected_triangles:
+        raise ValueError('Reviewed vertical backing selection changed: '+str(len(selected)))
+    return selected
+
+
+def load_selection(path, *, expected_sha256, expected_buffer_sha256, material,
+                   floor_receipt=None, floor_receipt_sha256=None, **selection):
+    import numpy as np
+    from audit_stadium_optimization import accessor
+    path = Path(path).resolve(strict=True)
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError('Backing source fingerprint changed')
+    doc = json.loads(raw)
+    if (doc.get('asset', {}).get('generator') != 'PES 2021 NX FMDL intermediate exporter' or
+            any(any(k in n for k in ('matrix', 'scale', 'rotation', 'translation')) for n in doc['nodes']) or
+            len(doc['buffers']) != 1):
+        raise ValueError('Backing must use the audited native-axis intermediate')
+    uri = Path(doc['buffers'][0]['uri'])
+    if uri.name != str(uri) or uri.is_absolute():
+        raise ValueError('Unsafe backing buffer path')
+    blob = (path.parent/uri).read_bytes()
+    if (len(blob) != doc['buffers'][0]['byteLength'] or
+            hashlib.sha256(blob).hexdigest() != expected_buffer_sha256):
+        raise ValueError('Backing buffer fingerprint/length changed')
+    matches = [p for mesh in doc['meshes'] for p in mesh['primitives']
+               if doc['materials'][p['material']]['name'] == material]
+    if len(matches) != 1 or matches[0].get('mode', 4) != 4:
+        raise ValueError('Expected one reviewed backing material')
+    prim = matches[0]
+    if floor_receipt is not None:
+        payload=Path(floor_receipt).read_bytes()
+        if hashlib.sha256(payload).hexdigest()!=floor_receipt_sha256:
+            raise ValueError('Clipped floor receipt fingerprint changed')
+        receipt=json.loads(payload)
+        if (receipt['gltf_sha256']!=expected_sha256 or receipt['buffer_sha256']!=expected_buffer_sha256 or
+                receipt['material']!=material or receipt['proof']['protected_overlap_m2']!=0 or
+                not 1<=len(receipt['rows'])<=148):
+            raise ValueError('Clipped floor receipt belongs to another source')
+        from stadium_geometry import overlaps_pitch
+        raw_pos=accessor(doc,blob,prim['attributes']['POSITION'])
+        raw_ids=accessor(doc,blob,prim['indices']).reshape(-1,3)
+        raw_tri=raw_pos[raw_ids]
+        source_floor=raw_tri[np.all(abs(raw_tri[:,:,1]-receipt['proof']['plane_m'])<.002,axis=1)]
+        if len(source_floor)!=receipt['proof']['source_triangles']:
+            raise ValueError('Clipped receipt source floor selection changed')
+        source_xz=source_floor[:,:,[0,2]]
+        def inside_source(point):
+            a,b,c=source_xz[:,0],source_xz[:,1],source_xz[:,2]
+            cross=lambda v,w:v[:,0]*w[:,1]-v[:,1]*w[:,0]
+            e0=cross(b-a,point-a);e1=cross(c-b,point-b);e2=cross(a-c,point-c)
+            return np.any(((e0>=-.002)&(e1>=-.002)&(e2>=-.002))|((e0<=.002)&(e1<=.002)&(e2<=.002)))
+        for row in receipt['rows']:
+            points=np.array(row['positions'])
+            if (points.shape!=(3,3) or not np.isfinite(points).all() or
+                    np.max(abs(points[:,1]-receipt['proof']['plane_m']))>.002 or
+                    overlaps_pitch(points,receipt['proof']['protected_half_x_m']-.0001,
+                                   receipt['proof']['protected_half_z_m']-.0001) or
+                    not all(inside_source(p[[0,2]]) for p in [*points,points.mean(0)])):
+                raise ValueError('Clipped floor geometry violates its source/field bounds')
+        return receipt['rows'],dict(gltf_sha256=expected_sha256,buffer_sha256=expected_buffer_sha256,
+                                    material=material,floor=receipt['proof'])
+    result = select_triangles(accessor(doc, blob, prim['attributes']['POSITION']),
+                              accessor(doc, blob, prim['indices']).reshape(-1, 3), **selection)
+    ids = accessor(doc, blob, prim['indices']).reshape(-1, 3)
+    uv = accessor(doc, blob, prim['attributes']['TEXCOORD_0'])
+    if not np.isfinite(uv).all():
+        raise ValueError('Backing source UVs are nonfinite')
+    for row in result:
+        values = uv[ids[row['source_triangle']]]
+        if row['winding_flipped']:
+            values = values[[0, 2, 1]]
+        # glTF UV V-down -> Blender V-up; export then restores UE's V-down.
+        row['uv'] = [(float(u), 1.-float(v)) for u, v in values]
+    return result, dict(gltf_sha256=hashlib.sha256(raw).hexdigest(),
+                        buffer_sha256=hashlib.sha256(blob).hexdigest(), material=material)

@@ -46,7 +46,8 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v75 session\n",file);
+    fputs("FootballNX scene v77 session\n",file);
+    fputs("review v77: calibrated Serie A cells; independent visible Cloudy drift; Camp Nou upper-stand repair pairing\n",file);
     fputs("weather v75: fixed world-space full-pitch rain/snow; no camera-follow transform updates\n",file);
     fputs("weather v74: small slow Winter snow; thin cold distance haze; slow Cloudy pitch shadows\n",file);
     fputs("review v73: stadium-wide distance mist; bounded thin 3D rain; bottom-corner per-pad tactics panels\n",file);

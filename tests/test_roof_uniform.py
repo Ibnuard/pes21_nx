@@ -172,7 +172,7 @@ int main(void) {
   // Cloud phase uploads only when its quarter-second step changes. Reused
   // draws, Night, Fine, Rainy and programs with no pitch receiver stay quiet.
   day=1;weather=NX_WEATHER_CLOUDY;cloud_step=120;glUseProgram_c(7);
-  assert(cloud_enabled==1 && cloud_phase==.125f);
+  assert(cloud_enabled==1 && cloud_phase==.25f);
   const int before_cloud=cloud_sets;
   for(int draw=0;draw<4000;draw++)glUseProgram_c(7);
   assert(cloud_sets==before_cloud);

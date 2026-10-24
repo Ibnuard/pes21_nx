@@ -57,12 +57,17 @@ PROFILES = {
     "italy": dict(key=10, source="Italy", sha256="60d42f819d44bbc24f69f7dfecc815d6302040e1111b712ff9f874a6825e612a",
                   size=(320, 70), bar_height=40,
                   layout="40px blue horizontal bar, white diagonal score center, cyan lower clock tab",
-                  names=((22, 31.7), (250, 31.7)), scores=((130, 29.3), (177, 29.3)),
+                  names=((33, 31.7), (259, 31.7)), scores=((128, 29.3), (175, 29.3)),
                   clock=(3, 62.3), clock_cell=(6, 62, 76, 90),
-                  text_y_offset=-3, added_time_cell=(76, 64, 124, 88), added_time_relation="right",
-                  name_cells=((6, 20, 118, 60), (214, 20, 326, 60)),
+                  text_y_offset=-3, name_y_offset=-5, score_y_offset=-5.5,
+                  added_time_cell=(76, 64, 124, 88), added_time_relation="right",
+                  # The kit strips sit inside the blue side regions. Exclude
+                  # them from each name's centering cell, unlike the former
+                  # broad cells that also included the diagonal score area.
+                  name_cells=((6, 20, 100, 60), (232, 20, 326, 60)),
                   score_cells=((118, 20, 166, 60), (166, 20, 214, 60)),
-                  kits=((101, 28), (231, 28)), ink=(0, 12, 83)),
+                  kits=((101, 25.35), (231, 25.35)), kit_tile_size=(5, 16),
+                  ink=(0, 12, 83)),
 }
 
 
@@ -70,10 +75,46 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def text_y_offset(spec, depth):
+    """Native glyph-ink calibration, after the authored appearance envelope."""
+    kind = "name" if depth in (61, 63) else "score"
+    return spec.get(kind + "_y_offset", spec.get("text_y_offset", 0))
+
+
+def center_italy_separator(panel, bar_height):
+    """Reposition the owned separator ink, retaining its raster and colour.
+
+    The safe central white window is wholly inside the inspected source's
+    diagonal score plate at every row. Its dash was already low in the source
+    crop, so moving the dynamic native digits alone cannot center the pair.
+    Integer raster placement gives at most half a pixel of center error.
+    """
+    pixels = np.asarray(panel)
+    left, top, right, bottom = 150, 2, 170, bar_height - 2
+    window = pixels[top:bottom, left:right]
+    mask = ((window[:, :, :3].min(axis=2) < 248) & (window[:, :, 3] > 128))
+    ys, xs = np.where(mask)
+    if len(xs) < 6:
+        raise ValueError("owned Italy score separator is missing")
+    bounds = (left + int(xs.min()), top + int(ys.min()),
+              left + int(xs.max()) + 1, top + int(ys.max()) + 1)
+    l, t, r, b = bounds
+    if not (3 <= r - l <= 12 and 1 <= b - t <= 6):
+        raise ValueError("unexpected owned Italy score separator")
+    dy = round(bar_height / 2 - (t + b) / 2)
+    glyph = panel.crop(bounds)
+    ImageDraw.Draw(panel).rectangle((l, t, r - 1, b - 1), fill="white")
+    panel.alpha_composite(glyph, (l, t + dy))
+    return dict(source_bounds=list(bounds), target_bounds=[l, t + dy, r, b + dy],
+                translate_y=dy, center_error_pixels=(t + b) / 2 + dy - bar_height / 2,
+                owned_pixels_preserved=True)
+
+
 def panel_for(profile, owned):
     """Build from inspected source crops; broadcaster/sponsor tiles are excluded."""
     spec = PROFILES[profile]
     crops = []
+    extra = {}
 
     def crop(rect):
         image, report = crop_rgba(owned, 1, rect)
@@ -98,6 +139,7 @@ def panel_for(profile, owned):
         panel = Image.new("RGBA", spec["size"])
         bar_height = spec["bar_height"]
         panel.alpha_composite(original.resize((320, bar_height), Image.Resampling.LANCZOS))
+        extra["score_separator"] = center_italy_separator(panel, bar_height)
         # Keep the actual source clock's diagonal edge and cyan colour.
         timer = crop((716, 458, 851, 504))
         panel.alpha_composite(timer.resize((80, 28), Image.Resampling.LANCZOS), (0, bar_height + 2))
@@ -122,7 +164,7 @@ def panel_for(profile, owned):
         panel.alpha_composite(mark, (153 - mark.width // 2, 20 - mark.height // 2))
     return panel, {"layout": spec["layout"], "main_plate_pixels": list(spec["size"]),
                    "source_crops": crops, "pc_animation_imported": False,
-                   "team_text": "native selected-team UIR initials; no baked abbreviations"}
+                   "team_text": "native selected-team UIR initials; no baked abbreviations", **extra}
 
 
 def patch_score(data, profile):
@@ -166,7 +208,7 @@ def patch_score(data, profile):
                 if depth in (61, 63, 65, 67):
                     # Apply after the appearance envelope so every existing
                     # keyframe receives the same optical correction.
-                    translated[1] += spec.get("text_y_offset", 0)
+                    translated[1] += text_y_offset(spec, depth)
                 write(row, "translate", "ii", [round(v * 20) for v in translated])
             if depth in (61, 63) and "scale" in row:
                 # v62 narrows a 78px name field to 60px for Spain's column.
@@ -239,11 +281,29 @@ def verify_geometry(rows, spec):
     cells = {63: spec["name_cells"][0], 61: spec["name_cells"][1],
              67: spec["score_cells"][0], 65: spec["score_cells"][1]}
     checks = []
+    kit_checks = []
+    if "kit_tile_size" in spec:
+        children = {r["depth"]: r for r in rows if r["parent"] == 27 and r["frame"] == 0}
+        if (children[1].get("name"), children[3].get("name")) != ("firstTeamColor", "secondTeamColor"):
+            raise ValueError("unsupported native kit-colour hierarchy")
     for row in rows:
         if row["parent"] != 28 or "translate" not in row:
             continue
         depth = row["depth"]
         x, y = row["translate"]
+        if depth in (69, 75) and "kit_tile_size" in spec:
+            width, height = spec["kit_tile_size"]
+            sx = row.get("scale", (1, 1))[0]
+            rects = []
+            for child in (children[1], children[3]):
+                cx, cy = child["translate"]
+                x0, x1 = sorted((x + sx * cx, x + sx * (cx + width)))
+                rects.append((x0, y + cy, x1, y + cy + height))
+            bound = (min(r[0] for r in rects), min(r[1] for r in rects),
+                     max(r[2] for r in rects), max(r[3] for r in rects))
+            if abs((bound[1] + bound[3]) / 2 - (20 + spec["bar_height"] / 2)) > .025:
+                raise ValueError("native kit colours are not centered in the plate")
+            kit_checks.append(dict(depth=depth, frame=row["frame"], bounds=bound))
         if depth in (77, 78):
             cell = spec["clock_cell"]
             bounds = [(x + lo * SCALE, y + 4 * SCALE,
@@ -283,11 +343,18 @@ def verify_geometry(rows, spec):
                     raise ValueError("ordinary clock background would leave a visible blank plate")
     return {"checked_placement_updates": len(checks), "clock_minute_states": [1, 2, 3],
             "fields_inside_separate_cells": True, "clock_cell": list(spec["clock_cell"]), "checks": checks,
+            **({"kit_checks": kit_checks, "kit_palette_centered": True,
+                "native_name_field_centers": [[p[0] + spec.get("name_width", 60) * SCALE / 2,
+                                                (c[0] + c[2]) / 2]
+                                               for p, c in zip(spec["names"], spec["name_cells"])]}
+               if "kit_tile_size" in spec else {}),
             **({"added_time_cell": list(spec["added_time_cell"]),
                 "added_time_visibility": "native losstime clip; ordinary clock background instance offscreen",
                 "added_time_ink": "black wrapper multiplier covers dynamic UIR and bitmap children",
                 "name_field_pixels": spec.get("name_width",60) * SCALE,
                 "text_optical_y_offset_pixels": spec.get("text_y_offset", 0),
+                "name_optical_y_offset_pixels": text_y_offset(spec, 63),
+                "score_optical_y_offset_pixels": text_y_offset(spec, 67),
                 "text_optical_calibration": "user native-render direction; magnitude awaits Switch check"}
                if "added_time_cell" in spec else {})}
 
@@ -470,9 +537,9 @@ def preview(panel, profile, report):
     small = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 14)
     for point, text in zip(spec["names"], ("BAR", "RMA") if profile == "spain" else ("HOM", "AWY")):
         draw.text((point[0] + 32 + spec.get("name_width", 60) * SCALE / 2,
-                   point[1] + 20.5 + spec.get("text_y_offset", 0)), text, anchor="mm", fill="white", font=font)
+                   point[1] + 20.5 + text_y_offset(spec, 63)), text, anchor="mm", fill="white", font=font)
     for point in spec["scores"]:
-        draw.text((point[0] + 44.5, point[1] + 22.5 + spec.get("text_y_offset", 0)),
+        draw.text((point[0] + 44.5, point[1] + 22.5 + text_y_offset(spec, 67)),
                   "0", anchor="mm", fill=spec["ink"], font=font)
     cell = spec["clock_cell"]
     draw.text(((cell[0] + cell[2]) / 2 + 32, (cell[1] + cell[3]) / 2 + 12),

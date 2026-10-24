@@ -503,7 +503,8 @@ static void glUseProgram_c(GLuint p) {
       const uint32_t key = step + (enabled ? 1024u : 0u);
       if (roof_uniforms[index].cloud_key != key) {
         /* At most four updates/sec per active pitch program; no per-draw time upload. */
-        glUniform2f(roof_uniforms[index].cloud_location,(GLfloat)step/960.0f,(GLfloat)enabled);
+        /* One spatial period per 120s: 40/30 cm per second along/across pitch. */
+        glUniform2f(roof_uniforms[index].cloud_location,(GLfloat)step/480.0f,(GLfloat)enabled);
         roof_uniforms[index].cloud_key=key;
       }
     }

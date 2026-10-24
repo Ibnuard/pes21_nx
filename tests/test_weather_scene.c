@@ -87,6 +87,23 @@ int main(void){
  }
  assert(spawn_count==destroy_count&&native_exits==60&&tick_count==1860);
  assert(first_begin==40&&first_return==40);
+ /* Cloudy has no precipitation actor or assets. Its match clock must still
+  * move, pause and retire independently, with at most two diagnostic notes. */
+ weather_scene_kind=0;missing=1;pause_mode=0;live_ready=0;
+ weather_scene_loaded(NULL);
+ const int cloud_loads=load_count,cloud_spawns=spawn_count;
+ for(int i=0;i<600;++i)weather_scene_tick(world,0,1.f/60);
+ assert(!pes_controller_cloud_shadow_step()&&!weather_cloud_reports);
+ live_ready=1;
+ for(int i=0;i<600;++i)weather_scene_tick(world,0,1.f/60);
+ assert(pes_controller_cloud_shadow_step()>=39&&weather_cloud_reports==2);
+ assert(load_count==cloud_loads&&spawn_count==cloud_spawns&&!alive);
+ pause_mode=1;const unsigned cloud_paused=pes_controller_cloud_shadow_step();
+ for(int i=0;i<600;++i)weather_scene_tick(world,0,1.f/60);
+ assert(pes_controller_cloud_shadow_step()==cloud_paused&&weather_cloud_reports==2);
+ pause_mode=0;weather_scene_unload(NULL);
+ assert(!pes_controller_cloud_shadow_step()&&!weather_cloud_reports);
+ missing=0;
  /* LoadedCall can precede player/uniform readiness by an arbitrary duration.
   * No weather asset allocation is allowed during that interval, even on a
   * later match with an FX system left alive by UE. */

@@ -36,6 +36,7 @@ static int weather_scene_first_tick;
 static float weather_scene_age,weather_clock;
 static float weather_cloud_clock;
 static int weather_cloud_live;
+static unsigned weather_cloud_reports;
 static _Alignas(4) uint32_t weather_cloud_step;
 uint32_t pes_controller_cloud_shadow_step(void) {
   return __atomic_load_n(&weather_cloud_step,__ATOMIC_RELAXED);
@@ -53,7 +54,7 @@ static void weather_scene_retire(void) {
   weather_scene_active=weather_scene_attempted=0;
   weather_scene_first_tick=0;
   weather_scene_age=weather_clock=0;weather_scene_reports=0;
-  weather_cloud_clock=0;weather_cloud_live=0;
+  weather_cloud_clock=0;weather_cloud_live=0;weather_cloud_reports=0;
   __atomic_store_n(&weather_cloud_step,0,__ATOMIC_RELAXED);
 }
 static void weather_scene_loaded(void *loader) {
@@ -140,6 +141,12 @@ static void weather_scene_tick(void *world,int level_tick,float seconds) {
   if (weather_cloud_live && !paused && isfinite(seconds) && seconds>0) {
     weather_cloud_clock=fmodf(weather_cloud_clock+fminf(seconds,0.1f),240.0f);
     __atomic_store_n(&weather_cloud_step,(uint32_t)(weather_cloud_clock*4.0f),__ATOMIC_RELAXED);
+    if (weather_cloud_reports<2 && weather_cloud_clock>=(weather_cloud_reports?8.0f:0.25f)) {
+      char message[128];
+      snprintf(message,sizeof(message),"v77 match clock=%.2fs phase=%.4f; Cloudy motion independent of rain/snow assets",
+          weather_cloud_clock,weather_cloud_clock/120.0f);
+      scene_runtime_note("weather motion",message);++weather_cloud_reports;
+    }
   }
   const uint32_t kind=__atomic_load_n(&weather_scene_kind,__ATOMIC_ACQUIRE);
   if (kind!=1 && kind!=2) return;
@@ -165,9 +172,8 @@ static void weather_scene_tick(void *world,int level_tick,float seconds) {
 }
 #ifndef PESNX_WEATHER_SCENE_HOST_TEST
 static void install_weather_scene(so_module *module) {
-  FILE *f=fopen("PesMobile/Content/Paks/PesMobile-WeatherWorld-v75-Android_ETC1_P.pak","rb");
-  if (!f) return;
-  fclose(f);
+  /* Cloud motion needs only the match lifecycle. Optional precipitation assets
+   * are resolved once at spawn, and their absence must not disable this clock. */
   const uintptr_t base=(uintptr_t)module->load_base;
   const char *root_symbol="_ZN6AActor23execK2_GetRootComponentEP7UObjectR6FFramePv";
   const char *mesh_symbol="_ZN20UStaticMeshComponent13SetStaticMeshEP11UStaticMesh";
@@ -217,6 +223,6 @@ static void install_weather_scene(so_module *module) {
   hook_arm64(base+0x38dd250,(uintptr_t)weather_scene_unload);
   hook_arm64(base+0x38cf4a0,(uintptr_t)weather_scene_destroy);
   hook_arm64(base+0x3924490,(uintptr_t)weather_scene_tick);
-  scene_runtime_note("weather field","v75 fixed full-pitch precipitation; one component, no camera rebasing; cloudy pitch clock");
+  scene_runtime_note("weather field","v77 independent Cloudy clock; v75 fixed full-pitch precipitation retained");
 }
 #endif

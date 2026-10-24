@@ -167,7 +167,7 @@ static const char stadium_lite_helpers_glsl[] =
   "  highp vec2 r=fract(p+vec2(0.43,0.37))-vec2(0.5);\n"
   "  highp float a=1.0-smoothstep(0.035,0.23,dot(q,q*vec2(1.0,1.5)));\n"
   "  highp float b=1.0-smoothstep(0.025,0.16,dot(r,r*vec2(1.6,1.0)));\n"
-  "  return albedo*(1.0-0.10*min(1.0,a*0.7+b*0.6));\n"
+  "  return albedo*(1.0-0.20*min(1.0,a*0.7+b*0.6));\n"
   "}\n"
   "highp vec3 nxPitchMowing(highp vec3 albedo,highp vec3 world) {\n"
   "  // Stable loaded-shell IDs, including fallback to the original Konami turf.\n"
