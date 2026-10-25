@@ -46,7 +46,9 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v77 session\n",file);
+    fputs("FootballNX scene v81 session\n",file);
+    fputs("review v81: both corner helper entries share native-sized bold white HUD rows and sprite spacing\n",file);
+    fputs("review v80: deeper Cloudy shade; source-backed Old Trafford; held horizontal Joy-Con corner tactics; v78 skin retained\n",file);
     fputs("review v77: calibrated Serie A cells; independent visible Cloudy drift; Camp Nou upper-stand repair pairing\n",file);
     fputs("weather v75: fixed world-space full-pitch rain/snow; no camera-follow transform updates\n",file);
     fputs("weather v74: small slow Winter snow; thin cold distance haze; slow Cloudy pitch shadows\n",file);

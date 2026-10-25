@@ -20,6 +20,8 @@ class ProgramBinaryCacheTests(unittest.TestCase):
 #include <assert.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdio.h>
+static void scene_runtime_note(const char *a,const char *b) {(void)a;(void)b;}
 typedef unsigned GLuint, GLenum;
 typedef int GLint, GLsizei;
 typedef float GLfloat;
@@ -69,6 +71,8 @@ static unsigned pes_controller_stadium_weather(void) {return 0;}
 static unsigned pes_controller_stadium_season(void) {return 0;}
 static unsigned pes_controller_stadium_turf_length(void) {return 0;}
 static unsigned pes_controller_stadium_pitch_condition(void) {return 0;}
+static unsigned pes_controller_cloud_shadow_step(void) {return 0;}
+static void glUniform2f(GLint p,float a,float b) {(void)p;(void)a;(void)b;assert(0);}
 static void glUseProgram(GLuint p) {assert(p==7 && current_context);use_calls++;}
 static GLint glGetUniformLocation(GLuint p,const char *name) {
   assert(p==7);queries++;
@@ -129,36 +133,36 @@ int main(void) {
   resolved_oes=(GLProgramBinaryProc)gl_program_binary_proc("glProgramBinaryOES",(__eglMustCastToProperFunctionPointerType)binary_oes);
   assert(resolved_core && resolved_oes && resolved_core!=resolved_oes);
   assert(gl_program_binary_real==binary_core && gl_program_binary_oes_real==binary_oes);
-  glUseProgram_c(7);assert(queries==7 && writes==1 && applied==1.f && last_location==2);
+  glUseProgram_c(7);assert(queries==8 && writes==1 && applied==1.f && last_location==2);
   int blob=11;
   expect_call(7,33,&blob,sizeof(blob));resolved_core(7,33,&blob,sizeof(blob));
   assert(core_calls==1 && oes_calls==0 && applied==0.f);
   assert(gl_program_generation==expected_generation+1);
-  glUseProgram_c(7);assert(queries==14 && writes==2 && applied==1.f && last_location==11);
+  glUseProgram_c(7);assert(queries==16 && writes==2 && applied==1.f && last_location==11);
   /* Same executable/layout still resets all values; it must be re-uploaded. */
   expect_call(7,33,&blob,sizeof(blob));resolved_core(7,33,&blob,sizeof(blob));
-  glUseProgram_c(7);assert(queries==21 && writes==3 && applied==1.f);
+  glUseProgram_c(7);assert(queries==24 && writes==3 && applied==1.f);
   /* OES keeps its own driver entry and invalidates the already-warm other TLS. */
   blob=17;expect_call(7,44,&blob,sizeof(blob));
   pthread_t loader;assert(!pthread_create(&loader,NULL,load_on_shared_context,&blob));
   assert(!pthread_join(loader,NULL));
   assert(core_calls==2 && oes_calls==1 && current_context==(void *)11);
-  glUseProgram_c(7);assert(queries==28 && writes==4 && last_location==17 && applied==1.f);
+  glUseProgram_c(7);assert(queries==32 && writes==4 && last_location==17 && applied==1.f);
   /* Native rejection and exact invalid arguments are forwarded, not consumed. */
   native_reject=1;expect_call(0,99,NULL,-3);resolved_core(0,99,NULL,-3);
   assert(core_calls==3 && oes_calls==1 && native_error==0x0501);
-  assert(gl_program_generation==expected_generation+1 && queries==28 && writes==4);
+  assert(gl_program_generation==expected_generation+1 && queries==32 && writes==4);
   assert(!gl_program_binary_proc("glProgramBinary",NULL));
   assert(gl_program_binary_real==binary_core); /* no unsupported advertisement */
   native_reject=0;native_error=0;
-  glUseProgram_c(7);assert(queries==35 && writes==5 && applied==1.f);
+  glUseProgram_c(7);assert(queries==40 && writes==5 && applied==1.f);
   /* A distinct context/share-group can reuse GLuint7 without a binary call.
    * Exercise the existing real make-current wrapper's TLS invalidation too. */
   const uint64_t generation=gl_program_generation;
   driver_location=29;applied=0.f;
   assert(eglMakeCurrent_dedup((void *)1,(void *)2,(void *)2,(void *)33));
   assert(gl_program_generation==generation);
-  glUseProgram_c(7);assert(queries==42 && writes==6 && last_location==29 && applied==1.f);
+  glUseProgram_c(7);assert(queries==48 && writes==6 && last_location==29 && applied==1.f);
   const int warm_queries=queries,warm_writes=writes,warm_uses=use_calls;
   for(int i=0;i<1000;i++)glUseProgram_c(7);
   assert(queries==warm_queries && writes==warm_writes && use_calls==warm_uses+1000);
@@ -174,7 +178,7 @@ int main(void) {
   }
   assert(!pthread_join(lookup,NULL));
   assert(core_calls==503 && oes_calls==501 && native_error==0);
-  glUseProgram_c(7);assert(queries==warm_queries+7 && applied==1.f);
+  glUseProgram_c(7);assert(queries==warm_queries+8 && applied==1.f);
   return 0;
 }
 '''

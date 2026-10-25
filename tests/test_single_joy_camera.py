@@ -98,6 +98,6 @@ int main(void) {
         self.assertIn('single_joy_setplay ? "SR+LS" : "RS"', overlay)
         self.assertIn('camera ? "SR"', overlay)
         self.assertIn('camera ? "LS"', overlay)
-        self.assertIn('"HOLD: CAMERA / AIM"', overlay)
+        self.assertIn('"HOLD: CAMERA"', overlay)
 
 if __name__ == '__main__': unittest.main()

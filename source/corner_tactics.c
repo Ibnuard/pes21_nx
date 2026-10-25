@@ -7,6 +7,7 @@ typedef struct {
   uint32_t mode, short_allowed, values[3], previous;
   uint32_t open, page, release, pending, pending_mode;
   uint32_t submitted, consumed;
+  uint32_t layout;
 } CornerPad;
 static CornerPad pads[2];
 static pthread_mutex_t corner_mutex=PTHREAD_MUTEX_INITIALIZER;
@@ -60,11 +61,16 @@ void fnx_corner_publish(uint32_t pad,uint64_t epoch,uint32_t mode,
   p->values[0]=normal;p->values[1]=short_choice;p->values[2]=defence;
   pthread_mutex_unlock(&corner_mutex);
 }
-uint32_t fnx_corner_input(uint32_t pad,uint64_t now,int allowed,
-    int connected,uint32_t buttons,int axes_neutral) {
+static uint32_t corner_input(uint32_t pad,uint64_t now,int allowed,
+    int connected,uint32_t buttons,int axes_neutral,uint32_t layout) {
   if(pad>1)return 0;
   pthread_mutex_lock(&corner_mutex);
   CornerPad *p=&pads[pad];
+  if(p->layout!=layout) {
+    p->release=p->release || p->open || p->pending;
+    p->open=p->page=p->pending=0;p->previous=0;
+  }
+  p->layout=layout;
   uint32_t pressed=buttons & ~p->previous;
   p->previous=buttons;
   int valid=allowed && connected && fresh(p,now);
@@ -77,6 +83,31 @@ uint32_t fnx_corner_input(uint32_t pad,uint64_t now,int allowed,
     /* Eat the closing press even if the native restart ended in that frame. */
     if(connected && allowed)result|=FNX_CORNER_CAPTURE;
     if(!buttons && axes_neutral)p->release=0;
+  } else if(valid && layout) {
+    /* Single Joy-Con: the shoulder is a held modifier, never a native L1
+     * action. Face directions and the short-page edge remain usable while
+     * it stays held. Releasing it closes and isolates any remaining keys. */
+    if(buttons&FNX_CORNER_HOLD) {
+      result|=FNX_CORNER_CAPTURE;
+      if(!p->open){p->open=1;p->page=0;}
+      if(pressed&FNX_CORNER_OTHER) {
+        p->open=0;p->release=1;
+      } else if((pressed&FNX_CORNER_PAGE) && p->short_allowed) {
+        p->page=!p->page;
+      } else {
+        uint32_t directions=pressed&15u;
+        if(directions && !(directions&(directions-1))) {
+          uint32_t d=directions==1 ? 0 : directions==2 ? 1 : directions==4 ? 2 : 3;
+          uint32_t mode=p->page ? FNX_CORNER_SHORT : p->mode;
+          if(option_for(mode,d)) {
+            p->pending=d+1;p->pending_mode=mode;p->queued_at=now;p->submitted++;
+          }
+        }
+      }
+    } else if(p->open) {
+      p->open=p->page=0;p->release=buttons || !axes_neutral;
+      result|=FNX_CORNER_CAPTURE;
+    }
   } else if(valid && p->open) {
     result|=FNX_CORNER_CAPTURE;
     if(pressed & (FNX_CORNER_BACK|FNX_CORNER_OTHER)) {
@@ -103,6 +134,15 @@ uint32_t fnx_corner_input(uint32_t pad,uint64_t now,int allowed,
   }
   pthread_mutex_unlock(&corner_mutex);
   return result;
+}
+uint32_t fnx_corner_input(uint32_t pad,uint64_t now,int allowed,
+    int connected,uint32_t buttons,int axes_neutral) {
+  return corner_input(pad,now,allowed,connected,buttons,axes_neutral,0);
+}
+uint32_t fnx_corner_hold_input(uint32_t pad,uint64_t now,int allowed,
+    int connected,uint32_t buttons,int axes_neutral,uint32_t layout) {
+  if(layout!=1 && layout!=2)return 0;
+  return corner_input(pad,now,allowed,connected,buttons,axes_neutral,layout);
 }
 int fnx_corner_take(uint32_t pad,uint64_t epoch,uint64_t now,
                     uint32_t *command,uint8_t *option) {
@@ -132,6 +172,7 @@ void fnx_corner_view(uint32_t pad,uint64_t now,FnxCornerView *out) {
   out->mode=p->page ? FNX_CORNER_SHORT : p->mode;
   out->short_allowed=p->short_allowed;out->current=current(p);
   out->submitted=p->submitted;out->consumed=p->consumed;
+  out->layout=p->layout;
   pthread_mutex_unlock(&corner_mutex);
 }
 const char *fnx_corner_label(uint32_t mode,uint32_t direction) {

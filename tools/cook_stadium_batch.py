@@ -62,8 +62,21 @@ def main():
         # The bundled legacy Qonvert DLL can race during concurrent format
         # initialization, spinning in its shared registry. Serialize this
         # offline commandlet; texture format/quality and runtime are unchanged.
-        cook_args = ['-run=Cook','-TargetPlatform=Android_ETC1',
-            '-CookDir=/Game/FootballNX/Stadiums']
+        cook_args = ['-run=Cook','-TargetPlatform=Android_ETC1']
+        if config.get('single_package_cook', False):
+            # UE4.22's single-package mode ignores CookDir. Its explicit MAP
+            # list accepts package names, including meshes/materials/textures.
+            packages=[]
+            content=project.parent/'Content'
+            for key in keys:
+                folder=content/'FootballNX/Stadiums'/key
+                assets=sorted(folder.glob('*.uasset'))
+                if not assets:raise ValueError('No imported stadium packages: '+key)
+                packages.extend('/Game/'+p.relative_to(content).with_suffix('').as_posix() for p in assets)
+            cook_args+=['-cooksinglepackage','-MAP='+'+'.join(packages)]
+        else:
+            # CookDir takes a filesystem directory, not a /Game package path.
+            cook_args+=['-CookDir='+str(project.parent/'Content/FootballNX/Stadiums')]
         if config.get('serial_texture_cook', True):
             cook_args.append('-nothreading')
         run_editor('cook',cook_args)

@@ -57,6 +57,17 @@ def test_source_and_buffer_binding_and_uv_winding(tmp_path):
     rows,proof=load_selection(path,**options)
     assert len(rows)==2 and rows[0]['uv'][0]==(0.,1.)
     assert proof['buffer_sha256']==options['expected_buffer_sha256']
+    doc['meshes'][0]['primitives'] *= 2
+    path.write_text(json.dumps(doc))
+    options['expected_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError,match='one reviewed'):
+        load_selection(path,**options)
+    _,proof=load_selection(path,primitive_ordinal=1,**options)
+    assert proof['primitive_ordinal']==1
+    for ordinal in (-1,2,True,1.0):
+        with pytest.raises(ValueError,match='ordinal'):
+            load_selection(path,primitive_ordinal=ordinal,**options)
+    options['primitive_ordinal']=0
     (tmp_path/'pane.bin').write_bytes(raw[:-1]+bytes([raw[-1]^1]))
     with pytest.raises(ValueError,match='fingerprint/length'):
         load_selection(path,**options)

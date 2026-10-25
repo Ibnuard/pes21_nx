@@ -20,6 +20,12 @@ class RoofUniformTests(unittest.TestCase):
         build_and_run(gcc, ENVIRONMENT + r'''
 #include <assert.h>
 #include <string.h>
+#include <stdio.h>
+static unsigned receiver_notes;
+static void scene_runtime_note(const char *category,const char *message) {
+ assert(!strcmp(category,"cloud receiver") && strstr(message,"v79 final pitch receiver"));
+ ++receiver_notes;
+}
 typedef unsigned GLuint;
 typedef int GLint;
 typedef float GLfloat;
@@ -177,6 +183,7 @@ int main(void) {
   for(int draw=0;draw<4000;draw++)glUseProgram_c(7);
   assert(cloud_sets==before_cloud);
   cloud_step++;glUseProgram_c(7);assert(cloud_sets==before_cloud+1);
+  assert(receiver_notes==2); // Actual uniform-bearing program, bounded per boot.
   day=0;glUseProgram_c(7);assert(cloud_enabled==0);
   const int at_night=cloud_sets;
   cloud_step++;glUseProgram_c(7);assert(cloud_sets==at_night);

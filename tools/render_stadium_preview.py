@@ -8,12 +8,19 @@ p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--blend',type=Path,required=True)
 p.add_argument('--output',type=Path,required=True)
 p.add_argument('--view',choices=['bowl','roof','near','far'],default='bowl')
+p.add_argument('--native-pitch',type=Path,
+               help='Owned native pitch/apron glTF; reference colours, geometry inspection only')
+p.add_argument('--camera-position',nargs=3,type=float)
+p.add_argument('--camera-target',nargs=3,type=float)
 a=p.parse_args(sys.argv[sys.argv.index('--')+1:])
 bpy.ops.wm.open_mainfile(filepath=str(a.blend.resolve()))
 shell=next(o for o in bpy.context.scene.objects if o.type=='MESH')
 profile_path=a.blend.parent/'fbx.local.json'
 profile=json.loads(profile_path.read_text()) if profile_path.is_file() else {}
 location={'roof':(0,-2,200),'bowl':(78,-67,36),'near':(0,-68,28),'far':(0,-16,28)}[a.view]
+if a.camera_position:
+    if not all(math.isfinite(v) for v in a.camera_position):raise ValueError('Nonfinite camera')
+    location=tuple(a.camera_position)
 if a.view!='roof':
     # Offline approximation of the shipped pixel cutaway, only for this render.
     # Use triangle centres to remove foreground faces; never save the modified mesh.
@@ -104,7 +111,35 @@ for mat in shell.data.materials:
             links.new(mix.outputs[0],facing.inputs[1]);links.new(transparent.outputs[0],facing.inputs[2])
             links.new(facing.outputs[0],output.inputs['Surface'])
         mat.surface_render_method='DITHERED'
-# A dimensioned reference plane is authored here, not the game's pitch asset.
+# Optional native floor coverage prevents the reference pitch from creating
+# false sky gaps around the stadium. It is not a native-material render.
+if a.native_pitch:
+    import numpy as np
+    sys.path.insert(0,str(Path(__file__).resolve().parent))
+    from audit_stadium_optimization import accessor
+    doc=json.loads(a.native_pitch.read_text())
+    if len(doc['buffers'])!=1:raise ValueError('Expected one owned native floor buffer')
+    uri=Path(doc['buffers'][0]['uri'])
+    if uri.name!=str(uri):raise ValueError('Unsafe native floor buffer path')
+    blob=(a.native_pitch.parent/uri).read_bytes()
+    vertices=[];faces=[]
+    for part in doc['meshes']:
+        for primitive in part['primitives']:
+            points=accessor(doc,blob,primitive['attributes']['POSITION'])
+            indices=accessor(doc,blob,primitive['indices']).reshape(-1,3)
+            if not np.isfinite(points).all() or abs(points[:,1]).max()>.05:
+                raise ValueError('Native floor must remain in its reviewed ground plane')
+            offset=len(vertices)
+            vertices.extend((float(x),-float(z),float(y)) for x,y,z in points)
+            faces.extend(tuple(offset+int(i) for i in tri) for tri in indices)
+    mesh=bpy.data.meshes.new('NativeFloorCoverage');mesh.from_pydata(vertices,[],faces);mesh.update()
+    native=bpy.data.objects.new('NativeFloorCoverage',mesh);bpy.context.collection.objects.link(native)
+    material=bpy.data.materials.new('NativeApronReference');material.use_nodes=True
+    material.node_tree.nodes.clear();emit=material.node_tree.nodes.new('ShaderNodeEmission')
+    emit.inputs['Color'].default_value=(.20,.22,.20,1)
+    output=material.node_tree.nodes.new('ShaderNodeOutputMaterial')
+    material.node_tree.links.new(emit.outputs[0],output.inputs['Surface']);mesh.materials.append(material)
+# A dimensioned reference playing surface covers the native interior above.
 bpy.ops.mesh.primitive_plane_add(size=2,location=(0,0,.025))
 pitch=bpy.context.object;pitch.scale=(52.5,34,1)
 green=bpy.data.materials.new('ReferencePitch');green.diffuse_color=(.08,.23,.07,1)
@@ -114,6 +149,9 @@ for x,y,sx,sy in ((0,-34,52.5,.12),(0,34,52.5,.12),(-52.5,0,.12,34),(52.5,0,.12,
     white=bpy.data.materials.get('PitchWhite') or bpy.data.materials.new('PitchWhite')
     white.diffuse_color=(.8,.9,.8,1);bpy.context.object.data.materials.append(white)
 target=Vector((0,-20,0) if a.view=='near' else (0,32,0) if a.view=='far' else (0,0,0 if a.view=='roof' else 5))
+if a.camera_target:
+    if not all(math.isfinite(v) for v in a.camera_target):raise ValueError('Nonfinite camera target')
+    target=Vector(a.camera_target)
 bpy.ops.object.camera_add(location=location)
 camera=bpy.context.object;camera.rotation_euler=(target-camera.location).to_track_quat('-Z','Y').to_euler()
 camera.data.type='ORTHO';camera.data.ortho_scale=325 if a.view=='roof' else 165

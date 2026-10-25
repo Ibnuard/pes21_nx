@@ -447,6 +447,7 @@ static __thread struct {
 static volatile uint64_t gl_program_generation;
 static __thread uint64_t roof_uniform_generation;
 static __thread uint64_t roof_uniform_clock;
+static unsigned cloud_receiver_reports;
 /* Four entries per hash bucket prevent alternating native programs from
  * re-querying every location and resubmitting unchanged climate uniforms.
  * Cache only locations/values: every native glUseProgram still runs. */
@@ -506,6 +507,17 @@ static void glUseProgram_c(GLuint p) {
         /* One spatial period per 120s: 40/30 cm per second along/across pitch. */
         glUniform2f(roof_uniforms[index].cloud_location,(GLfloat)step/480.0f,(GLfloat)enabled);
         roof_uniforms[index].cloud_key=key;
+        /* Two positive receiver notes per boot, at cached uniform updates.
+         * A ticking world alone does not prove a live shader has this uniform. */
+        unsigned reported=__atomic_load_n(&cloud_receiver_reports,__ATOMIC_RELAXED);
+        if (enabled && reported<2 && step>=(reported ? 32u : 1u) &&
+            __atomic_compare_exchange_n(&cloud_receiver_reports,&reported,reported+1u,
+                0,__ATOMIC_RELAXED,__ATOMIC_RELAXED)) {
+          char message[128];
+          snprintf(message,sizeof(message),"v79 final pitch receiver program=%u location=%d phase=%.4f",
+              p,roof_uniforms[index].cloud_location,(double)step/480.0);
+          scene_runtime_note("cloud receiver",message);
+        }
       }
     }
     if (roof_uniforms[index].location >= 0) {

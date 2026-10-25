@@ -76,7 +76,11 @@ static char *stadium_lighting_source(const char *source) {
     edits[count].at=end+1;edits[count].length=0;
     snprintf(edits[count++].text,768,
         "\n\thighp vec3 nxWeatherWorld=in_TEXCOORD8.xyz-View_PreViewTranslation;\n"
-        "\tout_Target0.xyz=nxPitchWeather(out_Target0.xyz%s,nxWeatherWorld);\n",
+        "\tout_Target0.xyz=nxPitchWeather(out_Target0.xyz%s,nxWeatherWorld);\n"
+        /* Native detail/emissive terms are added after the diffuse sample.
+         * Shade the completed pitch radiance once, so those terms cannot fill
+         * the cloud shadow back in. Fine/Rainy/Night keep the exact identity. */
+        "\tout_Target0.xyz=nxPitchCloud(out_Target0.xyz,nxWeatherWorld);\n",
         scope==16u ? "*nxRainLightScale()" : "");
   }
   /* Known colour shaders already publish linear radiance to Target0. Preserve

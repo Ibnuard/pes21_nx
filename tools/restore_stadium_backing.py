@@ -14,7 +14,7 @@ import bpy
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from stadium_backing import load_selection
+from stadium_backing import load_selection, backing_budget_allowed
 
 
 def restore(recipe_path, output):
@@ -24,11 +24,14 @@ def restore(recipe_path, output):
     backing, sources = [], []
     for item in recipe['sources']:
         rows, source = load_selection(item['source_gltf'], **item['selection'])
+        for row in rows:
+            row['atlas_source_material']=item.get('atlas_source_material',recipe['atlas_source_material'])
         backing.extend(rows);sources.append(source)
     output = Path(output).resolve()
     if output.exists():
         raise FileExistsError('Use a fresh backing output directory')
-    if (recipe['maximum_total_triangles'] > 24560 or
+    base_triangles=profile['shell_triangles']['reduced']+profile['crowd']['triangles']
+    if (not backing_budget_allowed(recipe,base_triangles,len(backing)) or
             profile['key'] != recipe['key'] or not profile.get('vertex_camera_cull')):
         raise ValueError('Unreviewed shell contract')
     blend = Path(profile['fbx']).with_suffix('.blend')
@@ -48,6 +51,12 @@ def restore(recipe_path, output):
     if len(old.uv_layers) != 5 or any(len(p.vertices) != 3 for p in old.polygons):
         raise ValueError('Base shell layout changed')
     slots = [m.name for m in old.materials]
+    for row in backing:
+        row_tile=atlas['mapping'][row['atlas_source_material']]
+        if ((row_tile.get('masked') and row_tile.get('coverage')!='all-above-native-threshold') or
+                row_tile['material'] not in slots or
+                profile['material_policies'][row_tile['material']].get('two_sided')):
+            raise ValueError('Per-panel backing must use an existing opaque one-sided tile')
     # A reclaimed atlas tile must also be unused in the actual base blend,
     # not only in the independent cooked export used during preparation.
     if 'reclaimed_tile_proof' in recipe:
@@ -57,7 +66,7 @@ def restore(recipe_path, output):
             raise ValueError('Backing atlas tile is referenced by base geometry')
     old_count = len(old.polygons)
     crowd = sum(1 for p in old.polygons if slots[p.material_index] == 'M_crowd_seated')
-    if crowd != profile['crowd']['triangles'] or old_count+len(backing) > recipe['maximum_total_triangles']:
+    if crowd != profile['crowd']['triangles'] or old_count!=base_triangles or not backing_budget_allowed(recipe,old_count,len(backing)):
         raise ValueError('Backing exceeds stadium/crowd budget')
     positions = [tuple(v.co) for v in old.vertices]
     faces = [tuple(p.vertices) for p in old.polygons]
@@ -70,11 +79,12 @@ def restore(recipe_path, output):
         raise ValueError('Unreviewed shell colour layout')
     max_cluster = max(v[1] for v in uv[1])
     for i, row in enumerate(backing):
+        row_tile=atlas['mapping'][row['atlas_source_material']]
         # Native Fox Y-up -> the established Blender (X,-Z,Y) metre basis.
         points = [(p[0], -p[2], p[1]) for p in row['positions']]
         normal = np.array((row['normal'][0], -row['normal'][2], row['normal'][1]))
         offset = len(positions);positions.extend(points);faces.append((offset,offset+1,offset+2))
-        slots_by_face.append(slots.index(material));smooth.append(False)
+        slots_by_face.append(slots.index(row_tile['material']));smooth.append(False)
         normals.extend([tuple(normal)]*3)
         light = .65+.30*max(0., min(1., float(normal @ np.array((.25,-.35,.90)))))
         colours[0].extend([(light,light,light,1.)]*3)
@@ -82,7 +92,7 @@ def restore(recipe_path, output):
         extent=(p.max(0)-p.min(0))*50+32
         packed=np.array((centre[0]*100,-centre[1]*100,centre[2]*100,*extent))/32768
         uv[0].extend(row['uv'])
-        values=[(tile['tile'],max_cluster+i+1),
+        values=[(row_tile['tile'],max_cluster+i+1),
                 (packed[0],1-packed[1]),(packed[2],1-packed[3]),(packed[4],1-packed[5])]
         for channel,value in zip(uv[1:],values):channel.extend([tuple(value)]*3)
     mesh=bpy.data.meshes.new(profile['key']+'BackedShell')
@@ -136,7 +146,9 @@ def restore(recipe_path, output):
     proof=dict(sources=sources,added_triangles=len(backing),
                preserved_base_triangles=old_count,crowd_triangles=crowd,total_triangles=len(faces),
                existing_materials_preserved=True,existing_uvs_preserved=True,
-               atlas_material=material,atlas_tile=tile['tile'],hardware_tested=False)
+               atlas_material=material,atlas_tile=tile['tile'],
+               panel_materials=sorted(set(row['atlas_source_material'] for row in backing)),
+               hardware_tested=False)
     profile['exterior_backing']=proof
     (output/'fbx.local.json').write_text(json.dumps(profile,indent=2)+'\n')
     (output/'backing-proof.json').write_text(json.dumps(proof,indent=2)+'\n')

@@ -7,12 +7,6 @@ static void corner_tactics_helper(MasterLeagueRender *ui,const char *key,
   fd_text(ui,label,x+w+.005f,fd_cap_top(cy,.017f),width-w-.005f,
       .017f,-2,verts,quads);
 }
-static void corner_tactics_entry(MasterLeagueRender *ui,uint32_t pad,
-    const FnxCornerView *view,const char *key,GLfloat *verts,int *quads) {
-  if(!view->available || view->open || *quads>3584 || pad>1)return;
-  const float x=pad ? .768f : .012f;
-  corner_tactics_helper(ui,key,"CORNER TACTICS",x,.965f,.22f,verts,quads);
-}
 static void corner_tactics_emit(MasterLeagueRender *ui,uint32_t slot,
     uint32_t panels,const FnxCornerView *view,float progress,
     GLfloat *verts,int *quads) {
@@ -40,6 +34,7 @@ static void corner_tactics_emit(MasterLeagueRender *ui,uint32_t slot,
   static const float dx[4]={.0735f,.137f,.0735f,.010f};
   static const float dy[4]={.047f,.091f,.135f,.091f};
   static const char *arrows[4]={"UP",">","DOWN","LEFT"};
+  static const char *right_buttons[4]={"Y","X","A","B"};
   for(uint32_t d=0;d<4;d++) {
     const char *label=fnx_corner_label(view->mode,d);
     if(!label[0])continue;
@@ -49,13 +44,14 @@ static void corner_tactics_emit(MasterLeagueRender *ui,uint32_t slot,
         selected ? .42f : .10f,selected ? .87f : .17f,verts,quads);
     if(selected)fd_rect(ui,cx,cy,.003f,.039f,.08f,.94f,.86f,verts,quads);
     const float icon_h=.031f,icon_w=icon_h*screen_height/screen_width;
-    ml_ui_image(ui,switch_button_texture(arrows[d]),0,cx+.006f,
+    ml_ui_image(ui,switch_button_texture(view->layout==2 ? right_buttons[d] : arrows[d]),0,cx+.006f,
         cy+(.039f-icon_h)*.5f,icon_w,icon_h,verts,quads);
     fd_text(ui,label,cx+.006f+icon_w+.005f,fd_cap_top(cy+.0195f,.017f),
         .113f-icon_w-.020f,.017f,-1,verts,quads);
   }
-  corner_tactics_helper(ui,"B_DARK","CLOSE",x+.012f,y+.190f,.085f,verts,quads);
+  corner_tactics_helper(ui,view->layout ? "SL" : "B_DARK",
+      view->layout ? "HOLD L1" : "CLOSE",x+.012f,y+.190f,.085f,verts,quads);
   if(view->short_allowed)
-    corner_tactics_helper(ui,"X_DARK",view->mode==FNX_CORNER_SHORT ?
+    corner_tactics_helper(ui,view->layout ? "SR" : "X_DARK",view->mode==FNX_CORNER_SHORT ?
         "ATTACKING CORNER" : "SHORT CORNER",x+.117f,y+.190f,.132f,verts,quads);
 }

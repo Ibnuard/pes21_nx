@@ -1,9 +1,10 @@
 """Select explicitly reviewed backing from an owned shell glTF.
 
 The input is a local intermediate export, not committed geometry. Upright
-panels require an exact height band. An explicit underground-floor receipt
-may restore the source outline only outside the protected field rectangle.
-Roof and unreviewed geometry remain excluded.
+panels require an exact height band or a hash-bound face/bounds receipt.
+Reviewed roof surfaces retain their exact source positions. An explicit
+underground-floor receipt restores only the source outline outside the
+protected field rectangle. Unreviewed geometry remains excluded.
 """
 import hashlib
 import json
@@ -90,8 +91,93 @@ def select_triangles(positions, indices, *, bottom_m, top_m, expected_triangles,
     return selected
 
 
+def select_upright_panel(positions, indices, *, panel_indices, expected_bounds,
+                         plane_axis, plane_m):
+    """Exact source-plane receipt for an irregular roof-end backing polygon."""
+    import numpy as np
+    from stadium_geometry import overlaps_pitch
+    p=np.asarray(positions,dtype=float);ids=np.asarray(indices)
+    bounds=np.asarray(expected_bounds,dtype=float)
+    if (p.ndim!=2 or p.shape[1]!=3 or ids.ndim!=2 or ids.shape[1]!=3 or
+            not np.issubdtype(ids.dtype,np.integer) or not len(ids) or
+            ids.min()<0 or ids.max()>=len(p) or not np.isfinite(plane_m) or
+            plane_axis not in (0,2) or bounds.shape!=(2,3) or
+            not np.isfinite(bounds).all() or not np.isfinite(p).all() or
+            bounds[0,1]<-15 or bounds[1,1]>100 or
+            not 1<=len(panel_indices)<=32 or len(set(panel_indices))!=len(panel_indices) or
+            any(not isinstance(i,int) or i<0 or i>=len(ids) for i in panel_indices)):
+        raise ValueError('Unbounded upright panel receipt')
+    triangles=p[ids[panel_indices]]
+    if (abs(triangles[:,:,plane_axis]-plane_m).max()>.002 or
+            abs(np.array([triangles.min((0,1)),triangles.max((0,1))])-bounds).max()>.002):
+        raise ValueError('Upright panel source plane/bounds changed')
+    result=[]
+    for index,tri in zip(panel_indices,triangles):
+        normal=np.cross(tri[1]-tri[0],tri[2]-tri[0]);area=np.linalg.norm(normal)
+        if area<1e-9 or abs(normal[1])/area>1e-4 or overlaps_pitch(tri,58.,40.):
+            raise ValueError('Upright panel is degenerate, sloped or overlaps the field')
+        flipped=float(normal[[0,2]]@tri.mean(0)[[0,2]])>0
+        if flipped:tri=tri[[0,2,1]];normal=-normal
+        result.append(dict(source_triangle=index,positions=tri.tolist(),
+                           normal=(normal/area).tolist(),winding_flipped=flipped))
+    return result
+
+
+def select_source_surface(positions, indices, *, surface_indices, expected_bounds,
+                          orientation):
+    """Bounded exact source faces: outer walls or the underside of a roof."""
+    import numpy as np
+    from stadium_geometry import overlaps_pitch
+    p=np.asarray(positions,dtype=float);ids=np.asarray(indices)
+    bounds=np.asarray(expected_bounds,dtype=float)
+    if (p.ndim!=2 or p.shape[1]!=3 or ids.ndim!=2 or ids.shape[1]!=3 or
+            not np.issubdtype(ids.dtype,np.integer) or not len(ids) or
+            ids.min()<0 or ids.max()>=len(p) or not np.isfinite(p).all() or
+            bounds.shape!=(2,3) or not np.isfinite(bounds).all() or
+            not 1<=len(surface_indices)<=256 or len(set(surface_indices))!=len(surface_indices) or
+            any(not isinstance(i,int) or i<0 or i>=len(ids) for i in surface_indices) or
+            orientation not in ('outer_wall','roof_underside','source_clockwise')):
+        raise ValueError('Unbounded source surface receipt')
+    triangles=p[ids[surface_indices]]
+    if (abs(np.array([triangles.min((0,1)),triangles.max((0,1))])-bounds).max()>.002 or
+            bounds[0,1]<-15 or bounds[1,1]>60 or abs(bounds[:,[0,2]]).max()>150):
+        raise ValueError('Source surface bounds changed')
+    result=[]
+    for index,tri in zip(surface_indices,triangles):
+        normal=np.cross(tri[1]-tri[0],tri[2]-tri[0]);area=np.linalg.norm(normal)
+        if area<1e-8:raise ValueError('Degenerate source surface')
+        if orientation=='outer_wall':
+            if abs(normal[1])/area>1e-4 or overlaps_pitch(tri,58.,40.):
+                raise ValueError('Outer backing must be upright and outside the field')
+            flipped=float(normal[[0,2]]@tri.mean(0)[[0,2]])>0
+        elif orientation=='source_clockwise':
+            if overlaps_pitch(tri,53.5,35.):raise ValueError('Source repair overlaps the playing surface')
+            flipped=True
+        else:
+            if tri[:,1].min()<8 or overlaps_pitch(tri,53.5,35.):
+                raise ValueError('Roof backing overlaps the protected playing surface')
+            # Roof sheets face the stadium interior. Upright end panes use
+            # the same inward winding as the surrounding source walls.
+            flipped=normal[1]>0 if abs(normal[1])/area>.1 else float(normal[[0,2]]@tri.mean(0)[[0,2]])>0
+        if flipped:tri=tri[[0,2,1]];normal=-normal
+        result.append(dict(source_triangle=index,positions=tri.tolist(),normal=(normal/area).tolist(),winding_flipped=bool(flipped)))
+    return result
+
+
+def backing_budget_allowed(recipe, base_triangles, added_triangles):
+    maximum=recipe['maximum_total_triangles']
+    if not 0<base_triangles or not 0<added_triangles or base_triangles+added_triangles>maximum:
+        return False
+    if maximum<=24560:return True
+    # Explicit Old Trafford completion: preserve its accepted base instead of
+    # damaging stairs/crowd again to make room for missing source roof sheets.
+    return (recipe.get('key')=='OldTrafford' and base_triangles==24522 and
+            maximum<=25320 and added_triangles<=798 and
+            recipe.get('source_roof_completion')==dict(native_reference=24560,maximum_extra_triangles=760))
+
+
 def load_selection(path, *, expected_sha256, expected_buffer_sha256, material,
-                   floor_receipt=None, floor_receipt_sha256=None, **selection):
+                   primitive_ordinal=None, floor_receipt=None, floor_receipt_sha256=None, **selection):
     import numpy as np
     from audit_stadium_optimization import accessor
     path = Path(path).resolve(strict=True)
@@ -112,9 +198,16 @@ def load_selection(path, *, expected_sha256, expected_buffer_sha256, material,
         raise ValueError('Backing buffer fingerprint/length changed')
     matches = [p for mesh in doc['meshes'] for p in mesh['primitives']
                if doc['materials'][p['material']]['name'] == material]
-    if len(matches) != 1 or matches[0].get('mode', 4) != 4:
-        raise ValueError('Expected one reviewed backing material')
-    prim = matches[0]
+    if primitive_ordinal is None:
+        if len(matches) != 1:
+            raise ValueError('Expected one reviewed backing material')
+        primitive_ordinal = 0
+    elif (type(primitive_ordinal) is not int or
+          not 0 <= primitive_ordinal < len(matches)):
+        raise ValueError('Reviewed backing primitive ordinal is out of range')
+    prim = matches[primitive_ordinal]
+    if prim.get('mode', 4) != 4:
+        raise ValueError('Reviewed backing primitive is not triangles')
     if floor_receipt is not None:
         payload=Path(floor_receipt).read_bytes()
         if hashlib.sha256(payload).hexdigest()!=floor_receipt_sha256:
@@ -147,7 +240,9 @@ def load_selection(path, *, expected_sha256, expected_buffer_sha256, material,
                 raise ValueError('Clipped floor geometry violates its source/field bounds')
         return receipt['rows'],dict(gltf_sha256=expected_sha256,buffer_sha256=expected_buffer_sha256,
                                     material=material,floor=receipt['proof'])
-    result = select_triangles(accessor(doc, blob, prim['attributes']['POSITION']),
+    selector=(select_source_surface if 'surface_indices' in selection else
+              select_upright_panel if 'panel_indices' in selection else select_triangles)
+    result = selector(accessor(doc, blob, prim['attributes']['POSITION']),
                               accessor(doc, blob, prim['indices']).reshape(-1, 3), **selection)
     ids = accessor(doc, blob, prim['indices']).reshape(-1, 3)
     uv = accessor(doc, blob, prim['attributes']['TEXCOORD_0'])
@@ -160,4 +255,5 @@ def load_selection(path, *, expected_sha256, expected_buffer_sha256, material,
         # glTF UV V-down -> Blender V-up; export then restores UE's V-down.
         row['uv'] = [(float(u), 1.-float(v)) for u, v in values]
     return result, dict(gltf_sha256=hashlib.sha256(raw).hexdigest(),
-                        buffer_sha256=hashlib.sha256(blob).hexdigest(), material=material)
+                        buffer_sha256=hashlib.sha256(blob).hexdigest(), material=material,
+                        primitive_ordinal=primitive_ordinal)

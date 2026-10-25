@@ -9223,8 +9223,9 @@ static void overlay_render(void) {
    * set-play helper, including the local defending side without a Mobile HUD. */
   if(corner_available_count==1 && !corner_open_count) {
     for(uint32_t pad=0;pad<2;pad++)if(corner_views[pad].available && setplay_helper_count<7) {
-      setplay_keys[setplay_helper_count]=android_controller_profile(pad)==PES_CONTROLLER_PROFILE_FULL ? "LEFT" : "LS";
-      setplay_labels[setplay_helper_count++]=corner_available_count==1 ? "CORNER TACTICS" :
+      const int horizontal=android_controller_profile(pad)!=PES_CONTROLLER_PROFILE_FULL;
+      setplay_keys[setplay_helper_count]=horizontal ? "SL" : "LEFT";
+      setplay_labels[setplay_helper_count++]=horizontal ? "HOLD FOR TACTICS" : corner_available_count==1 ? "CORNER TACTICS" :
           corner_views[pad].mode==FNX_CORNER_DEFENCE ? "DEFENCE TACTICS" : "ATTACK TACTICS";
     }
   }
@@ -9273,7 +9274,16 @@ static void overlay_render(void) {
   // One sprite group plus a measured label per row. Rail-button chords use
   // real SL/SR art, not the old text-only L1/R1 badges.
   if(corner_open_count)setplay_helper_count=0;
-  if (setplay_helper_count) {
+  const char *corner_entry_keys[2]={NULL},*corner_entry_labels[2]={NULL};
+  unsigned corner_entry_count=0;
+  if(corner_available_count>1)for(uint32_t pad=0;pad<2;pad++) {
+    if(!corner_views[pad].available || corner_views[pad].open)continue;
+    const int horizontal=android_controller_profile(pad)!=PES_CONTROLLER_PROFILE_FULL;
+    corner_entry_keys[pad]=horizontal ? "SL" : "LEFT";
+    corner_entry_labels[pad]=horizontal ? "HOLD FOR TACTICS" : "CORNER TACTICS";
+    corner_entry_count++;
+  }
+  if (setplay_helper_count || corner_entry_count) {
     const float size = screen_height * 0.045f;
     const float gh = helper_text_gh;
     const float gap = screen_height * 0.017f;
@@ -9281,17 +9291,25 @@ static void overlay_render(void) {
     int has_chord = 0;
     for (uint32_t i = 0; i < setplay_helper_count; ++i)
       has_chord |= strchr(setplay_keys[i], '+') != NULL;
+    // Keep both owners' columns stable while either tactics panel is open.
+    has_chord |= corner_available_count>1 && single_joy_setplay;
     const float group_w = size * (has_chord ? 2.65f : 1.0f);
     float label_w = 0;
     for (uint32_t i = 0; i < setplay_helper_count; ++i)
       label_w = fmaxf(label_w, measure_efootball_line(setplay_labels[i],
           (int)strlen(setplay_labels[i]), gh, EFOOTBALL_FONT_BOLD));
+    if(corner_available_count>1)for(uint32_t pad=0;pad<2;pad++) {
+      const char *label=android_controller_profile(pad)!=PES_CONTROLLER_PROFILE_FULL ?
+          "HOLD FOR TACTICS" : "CORNER TACTICS";
+      label_w=fmaxf(label_w,measure_efootball_line(label,(int)strlen(label),gh,EFOOTBALL_FONT_BOLD));
+    }
     const int corner_pair=corner_available_count>1;
     const int left_corner=corner_pair && corner_views[0].mode!=FNX_CORNER_DEFENCE;
     const float x = left_corner ? .012f*screen_width :
         (corner_available_count ? .988f : .955f)*screen_width-label_w-gap-group_w;
-    const float start_y = (corner_pair ? .900f : corner_available_count ? .965f : .925f) * screen_height -
-                          (setplay_helper_count - 1u) * step;
+    const float entry_y=.965f*screen_height;
+    const float start_y = (corner_pair ? entry_y-step : corner_available_count ? entry_y : .925f*screen_height) -
+                          (setplay_helper_count ? setplay_helper_count - 1u : 0u) * step;
     for (uint32_t i = 0; i < setplay_helper_count; ++i) {
       const int rail = !strcmp(setplay_keys[i], "L1+R1");
       const int kick = !strcmp(setplay_keys[i], "LS+Y");
@@ -9309,6 +9327,9 @@ static void overlay_render(void) {
             start_y + i * step - size * 0.5f, size, size, verts + quads * 24);
       }
     }
+    float entry_x[2]={.012f*screen_width,.988f*screen_width-label_w-gap-group_w};
+    for(uint32_t pad=0;pad<2;pad++)if(corner_entry_keys[pad])
+      ADD_SWITCH_HELPER(corner_entry_keys[pad],entry_x[pad]+size*.5f,entry_y,size);
     setplay_helper_text_first_quad = quads;
     for (uint32_t i = 0; i < setplay_helper_count; ++i) {
       const float y = start_y + i * step - gh * 0.5f;
@@ -9321,6 +9342,13 @@ static void overlay_render(void) {
       const int n = emit_efootball_line(setplay_labels[i], (int)strlen(setplay_labels[i]),
           x + group_w + gap, y, gh, EFOOTBALL_FONT_BOLD, verts + quads * 24);
       quads += n; setplay_helper_text_quads += n;
+    }
+    // The same bold white text and two-pixel shadow pass as the rows above.
+    for(uint32_t pad=0;pad<2;pad++)if(corner_entry_labels[pad]) {
+      const char *label=corner_entry_labels[pad];
+      const int n=emit_efootball_line(label,(int)strlen(label),entry_x[pad]+group_w+gap,
+          entry_y-gh*.5f,gh,EFOOTBALL_FONT_BOLD,verts+quads*24);
+      quads+=n;setplay_helper_text_quads+=n;
     }
   }
   const int setplay_gauge_supported =
@@ -9918,9 +9946,6 @@ static void overlay_render(void) {
   }
 
   for(uint32_t pad=0;pad<2;pad++) {
-    if(corner_available_count>1)
-      corner_tactics_entry(&corner_ui,pad,&corner_views[pad],
-          android_controller_profile(pad)==PES_CONTROLLER_PROFILE_FULL ? "LEFT" : "LS",verts,&quads);
     if(!corner_views[pad].open){corner_open_tick[pad]=0;continue;}
     if(!corner_open_tick[pad] || corner_now<corner_open_tick[pad])corner_open_tick[pad]=corner_now;
     const float progress=fminf(1.f,(float)(corner_now-corner_open_tick[pad])/140.f);

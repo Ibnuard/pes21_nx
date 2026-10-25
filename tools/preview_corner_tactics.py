@@ -15,15 +15,16 @@ import preview_cup as shared
 
 ROOT=shared.ROOT
 DRIVER=r'''
-static void capture(const char *name,unsigned mode,int split) {
+static void capture(const char *name,unsigned mode,int split,unsigned layout) {
   MasterLeagueRender ui={0};static GLfloat vertices[4096*24+8];int quads=0;
   for(int i=4096*24;i<4096*24+8;i++)vertices[i]=12345.f;
   FnxCornerView v={.available=1,.open=1,.mode=mode,.short_allowed=mode!=3,.current=0};
+  v.layout=layout;
   const FnxCornerView before=v;
   corner_tactics_emit(&ui,0,split?2:1,&v,1.f,vertices,&quads);
   assert(ui.draws[0].round.radius==ui.draws[1].round.radius);
   assert(ui.draws[2].round.radius==0 && ui.draws[3].round.radius==0);
-  if(split){v.mode=3;v.short_allowed=0;v.current=3;corner_tactics_emit(&ui,1,2,&v,1.f,vertices,&quads);}
+  if(split){v.mode=3;v.short_allowed=0;v.current=3;if(layout)v.layout=2;corner_tactics_emit(&ui,1,2,&v,1.f,vertices,&quads);}
   else assert(!memcmp(&v,&before,sizeof(v)));
   assert(quads<1024 && ui.draw_count<80);
   for(int i=4096*24;i<4096*24+8;i++)assert(vertices[i]==12345.f);
@@ -52,7 +53,8 @@ int main(void) {
   initialize_gl();FILE *f=fopen("font.pgm","wb");assert(f);
   fprintf(f,"P5\n%d %d\n255\n",EFOOTBALL_FONT_ATLAS_W,EFOOTBALL_FONT_ATLAS_H);
   fwrite(efootball_font_atlas_alpha,1,sizeof(efootball_font_atlas_alpha),f);fclose(f);
-  capture("attack",1,0);capture("short",2,0);capture("defence",3,0);capture("two-player",1,1);
+  capture("attack",1,0,0);capture("short",2,0,0);capture("defence",3,0,0);capture("two-player",1,1,0);
+  capture("horizontal-left",1,0,1);capture("horizontal-right",2,0,2);capture("horizontal-two-player",1,1,1);
   {MasterLeagueRender ui={0};GLfloat vertices[24];int quads=0;
    FnxCornerView closed={.available=1,.open=0};
    corner_tactics_emit(&ui,0,1,&closed,1.f,vertices,&quads);
@@ -82,11 +84,11 @@ def main():
         if result.returncode:raise SystemExit(result.stderr)
         result=subprocess.run([str(temp/'preview.exe')],cwd=temp,capture_output=True,text=True)
         if result.returncode:raise RuntimeError(result.stderr)
-        assets={2:Image.open(temp/'font.pgm').convert('RGB')}
+        assets={2:Image.open(temp/'font.pgm').convert('RGB'),20:Image.open(ROOT/'data/main_menu_button_a.bin').convert('RGBA'),21:Image.open(ROOT/'data/main_menu_button_b.bin').convert('RGBA')}
         import re
         header=(ROOT/'source/switch_button_assets.h').read_text()
         for i,(name,_) in enumerate(re.findall(r'X\((\w+), "([^"]+)"\)',header)):
-            if name in ('b_dark','x_dark','up','down','left','right'):
+            if name in ('b_dark','x_dark','up','down','left','right','sl','sr','x','y'):
                 assets[22+i]=Image.open(ROOT/'data'/f'switch_button_{name}.bin').convert('RGBA')
         for p in temp.glob('*.json'):
             shared.rasterize(json.loads(p.read_text()),assets).save(output/p.with_suffix('.png').name)

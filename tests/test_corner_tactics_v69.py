@@ -61,12 +61,18 @@ def hid_binary(tmp_path_factory):
     cc=shutil.which('gcc') or shutil.which('clang')
     if not cc:pytest.skip('host C compiler required')
     out=tmp_path_factory.mktemp('corner-hid-v69')/'hid.exe'
+    from test_gameplan_editor import function
+    shim=(ROOT/'source/android_shim.c').read_text()
+    cases=(ROOT/'tests/corner_hid_cases.c').read_text()
+    mapping='typedef enum {CONTROLLER_PROFILE_FULL,CONTROLLER_PROFILE_SINGLE_LEFT,CONTROLLER_PROFILE_SINGLE_RIGHT} ControllerProfile;\n'+function(shim,'controller_profile_map_buttons')+'\n'
+    cases=cases.replace('#include "corner_tactics_hid.inc"',mapping+'#include "corner_tactics_hid.inc"')
+    source=out.with_suffix('.c');source.write_text(cases)
     subprocess.run([cc,'-std=c11','-Wall','-Wextra','-Werror','-pthread',
-        '-I',(ROOT/'source').as_posix(),(ROOT/'tests/corner_hid_cases.c').as_posix(),
+        '-I',(ROOT/'source').as_posix(),source.as_posix(),
         (ROOT/'source/corner_tactics.c').as_posix(),'-lm','-o',out.as_posix()],check=True,capture_output=True,text=True)
     return out
 
-@pytest.mark.parametrize('case',['full-right','single-stick','cancel','short-page'])
+@pytest.mark.parametrize('case',['full-right','single-hold','single-short-two-pads','single-mapping','cancel','short-page'])
 def test_actual_hid_adapter(hid_binary,case):
     subprocess.run([str(hid_binary),case],check=True,capture_output=True,text=True)
 

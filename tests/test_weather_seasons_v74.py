@@ -35,12 +35,15 @@ int main(){
   nxCloudMotion.x=0;float after=nxPitchCloud(color,pos).y;
   assert(fabs(before-after)<.00001f); // 240-second phase wrap has no jump.
  }
- assert(min_factor>=.79999f && min_factor<.88f && max_factor>.99f);
+ assert(min_factor>=.57999f && min_factor<.70f && max_factor>.99f);
  assert(motion>1.f); // Slow motion must change the actual receiver, not only a clock.
- // Mowing normalization must not erase the shadow on authored stadiums.
+ // Apply cloud shade to completed radiance, after mowing and native additions.
  nxStadiumProfile=13;pos=vec3(0,0,0);nxCloudMotion=vec2(0,0);
  vec3 base=nxPitchMowing(color,pos);nxCloudMotion.y=1;
- vec3 shaded=nxPitchMowing(color,pos);assert(shaded.y<=base.y&&shaded.y>=base.y*.79999f);
+ vec3 no_early_cloud=nxPitchMowing(color,pos);assert(no_early_cloud.y==base.y);
+ vec3 completed=base+vec3(.5);
+ vec3 shaded=nxPitchCloud(completed,pos);
+ assert(shaded.y<=completed.y&&shaded.y>=completed.y*.57999f);
 }
 ''')
 
