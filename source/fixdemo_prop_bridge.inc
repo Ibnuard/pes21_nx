@@ -32,15 +32,17 @@ typedef struct {
 static const FixDemoPropMapping fixdemo_prop_mappings[] = {
   {FIXDEMO_PROP_CUP,
    "common/demo/prop/cup_int_hi/cup_int_hi.fpk",
-   "common/demo/prop/cup_int_hi/cup_int_hi.xml",
+   "cpk_dat/common/demo/prop/cup_int_hi/cup_int_hi.xml",
    "FootballNX/FixDemo/cup_int_hi/cup_int_hi.cup_int_hi"},
   {FIXDEMO_PROP_PODIUM,
    "common/demo/fixdemoobj/winners_platform_common/winners_platform_common.fpk",
-   "common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
+   "cpk_dat/common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
    "FootballNX/FixDemo/platform_cmn/platform_cmn.platform_cmn"},
 };
 
-/* Exact, length-delimited identity. No basename, case folding, traversal,
+/* Runtime identity is the exact output of native FixDemoCorrectModelPath,
+ * including cpk_dat/. Descriptor paths belong to the offline resource audit.
+ * Exact, length-delimited identity. No basename, case folding, traversal,
  * #Win alias, .fpk->.xml rewrite or permissive "cup_*" matching at runtime. */
 static inline const FixDemoPropMapping *fixdemo_prop_lookup(
     const char *path, size_t length, int descriptor) {

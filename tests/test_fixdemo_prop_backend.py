@@ -317,8 +317,8 @@ if __name__ == "__main__":
     assert sys.argv[1:] == ["--native-probes"]
     evidence = read_native_contract()
     for runtime_path in (
-        "common/demo/prop/cup_int_hi/cup_int_hi.xml",
-        "common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
+        "cpk_dat/common/demo/prop/cup_int_hi/cup_int_hi.xml",
+        "cpk_dat/common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
     ):
         for has_skeleton in (False, True):
             probe_native_create_cleans_slots_and_skips_props(evidence, runtime_path, has_skeleton)

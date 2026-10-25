@@ -26,11 +26,11 @@ static void test_paths(void) {
   } expected[] = {
     {FIXDEMO_PROP_CUP,
      "common/demo/prop/cup_int_hi/cup_int_hi.fpk",
-     "common/demo/prop/cup_int_hi/cup_int_hi.xml",
+     "cpk_dat/common/demo/prop/cup_int_hi/cup_int_hi.xml",
      "FootballNX/FixDemo/cup_int_hi/cup_int_hi.cup_int_hi"},
     {FIXDEMO_PROP_PODIUM,
      "common/demo/fixdemoobj/winners_platform_common/winners_platform_common.fpk",
-     "common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
+     "cpk_dat/common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
      "FootballNX/FixDemo/platform_cmn/platform_cmn.platform_cmn"},
   };
   for (size_t i = 0; i < COUNT(expected); ++i) {
@@ -79,6 +79,10 @@ static void test_paths(void) {
     }
   }
   const char *rejected[] = {
+    "common/demo/prop/cup_int_hi/cup_int_hi.xml",
+    "common/demo/fixdemoobj/winners_platform_common/winners_platform_common.xml",
+    "cpk_dat/cpk_dat/common/demo/prop/cup_int_hi/cup_int_hi.xml",
+    "cpk_dat/common/demo/prop/cup_int_hi/#Win/cup_int_hi.xml",
     "common/demo/prop/cup_other/cup_other.fpk",
     "common/demo/prop/cup_int_hi/#Win/cup_int_hi.fpk",
     "common/demo/prop/cup_int_hi/cup_int_hi.fpkd",

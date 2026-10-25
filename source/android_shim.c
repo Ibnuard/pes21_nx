@@ -1804,10 +1804,33 @@ static uint32_t append_cinematic_skip_controller(FakeTouchState *desired,
                                                  uint64_t now_ms) {
   (void)desired;
   (void)now_ms;
+  static uint32_t ceremony_generation, ceremony_phase;
+  static int ceremony_released;
+  const uint32_t phase = pes_controller_ceremony_input_state();
+  if (ceremony_generation != synthetic_input_generation || ceremony_phase != phase) {
+    ceremony_generation = synthetic_input_generation;
+    ceremony_phase = phase;
+    ceremony_released = 0;
+  }
   replay_touch_requested = 0;
-  if (!connected)
+  if (!connected) {
+    ceremony_released = 0;
     return 0;
-  const u64 pressed = buttons & ~previous_buttons;
+  }
+  u64 pressed = buttons & ~previous_buttons;
+  if (phase != PES_CEREMONY_INPUT_NONE) {
+    /* HID includes synthesized stick directions and controller-status bits.
+     * A Cup ceremony requires a released, intentional face/Plus press AFTER
+     * native StartDemoEvent. Loading/held transition input cannot cancel it. */
+    const u64 skip_buttons = HidNpadButton_A | HidNpadButton_B |
+        HidNpadButton_X | HidNpadButton_Y | HidNpadButton_Plus;
+    if (phase != PES_CEREMONY_INPUT_PLAYING) return 0;
+    if (!ceremony_released) {
+      if (!(buttons & skip_buttons)) ceremony_released = 1;
+      return 0;
+    }
+    pressed &= skip_buttons;
+  }
   if (pressed) {
     pes_controller_demo_skip_request();
     pes_controller_replay_feedback_set(

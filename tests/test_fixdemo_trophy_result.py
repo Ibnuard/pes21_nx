@@ -54,8 +54,8 @@ def test_real_result_runtime_host(tmp_path):
     executable = tmp_path / "trophy-result.exe"
     built = subprocess.run(
         [compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-         "-I", str(ROOT / "source"), str(ROOT / "tests/test_fixdemo_trophy_result.c"),
-         "-o", str(executable)], capture_output=True, text=True, timeout=60,
+         "-I", (ROOT / "source").as_posix(), (ROOT / "tests/test_fixdemo_trophy_result.c").as_posix(),
+         "-o", executable.as_posix()], capture_output=True, text=True, timeout=60,
     )
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([str(executable)], capture_output=True, text=True, timeout=15)

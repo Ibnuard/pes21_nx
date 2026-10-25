@@ -38,7 +38,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 #   NACP building is skipped as well.
 #---------------------------------------------------------------------------------
 TARGET		:=	pes21_nx
-APP_TITLE	:=	FootballNX 26
+APP_TITLE	:=	FootballNX 27
 APP_AUTHOR	:=	Androswitch Project
 APP_VERSION	:=	2.0.1-preview
 # Shared FNX Ronaldo artwork for local and CI builds.

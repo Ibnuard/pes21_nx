@@ -8,6 +8,7 @@
  * Flow/MatchListener own execution, Skip, virtual deletion and FPS restoration.
  */
 #include "fixdemo_ceremony_policy.h"
+#include "exhibition_match_identity.h"
 
 typedef struct FixdemoTrophyResultScope {
   void *owner;
@@ -47,6 +48,7 @@ static uintptr_t fixdemo_trophy_fade_cancel[2], fixdemo_trophy_fade_is_end[2];
 static void *(*fixdemo_trophy_result_original)(uint32_t, uint32_t);
 static void *(*fixdemo_trophy_match_original)(uint32_t, uint32_t);
 static const void *(*fixdemo_trophy_global_registry)(void);
+static const void *(*fixdemo_trophy_native_environment)(void);
 static const uint32_t *(*fixdemo_trophy_stats_team_id)(const void *, uint32_t);
 static const void *(*fixdemo_trophy_stats_team)(const void *, uint32_t);
 static uint32_t (*fixdemo_trophy_score)(const void *, uint32_t);
@@ -64,6 +66,10 @@ static FixdemoCeremonyPlan fixdemo_trophy_plan;
 static void *fixdemo_trophy_owner, *fixdemo_trophy_manager;
 static uint32_t fixdemo_trophy_started, fixdemo_trophy_abort;
 static uint32_t fixdemo_trophy_finished;
+static uint32_t fixdemo_trophy_observed_major, fixdemo_trophy_observed_cut;
+static uint32_t fixdemo_trophy_observed_permissions, fixdemo_trophy_state_notes;
+static uint32_t fixdemo_trophy_observed_loading, fixdemo_trophy_observed_loaded;
+static uint32_t fixdemo_trophy_cut_notes, fixdemo_trophy_cut_signature[5];
 static uint32_t fixdemo_trophy_owner_kind, fixdemo_trophy_fallback_scene;
 static uint32_t fixdemo_trophy_fallback_side, fixdemo_trophy_ending_steps;
 static uint32_t fixdemo_trophy_wait_logged;
@@ -72,6 +78,7 @@ static int fixdemo_trophy_result_installed;
 /* The process/UI queue sees only atomic token values, never listener or model
  * pointers. The serialized listener queue owns the remaining metadata. */
 static uint64_t fixdemo_trophy_ui_token, fixdemo_trophy_ui_skip;
+static uint64_t fixdemo_trophy_ui_playing_token;
 static uint64_t fixdemo_trophy_ui_timeout, fixdemo_trophy_ui_since;
 static uint64_t fixdemo_trophy_ui_waiting_token;
 static uint32_t fixdemo_trophy_ui_polls;
@@ -84,14 +91,24 @@ static int fixdemo_trophy_ui_active(void) {
   return token && token == __atomic_load_n(&fixdemo_trophy_live_token, __ATOMIC_ACQUIRE);
 }
 
+static uint32_t fixdemo_trophy_input_state(void) {
+  const uint64_t token = __atomic_load_n(&fixdemo_trophy_ui_token, __ATOMIC_ACQUIRE);
+  if (!token || token != __atomic_load_n(&fixdemo_trophy_live_token, __ATOMIC_ACQUIRE)) return 0u;
+  return token == __atomic_load_n(&fixdemo_trophy_ui_playing_token, __ATOMIC_ACQUIRE) ? 2u : 1u;
+}
+
 static int fixdemo_trophy_request_skip(void) {
   const uint64_t token = __atomic_load_n(&fixdemo_trophy_ui_token, __ATOMIC_ACQUIRE);
   if (!token || token != __atomic_load_n(&fixdemo_trophy_live_token, __ATOMIC_ACQUIRE)) return 0;
+  /* Loading owns input too. Consume stale demo requests without forwarding
+   * them to another native owner or queuing a Skip before the first cut. */
+  if (token != __atomic_load_n(&fixdemo_trophy_ui_playing_token, __ATOMIC_ACQUIRE)) return 1;
   __atomic_store_n(&fixdemo_trophy_ui_skip, token, __ATOMIC_RELEASE);
   return 1;
 }
 
 static void fixdemo_trophy_release_ui(void) {
+  __atomic_store_n(&fixdemo_trophy_ui_playing_token, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&fixdemo_trophy_ui_token, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&fixdemo_trophy_ui_waiting_token, 0, __ATOMIC_RELEASE);
   fixdemo_trophy_ui_owner = NULL;
@@ -117,9 +134,43 @@ static uint32_t fixdemo_trophy_word(const void *base, size_t offset) {
   return value;
 }
 
+/* Read only the manager passed by its current owner. Native Exec/ExecMain and
+ * the listener fingerprints bind these scalar offsets. Never walk a saved cut
+ * or renderer pointer, and never write a native load/state/readiness field. */
+static void fixdemo_trophy_observe_manager(void *manager, const void *owner) {
+  const unsigned char *bytes = manager;
+  const uint32_t major = fixdemo_trophy_word(manager, 0x1dc);
+  const uint32_t cut = fixdemo_trophy_word(manager, 0x1e0);
+  const unsigned char *environment = fixdemo_trophy_native_environment();
+  const uint32_t suppressed = environment ? environment[0x5262] : UINT8_MAX;
+  const uint32_t permissions = bytes[0x54] | ((uint32_t)bytes[0x55] << 8) | (suppressed << 16);
+  const uint32_t loading = fixdemo_trophy_word(manager, 0x230);
+  const uint32_t loaded = fixdemo_trophy_word(manager, 0x234);
+  if (major == fixdemo_trophy_observed_major && cut == fixdemo_trophy_observed_cut &&
+      permissions == fixdemo_trophy_observed_permissions &&
+      loading == fixdemo_trophy_observed_loading && loaded == fixdemo_trophy_observed_loaded) return;
+  fixdemo_trophy_observed_major = major;
+  fixdemo_trophy_observed_cut = cut;
+  fixdemo_trophy_observed_permissions = permissions;
+  fixdemo_trophy_observed_loading = loading;
+  fixdemo_trophy_observed_loaded = loaded;
+  if (fixdemo_trophy_state_notes++ >= 20u) return;
+  char message[256];
+  snprintf(message, sizeof(message),
+      "candidate-state token=%llu step=%u manager=%u cut=%u allow=%u skip=%u requested=%u started=%u cut_object=%u loading=%x loaded=%x suppressed=%u",
+      (unsigned long long)fixdemo_trophy_plan.match_token,
+      owner ? ((const unsigned char *)owner)[0x119] : UINT8_MAX,
+      major, cut, bytes[0x54], bytes[0x55],
+      fixdemo_trophy_plan.match_token == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE),
+      fixdemo_trophy_started, fixdemo_trophy_pointer(manager, 0xe8) != NULL,
+      loading, loaded, suppressed);
+  fixdemo_trophy_note(message);
+}
+
 static void fixdemo_trophy_forget_candidate(void) {
   /* Invalidate asynchronous notifications BEFORE any native destructor. No
    * deletion happens here: only the proven native owner may release objects. */
+  __atomic_store_n(&fixdemo_trophy_ui_playing_token, 0, __ATOMIC_RELEASE);
   if (fixdemo_trophy_plan.match_token)
     fixdemo_trophy_props_cancel(fixdemo_trophy_plan.match_token);
   fixdemo_trophy_owner = NULL;
@@ -160,7 +211,8 @@ static void fixdemo_trophy_begin_match(void) {
 }
 
 /* Both entry adapters call this only with currently readable native records.
- * It copies values, validates physical IDs and retains no native data pointer. */
+ * It copies values, validates physical identity plus the native HOME/AWAY
+ * storage locator, and retains no native data pointer. */
 static int fixdemo_trophy_snapshot(const void *record, const void *match,
     const CompetitionCupFinalContext *final, FixdemoCeremonySnapshot *snapshot) {
   if (!record || !match) {
@@ -175,8 +227,14 @@ static int fixdemo_trophy_snapshot(const void *record, const void *match,
     const uint32_t physical = exhibition_native_team_id(logical);
     const uint32_t *observed = fixdemo_trophy_stats_team_id(stats, index);
     const void *team = fixdemo_trophy_stats_team(stats, index);
-    if (!physical || !observed || *observed != physical || !team) {
-      fixdemo_trophy_diagnostic("factory-rejected current-team-mismatch");
+    if (!observed || !team ||
+        !exhibition_match_team_identity(*observed, physical, index)) {
+      char message[192];
+      snprintf(message, sizeof(message),
+          "factory-rejected current-team-mismatch side=%u logical=%u actual=%u master=%u expected=%u",
+          index, logical, observed ? *observed : 0u, physical,
+          physical ? physical | (0x3ffdu + index) : 0u);
+      fixdemo_trophy_diagnostic(message);
       return 0;
     }
     const uint32_t full = fixdemo_trophy_score(team, 5u);
@@ -443,6 +501,12 @@ static void *fixdemo_trophy_create_candidate(const FixdemoCeremonyPlan *plan,
   fixdemo_trophy_fallback_side = side;
   fixdemo_trophy_manager = candidate;
   fixdemo_trophy_started = fixdemo_trophy_abort = fixdemo_trophy_finished = 0u;
+  fixdemo_trophy_observed_major = fixdemo_trophy_observed_cut = UINT32_MAX;
+  fixdemo_trophy_observed_permissions = UINT32_MAX;
+  fixdemo_trophy_observed_loading = fixdemo_trophy_observed_loaded = UINT32_MAX;
+  fixdemo_trophy_cut_notes = 0;
+  memset(fixdemo_trophy_cut_signature, 0xff, sizeof(fixdemo_trophy_cut_signature));
+  fixdemo_trophy_state_notes = 0u;
   fixdemo_trophy_note("candidate-created awaiting-two-bound-meshes");
   return candidate;
 }
@@ -588,6 +652,9 @@ static void fixdemo_trophy_start(void *manager) {
   }
   /* Preserve the native 30-FPS cinematic request and its saved restore value. */
   fixdemo_trophy_start_original(manager);
+  if (manager == fixdemo_trophy_manager && fixdemo_trophy_started && !fixdemo_trophy_abort &&
+      fixdemo_trophy_plan.match_token == __atomic_load_n(&fixdemo_trophy_ui_token, __ATOMIC_ACQUIRE))
+    __atomic_store_n(&fixdemo_trophy_ui_playing_token, fixdemo_trophy_plan.match_token, __ATOMIC_RELEASE);
 }
 
 static void fixdemo_trophy_end(void *manager) {
@@ -602,6 +669,20 @@ static int fixdemo_trophy_cut_ready(void *manager, void *cut, uint32_t number,
                                     uint32_t first) {
   const int native_ready = fixdemo_trophy_cut_ready_original(manager, cut, number, first);
   if (manager != fixdemo_trophy_manager) return native_ready;
+  /* Inspect only this native invocation's live cut argument. Exec/CreateWork
+   * fingerprints bind these scalar fields; no saved cut pointer is followed. */
+  const uint32_t observed[5] = {number, first, (uint32_t)native_ready,
+      fixdemo_trophy_word(cut, 0x48), fixdemo_trophy_word(cut, 0x4c)};
+  if (memcmp(observed, fixdemo_trophy_cut_signature, sizeof(observed))) {
+    memcpy(fixdemo_trophy_cut_signature, observed, sizeof(observed));
+    if (fixdemo_trophy_cut_notes++ < 16u) {
+      char message[160];
+      snprintf(message, sizeof(message),
+          "cut-readiness number=%u first=%u native=%u data_state=%u work_phase=%u",
+          observed[0], observed[1], observed[2], observed[3], observed[4]);
+      fixdemo_trophy_note(message);
+    }
+  }
   /* Native loading still runs, but the first cut cannot start with missing
    * props. Later cuts may legitimately retire either prop; their native
    * per-object IsReady checks remain authoritative without requiring both
@@ -748,6 +829,7 @@ static void fixdemo_trophy_listener(void *listener, const void *context) {
        * applies the same Skip permission consumed by Manager::Exec/ExecMain. */
       if (token == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE))
         ((unsigned char *)manager)[0x55] = 1u;
+      fixdemo_trophy_observe_manager(manager, listener);
       const int failed = fixdemo_trophy_abort ||
           token == __atomic_load_n(&fixdemo_trophy_ui_timeout, __ATOMIC_ACQUIRE) ||
           (fixdemo_trophy_started ? fixdemo_trophy_props_peek(token) :
@@ -756,6 +838,19 @@ static void fixdemo_trophy_listener(void *listener, const void *context) {
        * A natural EndDemoEvent also means the native FPS has been restored. */
       const int finished = fixdemo_trophy_finished || fixdemo_trophy_word(manager, 0x1dc) == 4u;
       if (failed || finished) {
+        const int skipped = token == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE) ||
+                            ((const unsigned char *)manager)[0x55];
+        const int unstarted = finished && !fixdemo_trophy_started && !skipped;
+        char message[256];
+        snprintf(message, sizeof(message),
+            "candidate-terminal reason=%s manager=%u cut=%u allow=%u native_skip=%u requested=%u started=%u ended=%u loading=%x loaded=%x",
+            failed ? "failure" : skipped ? "skip" : unstarted ? "native-terminal-before-start" : "native-end",
+            fixdemo_trophy_word(manager, 0x1dc), fixdemo_trophy_word(manager, 0x1e0),
+            ((const unsigned char *)manager)[0x54], ((const unsigned char *)manager)[0x55],
+            token == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE),
+            fixdemo_trophy_started, fixdemo_trophy_finished,
+            fixdemo_trophy_word(manager, 0x230), fixdemo_trophy_word(manager, 0x234));
+        fixdemo_trophy_note(message);
         const uint32_t scene = fixdemo_trophy_fallback_scene, side = fixdemo_trophy_fallback_side;
         fixdemo_trophy_failed_token = token;
         fixdemo_trophy_forget_candidate();
@@ -774,7 +869,7 @@ static void fixdemo_trophy_listener(void *listener, const void *context) {
           fixdemo_trophy_empty_result_owner = listener;
         }
         fixdemo_trophy_release_ui();
-        fixdemo_trophy_diagnostic(failed ? "listener-result candidate-failed ordinary-overview-released" :
+        fixdemo_trophy_diagnostic((failed || unstarted) ? "listener-result candidate-failed ordinary-overview-released" :
                                            "listener-result candidate-finished ordinary-overview-released");
       }
     }
@@ -850,6 +945,9 @@ static const FixdemoTrophyResultABI fixdemo_trophy_result_abi[] = {
   {"_ZN9game_mode13MatchListener19WaitSendMatchResultEPKN5cobra4game7ContextE", 0x7be13e4, 0xf0, UINT64_C(0xb6e76da23eafe8b0)},
   {"_ZN9game_mode13MatchListener17MatchHalfTimeDemoEPKN5cobra4game7ContextE", 0x7bf30c4, 0x440, UINT64_C(0xb58fa74eaf59ef49)},
   {"_ZN7process23ProcessMatchPreHalfTime4MainEv", 0x6cb2d4c, 0x8c, UINT64_C(0x7a1bc7dcf1987951)},
+  {"_ZN10FixDemoEnv11GetInstanceEv", 0x7b4b17c, 0x3c, UINT64_C(0xdb55e2467c245d42)},
+  {"_ZN11FixDemoMain4ExecEv", 0x7b70870, 0x468, UINT64_C(0x99e8abd380d38f7d)},
+  {"_ZN11FixDemoMain10CreateWorkEb", 0x7b6f820, 0x1c8, UINT64_C(0xb47b7668e255c10b)},
 };
 static const uint32_t fixdemo_trophy_result_plt_rvas[8] = {
   0x37e2a40, 0x39040c0, 0x391c230, 0x391bc10, 0x381e6e0, 0x383dba0,
@@ -939,6 +1037,7 @@ static int fixdemo_trophy_result_prepare(so_module *module) {
   fixdemo_trophy_wait_result_original = (void *)methods[32];
   fixdemo_trophy_listener_original = (void *)methods[33];
   fixdemo_trophy_pre_result_original = (void *)methods[34];
+  fixdemo_trophy_native_environment = (void *)methods[35];
   fixdemo_trophy_listener_caller = methods[33] + 0x27c;
   fixdemo_trophy_result_prepared = 1;
   return 1;

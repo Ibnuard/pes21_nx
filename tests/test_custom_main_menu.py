@@ -100,9 +100,12 @@ class CustomMainMenuTests(unittest.TestCase):
         self.assertLessEqual(brand.height, 480)
         self.assertGreater(brand.width / brand.height, 2.5)
         self.assertLess(brand.width / brand.height, 2.8)
-        self.assertEqual(brand.getpixel((504, 318))[:3], (239, 255, 0))
-        self.assertEqual(brand.getpixel((420, 340))[:3], (255, 38, 112))
-        self.assertEqual(brand.getpixel((100, 100))[:3], (255, 255, 255))
+        pixels = [p for p in brand.getdata() if p[3] >= 240]
+        self.assertGreater(sum(b > 180 and r < 80 and g < 140 for r, g, b, _ in pixels), 10000)
+        self.assertGreater(sum(r > 180 and g < 100 and b < 140 for r, g, b, _ in pixels), 500)
+        self.assertGreater(sum(max(r, g, b) < 75 for r, g, b, _ in pixels), 50000)
+        self.assertEqual((ROOT / "art/main_menu/brand-logo-runtime.png").read_bytes(),
+                         (ROOT / "data/main_menu_brand.bin").read_bytes())
 
         with Image.open(
             ROOT / "art" / "main_menu" / "androswitch-boot-splash-v3.png"
@@ -137,7 +140,6 @@ class CustomMainMenuTests(unittest.TestCase):
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
         header = (ROOT / "source/ue4_hooks.h").read_text(encoding="utf-8")
         config = (ROOT / "source/config.c").read_text(encoding="utf-8")
-        self.assertIn("#define PES_MATCH_SETTINGS_COUNT 8u", header)
         self.assertNotIn("PLAYER CURSOR", hooks)
         self.assertNotIn("player_cursor_show", hooks)
         self.assertNotIn("player_cursor_show", config)

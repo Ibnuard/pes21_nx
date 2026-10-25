@@ -27,19 +27,39 @@ static uintptr_t *fixdemo_trophy_prop_ue_callback_slot;
 static uintptr_t *fixdemo_trophy_prop_destroy_slot;
 static int fixdemo_trophy_prop_prepared, fixdemo_trophy_prop_installed;
 static __thread unsigned fixdemo_trophy_prop_game_scope;
+static uint64_t fixdemo_trophy_prop_failure_noted;
+static uint32_t fixdemo_trophy_prop_create_notes;
 
 static uint64_t fixdemo_trophy_prop_now_ms(void) {
   return armTicksToNs(armGetSystemTick()) / 1000000u;
 }
 
 static int fixdemo_trophy_props_begin(uint64_t epoch) {
+  fixdemo_trophy_prop_create_notes = 0;
   return fixdemo_trophy_prop_installed && fixdemo_prop_lifecycle_begin(
       &fixdemo_trophy_prop_lifecycle, epoch, fixdemo_trophy_prop_now_ms());
 }
 
 static enum FixDemoTrophyPropStatus fixdemo_trophy_props_status(uint64_t epoch) {
-  return fixdemo_prop_lifecycle_status(&fixdemo_trophy_prop_lifecycle,
+  const enum FixDemoTrophyPropStatus status = fixdemo_prop_lifecycle_status(&fixdemo_trophy_prop_lifecycle,
       epoch, fixdemo_trophy_prop_now_ms());
+  if (status == FIXDEMO_TROPHY_PROPS_FAILED && epoch != fixdemo_trophy_prop_failure_noted &&
+      fixdemo_prop_lifecycle_lock(&fixdemo_trophy_prop_lifecycle)) {
+    const FixDemoPropLifecycle *state = &fixdemo_trophy_prop_lifecycle;
+    const uint32_t owners = (state->slots[0].owner != 0) | ((state->slots[1].owner != 0) << 1);
+    const uint32_t ue = (state->slots[0].ue != 0) | ((state->slots[1].ue != 0) << 1);
+    const uint32_t ready = state->ready_mask;
+    const uint32_t polls = state->polls;
+    const uint64_t age = fixdemo_trophy_prop_now_ms() - state->started_ms;
+    fixdemo_prop_lifecycle_unlock(&fixdemo_trophy_prop_lifecycle);
+    fixdemo_trophy_prop_failure_noted = epoch;
+    char message[160];
+    snprintf(message, sizeof(message),
+        "prop-wait-failed owners=%x ue=%x ready=%x polls=%u age_ms=%llu",
+        owners, ue, ready, polls, (unsigned long long)age);
+    fixdemo_trophy_note(message);
+  }
+  return status;
 }
 
 static enum FixDemoTrophyPropStatus fixdemo_trophy_props_peek(uint64_t epoch) {
@@ -80,6 +100,14 @@ static void fixdemo_trophy_prop_create(void *owner, int type, const char *path,
       (uintptr_t)owner, fixdemo_trophy_prop_now_ms());
   const size_t length = path ? strnlen(path, 128u) : 0u;
   const FixDemoPropMapping *mapping = fixdemo_prop_lookup(path, length, 0);
+  if (fixdemo_trophy_prop_create_notes++ < 6u) {
+    char message[96];
+    const FixDemoPropMapping *descriptor = fixdemo_prop_lookup(path, length, 1);
+    snprintf(message, sizeof(message), "prop-create runtime=%u descriptor=%u scope=%u type=%d",
+        mapping ? mapping->kind : 0u, descriptor ? descriptor->kind : 0u,
+        fixdemo_trophy_prop_game_scope, type);
+    fixdemo_trophy_note(message);
+  }
   if (!mapping || !fixdemo_trophy_prop_game_scope) {
     fixdemo_trophy_prop_ops.create(owner, type, path, skeleton, colors);
     if (mapping) fixdemo_prop_lifecycle_fail(&fixdemo_trophy_prop_lifecycle, epoch);
@@ -102,6 +130,8 @@ static void fixdemo_trophy_prop_create(void *owner, int type, const char *path,
   if (!fixdemo_prop_lifecycle_register(&fixdemo_trophy_prop_lifecycle, epoch,
       mapping->kind, (uintptr_t)owner, demo, model, key, fixdemo_trophy_prop_now_ms()))
     fixdemo_prop_lifecycle_fail(&fixdemo_trophy_prop_lifecycle, epoch);
+  else fixdemo_trophy_note(mapping->kind == FIXDEMO_PROP_CUP ?
+      "cup-created-hidden" : "podium-created-hidden");
 }
 
 static int fixdemo_trophy_prop_ready(void *owner) {

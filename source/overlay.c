@@ -196,7 +196,11 @@ static const char fshader_src[] =
   "  else if (uImage > 0.5) {\n"
   "    vec3 imageColor = sampled.rgb;\n"
   "    float imageAlpha = sampled.a;\n"
-  "    if (uImage > 1.5) imageColor = uColor.rgb;\n"
+  "    if (uImage > 2.5) {\n"
+  "      float spread = max(sampled.r,max(sampled.g,sampled.b))-min(sampled.r,min(sampled.g,sampled.b));\n"
+  "      float neutral = 1.0-smoothstep(0.10,0.24,spread);\n"
+  "      imageColor = mix(sampled.rgb,uColor.rgb,neutral);\n"
+  "    } else if (uImage > 1.5) imageColor = uColor.rgb;\n"
   "    if (uImageCurve > 0.5) {\n"
   "      imageColor = pow(max(imageColor, vec3(0.0)), vec3(1.0 / 2.2));\n"
   "      imageAlpha = 1.0;\n"
@@ -4912,7 +4916,7 @@ static void overlay_render(void) {
     quads += emit_image_rect(0.055f * screen_width,
                              0.052f * screen_height,
                              0.245f * screen_width,
-                             0.245f * screen_width * (496.0f / 1310.0f),
+                             0.245f * screen_width * (405.0f / 1120.0f),
                              verts + quads * 24);
     competition_portrait_quad = quads;
     quads += emit_image_rect(0.540f * screen_width,
@@ -5146,7 +5150,7 @@ static void overlay_render(void) {
         const float mark_w = has_cup_logo
             ? 0.300f * screen_height : 0.225f * screen_width;
         const float mark_h = has_cup_logo
-            ? mark_w : mark_w * (496.0f / 1310.0f);
+            ? mark_w : mark_w * (405.0f / 1120.0f);
         cup_watermark_quad = quads;
         quads += emit_image_rect(
             inner_x + (left_w - mark_w) * 0.5f,
@@ -5936,7 +5940,7 @@ static void overlay_render(void) {
         const float logo_w = has_cup_logo
             ? 0.195f * (float)screen_height : logo_area_w * 0.86f;
         const float logo_h = has_cup_logo
-            ? logo_w : logo_w * (496.0f / 1310.0f);
+            ? logo_w : logo_w * (405.0f / 1120.0f);
         competition_cup_logo_quad = quads;
         quads += emit_image_rect(logo_area_x + (logo_area_w - logo_w) * 0.5f,
                                 logo_area_y + (logo_area_h - logo_h) * 0.5f,
@@ -7240,8 +7244,8 @@ static void overlay_render(void) {
           : has_logo ? 0.195f * (float)screen_height
                          : logo_area_w * 0.86f;
       float logo_h = league_settings_popup && !has_logo
-          ? logo_w * (496.0f / 1310.0f)
-          : has_logo ? logo_w : logo_w * (496.0f / 1310.0f);
+          ? logo_w * (405.0f / 1120.0f)
+          : has_logo ? logo_w : logo_w * (405.0f / 1120.0f);
       if (league_settings_popup && has_logo) {
         const uint32_t index = competition_frontend_league_catalog_index();
         const float aspect = index < FL26_LEAGUE_CATALOG_COUNT
@@ -9001,7 +9005,7 @@ static void overlay_render(void) {
     // Treat the logo, prompt and credit as one vertically centered group on
     // the otherwise quiet right side of the title page.
     const float brand_w = 0.350f * (float)screen_width;
-    const float brand_h = brand_w * (496.0f / 1310.0f);
+    const float brand_h = brand_w * (405.0f / 1120.0f);
     title_brand_quad = quads;
     quads += emit_image_rect(0.715f * (float)screen_width - brand_w * 0.5f,
                              0.360f * (float)screen_height - brand_h * 0.5f,
@@ -9889,7 +9893,7 @@ static void overlay_render(void) {
     main_menu_brand_quad = quads;
     quads += emit_image_rect(0.055f * screen_width, 0.052f * screen_height,
                              0.245f * screen_width,
-                             0.245f * screen_width * (496.0f / 1310.0f),
+                             0.245f * screen_width * (405.0f / 1120.0f),
                              verts + quads * 24);
 
     const float card_x = 0.055f * screen_width;
@@ -10138,7 +10142,9 @@ overlay_geometry_ready:
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
     glBindTexture(GL_TEXTURE_2D, gl.main_menu_brand_tex);
+    glUniform1f(gl.loc_image, 3.0f);
     glDrawArrays(GL_TRIANGLES, title_brand_quad * 6, 6);
+    glUniform1f(gl.loc_image, 1.0f);
 
     const u64 blink_frequency = armGetSystemTickFreq();
     const float blink_phase = blink_frequency
@@ -10190,7 +10196,9 @@ overlay_geometry_ready:
     glBindTexture(GL_TEXTURE_2D, gl.main_menu_brand_tex);
     glUniform2f(gl.loc_off, 0.0f, 0.0f);
     glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+    glUniform1f(gl.loc_image, 3.0f);
     glDrawArrays(GL_TRIANGLES, main_menu_brand_quad * 6, 6);
+    glUniform1f(gl.loc_image, 1.0f);
     glBindTexture(GL_TEXTURE_2D, gl.main_menu_button_a_tex);
     glDrawArrays(GL_TRIANGLES, main_menu_button_a_quad * 6, 6);
 
@@ -10273,7 +10281,9 @@ overlay_geometry_ready:
     if (!competition_settings_page && !bracket_page) {
       glBindTexture(GL_TEXTURE_2D, gl.main_menu_brand_tex);
       glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 1.0f);
+      glUniform1f(gl.loc_image, 3.0f);
       glDrawArrays(GL_TRIANGLES, competition_brand_quad * 6, 6);
+      glUniform1f(gl.loc_image, 1.0f);
       const uint32_t portrait = main_menu_portrait_transition.current < 4u
                                     ? main_menu_portrait_transition.current
                                     : 0u;
@@ -10352,7 +10362,9 @@ overlay_geometry_ready:
         glUniform4f(gl.loc_color, 1.0f, 1.0f, 1.0f, 0.22f);
         glBindTexture(GL_TEXTURE_2D,
                       logo_tex ? logo_tex : gl.main_menu_brand_tex);
+        glUniform1f(gl.loc_image, !logo_tex || logo_tex == gl.main_menu_brand_tex ? 3.0f : 1.0f);
         glDrawArrays(GL_TRIANGLES, cup_watermark_quad * 6, 6);
+        glUniform1f(gl.loc_image, 1.0f);
       }
       if (cup_champion_trophy_quad) {
         glBindTexture(GL_TEXTURE_2D, gl.cup_hub_trophy_tex);
@@ -10559,7 +10571,9 @@ overlay_geometry_ready:
         const GLuint logo_tex = current_cup_logo_texture();
         glBindTexture(GL_TEXTURE_2D,
                       logo_tex ? logo_tex : gl.main_menu_brand_tex);
+        glUniform1f(gl.loc_image, !logo_tex || logo_tex == gl.main_menu_brand_tex ? 3.0f : 1.0f);
         glDrawArrays(GL_TRIANGLES, competition_cup_logo_quad * 6, 6);
+        glUniform1f(gl.loc_image, 1.0f);
         glBindTexture(GL_TEXTURE_2D, gl.tex);
         glUniform1f(gl.loc_image, 0.0f);
         glUniform1f(gl.loc_solid, 1.0f);
@@ -11331,7 +11345,9 @@ overlay_geometry_ready:
           : current_cup_logo_texture();
       glBindTexture(GL_TEXTURE_2D,
                     logo_tex ? logo_tex : gl.main_menu_brand_tex);
-      glDrawArrays(GL_TRIANGLES, cup_settings_logo_quad * 6, 6);
+      glUniform1f(gl.loc_image, !logo_tex || logo_tex == gl.main_menu_brand_tex ? 3.0f : 1.0f);
+        glDrawArrays(GL_TRIANGLES, cup_settings_logo_quad * 6, 6);
+        glUniform1f(gl.loc_image, 1.0f);
       glBindTexture(GL_TEXTURE_2D, gl.tex);
       glUniform1f(gl.loc_image, 0.0f);
       glUniform1f(gl.loc_solid, 1.0f);

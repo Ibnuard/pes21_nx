@@ -22,7 +22,8 @@ enum {
 /* All native_*_team fields below contain logical catalog IDs in native
  * HOME/AWAY order, never raw physical native IDs (physical_team_id << 14).
  * The integration must verify the observed native IDs against the established
- * logical-to-physical mapping before publishing a fresh logical-ID snapshot. */
+ * logical-to-physical mapping AND native HOME/AWAY storage locators before
+ * publishing a fresh logical-ID snapshot. */
 typedef struct {
   uint64_t match_token;
   uint32_t native_home_team;

@@ -33,6 +33,7 @@ static unsigned char owner_memory[0x200], candidate_memory[0x2a0], ordinary[0x2b
 static unsigned char registry_memory[0x940], global_memory[0x5160];
 static unsigned char match_memory[0x1330], record_memory[0x750cc + 2 * 0x4ba90];
 static unsigned char listener_memory[0x1bc00];
+static unsigned char native_environment[0x5263];
 static const void *expected_environment = (void *)(uintptr_t)0x2340;
 static uint32_t expected_kind = 5, expected_category = 0;
 static int playing_allowed;
@@ -85,6 +86,7 @@ static void word(void *base, size_t offset, uint32_t value) {
   memcpy((unsigned char *)base + offset, &value, sizeof(value));
 }
 static const void *global_registry(void) { return global_memory; }
+static const void *get_native_environment(void) { return native_environment; }
 static const uint32_t *team_id(const void *stats, uint32_t side) {
   assert(stats == record_memory + 0x750cc && side < 2);
   return (const uint32_t *)((const unsigned char *)stats + side * 0x4ba90 + 0x28);
@@ -287,6 +289,7 @@ static void configure(void) {
   fixdemo_trophy_result_original = result_create;
   fixdemo_trophy_match_original = match_create;
   fixdemo_trophy_global_registry = global_registry;
+  fixdemo_trophy_native_environment = get_native_environment;
   fixdemo_trophy_stats_team_id = team_id;
   fixdemo_trophy_stats_team = team_stats;
   fixdemo_trophy_score = score;
@@ -310,6 +313,7 @@ static void reset_case(void) {
   memset(registry_memory, 0, sizeof(registry_memory));
   memset(global_memory, 0, sizeof(global_memory));
   memset(listener_memory, 0, sizeof(listener_memory));
+  memset(native_environment, 0, sizeof(native_environment));
   memset(match_memory, 0, sizeof(match_memory));
   memset(diagnostic_log, 0, sizeof(diagnostic_log));
   memset(record_memory, 0, sizeof(record_memory));
@@ -336,7 +340,9 @@ static void reset_case(void) {
   pointer(fade_table, 0x20, (const void *)(uintptr_t)cancel_mobile_fade);
   pointer(fade_table, 0x48, (const void *)(uintptr_t)mobile_fade_end);
   void *home = record_memory + 0x750cc, *away = record_memory + 0x750cc + 0x4ba90;
-  word(home, 0x28, 900u << 14); word(away, 0x28, 901u << 14);
+  /* Stats records retain SetExhibitionTeamId's native side storage keys. */
+  word(home, 0x28, (900u << 14) | 0x3ffdu);
+  word(away, 0x28, (901u << 14) | 0x3ffeu);
   word(home, 0x100, 2); word(away, 0x100, 1);
   final_ok = props_begin_ok = props_start_ok = 1;
   fail_allocation = invalidate_during_score = expected_winner = playing_allowed = 0;
@@ -379,6 +385,49 @@ static uint32_t run_pre_result(void) {
 }
 
 static void check_listener_result(void) {
+  /* A terminal manager before Start is not successful playback. Preserve
+   * native cleanup/UI ordering and keep the success latch unconsumed. */
+  reset_case(); arm_listener(); run_listener();
+  word(candidate_memory, 0x1dc, 4); word(candidate_memory, 0x1e0, 7);
+  native_environment[0x5262] = 1;
+  run_listener();
+  assert(!starts && !fixdemo_trophy_latch.consumed && deletes == 1 && fallbacks == 1);
+  assert(strstr(diagnostic_log, "reason=native-terminal-before-start"));
+  assert(strstr(diagnostic_log, "suppressed=1"));
+  assert(strstr(diagnostic_log, "candidate-failed ordinary-overview-released"));
+  assert(!strstr(diagnostic_log, "candidate-finished ordinary-overview-released"));
+  assert(run_pre_result() && overview_started == 1);
+
+  /* Repeated identical states do not write each frame. The bounded observer
+   * does not mutate any borrowed manager/environment byte. */
+  reset_case(); arm_listener(); run_listener(); run_listener();
+  /* A changing native cut load stage must remain observable even when the
+   * outer manager stays in the same waiting state; observation cannot admit
+   * an unready prop or mutate the live cut. */
+  unsigned char cut_memory[0x50] = {0};
+  word(cut_memory, 0x48, 1);
+  assert(!fixdemo_trophy_cut_ready(candidate_memory, cut_memory, 0, 1));
+  assert(strstr(diagnostic_log, "data_state=1 work_phase=0"));
+  word(cut_memory, 0x48, 2);
+  assert(!fixdemo_trophy_cut_ready(candidate_memory, cut_memory, 0, 1));
+  assert(strstr(diagnostic_log, "data_state=2 work_phase=0"));
+  assert(fixdemo_trophy_word(cut_memory, 0x48) == 2);
+  word(candidate_memory, 0x234, 0xf);
+  run_listener();
+  assert(strstr(diagnostic_log, "loaded=f"));
+  size_t stable_log = strlen(diagnostic_log);
+  unsigned char manager_before[sizeof(candidate_memory)];
+  memcpy(manager_before, candidate_memory, sizeof(manager_before));
+  for (int i = 0; i != 50; ++i) run_listener();
+  assert(strlen(diagnostic_log) == stable_log);
+  assert(!memcmp(manager_before, candidate_memory, sizeof(manager_before)));
+  for (unsigned i = 0; i != 30; ++i) {
+    word(candidate_memory, 0x1e0, 10+i); run_listener();
+  }
+  stable_log = strlen(diagnostic_log);
+  word(candidate_memory, 0x1e0, 999); run_listener();
+  assert(strlen(diagnostic_log) == stable_log && !deletes && !starts);
+
   reset_case(); arm_listener();
   assert(fixdemo_trophy_ui_active() && result_enabled && !overview_started);
   assert(strstr(diagnostic_log, "wait-result-entry token="));
@@ -502,16 +551,30 @@ static void check_listener_result(void) {
   listener_memory[0x11c] = 1; run_listener(); run_listener();
   assert(listener_memory[0x118] == 17 && !deletes && !fade_cancels);
 
-  /* Skip is published by input as a token and applied on the owner queue. */
+  /* v84 device sequence: a queued Skip during cut loading terminated the
+   * manager before Start. Loading now consumes that request without queuing
+   * it, including a request before candidate construction. */
   reset_case(); assert(!fixdemo_trophy_request_skip()); arm_listener();
+  assert(fixdemo_trophy_input_state() == 1u);
   assert(fixdemo_trophy_request_skip()); run_listener();
-  assert(!creates && fallbacks == 1 && run_pre_result());
+  assert(creates == 1 && !fallbacks && !run_pre_result() && !fixdemo_trophy_ui_skip);
   for (int after_start = 0; after_start != 2; ++after_start) {
     reset_case(); arm_listener(); run_listener();
-    if (after_start) { props_state = FIXDEMO_TROPHY_PROPS_READY; run_listener(); }
+    assert(fixdemo_trophy_input_state() == 1u);
+    if (!after_start) {
+      word(candidate_memory, 0x1dc, 3); word(candidate_memory, 0x1e0, 2);
+      word(candidate_memory, 0x234, 0x1f); test_clock += 1883;
+      assert(fixdemo_trophy_request_skip()); run_listener();
+      assert(!fixdemo_trophy_ui_skip && !candidate_memory[0x55] && !deletes);
+      assert(!starts && !run_pre_result() && fixdemo_trophy_input_state() == 1u);
+    }
+    props_state = FIXDEMO_TROPHY_PROPS_READY; run_listener();
+    assert(starts == 1 && fixdemo_trophy_input_state() == 2u && !fixdemo_trophy_ui_skip);
+    /* A fresh deliberate request after Start is still applied by the owner. */
     assert(fixdemo_trophy_request_skip() && !candidate_memory[0x55]);
     run_listener(); assert(candidate_memory[0x55] && !deletes && !run_pre_result());
     run_listener(); assert(deletes == 1 && fallbacks == 1 && run_pre_result());
+    assert(fixdemo_trophy_input_state() == 0u);
   }
 
   /* Rejections, loader failures, later failures and NULL ordinary backgrounds
@@ -651,8 +714,38 @@ static void check_ending(void) {
   run_ending(); assert(!deletes && !fixdemo_trophy_manager && !props_epoch);
 }
 
+static void check_match_local_team_keys(void) {
+  /* Reproduce the device's ready state 16 and its native stored team keys. */
+  reset_case();
+  listener_memory[0x118] = 16;
+  listener_memory[0x18ff0] = listener_memory[0x18ff3] = 1;
+  fixdemo_trophy_wait_result(listener_memory, (void *)(uintptr_t)0x4440);
+  assert(fixdemo_trophy_ui_active() && !run_pre_result());
+  run_listener();
+  assert(creates == 1 && !fallbacks && !overview_started);
+
+  /* A master key, wrong native side or another physical team is never proof
+   * of this side's current record. Exercise the real listener and UI gate. */
+  for (uint32_t side = 0; side < 2; ++side) {
+    const uint32_t master = (900u + side) << 14;
+    const uint32_t invalid[] = {master, master | (0x3ffdu + (1u-side)),
+        (master ^ 0x4000u) | (0x3ffdu + side), master | 0x3fffu,
+        0u, side ? 107u : 101u};
+    for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i) {
+      reset_case();
+      word(record_memory + 0x750cc + side * 0x4ba90, 0x28, invalid[i]);
+      arm_listener(); run_listener();
+      assert(!creates && !fixdemo_trophy_ui_active() && fallbacks == 1);
+      assert(strstr(diagnostic_log, "current-team-mismatch side="));
+      assert(strstr(diagnostic_log, " actual=") && strstr(diagnostic_log, " expected="));
+      assert(run_pre_result() && !active_reads && read_locks == read_unlocks);
+    }
+  }
+}
+
 int main(void) {
   configure();
+  check_match_local_team_keys();
   reset_case(); create();
   assert(creates == 1 && fallbacks == 0 && !fixdemo_trophy_latch.consumed);
   run_frame(); assert(!playing_allowed && !starts && status_polls == 1);

@@ -295,6 +295,8 @@ static uint64_t pause_editor_transition_tick, match_result_action_tick;
 static uint64_t match_result_handoff_tick, pause_top_menu_transition_tick;
 static void *match_result_window;
 static uint32_t footer_calls, stats_calls, pause_calls, wait_calls, event_calls;
+static int ceremony_active;
+static int fixdemo_trophy_ui_active(void) { return ceremony_active; }
 static int match_result_handoff_active(void) { return match_result_handoff_tick != 0; }
 static uint64_t armGetSystemTick(void) { return 100; }
     static void debugPrintf(const char *fmt, ...) { (void)fmt; }
@@ -315,6 +317,7 @@ static void (*match_result_footer_touch)(void *, uint32_t) = footer;
 static void (*match_stats_footer_touch)(void *, uint32_t) = stats;
 static void (*match_result_control_wait)(void *, uint32_t) = wait_control;
 static void reset(void) {
+  ceremony_active=0;
   result_exit_confirm_clear(&match_result_top_menu_confirm);
   footer_calls=stats_calls=pause_calls=wait_calls=event_calls=0;
   match_result_exit_requested=0; match_result_handoff_tick=0;
@@ -337,6 +340,12 @@ static void confirm_top_menu(void) {
   assert(!match_result_top_menu_confirm.active);
 }
 int main(void) {
+  reset(); ceremony_active=1;
+  match_result_surface=MATCH_RESULT_SURFACE_FULL_MENU;
+  match_result_input_action=PES_PAUSE_INPUT_BACK;
+  match_result_process_controller_input((void *)123);
+  assert(!match_result_input_action && !match_result_exit_requested);
+  assert(!match_result_top_menu_confirm.active && !footer_calls && !pause_calls && !event_calls);
   // A and the B shortcut must use the same native footer as a physical tap,
   // regardless of which match-ending settings led to the final result.
   for (uint32_t input=PES_PAUSE_INPUT_DECIDE; input<=PES_PAUSE_INPUT_BACK; ++input)

@@ -1,6 +1,6 @@
 # Main menu assets
 
-Generated with the built-in image generation tool for the approved blue/yellow full-page main menu.
+Project-authored menu artwork. Current FootballNX27 branding uses charcoal/white letters with blue and red accents; older background studies remain historical.
 
 - `background-v1.png`: background only, without text, UI, logos or players.
 - `androswitch-boot-splash-v3.png`: authored 1920x1080 replacement for the
@@ -11,8 +11,9 @@ Generated with the built-in image generation tool for the approved blue/yellow f
   it is not linked into the NRO.
 - `icons-mask-v1.png`: monochrome source mask, 2x2 layout: Exhibition, 2 Player, Settings, Credits.
 - `background-runtime.png` and `icons-runtime.png`: normalized assets embedded in the NRO. The runtime icon atlas converts mask luminance into transparency.
-- `brand-logo-source.png`: approved two-line `Football` / `NX26` wordmark with its yellow NX accent.
-- `brand-logo-runtime.png`: transparent, tightly cropped two-line branding embedded in the NRO; the asset builder removes the source preview's baked checkerboard, colors the X eFootball yellow, and changes the N/X accent to bright pink.
+- `brand-logo-source.png`: historical two-line NX26 source, retained as a reference.
+- `brand-logo-source-v27.png`: current transparent Football / NX27 source, edited with the imagegen skill from the supplied stacked logo; charcoal letters, blue X, red wedge.
+- `brand-logo-runtime.png`: cropped and resized NX27 source embedded byte-identically as `data/main_menu_brand.bin`. The renderer adapts neutral lettering to charcoal on white pages and white on dark pages, retaining blue/red RGB and alpha. See `BRAND_V27.md`.
 - `portrait-*-source.png`: the four supplied transparent player cutouts.
 - `portrait-*.png`: normalized 768x1024 runtime portraits, bottom-aligned without changing the foreground artwork.
 
@@ -24,7 +25,7 @@ Runtime mapping: Exhibition uses Yamal, 2 Player uses Mbappe, Settings uses Mess
 
 The title page reuses the same background and four portraits. It cycles the
 large left portrait every 5 seconds with a 450 ms slide/fade: the old portrait
-exits left while the next enters from the right. The FootballNX26 wordmark,
+exits left while the next enters from the right. The FootballNX27 wordmark,
 blinking Switch A prompt and `ANDROSWITCH PROJECT 2026` credit form one
 vertically centered group in the right-hand area.
 
@@ -35,3 +36,5 @@ rectangle from red to the splash's blue (`#001C61`), preserving the timeline.
 Visual order: Exhibition, 2 Player, Settings, Credits. Existing native action indices are 0, 2, 3, 1 respectively; the custom vertical navigation preserves that action mapping.
 
 Regenerate all embedded payloads with `python tools/build_main_menu_assets.py`.
+
+Regenerate only the current brand with `python tools/build_main_menu_assets.py --brand-only`; this leaves all portraits and other artwork exact.

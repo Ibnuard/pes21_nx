@@ -81,7 +81,7 @@ def test_append_preserves_ids_controls_native_endings_and_inputs():
     assert result["scenes"][-1]["id"] == 0x70007
     variant = result["cuts"][-1]["variants"][0]
     assert variant["flags"] == 0x7FF and variant["human_mask"] == 3
-    assert variant["files"] == trophy.DONOR_FILES[:3] + [""] + trophy.DONOR_FILES[4:]
+    assert variant["files"] == list(trophy.CORE_FILES) + [""] * 6
     assert variant["conditions"] == [256] + [0] * 9
     assert result["scenes"][-1]["cuts"][0]["human_changes"] == [[1, 0, 0]]
     assert result["scenes"][-1]["cuts"][0]["signed_params"] == [6, 0, 180, 0]

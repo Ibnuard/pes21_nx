@@ -1,7 +1,8 @@
-"""Build local Mobile-compatible competition skins, preserving native AP2.
+"""Build local Mobile-compatible competition skins, preserving native bindings.
 
 Uses only the user's compatible Mobile UI member and optional local emblems.
 It does not substitute PC FL26 scripts or change native score/time bindings.
+Generic FootballNX27 skins adapt verified placement fields; other skins retain AP2.
 Output contains game-owned UI data and must stay in an ignored local directory.
 """
 from __future__ import annotations
@@ -40,8 +41,8 @@ THEMES = (
  (35,'AFC','#113247','#fff1a5','CupLogos/cup-afc.png'),
  (33,'EURO','#0f2444','#c5e7ff','CupLogos/cup-euro.png'),
  (27,'WC','#3b1326','#edd3a2','CupLogos/cup-world.png'),
- (1000,'CUP','#283241','#e2d5a6',None),
- (1001,'NX','#14302e','#71ead4',None),
+ (1000,'NX27','#125bff','#ffffff',None),
+ (1001,'NX27','#125bff','#ffffff',None),
  (1002,'INT','#121946','#c7d9ff',None),
 )
 
@@ -54,6 +55,11 @@ def txp(container):
 
 def skin(original, theme, logos):
     key,label,dark,light,logo=theme
+    if key in (1000, 1001):
+        from build_footballnx27_scoreboard import build as build_brand
+        brand = Path(__file__).resolve().parents[1] / 'art/main_menu/brand-logo-runtime.png'
+        _, packet, preview, _ = build_brand(original, Image.open(brand))
+        return packet, preview
     atlas,regions,_=read_atlas(original)
     width,height=struct.unpack_from('>HH',atlas,16)
     pixels=np.frombuffer(atlas[64:],np.uint8).reshape(height,width,4).copy()
@@ -108,4 +114,4 @@ if __name__=='__main__':
     p.add_argument('--output',type=Path,required=True)
     a=p.parse_args()
     report=build(a.mobile_cpk,a.logos,a.output)
-    print('Validated %d competition skins; AP2 unchanged'%len(report['themes']))
+    print('Validated %d competition skins; native bindings preserved'%len(report['themes']))

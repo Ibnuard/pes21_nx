@@ -368,7 +368,9 @@ def build_trophy_table(native: dict, donor: dict) -> dict:
     if not any(v["conditions"] == generic for c in native["cuts"] for v in c["variants"]):
         raise ValueError("native generic ending condition is unavailable")
     variant["conditions"] = generic
-    variant["files"][3] = ""  # Preserve all other file-slot indices.
+    # Native GetFileName stops at the first empty slot after index zero. The
+    # omitted FX must not leave a hole in front of the retained podium file.
+    variant["files"] = list(CORE_FILES) + [""] * (native["file_count"] - len(CORE_FILES))
     result = copy.deepcopy(native)
     for key, target, name, records in (
         ("cuts", CUT_ID, CUT_NAME, [variant]),

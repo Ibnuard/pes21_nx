@@ -284,7 +284,7 @@ def prepare(source_cpk: Path, mobile_cpk: Path, pes_tools: Path,
         gltf.with_suffix(".bin").write_bytes(binary)
         gltf.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         report["props"].append({"key": prop.key, "descriptor_model_path": prop.model_path,
-                                "runtime_model_path": prop.model_path.removesuffix(".fpk") + ".xml",
+                                "runtime_model_path": "cpk_dat/" + prop.model_path.removesuffix(".fpk") + ".xml",
                                 "donor_archive_path": prop.archive_path,
                                 "fpk_sha256": digest(packed), "fmdl_sha256": digest(raw),
                                 "target_class": "StaticMesh", "target_object_path": prop.object_path,

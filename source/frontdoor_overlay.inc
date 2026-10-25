@@ -273,10 +273,11 @@ static void fd_art(MasterLeagueRender *ui,uint32_t sprite,float x,float y,float 
   *quads+=emit_image_rect_uv(x*screen_width,y*screen_height,w*screen_width,h*screen_height,u,v,u+uw,v+vh,verts+*quads*24);
 }
 static void fd_brand(MasterLeagueRender *ui,float x,float y,float w,GLfloat *verts,int *quads) {
-  ml_ui_image(ui,gl.main_menu_brand_tex,0,x,y,w,w*screen_width/screen_height*(496.f/1310.f),verts,quads);
+  ml_ui_image(ui,gl.main_menu_brand_tex,0,x,y,w,w*screen_width/screen_height*(405.f/1120.f),verts,quads);
   /* Keep the existing logo silhouette, using alpha-only navy ink on white. */
-  MlDraw *d=&ui->draws[ui->draw_count-1u];d->kind=4;
-  d->color[0]=.025f;d->color[1]=.09f;d->color[2]=.27f;
+  MlDraw *d=&ui->draws[ui->draw_count-1u];d->kind=5;
+  /* Neutral lettering adapts to the white page; the blue/red marks retain RGB. */
+  d->color[0]=.102f;d->color[1]=.125f;d->color[2]=.161f;
 }
 /* Animate the selected card's sample window, not its geometry. A modest zoom
  * leaves room for a seamless six-second elliptical drift inside this strip.

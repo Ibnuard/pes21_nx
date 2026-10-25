@@ -46,7 +46,13 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v81 session\n",file);
+    fputs("FootballNX scene v87 session\n",file);
+    fputs("review v87: exact native prop paths; contiguous Cup/podium file list; native result footer held with ceremony\n",file);
+    fputs("review v86: custom overview and menu input wait for Cup ceremony; cut/prop loading stages journaled\n",file);
+    fputs("review v85: trophy Skip waits for native Start, button release and fresh face/Plus press\n",file);
+    fputs("review v84: bounded native trophy loading and terminal diagnostics; v83 added-time plate retained\n",file);
+    fputs("review v83: native HOME/AWAY trophy result identities; larger centered FootballNX27 added-time plate\n",file);
+    fputs("review v82: FootballNX27 white-blue-red League/Cup scoreboard; adaptive charcoal/white branding\n",file);
     fputs("review v81: both corner helper entries share native-sized bold white HUD rows and sprite spacing\n",file);
     fputs("review v80: deeper Cloudy shade; source-backed Old Trafford; held horizontal Joy-Con corner tactics; v78 skin retained\n",file);
     fputs("review v77: calibrated Serie A cells; independent visible Cloudy drift; Camp Nou upper-stand repair pairing\n",file);

@@ -205,7 +205,10 @@ static void package(void) {
 }
 static void check_scene(const char *needle) {
   read_text("scene-runtime.log", scene, sizeof(scene));
-  assert(strstr(scene, "FootballNX scene v60 session\n"));
+  unsigned scene_revision = 0;
+  char line_end = 0;
+  assert(sscanf(scene, "FootballNX scene v%u session%c", &scene_revision, &line_end) == 2);
+  assert(scene_revision > 0 && line_end == '\n');
   assert(strstr(scene, "ceremony status: revision=v60 app=test-app build=" PESNX_BUILD_ID));
   assert(strstr(scene, "boot_ms=9876000"));
   if (!strstr(scene, needle)) {

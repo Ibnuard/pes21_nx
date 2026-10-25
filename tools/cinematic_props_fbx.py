@@ -64,7 +64,7 @@ def validate_preparation(source: Path) -> dict:
         key, prefix = prop["key"], PROP_PATHS[prop["key"]]
         if (prop["gltf"] != f"{key}/{key}.gltf" or
                 prop["descriptor_model_path"] != prefix + ".fpk" or
-                prop["runtime_model_path"] != prefix + ".xml" or
+                prop["runtime_model_path"] != "cpk_dat/" + prefix + ".xml" or
                 prop["target_class"] != "StaticMesh" or
                 prop["target_object_path"] != f"/Game/Assets/FootballNX/FixDemo/{key}/{key}.{key}"):
             raise ValueError("prop path escaped the exact allowlist")

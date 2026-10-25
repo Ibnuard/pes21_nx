@@ -809,9 +809,10 @@ static void master_league_draw_layer(const MasterLeagueRender *ui,int overlay) {
       glUniform4f(gl.loc_round_uv,d->uv[0],d->uv[1],d->uv[2],d->uv[3]);
     }
     glUniform1f(gl.loc_solid,d->kind==0 ? 1.f : 0.f);
-    glUniform1f(gl.loc_image,d->kind==4 ? 2.f : d->kind==2 ? 1.f : 0.f);
-    /* kind 3 uses luminance coverage (rating star); kind 4 tints RGB while
-     * preserving the source alpha (the existing wordmark on a white page). */
+    glUniform1f(gl.loc_image,d->kind==5 || (d->kind==2 && d->texture==gl.main_menu_brand_tex)
+        ? 3.f : d->kind==4 ? 2.f : d->kind==2 ? 1.f : 0.f);
+    /* kind 3 uses luminance coverage; kind 4 tints every RGB sample; kind 5
+     * adapts neutral brand letters while retaining the blue/red accents. */
     glBindTexture(GL_TEXTURE_2D,d->kind>=2 ? d->texture : d->kind==1 ? gl.efootball_tex : gl.tex);
     if(d->theme>=0) fnx_button_color((uint32_t)d->theme,d->selected,d->enabled);
     else glUniform4f(gl.loc_color,d->color[0],d->color[1],d->color[2],d->color[3]);

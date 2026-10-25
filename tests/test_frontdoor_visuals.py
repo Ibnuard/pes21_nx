@@ -183,9 +183,9 @@ class FrontdoorVisualTests(unittest.TestCase):
 
     def test_title_preserves_logo_alpha_and_has_one_start_prompt(self):
         draws = self.frames['01-title']
-        logo = [d for d in draws if d['kind'] == 4 and d['texture'] == 56]
+        logo = [d for d in draws if d['kind'] == 5 and d['texture'] == 56]
         self.assertEqual(len(logo), 1)
-        self.assertEqual(logo[0]['color'], [.025, .09, .27, 1])
+        self.assertEqual(logo[0]['color'], [.102, .125, .161, 1])
         self.assertEqual(sum(d['kind'] == 2 and 20 <= d['texture'] <= 37 for d in draws), 1)
         self.assertFalse(any(d['texture'] == 76 and box(d)[1] < .6 for d in draws))
 

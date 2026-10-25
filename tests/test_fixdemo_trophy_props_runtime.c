@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
     assert(fixdemo_trophy_props_peek(7) == FIXDEMO_TROPHY_PROPS_PENDING);
     update(1);
     assert(fixdemo_trophy_props_status(7) == FIXDEMO_TROPHY_PROPS_READY);
-    assert(notes == 2); teardown(); assert(deleted == 2);
+    assert(notes == 6); teardown(); assert(deleted == 2);
   } else if (!strcmp(argv[1], "fast-or-cached")) {
     assert(fixdemo_trophy_props_begin(7));
     /* A registered UE callback can finish before our Create returns, or the
@@ -147,9 +147,10 @@ int main(int argc, char **argv) {
   } else if (!strcmp(argv[1], "late-callback")) {
     assert(fixdemo_trophy_props_begin(7)); create(0);
     fixdemo_trophy_prop_model_update(rigs[0].model.data);
+    const unsigned before = notes;
     teardown();
     fixdemo_trophy_prop_ue_callback(rigs[0].ue.data, (void *)(uintptr_t)77);
-    assert(!notes);
+    assert(notes == before);
     assert(fixdemo_trophy_props_begin(8));
     assert(fixdemo_trophy_props_status(8) == FIXDEMO_TROPHY_PROPS_PENDING);
     fixdemo_trophy_props_cancel(8);

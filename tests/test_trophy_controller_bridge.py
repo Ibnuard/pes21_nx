@@ -41,6 +41,7 @@ static uint64_t armGetSystemTick(void) { return now; }
 static uint64_t armTicksToNs(uint64_t value) { return value; }
 static int fixdemo_trophy_ui_active(void) { return trophy; }
 static int fixdemo_trophy_request_skip(void) { ++skip_calls; return accepted_skip; }
+static uint32_t fixdemo_trophy_input_state(void) { return trophy; }
 static int match_native_demo_active_at(uint64_t tick, uintptr_t *owner) {
   assert(tick == now);
   if (owner) { ++native_owner_queries; *owner = native_demo ? 42 : 0; }
@@ -57,8 +58,8 @@ static uint32_t match_button_setplay_options_from_mask(uint32_t mask) {
 }
 ''' + defines + "\n" + struct(header, "PesControllerSnapshot") + "\n"
     code += "\n".join(function(hooks[re.search(
-        r"^(?:void|int) " + name + r"\(", hooks, re.M).start():], name) for name in (
-        "pes_controller_demo_skip_request", "pes_controller_cinematic_skip_active",
+        r"^(?:void|int|uint32_t) " + name + r"\(", hooks, re.M).start():], name) for name in (
+        "pes_controller_demo_skip_request", "pes_controller_ceremony_input_state", "pes_controller_cinematic_skip_active",
         "pes_controller_surface_snapshot", "pes_controller_surface_cached_snapshot"))
     code += r'''
 int main(void) {
@@ -67,6 +68,7 @@ int main(void) {
   pes_controller_surface_snapshot(&snapshot);
   assert(snapshot.surface == PES_CONTROLLER_SURFACE_NONE);
   assert(!pes_controller_cinematic_skip_active());
+  assert(pes_controller_ceremony_input_state() == 0);
   pes_controller_demo_skip_request();
   assert(skip_calls == 1 && native_owner_queries == 1);
   assert(!match_demo_skip_request_owner && !match_demo_skip_request_tick);
@@ -79,6 +81,8 @@ int main(void) {
 
   /* The canary owns the frame even while earlier replay/goal heartbeats live. */
   trophy = accepted_skip = native_replay = 1;
+  assert(pes_controller_ceremony_input_state() == 1);
+  trophy = 2; assert(pes_controller_ceremony_input_state() == 2);
   match_goal_demo_seen_tick = match_goal_demo_pad_seen_tick = now;
   match_goal_demo_owner_known = match_goal_demo_player_goal = 1;
   match_goal_button_visible_tick = now; match_goal_button_visible = 1;

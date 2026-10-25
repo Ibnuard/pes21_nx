@@ -255,6 +255,10 @@ void pes_controller_goal_demo_consume(void);
 void pes_controller_cinematic_update(int gameplay_active, int control_mode,
                                      int excluded, uint64_t now_ms);
 int pes_controller_cinematic_skip_active(void);
+#define PES_CEREMONY_INPUT_NONE 0u
+#define PES_CEREMONY_INPUT_LOADING 1u
+#define PES_CEREMONY_INPUT_PLAYING 2u
+uint32_t pes_controller_ceremony_input_state(void);
 int pes_controller_inmatch_tutorial_active(void);
 void pes_controller_inmatch_tutorial_play_request(void);
 uint32_t pes_controller_penalty_role(void);

@@ -16,6 +16,7 @@ import sys
 import tempfile
 
 from PIL import Image, ImageChops, ImageDraw
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -79,7 +80,7 @@ static void glDrawArrays(int mode,int first,int count) {
   (void)mode;
   if(!count || uniforms[gl.loc_color][3]<=0.f)return;
   assert(first>=0 && count>=0 && first%6==0 && count%6==0 && first+count<=active_quads*6);
-  int kind=uniforms[gl.loc_solid][0]>.5f ? 0 : uniforms[gl.loc_image][0]>1.5f ? 4 : uniforms[gl.loc_image][0]>.5f ? 2 : 1;
+  int kind=uniforms[gl.loc_solid][0]>.5f ? 0 : uniforms[gl.loc_image][0]>2.5f ? 5 : uniforms[gl.loc_image][0]>1.5f ? 4 : uniforms[gl.loc_image][0]>.5f ? 2 : 1;
   fprintf(frame,"%s{\"kind\":%d,\"texture\":%u,\"radius\":%g,\"color\":[%g,%g,%g,%g],\"vertices\":[",
       draw_count++ ? "," : "",kind,bound_texture,uniforms[gl.loc_round_rect][0]>.5f ? uniforms[gl.loc_round_radius][0] : 0.f,
       uniforms[gl.loc_color][0],uniforms[gl.loc_color][1],uniforms[gl.loc_color][2],uniforms[gl.loc_color][3]);
@@ -323,6 +324,14 @@ def rasterize(draws, assets):
                 if draw["kind"] == 1:
                     tile = Image.new("RGBA", (w,h), color)
                     tile.putalpha(sample.getchannel("R").point(lambda a: round(a*color[3]/255)))
+                elif draw["kind"] == 5:
+                    rgba = np.asarray(sample).astype(np.float32) / 255
+                    spread = np.ptp(rgba[:, :, :3], axis=2)
+                    ramp = np.clip((spread - .10) / .14, 0, 1)
+                    neutral = (1 - ramp * ramp * (3 - 2 * ramp))[:, :, None]
+                    rgba[:, :, :3] = rgba[:, :, :3] * (1-neutral) + np.array(color[:3]) / 255 * neutral
+                    rgba[:, :, 3] *= color[3] / 255
+                    tile = Image.fromarray(np.clip(np.rint(rgba*255),0,255).astype(np.uint8))
                 elif draw["kind"] == 4:
                     tile = Image.new("RGBA", (w,h), color)
                     tile.putalpha(sample.getchannel("A").point(lambda a: round(a*color[3]/255)))

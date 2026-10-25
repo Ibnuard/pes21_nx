@@ -138,7 +138,7 @@ def preparation_fixture(folder):
     for key, prefix in fbx.PROP_PATHS.items():
         gltf_fixture(folder / key, key)
         profile["props"].append({"key": key, "gltf": f"{key}/{key}.gltf", "target_class": "StaticMesh",
-                                 "descriptor_model_path": prefix + ".fpk", "runtime_model_path": prefix + ".xml",
+                                 "descriptor_model_path": prefix + ".fpk", "runtime_model_path": "cpk_dat/" + prefix + ".xml",
                                  "target_object_path": f"/Game/Assets/FootballNX/FixDemo/{key}/{key}.{key}"})
     for file in sorted(folder.rglob("*")):
         if file.is_file():

@@ -3762,6 +3762,7 @@ static void stadium_refresh_saved_graphics_quality(void) {
 static void fixdemo_trophy_begin_match(void);
 static void fixdemo_trophy_end_match(void);
 static int fixdemo_trophy_ui_active(void);
+static uint32_t fixdemo_trophy_input_state(void);
 static int fixdemo_trophy_request_skip(void);
 
 uintptr_t pes_exhibition_match_setup_data_entry(void) {
@@ -13573,6 +13574,7 @@ static void match_pause_apply_owner_side(void) {
 static void match_result_process_controller_input(void *window);
 static void match_result_set_surface(uint32_t surface);
 static void match_result_prepare_skin(void *window);
+static void match_result_ceremony_hold(void *window);
 
 // MyClubSquadEdit is the authoritative native Game Plan frontend for both
 // pre-match and the Pause child. Keep one heartbeat on its real update method
@@ -13712,6 +13714,10 @@ static int pes_match_stats_init(void *window) {
 void pes_match_team_stats_update_entry(void *window) {
   if (!window)
     return;
+  if (fixdemo_trophy_ui_active()) {
+    match_result_ceremony_hold(window);
+    return;
+  }
   if (!__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE) &&
       !match_result_handoff_active()) {
     match_result_window = window;
@@ -14075,6 +14081,10 @@ void pes_controller_demo_skip_request(void) {
     return;
   __atomic_store_n(&match_demo_skip_request_tick, now, __ATOMIC_RELEASE);
   __atomic_store_n(&match_demo_skip_request_owner, owner, __ATOMIC_RELEASE);
+}
+
+uint32_t pes_controller_ceremony_input_state(void) {
+  return fixdemo_trophy_input_state();
 }
 
 uintptr_t pes_match_replay_check_skip_entry(void *replay,
@@ -16598,6 +16608,43 @@ static void match_result_set_surface(uint32_t surface) {
                    __ATOMIC_RELEASE);
 }
 
+// Only use the live callback window, and resolve its nodes again each time.
+// A ceremony suppresses the native footer too, without publishing a result
+// skin or retaining a node that the native layout may later destroy.
+static int match_result_hide_native(void *window) {
+  if (!window || !match_node_set_alpha)
+    return 0;
+  int hidden = 0;
+  if (exhibition_window_get_window) {
+    void *surface = exhibition_window_get_window(window);
+    if (surface) {
+      match_node_set_alpha(surface, 0.0f);
+      hidden = 1;
+    }
+  }
+  // The stats table is owned by the layout root, outside the window surface.
+  if (match_setplay_get_root) {
+    void *root = match_setplay_get_root(window);
+    if (root) {
+      match_node_set_alpha(root, 0.0f);
+      hidden = 1;
+    }
+  }
+  return hidden;
+}
+
+static void match_result_ceremony_hold(void *window) {
+  match_result_hide_native(window);
+  __atomic_store_n(&match_result_input_action, 0, __ATOMIC_RELEASE);
+  uint32_t context = __atomic_load_n(&virtual_cursor_context, __ATOMIC_ACQUIRE);
+  if (context == PES_VIRTUAL_CURSOR_HALF_TIME ||
+      context == PES_VIRTUAL_CURSOR_HALF_PREVIEW ||
+      context == PES_VIRTUAL_CURSOR_FULL_TIME)
+    __atomic_compare_exchange_n(&virtual_cursor_context, &context,
+                                PES_VIRTUAL_CURSOR_NONE, 0,
+                                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+
 // The native result pages keep their background; the tile list is removed at
 // init time. Hiding the window surface as well keeps the stock footer from
 // peeking through the custom skin, and a missing helper stays fail-open.
@@ -16608,23 +16655,7 @@ static void match_result_prepare_skin(void *window) {
       !live_gameplan_window) {
     __atomic_store_n(&pause_editor_transition_tick, 0, __ATOMIC_RELEASE);
   }
-  int hidden = 0;
-  if (exhibition_window_get_window) {
-    void *surface = exhibition_window_get_window(window);
-    if (surface) {
-      match_node_set_alpha(surface, 0.0f);
-      hidden = 1;
-    }
-  }
-  // The stats table lives on the layout root, not the window surface, so the
-  // native rows stay visible unless the root is hidden as well.
-  if (match_setplay_get_root) {
-    void *root = match_setplay_get_root(window);
-    if (root) {
-      match_node_set_alpha(root, 0.0f);
-      hidden = 1;
-    }
-  }
+  const int hidden = match_result_hide_native(window);
   // Fail open: with no node to hide the native page must keep working on its
   // own rather than be covered by a custom surface that cannot replace it.
   if (hidden) {
@@ -16773,7 +16804,9 @@ static void match_result_record_competition_score(void) {
 static void match_result_process_controller_input(void *window) {
   const uint32_t action = __atomic_exchange_n(
       &match_result_input_action, 0, __ATOMIC_ACQ_REL);
-  if (!window)
+  /* A result window can already exist while the final ceremony owns the
+   * frame. Drain stale menu actions without dispatching or saving results. */
+  if (!window || fixdemo_trophy_ui_active())
     return;
   if (match_result_handoff_active())
     return;
@@ -16942,6 +16975,7 @@ int pes_controller_custom_postmatch_active(void) {
 }
 
 int pes_controller_result_top_menu_confirm_active(void) {
+  if (fixdemo_trophy_ui_active()) return 0;
   return __atomic_load_n(&match_result_top_menu_confirm.active,__ATOMIC_ACQUIRE)!=0u;
 }
 uint32_t pes_controller_result_top_menu_confirm_focus(void) {
@@ -16949,6 +16983,7 @@ uint32_t pes_controller_result_top_menu_confirm_focus(void) {
 }
 
 uint32_t pes_controller_match_result_skin(void) {
+  if (fixdemo_trophy_ui_active()) return MATCH_RESULT_SURFACE_NONE;
   if (live_gameplan_open_requested || live_gameplan_window ||
       __atomic_load_n(&exhibition_gameplan_custom_active, __ATOMIC_ACQUIRE))
     return MATCH_RESULT_SURFACE_NONE;
@@ -17015,6 +17050,7 @@ uint32_t pes_controller_match_result_focus(void) {
 // native result page is either still building its own nodes or being torn down
 // after a continuation, and in both windows its stats layout can flash through.
 uint32_t pes_controller_match_result_transition(void) {
+  if (fixdemo_trophy_ui_active()) return 0;
   if (__atomic_load_n(&exhibition_gameplan_custom_active, __ATOMIC_ACQUIRE))
     return 0;
   const uint64_t now = armGetSystemTick();
@@ -17180,6 +17216,12 @@ static void pes_match_result_update(void *window) {
   static uint32_t exit_wait_frames;
   if (match_result_update_original)
     match_result_update_original(window);
+  /* Keep the native update running, but do not publish a custom overview or
+   * reactivate its cursor over a loading/playing Cup-final ceremony. */
+  if (fixdemo_trophy_ui_active()) {
+    match_result_ceremony_hold(window);
+    return;
+  }
   if (__atomic_load_n(&match_result_exit_requested, __ATOMIC_ACQUIRE)) {
     exit_wait_frames++;
     if (exit_wait_frames <= 5u || exit_wait_frames % 300u == 0u)
@@ -17417,7 +17459,11 @@ uintptr_t pes_match_result_full_entry(void *result, const char *name,
     __atomic_store_n(&match_result_page, MATCH_RESULT_PAGE_FINAL,
                      __ATOMIC_RELEASE);
     match_result_set_surface(MATCH_RESULT_SURFACE_FULL_MENU);
-    if (final_result) {
+    if (fixdemo_trophy_ui_active()) {
+      // The constructor has not initialized its nodes yet. Its update hook
+      // hides the live layout; never activate the result cursor in between.
+      match_result_ceremony_hold(NULL);
+    } else if (final_result) {
       // Keep the native bottom-right Next footer reachable with A while the
       // result tile list itself stays hidden. B is handled as Top Menu.
       pes_virtual_cursor_activate(PES_VIRTUAL_CURSOR_FULL_TIME, 56753, 61734);
@@ -17446,16 +17492,23 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
         MATCH_RESULT_SURFACE_HALF_MENU, MATCH_RESULT_SURFACE_FULL_MENU);
     match_result_set_surface(surface);
     __atomic_store_n(&match_result_half_menu_seen, 1, __ATOMIC_RELEASE);
-    pes_virtual_cursor_activate(surface == MATCH_RESULT_SURFACE_HALF_MENU
-                                    ? PES_VIRTUAL_CURSOR_HALF_TIME
-                                    : PES_VIRTUAL_CURSOR_FULL_TIME,
-                                32768, 32768);
+    if (fixdemo_trophy_ui_active())
+      match_result_ceremony_hold(NULL);
+    else
+      pes_virtual_cursor_activate(surface == MATCH_RESULT_SURFACE_HALF_MENU
+                                      ? PES_VIRTUAL_CURSOR_HALF_TIME
+                                      : PES_VIRTUAL_CURSOR_FULL_TIME,
+                                  32768, 32768);
   }
   debugPrintf("ml-v5-diag: halftime menu resume native window=%p\n",result);
   return match_result_half_resume;
 }
 
 uintptr_t pes_match_result_half_update_entry(void *result) {
+  if (fixdemo_trophy_ui_active()) {
+    match_result_ceremony_hold(result);
+    return match_result_half_update_resume;
+  }
   if (result && !__atomic_load_n(&match_result_exit_requested,
                                  __ATOMIC_ACQUIRE) &&
       !match_result_handoff_active()) {
