@@ -188,8 +188,8 @@ static void check_live_final_eligibility(void) {
   check_final_context(0, 0u, 0u, 0u);
   competition_frontend_cup_restore_after_match();
 
-  /* Home Away affects only semis. Play both legs, then the third-place
-   * fixture at index 1; only the last-round championship at index 0 qualifies. */
+  /* Home Away includes the final. Bronze is one match; only the deciding
+   * championship leg may own a trophy scene. */
   competition_frontend_close();competition_frontend_finish_close();
   competition_frontend_open_modes();competition_frontend_pad_event(0u, 0u);
   press(BUTTON_A);press(BUTTON_A);press(BUTTON_LEFT);
@@ -202,17 +202,17 @@ static void check_live_final_eligibility(void) {
   assert(competition_frontend_cup_home_away());
   assert(competition_frontend_cup_third_place());
   fill_ceremony_bracket();
-  for (uint32_t match = 0u; match < 6u; match++) {
+  for (uint32_t match = 0u; match < 7u; match++) {
     uint32_t round = UINT32_MAX, index = UINT32_MAX;
     assert(competition_frontend_cup_next_fixture(&round, &index));
     const int championship = round == 1u && index == 0u;
     if (match < 4u) assert(round == 0u);
     if (match == 4u) assert(round == 1u && index == CUP_THIRD_PLACE_INDEX);
-    if (match == 5u) assert(championship);
+    if (match >= 5u) assert(championship);
     begin_ceremony_fixture(&home, &away);
-    if (match < 4u) assert(competition_frontend_match_leg(NULL, NULL) != 0u);
+    if (match != 4u) assert(competition_frontend_match_leg(NULL, NULL) != 0u);
     else assert(competition_frontend_match_leg(NULL, NULL) == 0u);
-    check_final_context(championship, home, away, round);
+    check_final_context(championship && match==6u, home, away, round);
     competition_frontend_cup_match_result(1u, 0u);
     check_final_context(0, 0u, 0u, 0u);
     competition_frontend_cup_restore_after_match();
@@ -572,6 +572,9 @@ int main(void) {
   assert(competition_frontend_cup_team_count() == 2u);
   press(BUTTON_LEFT);
   assert(competition_frontend_cup_team_count() == 2u);
+  press(BUTTON_DOWN);
+  if (!competition_frontend_cup_home_away()) press(BUTTON_RIGHT);
+  assert(competition_frontend_cup_home_away());
   while (competition_frontend_focus() != 5u) press(BUTTON_DOWN);
   press(BUTTON_A);
   assert(competition_frontend_cup_view_stage_count() == 1u);
@@ -623,10 +626,33 @@ int main(void) {
   uint32_t quick_home = 0u, quick_away = 0u;
   assert(competition_frontend_cup_match_teams(&quick_home, &quick_away));
   competition_frontend_cup_handoff_result(1);
-  check_final_context(1, quick_home, quick_away, 0u);
+  check_final_context(0, 0u, 0u, 0u);
+  assert(competition_frontend_match_leg(NULL,NULL)==1u);
+  assert(!competition_frontend_cup_extra_time() && !competition_frontend_cup_penalty());
   competition_frontend_cup_match_result(2u, 0u);
   /* Custom Cup wins even when both clubs belong to the Premier League. */
   assert(competition_frontend_scoreboard(101u,107u)==1000u);
+  competition_frontend_cup_restore_after_match();
+  assert(!competition_frontend_cup_tournament()->champion);
+  assert(!competition_frontend_cup_take_champion_presentation());
+  uint32_t next_round=99u,next_index=99u;
+  assert(competition_frontend_cup_next_fixture(&next_round,&next_index) && !next_round && !next_index);
+  assert(competition_frontend_cup_tournament()->fixtures[0][0].first_leg_complete);
+  /* Save/reopen between legs must retain the pending championship. */
+  competition_frontend_close();competition_frontend_finish_close();
+  competition_frontend_open_modes();competition_frontend_pad_event(0u,0u);
+  press(BUTTON_A);press(BUTTON_DOWN);press(BUTTON_A);press(BUTTON_A);
+  assert(competition_frontend_state()==COMPETITION_FRONTEND_CUP_BRACKET);
+  assert(!competition_frontend_cup_tournament()->champion);
+  press(BUTTON_UP);press(BUTTON_RIGHT);begin_ceremony_fixture(&quick_home,&quick_away);
+  uint8_t first_home=0,first_away=0;
+  assert(competition_frontend_match_leg(&first_home,&first_away)==2u);
+  assert(first_home==2u && first_away==0u && competition_frontend_cup_penalty());
+  check_final_context(1,quick_home,quick_away,0u);
+  CompetitionCupFinalContext two_legs;
+  assert(competition_frontend_cup_live_final_context(&two_legs) && two_legs.two_leg_decider);
+  assert(two_legs.first_home_goals==2u && two_legs.first_away_goals==0u);
+  competition_frontend_cup_match_result(0u,1u);
   competition_frontend_cup_restore_after_match();
   assert(competition_frontend_cup_tournament()->champion);
   assert(competition_frontend_cup_view_round() == 0u);

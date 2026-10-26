@@ -22,6 +22,9 @@ def test_starting_plans_survive_match_and_second_side_failure_rolls_back(tmp_pat
 #define PREMATCH_GAMEPLAN_MAX_PLAYERS 40
 #define debugPrintf(...) ((void)0)
 ''' + types + r'''
+static int manager_dummy_plan_editor(void){return 0;}
+static int manager_league_native_plan_snapshot_members(uint32_t side,GameplanPreset *p){(void)side;(void)p;return 1;}
+static int manager_league_native_plan_rekey_settings(uint32_t side,const GameplanPreset *p,TmpdbMatchPlanSettingsValue *s){(void)side;(void)p;(void)s;return 1;}
 typedef struct { TmpdbFormationValue formation[2]; TmpdbMatchPlanSettingsValue settings; uint32_t tactics; } Squad;
 static Squad squads[2], backup_squads[2];
 static PrematchGameplanSide exhibition_gameplan_sides[2], backup_sides[2];

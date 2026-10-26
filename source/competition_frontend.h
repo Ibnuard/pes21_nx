@@ -22,6 +22,7 @@ typedef enum {
   COMPETITION_FRONTEND_LEAGUE_SETTINGS,
   COMPETITION_FRONTEND_LEAGUE_HUB,
   COMPETITION_FRONTEND_MASTER_LEAGUE,
+  COMPETITION_FRONTEND_MANAGER_DUMMY,
 } CompetitionFrontendState;
 
 enum {
@@ -32,11 +33,13 @@ enum {
   COMPETITION_ACTION_CUP_FIXTURE = 4,
   COMPETITION_ACTION_LEAGUE_FIXTURE = 5,
   COMPETITION_ACTION_MANAGER_NAME = 6,
+  COMPETITION_ACTION_MANAGER_PLAN = 7,
 };
 
 void competition_frontend_open_match_mode(void);
 void competition_frontend_match_action_result(int opened);
 void competition_frontend_open_modes(void);
+void competition_frontend_open_online_league(void);
 void competition_frontend_close(void);
 void competition_frontend_finish_close(void);
 void competition_frontend_manager_name_result(const char *text);
@@ -142,6 +145,9 @@ typedef struct {
   uint32_t native_away_team;
   uint32_t round;
   uint32_t fixture_index;
+  uint32_t two_leg_decider;
+  uint32_t first_home_goals;
+  uint32_t first_away_goals;
 } CompetitionCupFinalContext;
 /* Read-only, live standalone Cup championship final. Call at the native result
  * boundary, after a successful handoff; never cache this for later eligibility.

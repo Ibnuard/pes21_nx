@@ -8,6 +8,7 @@
 #define CUP_MAX_FIXTURES 32u
 #define CUP_THIRD_PLACE_INDEX 1u
 #define CUP_DECIDED_PENALTIES 1u /* CupFixture.reserved; keeps the saved ABI */
+#define CUP_TWO_LEG_FINAL 2u /* Championship policy; preserves the saved ABI. */
 
 typedef struct {
   uint32_t home;
@@ -74,5 +75,10 @@ const CupFixture *cup_tournament_third_place_fixture(
     const CupTournament *cup);
 void cup_tournament_set_rules(CupTournament *cup, int home_away,
                               int third_place);
+/* Standalone Cup may include its championship in Home Away. League knockouts
+ * retain their separate single-final policy. Third place is always one match. */
+void cup_tournament_set_final_two_legs(CupTournament *cup, int enabled);
+int cup_tournament_has_second_leg(const CupTournament *cup, uint32_t round,
+                                  uint32_t index);
 
 #endif

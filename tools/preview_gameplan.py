@@ -19,9 +19,9 @@ static void capture(const char *name) {
   MasterLeagueRender ui={0};int quads=0;
   EditorPanel before[2];memcpy(before,views,sizeof(views));
   ml_ui_image(&ui,70,0,0,0,1,1,vertices,&quads);
-  for(uint32_t side=0;side<(views[0].setplay ? 1u : 2u);side++) {
+  for(uint32_t side=0;side<(views[0].setplay || views[0].centered ? 1u : 2u);side++) {
     if(!views[0].setplay) {
-      const float x=.018f+side*.489f;
+      const float x=views[0].centered ? .2625f : .018f+side*.489f;
       fd_art(&ui,side,x,.025f,.475f,.120f,vertices,&quads);
       fd_text(&ui,side ? "AWAY / PLAYER 2" : "HOME / PLAYER 1",x+.020f,.052f,.4f,.030f,-1,vertices,&quads);
       fd_text(&ui,"GAME PLAN",x+.020f,.101f,.4f,.021f,-1,vertices,&quads);
@@ -64,6 +64,7 @@ int main(void) {
   fd_copy(views[1].rows[1].label,96,"LOAD FORMATION");fd_copy(views[1].rows[1].value,96,"Restore a saved setup");
   views[1].rows[0].icon=9;views[1].rows[1].icon=10;
   capture("01-formation-presets");
+  views[0].centered=1;capture("12-manager-single-formation");views[0].centered=0;
   panel(0,4,"PLAYER ROLES","CAPTAIN / SET PIECES / ATTACKERS");views[0].count=9;views[0].focus=5;
   const char *roles[]={"CAPTAIN","RIGHT CORNER KICK","LEFT CORNER KICK","LONG FREE KICK","SHORT FREE KICK","PENALTY KICK","SET-PIECE ATTACKER 1","SET-PIECE ATTACKER 2","SET-PIECE ATTACKER 3"};
   for(int i=0;i<9;i++) {fd_copy(views[0].rows[i].label,96,roles[i]);fd_copy(views[0].rows[i].value,96,i>5 ? "NONE" : i%2 ? "Alexander Longname" : "Daniel Sample");}

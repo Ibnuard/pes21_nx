@@ -56,6 +56,7 @@ class GameplanEditorTests(unittest.TestCase):
             '#include "gameplan_preset.h"',
             '#define ML_CURRENT_PLAN_SLOT GAMEPLAN_PRESET_SLOTS\n'
             'static int ml_frontend_plan_editor(void) { return 0; }\n'
+            'static int native_office_plan_editor(void) { return ml_frontend_plan_editor(); }\n'
             'static void *live_gameplan_window;\n'
             'static int prematch_gameplan_save_preset(uint32_t s, uint32_t slot) { (void)s; (void)slot; return 1; }',
             definitions,

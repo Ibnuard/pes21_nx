@@ -23,6 +23,10 @@ def compile_run(tmp_path, body, *, wrappers=False):
     source += '#define scene_runtime_note(a,b) ((void)0)\n'
     if wrappers:
         source += f'#include "{(ROOT / "source/trophy_audio_policy.h").as_posix()}"\n'
+        # This harness isolates commentary/trophy ownership. Manager League's
+        # independent bank guard has its own native runtime tests.
+        source += ('static int manager_league_audio_plain_hca_header(const void *a,uint32_t n,'
+                   'const void *b,uint32_t m){(void)a;(void)n;(void)b;(void)m;return 0;}\n')
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf8")
         first = hooks.index("static uint32_t team_commentary_indonesia_slot;")
         last = hooks.index("\n#ifdef DEBUG_LOG\nstatic int32_t (*sound_cinf_play_original)", first)

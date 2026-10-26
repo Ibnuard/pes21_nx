@@ -13,7 +13,7 @@ import tempfile
 from stadium_lite_preview import host_math
 
 
-def preview(output):
+def preview(output, stadium=None):
     import numpy as np
     import matplotlib
     matplotlib.use('Agg')
@@ -45,10 +45,14 @@ int main() {
     srgb = np.where(linear <= .0031308, linear * 12.92,
                     1.055 * np.power(linear, 1 / 2.4) - .055)
     labels = ('Anfield Stadium — narrow transverse', 'Etihad Stadium — checker',
-              'Signal Iduna Park — broad transverse', 'Stamford Bridge — longitudinal',
+              'Signal Iduna Park — broad transverse', 'Stamford Bridge — narrow vertical / worn grass',
               'Old Trafford — straight alternating', 'Camp Nou — concentric rings')
-    fig, axes = plt.subplots(2, 3, figsize=(15, 7.5), layout='constrained', facecolor='#16211e')
-    for image, label, ax in zip(srgb, labels, axes.flat):
+    indices = [dict(zip((1,2,8,9,12,13),range(6)))[stadium]] if stadium is not None else list(range(6))
+    fig, axes = plt.subplots(1 if stadium is not None else 2, 1 if stadium is not None else 3,
+                             figsize=(12,8) if stadium is not None else (15,7.5),
+                             layout='constrained', facecolor='#16211e')
+    for index, ax in zip(indices, np.atleast_1d(axes).flat):
+        image, label = srgb[index], labels[index]
         ax.imshow(np.clip(image, 0, 1), origin='lower', extent=(-52.5, 52.5, -34, 34))
         line = dict(edgecolor='#e6eee7', facecolor='none', linewidth=.9)
         ax.add_patch(Rectangle((-52.5, -34), 105, 68, **line))
@@ -70,7 +74,7 @@ int main() {
         ax.set_axis_off()
     fig.suptitle('Authored pitch mowing — exact shader math, diagnostic top views',
                  color='#edf5ed', fontsize=16)
-    fig.supxlabel('Konami retains its accepted original bands. Lighting, weather and fine detail are not simulated.',
+    fig.supxlabel('Distinct stadium stripe widths; shared green and wear. Lighting and native fine detail are not simulated.',
                   color='#c1cec5', fontsize=10)
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=150, facecolor=fig.get_facecolor())
@@ -80,4 +84,6 @@ int main() {
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
-    preview(parser.parse_args().output)
+    parser.add_argument('--stadium', type=int, choices=(1,2,8,9,12,13))
+    args=parser.parse_args()
+    preview(args.output,args.stadium)

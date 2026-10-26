@@ -3,6 +3,15 @@
 Tanggal: 9 Oktober 2026  
 Status: konsep untuk pengembangan berikutnya; belum diimplementasikan.
 
+Arah diskusi terbaru pada 26 Oktober 2026 adalah Manager League online
+asinkron: siklus mingguan 3 hari daftar + 3 hari pertandingan + 1 hari penutupan,
+minimal 7 tim, skuad acak OVR 60–69, modal awal 5.000 poin, pasar pemain,
+hadiah liga dan ranking. Pertandingan dihitung backend dengan tayangan titik
+selama tiga menit. Rancangan serta batas
+hasil yang telah dihitung dicatat di [MANAGER_LEAGUE_DESIGN.md](MANAGER_LEAGUE_DESIGN.md).
+Urutan prioritas di bawah merupakan usulan historis untuk dua mini-game,
+bukan keputusan implementasi atas arah Manager League tersebut.
+
 Dua ide mini-game untuk FootballNX adalah Football Triple Triad berbasis
 kartu pemain dan Mini Soccer 6v6 di setengah lapangan. Prioritas yang
 disarankan adalah Football Triple Triad karena data pemain, pemuatan portrait,

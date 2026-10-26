@@ -56,7 +56,7 @@ def test_frontend_can_open_and_seed_every_fl26_cup():
             str(ROOT / "tests/test_fl26_cup_catalog.c"),
             str(ROOT / "source/competition_frontend.c"),
             *[str(ROOT / 'source' / name) for name in (
-                'master_league.c', 'master_league_save.c', 'master_league_frontend.c',
+                'master_league.c', 'master_league_save.c', 'master_league_frontend.c', 'manager_league_dummy.c',
                 'master_league_catalog.c', 'gameplan_preset.c')],
             str(ROOT / "source/league_tournament.c"),
             str(ROOT / "source/league_save.c"),

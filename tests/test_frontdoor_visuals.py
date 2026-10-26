@@ -43,7 +43,7 @@ class FrontdoorVisualTests(unittest.TestCase):
 
     def test_full_flow_fits_native_budgets_and_screen(self):
         # The C driver also checks a vertex-buffer canary and immutable input.
-        self.assertEqual(len(self.frames), 62)
+        self.assertEqual(len(self.frames), 63)
         for name, draws in self.frames.items():
             with self.subTest(frame=name):
                 self.assertLess(len(draws), 384)
@@ -189,24 +189,24 @@ class FrontdoorVisualTests(unittest.TestCase):
         self.assertEqual(sum(d['kind'] == 2 and 20 <= d['texture'] <= 37 for d in draws), 1)
         self.assertFalse(any(d['texture'] == 76 and box(d)[1] < .6 for d in draws))
 
-    def test_main_menu_is_four_compact_icon_title_rows_on_the_left(self):
-        for name in ['02-main-menu', '03-main-menu-modes', '04-main-menu-settings', '05-main-menu-credits']:
+    def test_main_menu_is_five_compact_icon_title_rows_on_the_left(self):
+        for name,focus in [('02-main-menu',0),('03-main-menu-modes',1),
+                           ('04-main-menu-online-league',2),('04-main-menu-settings',3),('05-main-menu-credits',4)]:
             draws = self.frames[name]
             icons = [d for d in draws if d['texture'] == 52 and d['kind'] == 2]
             labels = [d for d in draws if d['kind'] == 1 and d['texture'] == 2 and box(d)[1] < .9]
             with self.subTest(frame=name):
-                self.assertEqual(len(icons), 4)
-                self.assertEqual(len(labels), 4)  # No headline or descriptions.
-                focus = int(name[:2]) - 2
-                y = .337
+                self.assertEqual(len(icons), 5)
+                self.assertEqual(len(labels), 5)  # No headline or descriptions.
+                y = .327
                 for i, (icon, label) in enumerate(zip(icons, labels)):
-                    height = .182 if i == focus else .084
+                    height = .16275 if i == focus else .075
                     ib, lb = box(icon), box(label)
                     self.assertLess(lb[2], .457)
                     self.assertAlmostEqual(lb[0], .134, delta=.001)
                     self.assertLess(ib[2], lb[0])
                     self.assertAlmostEqual((ib[1] + ib[3]) / 2, y + height / 2, delta=.001)
-                    y += height + .020
+                    y += height + .017
                 portraits = [d for d in draws if d['kind'] == 2 and 72 <= d['texture'] <= 75]
                 self.assertTrue(portraits)
                 self.assertGreaterEqual(box(portraits[0])[0], .5599)
@@ -214,21 +214,21 @@ class FrontdoorVisualTests(unittest.TestCase):
     def test_menu_motion_reflows_without_overlap_jump_or_frame_rate_dependency(self):
         # Driver assertions cover retarget continuity, inactive/reentry reset,
         # normalized weights and equal-time poses at different update rates.
-        self.assertEqual(len(self.motion), 35)
+        self.assertEqual(len(self.motion), 43)
         def rows(draws):
             return [box(d) for d in draws if d['kind'] == 0 and d['color'] == [1, 1, 1, 1]
                     and abs(box(d)[0] - .050) < .001 and abs(box(d)[2] - .457) < .001]
         for name, draws in self.motion.items():
             cards = rows(draws)
             with self.subTest(frame=name):
-                self.assertEqual(len(cards), 4)
-                self.assertAlmostEqual(cards[0][1], .337, delta=.001)
-                self.assertAlmostEqual(cards[-1][3], .831, delta=.001)
+                self.assertEqual(len(cards), 5)
+                self.assertAlmostEqual(cards[0][1], .327, delta=.001)
+                self.assertAlmostEqual(cards[-1][3], .85775, delta=.001)
                 for prev, nxt in zip(cards, cards[1:]):
-                    self.assertAlmostEqual(nxt[1] - prev[3], .020, delta=.001)
+                    self.assertAlmostEqual(nxt[1] - prev[3], .017, delta=.001)
                 for card in cards:
-                    self.assertGreaterEqual(card[3] - card[1], .0839)
-                    self.assertLessEqual(card[3] - card[1], .1821)
+                    self.assertGreaterEqual(card[3] - card[1], .0749)
+                    self.assertLessEqual(card[3] - card[1], .1629)
         self.assertEqual(rows(self.motion['retarget-before']), rows(self.motion['retarget-after']))
         start, end = rows(self.motion['motion-00']), rows(self.motion['motion-08'])
         self.assertGreater(start[0][3] - start[0][1], 2 * (start[1][3] - start[1][1]))

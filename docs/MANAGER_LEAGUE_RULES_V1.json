@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "status": "design_draft_not_implemented",
+  "updated_date": "2026-10-26",
+  "confirmed_product_rules": {
+    "cycle_days": 7,
+    "registration_days": 3,
+    "competition_days": 3,
+    "settlement_days": 1,
+    "minimum_teams": 7,
+    "multiple_matches_per_day": true,
+    "starter_ovr_min": 60,
+    "starter_ovr_max": 69,
+    "starter_grant_points": 5000,
+    "selected_club_does_not_grant_original_roster": true,
+    "player_catalog_and_profiles_required": true,
+    "league_winner_receives_points": true,
+    "manager_ranking_required": true,
+    "asynchronous_server_simulation": true,
+    "presentation_seconds": 180,
+    "shop_model": "club_player_packs",
+    "shop_pack_tiers": [
+      "lite",
+      "medium",
+      "jumbo"
+    ],
+    "shop_pack_availability_source": "api"
+  },
+  "proposed_defaults_not_yet_balance_approved": {
+    "timezone": "Asia/Jakarta",
+    "registration_start_weekday": "Monday",
+    "registration_start_time": "00:00",
+    "registration_end_exclusive_weekday": "Thursday",
+    "registration_end_exclusive_time": "00:00",
+    "competition_weekdays": [
+      "Thursday",
+      "Friday",
+      "Saturday"
+    ],
+    "settlement_weekday": "Sunday",
+    "maximum_teams_per_group": 16,
+    "group_partition": "k=ceil(N/16); sizes=floor(N/k) or ceil(N/k)",
+    "competition_format": "single_round_robin",
+    "odd_team_policy": "one_bye_each_no_points_no_bot",
+    "round_distribution": "balanced_first_days_receive_remainder",
+    "round_slot_times": [
+      "12:00",
+      "15:00",
+      "18:00",
+      "20:00",
+      "22:00"
+    ],
+    "tactics_cutoff_minutes_before_round": 5,
+    "standings_points": {
+      "win": 3,
+      "draw": 1,
+      "loss": 0
+    },
+    "standings_tiebreak": [
+      "points",
+      "goal_difference",
+      "goals_for",
+      "tied_group_head_to_head_points",
+      "tied_group_head_to_head_goal_difference",
+      "tied_group_head_to_head_goals_for",
+      "precommitted_draw_order"
+    ],
+    "starting_roster_size": 18,
+    "starting_position_groups": {
+      "GK": 2,
+      "DEF": 6,
+      "MID": 6,
+      "FWD": 4
+    },
+    "maximum_roster_size": 25,
+    "same_catalog_player_multiple_active_instances_per_club": false,
+    "same_catalog_player_allowed_in_different_clubs": true,
+    "grant_policy": "once_per_account_completed_onboarding",
+    "wallet_and_roster_persist_between_weeks": true,
+    "competition_roster_attributes_locked": true,
+    "tactics_locked_per_round": true,
+    "condition_reset_each_match": true,
+    "cross_match_injuries_and_suspensions": false,
+    "market_locked_for_competition_entries": true,
+    "p2p_trading_gifting_or_point_transfers": false,
+    "release_player_point_refund": 0,
+    "weekly_rewards_points": {
+      "first": 2000,
+      "second": 1000,
+      "third": 750,
+      "other_valid_participants": 250
+    },
+    "ranking_points_formula": "floor(1000 * (team_count - final_rank) / (team_count - 1))",
+    "ranking_points_spendable": false,
+    "maximum_ranked_entries_per_account_per_week": 1,
+    "account_club_limit": 1,
+    "below_minimum_policy": "not_started_no_awards_preserve_owned_assets",
+    "incomplete_fixture_policy": "suspend_group_no_invented_result_or_award",
+    "seed_domains": [
+      "starter",
+      "grouping",
+      "schedule",
+      "tiebreak_draw",
+      "match_simulation"
+    ],
+    "market_type": "club_player_packs",
+    "pack_opening_authority": "server_transaction_with_persisted_receipt",
+    "pack_retry_policy": "same_receipt_no_reroll_or_second_debit",
+    "pack_catalog_fields": [
+      "server_now",
+      "catalog_version",
+      "offer_id",
+      "club_catalog_id",
+      "tier",
+      "pool_version",
+      "starts_at",
+      "ends_at",
+      "price_points",
+      "draw_rule",
+      "disclosed_odds",
+      "purchase_limit",
+      "account_eligibility"
+    ],
+    "collection_separate_from_registered_squad": true
+  },
+  "superseded_direct_player_market_proposal": {
+    "market_type": "system_fixed_price",
+    "price_bands": [
+      {
+        "ovr_min": 60,
+        "ovr_max": 64,
+        "points": 300
+      },
+      {
+        "ovr_min": 65,
+        "ovr_max": 69,
+        "points": 900
+      },
+      {
+        "ovr_min": 70,
+        "ovr_max": 74,
+        "points": 2200
+      },
+      {
+        "ovr_min": 75,
+        "ovr_max": 79,
+        "points": 4500
+      },
+      {
+        "ovr_min": 80,
+        "ovr_max": 84,
+        "points": 9000
+      }
+    ],
+    "out_of_band_market_offers": "not_admitted"
+  },
+  "open_pack_questions": {
+    "price_points": null,
+    "ovr_weights_and_guarantees": null,
+    "already_owned_player_policy": null,
+    "collection_capacity": null
+  },
+  "confirmed_pack_rules": {
+    "draws": {
+      "policy": "user_selects_fixed_count_from_pool_then_explicit_confirm",
+      "lite": {
+        "draw": 2,
+        "pool": 5
+      },
+      "medium": {
+        "draw": 4,
+        "pool": 6
+      },
+      "jumbo": {
+        "draw": 5,
+        "pool": 8
+      }
+    },
+    "confirm_required": true,
+    "debit_and_grant": "atomic_after_explicit_confirm"
+  }
+}

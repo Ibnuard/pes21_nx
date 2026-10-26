@@ -22,6 +22,7 @@ class MasterLeagueNativeAdapterTests(unittest.TestCase):
 #include <assert.h>
 #include <stdio.h>
 #include "master_league_frontend.h"
+#include "manager_league_dummy.h"
 #define PREMATCH_GAMEPLAN_MAX_PLAYERS 40u
 '''
         stubs = r'''
@@ -42,6 +43,20 @@ static TmpdbMatchPlanSettingsValue get_settings(const void *s) {
 static TmpdbFormationValue (*match_squad_data_get_formation)(const void *,uint32_t)=get_formation;
 static TmpdbMatchPlanSettingsValue (*match_squad_data_get_settings)(const void *)=get_settings;
 int ml_frontend_match_active(void) { return active; }
+int manager_dummy_plan_editor(void) { return 0; }
+int manager_dummy_preset_read(uint32_t team,uint32_t slot,GameplanPreset *out) {
+  (void)team;(void)slot;(void)out;assert(0);return 0;
+}
+int manager_dummy_preset_write(uint32_t team,uint32_t slot,const GameplanPreset *plan) {
+  (void)team;(void)slot;(void)plan;assert(0);return 0;
+}
+int manager_dummy_store_current_plan(const GameplanPreset *plan) { (void)plan;assert(0);return 0; }
+static int manager_league_native_plan_shape_valid(const GameplanPreset *plan) {
+  (void)plan;assert(0);return 0;
+}
+static int manager_league_native_plan_snapshot_members(uint32_t side,GameplanPreset *plan) {
+  (void)side;(void)plan;assert(!manager_dummy_plan_editor());return 1;
+}
 int ml_frontend_preset_read(uint32_t team,uint32_t slot,GameplanPreset *out) {
   if(team!=101u || slot>3u) return 0; *out=saved;return 1;
 }

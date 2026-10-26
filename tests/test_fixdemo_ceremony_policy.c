@@ -307,7 +307,28 @@ static void check_one_shot(void) {
   assert(!fixdemo_ceremony_begin_match(&latch, 43u));
 }
 
+static void check_aggregate_decider(void) {
+  FixdemoCeremonyContext context=live_final;
+  FixdemoCeremonySnapshot snapshot=full_time;
+  FixdemoCeremonyLatch latch={41u,0u};
+  context.two_leg_decider=1u;context.first_home_goals=2u;context.first_away_goals=0u;
+  snapshot.home_goals=0;snapshot.away_goals=1;
+  accepted(&context,&snapshot,&latch,0u); /* Match loser wins the aggregate. */
+  snapshot.home_goals=snapshot.away_goals=0;
+  accepted(&context,&snapshot,&latch,0u); /* Drawn leg still has a champion. */
+  snapshot.away_goals=2;snapshot.shootout_fresh=0u;
+  rejected(&context,&snapshot,&latch); /* Level aggregate needs current PK. */
+  snapshot.shootout_fresh=snapshot.shootout_only=1u;
+  snapshot.home_shootout=3;snapshot.away_shootout=4;
+  accepted(&context,&snapshot,&latch,1u);
+  context.two_leg_decider=0u;rejected(&context,&snapshot,&latch);
+  context.two_leg_decider=2u;rejected(&context,&snapshot,&latch);
+  context.two_leg_decider=1u;context.first_home_goals=100u;
+  rejected(&context,&snapshot,&latch);
+}
+
 int main(void) {
+  check_aggregate_decider();
   check_result_boundary();
   check_match_identity();
   check_ending_factory_boundary();

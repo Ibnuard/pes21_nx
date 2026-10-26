@@ -171,6 +171,58 @@ static void check_knockout_seeding(void) {
   assert(league.knockout.fixtures[0][0].winner == seeded[0]);
 }
 
+/* Exercise complete schedules, rather than manufacturing a completed table.
+ * A two-team return fixture and a first final leg must both retain NEXT. */
+static void check_home_away_completion(uint32_t count, int knockout) {
+  uint32_t teams[LEAGUE_MAX_TEAMS];
+  for (uint32_t i=0;i<count;i++) teams[i]=101u+i;
+  assert(league_tournament_init(&league,teams,count,teams,1u,1,93u));
+  league_tournament_set_system(&league,knockout ? LEAGUE_SYSTEM_KNOCKOUT : LEAGUE_SYSTEM_STANDINGS);
+  uint32_t table_played=0u, knockout_played=0u;
+  while (league.phase==LEAGUE_PHASE_TABLE) {
+    uint32_t fixture=0u;
+    league_tournament_advance(&league);
+    if (league.phase!=LEAGUE_PHASE_TABLE) break;
+    assert(!league.knockout.champion);
+    assert(league_tournament_next_human(&league,&fixture,NULL,NULL));
+    const LeagueFixture *f=&league.fixtures[fixture];
+    assert(league_tournament_record(&league,fixture,0,0,f->home==101u ? 2u : 0u,
+                                    f->away==101u ? 2u : 0u));
+    table_played++;
+    if (table_played<count-1u || league.active_matchday<league.matchday_count) {
+      assert(league.phase==LEAGUE_PHASE_TABLE);
+      assert(!league.knockout.champion);
+    }
+    assert(table_played<=2u*(count-1u));
+  }
+  assert(table_played==2u*(count-1u));
+  for(uint32_t i=0;i<league.fixture_count;i++)assert(league.fixtures[i].complete);
+  if(!knockout)assert(league.phase==LEAGUE_PHASE_COMPLETE && league.knockout.champion==101u);
+  while(league.phase==LEAGUE_PHASE_KNOCKOUT) {
+    uint32_t r=0u,i=0u;
+    assert(league_tournament_next_human(&league,NULL,&r,&i));
+    const CupFixture *f=cup_tournament_fixture(&league.knockout,r,i);
+    const int return_leg=f->first_leg_complete;
+    assert(cup_tournament_has_second_leg(&league.knockout,r,i));
+    /* Win leg 1, lose leg 2, still advance on aggregate. */
+    const uint32_t winner=return_leg ? (f->home==101u ? f->away : f->home) : 101u;
+    const uint32_t goals=return_leg ? 1u : 2u;
+    assert(league_tournament_record(&league,0,r,i,f->home==winner ? goals : 0u,
+                                    f->away==winner ? goals : 0u));
+    knockout_played++;
+    if(!return_leg) {
+      assert(!f->complete && !f->winner && !league.knockout.champion);
+      assert(league.phase==LEAGUE_PHASE_KNOCKOUT);
+      uint32_t next_r=99u,next_i=99u;
+      assert(league_tournament_next_human(&league,NULL,&next_r,&next_i));
+      assert(next_r==r && next_i==i);
+    } else assert(f->complete && f->winner==101u);
+    assert(knockout_played<=2u*league.knockout.round_count);
+  }
+  if(knockout)assert(knockout_played==2u*league.knockout.round_count);
+  assert(league.phase==LEAGUE_PHASE_COMPLETE && league.knockout.champion==101u);
+}
+
 static void check_simulated_opening_locks_teams(void) {
   const uint32_t teams[3] = {101u, 102u, 103u};
   assert(league_tournament_init(&league, teams, 3u, teams + 1u, 1u, 0, 17u));
@@ -308,6 +360,8 @@ int main(void) {
   for (uint32_t teams = 2u; teams <= 32u; teams++) {
     check_schedule(teams, 0);
     check_schedule(teams, 1);
+    check_home_away_completion(teams,0);
+    check_home_away_completion(teams,1);
   }
   assert(league_tournament_qualifier_count(2u) == 2u);
   assert(league_tournament_qualifier_count(3u) == 2u);

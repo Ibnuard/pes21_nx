@@ -330,16 +330,18 @@ Overtime, Substitutions, Injuries, Ball, dan VAR. Penalties selalu ON.
 
 Label UI:
 
-- Home Away ON = tie dua leg dengan aggregate score pada ronde sebelum final.
+- Home Away ON = tie dua leg dengan aggregate score, termasuk final Cup.
 - Home Away OFF = satu pertandingan eliminasi pada tiap pairing.
 
 Interpretasi internal:
 
 - Semua Cup memakai format knockout.
-- Final dan laga juara 3 adalah pertandingan tunggal.
+- Final mengikuti pilihan Home Away. Laga juara 3 adalah pertandingan tunggal.
 
-Jika Home Away ON, pairing sebelum final memiliki leg 1 dan leg 2;
-kelolosan ditentukan dari jumlah gol agregat.
+Jika Home Away ON, setiap pairing Cup termasuk final memiliki leg 1 dan leg 2;
+kelolosan dan juara ditentukan dari jumlah gol agregat setelah leg 2. Cup dua
+tim juga memerlukan dua pertandingan. Ketentuan ini menggantikan aturan final
+tunggal sebelumnya; lihat `MATCH_REVIEW_V94.md` untuk kompatibilitas save lama.
 
 Jika Home Away OFF, tim yang kalah langsung tersingkir. Jumlah tim yang bukan
 power-of-two ditangani dengan bye atau preliminary round.

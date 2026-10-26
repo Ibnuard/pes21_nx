@@ -29,7 +29,7 @@ class LeagueVisualTests(unittest.TestCase):
                     if p.stem!='provenance'}
 
     def test_flow_stays_within_native_vertex_and_draw_budgets(self):
-        self.assertEqual(len(self.frames),59)
+        self.assertEqual(len(self.frames),63)
         for name,draws in self.frames.items():
             with self.subTest(page=name):
                 self.assertLess(len(draws),384)

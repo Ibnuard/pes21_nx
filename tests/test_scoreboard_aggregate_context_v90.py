@@ -53,11 +53,18 @@ static void two_leg_cases(CupTournament *bracket,uint32_t *swap){
   f->complete=1;assert_leg(0,0,0);f->complete=0;
   uint32_t saved=f->home;f->home=0;assert_leg(0,0,0);f->home=saved;
   saved=f->away;f->away=0;assert_leg(0,0,0);f->away=saved;
-  /* Native single-leg final even when the tournament Home/Away setting is on. */
+  /* Career/generic brackets may keep a single final; standalone modes
+   * explicitly enable the final policy as part of their Home/Away rule. */
   CupFixture *final=&bracket->fixtures[1][0];
   final->home=11;final->away=22;final->first_leg_complete=1;
   if(bracket==&cup_tournament)cup_pending_round=1;else league_pending_round=1;
   assert_leg(0,0,0);
+  final->first_leg_complete=0;
+  cup_tournament_set_final_two_legs(bracket,1);
+  assert_leg(1,0,0);
+  final->first_leg_complete=1;final->first_leg_home_goals=3;final->first_leg_away_goals=1;
+  *swap=0;assert_leg(2,3,1);
+  *swap=1;assert_leg(2,1,3);
   if(bracket==&cup_tournament)cup_pending_round=0;else league_pending_round=0;
 }
 int main(void){

@@ -10,7 +10,7 @@
 #endif
 
 #define CUP_SAVE_MAGIC 0x32584346u /* FCX2 */
-#define CUP_SAVE_VERSION 4u
+#define CUP_SAVE_VERSION 5u
 #define CUP_SAVE_LEGACY_VERSION 2u
 
 typedef struct {
@@ -171,6 +171,15 @@ static int cup_save_read_copy(uint32_t slot, uint32_t copy,
     if (header.version == CUP_SAVE_LEGACY_VERSION)
       out->state.cup_select =
           cup_save_migrate_selector(out->state.cup_select);
+  }
+  /* Pending Home Away championships gain their second leg. Completed old Cups
+   * keep their recorded outcome; never reinterpret an already awarded title. */
+  CupTournament *cup = &out->state.tournament;
+  if (header.version < 5u && out->state.home_away && cup->home_away &&
+      !cup->champion && cup->round_count && cup->round_count <= CUP_MAX_ROUNDS) {
+    CupFixture *final = &cup->fixtures[cup->round_count - 1u][0];
+    if (!final->complete && !final->first_leg_complete)
+      final->reserved |= CUP_TWO_LEG_FINAL;
   }
   return 1;
 }

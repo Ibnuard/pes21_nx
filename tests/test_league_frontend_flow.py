@@ -35,7 +35,7 @@ class LeagueFrontendFlowTests(unittest.TestCase):
                     str(ROOT / "source/league_tournament.c"),
                     str(ROOT / "source/league_save.c"),
                     *[str(ROOT / "source" / name) for name in (
-                        "master_league.c", "master_league_save.c", "master_league_frontend.c",
+                        "master_league.c", "master_league_save.c", "master_league_frontend.c", "manager_league_dummy.c", "manager_league_motion.c", "manager_league_plan.c",
                         "master_league_catalog.c", "gameplan_preset.c")],
                     "-o", str(binary),
                 ],

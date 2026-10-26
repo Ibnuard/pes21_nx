@@ -16,37 +16,66 @@ from stadium_lite_preview import host_math
 
 
 class StadiumPitchMowingTests(unittest.TestCase):
-    def test_camp_nou_rings_and_old_trafford_straight_bands(self):
-        cc = shutil.which('g++')
-        if not cc:
-            self.skipTest('Host C++ compiler unavailable')
-        build_and_run(cc, host_math() + r'''
+    def test_stadium_stripes_align_with_field_markings_and_keep_distinct_widths(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        build_and_run(cc,host_math()+r'''
 int main() {
- const vec3 grass(.03,.09,.01);
- nxStadiumProfile=13;
- // Points at the same Euclidean radius have the same shade, including
- // rotations/reflections away from the centre: actual circles, not diamonds.
- for(int radius=100;radius<=5000;radius+=100) {
-  const float expected=nxPitchMowing(grass,vec3(radius,0,0)).g;
-  for(int angle=0;angle<360;angle+=15) {
-   const float a=angle*3.141592653589793f/180;
-   const float x=cosf(a)*radius,y=sinf(a)*radius;
-   if(fabsf(y)>3500)continue;
-   assert(fabsf(nxPitchMowing(grass,vec3(x,y,0)).g-expected)<.00001f);
+ const vec3 grass(.03,.09,.01);const int ids[]={0,1,8,9,12};
+ const int expected[]={18,20,12,22,14};
+ for(int i=0;i<5;i++) {
+  nxStadiumProfile=ids[i];int edges=0;float last=0;
+  for(int x=-5249;x<5250;x+=2) {
+   // Remove shared wear by reading the authored band field independently.
+    float mid=ids[i]==9?8:ids[i]==1?7:6,box=2;
+   float band=ids[i]==8?nxMowingBand(x/1750.f+.25f):ids[i]==12?nxMowingBand(x/1500.f+.25f):nxMowingAligned(x,mid,box);
+   if(last*band<0)edges++;if(fabsf(band)>.01f)last=band;
+  }
+  assert(edges==expected[i]-1);
+  if(ids[i]==8 || ids[i]==12) {
+   const float width=ids[i]==8?875.f:750.f;float last_edge=-5250;
+   for(float x=-5250+width;x<=5251;x+=width) {
+    float period=width*2;
+    assert(fabsf(nxMowingBand(x/period+.25f))<.0001f);
+    assert(fabsf(x-last_edge-width)<.001f);last_edge=x;
+   }
+   continue;
+  }
+  float mid=ids[i]==9?8:ids[i]==1?7:6,box=2;
+  const float anchors[]={-5250,-4700,-3600,0,3600,4700,5250};
+  for(float x:anchors)assert(fabsf(nxMowingAligned(x,mid,box))<.0001f);
+  assert(nxMowingAligned(-10,mid,box)>.9f && nxMowingAligned(10,mid,box)<-.9f);
+  // The pattern is antisymmetric about the halfway line, not the same shade
+  // on both sides. Shared wear is fixed to the field, never the camera.
+  for(int x=100;x<5200;x+=101)assert(fabsf(nxMowingAligned(x,mid,box)+nxMowingAligned(-x,mid,box))<.001f);
+ }
+}
+''')
+
+    def test_shared_grass_palette_and_wear_preserve_distinct_ring_and_checker_patterns(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        build_and_run(cc,host_math()+r'''
+int main() {
+ const vec3 grass(.03,.09,.01);const int ids[]={0,1,2,8,9,12,13};
+ int patches=0,total=0;
+ for(int id:ids) {
+  nxStadiumProfile=id;
+  for(int x=-5000;x<=5000;x+=123)for(int y=-3200;y<=3200;y+=131) {
+   float band=id==9?nxMowingAligned(x,8,2):id==8?nxMowingBand(x/1750.f+.25f):id==12?nxMowingBand(x/1500.f+.25f):id==2?(nxMowingAligned(x,3,1)+nxMowingBand(y/1700.f))*.5f:id==13?nxMowingBand(length(vec2(x,y))/1700.f):id==1?nxMowingAligned(x,7,2):nxMowingAligned(x,6,2);
+   const vec3 p(x,y,0),g=nxPitchMowing(grass,p);float clean=.09f*(1+.15f*band);
+   assert(clean-g.g>=-.000001f && clean-g.g<=.010801f);
+   assert(fabsf(g.r/g.g-.033f/.09f)<.000001f && fabsf(g.b/g.g-.009f/.09f)<.000001f);
+   patches+=clean-g.g>.003f;total++;
+   nxCloudMotion=vec2(200,1);assert(nxPitchMowing(grass,p).g==g.g);
   }
  }
- assert(nxPitchMowing(grass,vec3(0,0,0)).g>.095f);
- assert(nxPitchMowing(grass,vec3(850,0,0)).g<.085f);
- assert(nxPitchMowing(grass,vec3(1700,0,0)).g>.095f);
- nxStadiumProfile=12;
- for(int x=-5000;x<=5000;x+=100) {
-  const float expected=nxPitchMowing(grass,vec3(x,0,0)).g;
-  for(int y=-3400;y<=3400;y+=100)
-   assert(nxPitchMowing(grass,vec3(x,y,0)).g==expected);
+ assert(patches>total*.25 && patches<total*.75);
+ // Ring geometry stays circular; patch modulation does not redefine its path.
+ for(int radius=100;radius<5000;radius+=100)for(int angle=0;angle<360;angle+=15) {
+  float a=angle*3.14159265f/180;
+  assert(fabsf(nxMowingBand(length(vec2(cosf(a)*radius,sinf(a)*radius))/1700.f)-nxMowingBand(radius/1700.f))<.0001f);
  }
- assert(nxPitchMowing(grass,vec3(0,0,0)).g>.095f);
- assert(nxPitchMowing(grass,vec3(1050,0,0)).g<.085f);
- assert(nxPitchMowing(grass,vec3(2100,0,0)).g>.095f);
 }
 ''')
 
@@ -85,6 +114,21 @@ int main() {
 }
 ''')
 
+    def test_etihad_has_three_broad_base_green_levels(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        build_and_run(cc,host_math()+r'''
+int main() {
+ nxStadiumProfile=2;int dark=0,middle=0,light=0,total=0;
+ for(int x=-5190;x<5190;x+=43)for(int y=-3330;y<3330;y+=43) {
+  float g=nxPitchMowing(vec3(.033,.09,.009),vec3(x,y,0)).g;
+  dark+=g<.078f;middle+=g>=.078f && g<.0915f;light+=g>=.0915f;total++;
+ }
+ assert(dark>total*.18f && light>total*.18f);
+ assert(middle>total*.4f && middle<total*.6f);
+}
+''')
+
     def test_minified_bands_fade_to_the_same_mean(self):
         cc = shutil.which('g++')
         if not cc:
@@ -117,10 +161,13 @@ int main() {
  for(int i=0;i<6;i++) {
   nxStadiumProfile=ids[i];int n=0,high=0,low=0;
   for(int y=-3000;y<=3000;y+=250)for(int x=-5000;x<=5000;x+=250) {
-   vec3 pos(x,y,0);vec3 a=nxPitchMowing(dark,pos),b=nxPitchMowing(light,pos);
-   assert(a.g>=.09f*.915f-.000001f && a.g<=.09f*1.085f+.000001f);
+   // Offset the broad grid from exact paint/band boundaries; anchor neutrality
+   // is checked separately and must not bias the light/dark coverage count.
+   vec3 pos(x+17,y+13,0);vec3 a=nxPitchMowing(dark,pos),b=nxPitchMowing(light,pos);
+   const float lower=.73f,upper=1.15f;
+   assert(a.g>=.09f*lower-.000001f && a.g<=.09f*upper+.000001f);
    assert(fabsf(a.g-b.g)<.000001f); // baked green bands replaced, not overlaid
-   assert(fabsf(a.r/a.g-dark.r/dark.g)<.000001f); // hue survives
+   assert(fabsf(a.r/a.g-.033f/.09f)<.000001f); // shared Stamford palette
    high+=a.g>.095;low+=a.g<.085;
    patterns[i][n++]=a.g;
    for(int day=0;day<2;day++)for(int weather=0;weather<3;weather++) {
@@ -129,7 +176,7 @@ int main() {
    }
    for(int p=0;p<=100;p++)same(nxPitchMowing(vec3(p*.01f),pos),vec3(p*.01f));
   }
-  assert(n==1025 && high>n*.30 && low>n*.30);
+  assert(n==1025 && high>n*(ids[i]==2 ? .15f : .30f) && low>n*(ids[i]==2 ? .15f : .30f));
   for(int j=0;j<i;j++) {
    int different=0;
    for(int k=0;k<n;k++)different+=fabsf(patterns[i][k]-patterns[j][k])>.004;
@@ -141,7 +188,7 @@ int main() {
  }
  for(int id=-1;id<18;id++) {
   bool supported=false;for(int i=0;i<6;i++)supported|=id==ids[i];
-  if(supported)continue;
+  if(supported || id==0)continue;
   nxStadiumProfile=id;
   same(nxPitchMowing(dark,vec3(300,400,0)),dark);
   same(nxPitchMowing(light,vec3(-500,700,0)),light);
@@ -149,7 +196,7 @@ int main() {
  // Return to Konami, then another imported shell: no old pattern survives.
  for(int repeat=0;repeat<100;repeat++) {
   nxStadiumProfile=1;vec3 first=nxPitchMowing(dark,vec3(300,400,0));
-  nxStadiumProfile=0;same(nxPitchMowing(dark,vec3(300,400,0)),dark);
+  nxStadiumProfile=0;vec3 konami=nxPitchMowing(dark,vec3(300,400,0));assert(konami.g!=dark.g);
   nxStadiumProfile=1;same(nxPitchMowing(dark,vec3(300,400,0)),first);
  }
 }

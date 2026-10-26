@@ -261,17 +261,25 @@ static int fixdemo_trophy_snapshot(const void *record, const void *match,
 static int fixdemo_trophy_plan_snapshot(const CompetitionCupFinalContext *final,
     const FixdemoCeremonySnapshot *snapshot, FixdemoCeremonyPlan *plan) {
   FixdemoCeremonyContext context = {
-    snapshot->match_token, final->native_home_team, final->native_away_team, 1u
+    .match_token = snapshot->match_token,
+    .native_home_team = final->native_home_team,
+    .native_away_team = final->native_away_team,
+    .live_cup_final_fresh = 1u,
+    .two_leg_decider = final->two_leg_decider,
+    .first_home_goals = final->first_home_goals,
+    .first_away_goals = final->first_away_goals
   };
   const int accepted = fixdemo_ceremony_plan(&context, snapshot, &fixdemo_trophy_latch, plan);
-  char message[224];
+  char message[256];
   snprintf(message, sizeof(message),
-           "factory-snapshot boundary=%u token=%llu phase=%u scene=%x side=%u teams=%u/%u goals=%d/%d pk=%d/%d accepted=%d",
+           "factory-snapshot boundary=%u token=%llu phase=%u scene=%x side=%u teams=%u/%u goals=%d/%d pk=%d/%d accepted=%d prior=%u/%u aggregate=%d/%d",
            snapshot->boundary, (unsigned long long)snapshot->match_token,
            snapshot->phase, snapshot->original_scene, snapshot->original_side,
            final->native_home_team, final->native_away_team, snapshot->home_goals,
            snapshot->away_goals, snapshot->home_shootout, snapshot->away_shootout,
-           accepted);
+           accepted, final->first_home_goals, final->first_away_goals,
+           snapshot->home_goals + (int32_t)final->first_home_goals,
+           snapshot->away_goals + (int32_t)final->first_away_goals);
   fixdemo_trophy_diagnostic(message);
   return accepted;
 }

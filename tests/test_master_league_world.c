@@ -27,6 +27,23 @@ static void world_season(MasterLeague *c) {
       assert(c->match_income==before->match_income && c->prize_income==before->prize_income);
     }
     assert(!ml_simulate_event(c,&e)); /* duplicate callback cannot double-advance */
+    if(e.kind==ML_EVENT_QUALIFIER) {
+      LeagueTournament *q=&c->world.qualifiers;
+      assert(q->home_away && q->matchday_count==6u);
+      if(counts[ML_EVENT_QUALIFIER]<6u) {
+        assert(q->phase==LEAGUE_PHASE_TABLE && !q->knockout.champion && !c->world.finals_started);
+      }
+      if(counts[ML_EVENT_QUALIFIER]==3u) {
+        assert(ml_save_write(1u,c) && ml_save_read(1u,c->content_id,before));
+        assert(!memcmp(c,before,sizeof(*c)));*c=*before;
+        q=&c->world.qualifiers;
+        for(uint32_t d=0;d<3u;d++)for(uint32_t i=0;i<2u;i++) {
+          const LeagueFixture *f=league_tournament_matchday_fixture(q,d,i);
+          const LeagueFixture *back=league_tournament_matchday_fixture(q,d+3u,i);
+          assert(f->complete && !back->complete && f->home==back->away && f->away==back->home);
+        }
+      }
+    }
     free(before);
     if(c->world.national_count && !c->world.national_team) {
       const uint32_t club=c->settings.club;

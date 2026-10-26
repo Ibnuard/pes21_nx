@@ -46,7 +46,15 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v90 session\n",file);
+    fputs("FootballNX scene v95 session\n",file);
+    fputs("review v95: one-action welcome; centered single-club Manager plan; two-column Match Centre; saved league news; centered footer; possession and restart dot tape\n",file);
+    fputs("review v95: sealed pack opening and separate full-aspect player reveal; shared grass wear; uniform Old Trafford/Signal strips; three-tone Etihad; optional BUS8 Manager audio candidate with separate status journal\n",file);
+    fputs("review v94: native Master League pages and Game Plan; catalog-bound real squads and portraits; account onboarding; manual club packs; continuous action tape; owned Live audio\n",file);
+    fputs("review v94: standalone Cup/League Home Away finals retain leg 2; automatic career return schedules checked; Stamford narrow vertical mowing and worn grass\n",file);
+    fputs("review v94 match fixes: valid white rounded banner packets; Home Away Cup final return leg and aggregate trophy winner; quiet custom HCA trophy music on existing native pool\n",file);
+    fputs("review v93: Pre-League days 1-3; Match Day days 4-6; Result day 7; phase-aware hub and transfer window; accelerated offline days\n",file);
+    fputs("review v92: Online League offline dummy; Master League hub; broadcast scoreboard, tactical pitch, event panels and past-only timeline\n",file);
+    fputs("review v91: fifth Online League menu; isolated offline Manager League dummy; scheduled dot broadcasts and full recent replays\n",file);
     fputs("review v90: rounded match banner; smaller competition title; leg-two native aggregate; quieter lossless trophy cue\n",file);
     fputs("review v89: FootballNX27 white-red-blue match banners; current competition label; production Skip helper; custom ceremony music and optional podium sparks\n",file);
     fputs("review v88: reflection-independent Cup metal; controller Skip footer; optional FL26 Cup music on native mixer\n",file);

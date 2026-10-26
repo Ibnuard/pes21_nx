@@ -24,6 +24,9 @@ static int office_editor;
 typedef struct {struct {uint32_t club;} settings;} MasterLeague;
 static const MasterLeague career={.settings={101u}};
 static int ml_frontend_plan_editor(void){return office_editor;}
+static int native_office_plan_editor(void){return ml_frontend_plan_editor();}
+static int manager_dummy_plan_editor(void){return 0;}
+static int manager_league_office_lineup_valid(uint32_t side,void *squad){(void)side;(void)squad;return 0;}
 static const MasterLeague *ml_frontend_career(void){return &career;}
 static int ml_frontend_roster(uint32_t team,uint32_t players[40],uint8_t shirts[40],uint32_t *count) {
   assert(team==101u);*count=TEST_COUNT;

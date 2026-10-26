@@ -33,6 +33,9 @@ typedef struct {
    * A saved champion, old trophy context or previous successful query is not
    * live evidence. Leave zero if the frontend context cannot be read now. */
   uint32_t live_cup_final_fresh;
+  uint32_t two_leg_decider;
+  uint32_t first_home_goals;
+  uint32_t first_away_goals;
 } FixdemoCeremonyContext;
 
 typedef struct {
@@ -127,7 +130,10 @@ static inline int fixdemo_ceremony_plan(
   if (!plan) return 0;
   memset(plan, 0, sizeof(*plan));
   if (!context || !snapshot || !latch || !context->match_token ||
-      context->live_cup_final_fresh != 1u || !context->native_home_team ||
+      context->live_cup_final_fresh != 1u || context->two_leg_decider > 1u ||
+      context->first_home_goals > 99u || context->first_away_goals > 99u ||
+      (!context->two_leg_decider && (context->first_home_goals || context->first_away_goals)) ||
+      !context->native_home_team ||
       !context->native_away_team ||
       context->native_home_team == context->native_away_team ||
       snapshot->fresh != 1u || snapshot->caller_verified != 1u ||
@@ -146,8 +152,10 @@ static inline int fixdemo_ceremony_plan(
         !fixdemo_ceremony_score_valid(snapshot->away_shootout))))
     return 0;
 
-  uint32_t winner = snapshot->home_goals > snapshot->away_goals ? 0u : 1u;
-  if (snapshot->home_goals == snapshot->away_goals) {
+  const int32_t home_total = snapshot->home_goals + (int32_t)context->first_home_goals;
+  const int32_t away_total = snapshot->away_goals + (int32_t)context->first_away_goals;
+  uint32_t winner = home_total > away_total ? 0u : 1u;
+  if (home_total == away_total) {
     if (snapshot->shootout_fresh != 1u ||
         snapshot->home_shootout == snapshot->away_shootout)
       return 0;

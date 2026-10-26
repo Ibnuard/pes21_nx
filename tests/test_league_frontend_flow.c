@@ -131,7 +131,7 @@ int main(void) {
   assert(strcmp(competition_frontend_slot_competition(0u),
                 "ARGENTINA LEAGUE") == 0);
   assert(strcmp(competition_frontend_slot_progress(0u),
-                "MATCHDAY 1/1") == 0);
+                "MATCHDAY 1 OF 1") == 0);
   press(BUTTON_A);
   assert(competition_frontend_state() == COMPETITION_FRONTEND_LEAGUE_HUB);
   assert(strcmp(competition_frontend_league_name(), "FOOTBALLNX LEAGUE") == 0);
@@ -232,6 +232,52 @@ int main(void) {
   assert(league->fixture_count == 2u);
   assert(league->fixtures[0].home == league->fixtures[1].away);
   assert(league->fixtures[0].away == league->fixtures[1].home);
+  press(BUTTON_B);
+  focus_hub(3u);press(BUTTON_A);press(BUTTON_DOWN);press(BUTTON_A);
+  assert(competition_frontend_state()==COMPETITION_FRONTEND_LEAGUE_HUB);
+  uint32_t managed=0u;
+  for(uint32_t day=0;day<2u;day++) {
+    focus_hub(2u);press(BUTTON_A);
+    assert(competition_frontend_take_action()==COMPETITION_ACTION_LEAGUE_FIXTURE);
+    assert(!competition_frontend_league_extra_time() && !competition_frontend_league_penalty());
+    assert(competition_frontend_league_match_teams(&home,&away));managed=home;
+    competition_frontend_league_handoff_result(1);
+    competition_frontend_league_match_result(2u,0u);
+    competition_frontend_league_restore_after_match();
+    if(!day)assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_TABLE);
+  }
+  assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_KNOCKOUT);
+  focus_hub(2u);press(BUTTON_A);
+  assert(competition_frontend_take_action()==COMPETITION_ACTION_LEAGUE_FIXTURE);
+  assert(competition_frontend_match_leg(NULL,NULL)==1u);
+  assert(!competition_frontend_league_extra_time() && !competition_frontend_league_penalty());
+  assert(competition_frontend_league_match_teams(&home,&away) && home==managed);
+  competition_frontend_league_handoff_result(1);
+  CompetitionCupFinalContext trophy;
+  assert(!competition_frontend_cup_live_final_context(&trophy));
+  competition_frontend_league_match_result(2u,0u);
+  competition_frontend_league_restore_after_match();
+  assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_KNOCKOUT);
+  assert(!competition_frontend_league_tournament()->knockout.champion);
+  assert(competition_frontend_item_enabled(2u));
+  /* Restore the autosaved return fixture through the actual Continue flow. */
+  competition_frontend_close();competition_frontend_finish_close();
+  competition_frontend_open_modes();competition_frontend_pad_event(0u,0u);
+  press(BUTTON_DOWN);press(BUTTON_A);press(BUTTON_DOWN);press(BUTTON_A);
+  press(BUTTON_DOWN);press(BUTTON_A);
+  assert(competition_frontend_state()==COMPETITION_FRONTEND_LEAGUE_HUB);
+  focus_hub(2u);press(BUTTON_A);
+  assert(competition_frontend_take_action()==COMPETITION_ACTION_LEAGUE_FIXTURE);
+  assert(competition_frontend_league_extra_time() && competition_frontend_league_penalty());
+  uint8_t prior_home=0u,prior_away=0u;
+  assert(competition_frontend_match_leg(&prior_home,&prior_away)==2u);
+  assert(prior_home==2u && prior_away==0u);
+  assert(competition_frontend_league_match_teams(&home,&away) && home==managed);
+  competition_frontend_league_handoff_result(1);
+  competition_frontend_league_match_result(0u,1u);
+  competition_frontend_league_restore_after_match();
+  assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_COMPLETE);
+  assert(competition_frontend_league_tournament()->knockout.champion==managed);
 
   competition_frontend_close();
   competition_frontend_finish_close();

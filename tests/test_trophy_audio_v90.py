@@ -131,7 +131,8 @@ def test_full_pcm_bank_is_quiet_before_playback_and_has_no_adx_loss():
     music.verify_bank(blob, audio)
     assert len(blob) == 2758200 < music.MAX_BANK == 4 * 1024 * 1024
     assert hashlib.sha256(blob).hexdigest() == report["bank_sha256"]
-    assert (ROOT / "source/trophy_audio_catalog.h").read_text() == music.catalog(blob, audio)
+    # The historical PCM bank stays sealed after the v94 HCA runtime repair.
+    assert (folder / "trophy_audio_catalog.h").read_text() == music.catalog(blob, audio)
     assert report["cue_gain_db"] == -12 and report["gain_applied_before_playback"]
     assert report["codec"] == "WAVE_PCM16" and not report["lossy_transcode"]
     assert report["codec_info"]["samples"] == 688128

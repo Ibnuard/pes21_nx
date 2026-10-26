@@ -27,7 +27,7 @@ def compile_run(tmp_path, body):
                             "-I", (ROOT / "tests").as_posix(), source.as_posix(),
                             "-o", exe.as_posix()], capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stdout + built.stderr
-    ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+    ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20, cwd=tmp_path)
     assert ran.returncode == 0, ran.stdout + ran.stderr
 
 
@@ -183,30 +183,38 @@ def test_staged_bank_graph_exact_payload_loop_and_catalog():
     assert sealed.read_text() == music.catalog(blob, audio)
 
 
+def owned_hca_header():
+    from stage_manager_league_audio import awb_recording
+    path = ROOT / 'local-debug/match-review-v94/audio/stage-02/Audio/trophy-user-hca-v94.acb'
+    if not path.is_file():
+        pytest.skip('ignored staged current user HCA bank required')
+    audio = awb_recording(Utf(path.read_bytes()).blob(0, 'AwbFile'), 0)
+    return audio[:int.from_bytes(audio[6:8], 'big')]
+
+
 def test_plaintext_decoder_admission_is_full_header_exact_and_owned(tmp_path):
-    _, audio = local_bank()
-    header = ",".join(str(b) for b in audio[:260])
+    header = ",".join(str(b) for b in owned_hca_header())
     compile_run(tmp_path, r'''
 #include <assert.h>
 #include "trophy_audio_policy.h"
 int main(void) {
-  unsigned char h[260]={''' + header + r'''};
-  assert(!trophy_audio_plain_hca_header(h,260,NULL,0));
+  unsigned char h[TROPHY_AUDIO_HEADER_BYTES]={''' + header + r'''};
+  assert(!trophy_audio_plain_hca_header(h,sizeof(h),NULL,0));
   __atomic_store_n(&trophy_audio_bank_mounted,1,__ATOMIC_RELEASE);
-  for(unsigned split=0;split<=260;++split)
+  for(unsigned split=0;split<=sizeof(h);++split)
 #if TROPHY_AUDIO_ENCODE_TYPE == 2u
-    assert(trophy_audio_plain_hca_header(h,split,h+split,260-split));
+    assert(trophy_audio_plain_hca_header(h,split,h+split,sizeof(h)-split));
 #else
-    assert(!trophy_audio_plain_hca_header(h,split,h+split,260-split));
+    assert(!trophy_audio_plain_hca_header(h,split,h+split,sizeof(h)-split));
 #endif
   assert(!trophy_audio_plain_hca_header(NULL,260,NULL,0));
   assert(!trophy_audio_plain_hca_header(h,-1,h,260));
-  assert(!trophy_audio_plain_hca_header(h,96,NULL,0));
-  for(unsigned i=0;i<260;++i) {
-    h[i]^=1;assert(!trophy_audio_plain_hca_header(h,260,NULL,0));h[i]^=1;
+  assert(!trophy_audio_plain_hca_header(h,sizeof(h)-1,NULL,0));
+  for(unsigned i=0;i<sizeof(h);++i) {
+    h[i]^=1;assert(!trophy_audio_plain_hca_header(h,sizeof(h),NULL,0));h[i]^=1;
   }
   __atomic_store_n(&trophy_audio_bank_mounted,0,__ATOMIC_RELEASE);
-  assert(!trophy_audio_plain_hca_header(h,260,NULL,0));
+  assert(!trophy_audio_plain_hca_header(h,sizeof(h),NULL,0));
   return 0;
 }
 ''')
@@ -214,8 +222,7 @@ int main(void) {
 
 def test_actual_decoder_wrapper_preserves_other_voices(tmp_path):
     from test_player_commentary_runtime import compile_run as run_wrapper
-    _, audio = local_bank()
-    header = ','.join(str(b) for b in audio[:260])
+    header = ','.join(str(b) for b in owned_hca_header())
     run_wrapper(tmp_path, r'''
 static unsigned calls, clears;
 static int32_t decode(void *decoder,const void *a,int64_t n,const void *b,
@@ -227,15 +234,15 @@ static int32_t clear(void *d,const void *table,int64_t n) {
 }
 int main(void) {
   (void)pes_sound_team_name_label;(void)pes_sound_mount_data;(void)pes_sound_unmount_data;
-  unsigned char h[260]={''' + header + r'''};
+  unsigned char h[TROPHY_AUDIO_HEADER_BYTES]={''' + header + r'''};
   sound_hca_decode_header_original=decode;sound_hca_set_decryption_table=clear;
   int64_t used=0;
-  assert(pes_sound_decode_hca_header((void*)1,h,260,NULL,0,&used)==23);
+  assert(pes_sound_decode_hca_header((void*)1,h,sizeof(h),NULL,0,&used)==23);
   assert(calls==1 && !clears && used==17); /* Bank not owned. */
   __atomic_store_n(&trophy_audio_bank_mounted,1,__ATOMIC_RELEASE);
-  for(unsigned split=0;split<=260;++split) {
+  for(unsigned split=0;split<=sizeof(h);++split) {
     unsigned before=calls;
-    assert(pes_sound_decode_hca_header((void*)1,h,split,h+split,260-split,&used)==23);
+    assert(pes_sound_decode_hca_header((void*)1,h,split,h+split,sizeof(h)-split,&used)==23);
 #if TROPHY_AUDIO_ENCODE_TYPE == 2u
     assert(calls==before+1 && clears==split+1 && used==17);
 #else
@@ -243,8 +250,8 @@ int main(void) {
 #endif
   }
   unsigned before=clears;
-  h[128]^=1;
-  assert(pes_sound_decode_hca_header((void*)1,h,260,NULL,0,&used)==23);
+  h[sizeof(h)-1]^=1;
+  assert(pes_sound_decode_hca_header((void*)1,h,sizeof(h),NULL,0,&used)==23);
   assert(clears==before); /* Different voice retains native cipher. */
   return 0;
 }

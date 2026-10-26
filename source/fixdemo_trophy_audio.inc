@@ -124,7 +124,7 @@ static int fixdemo_audio_native_play(void *context, uint64_t *handle) {
       fixdemo_trophy_note("music-bank absent-or-damaged native-ceremony-retained");
       return -1;
     }
-    if (!fixdemo_audio_ensure_wave_pool()) {
+    if (TROPHY_AUDIO_ENCODE_TYPE == 20u && !fixdemo_audio_ensure_wave_pool()) {
       free(bank);
       return -1;
     }
@@ -149,11 +149,12 @@ static int fixdemo_audio_native_play(void *context, uint64_t *handle) {
       return -1;
     }
     char message[112];
-    snprintf(message, sizeof(message), "music-bank mounted=%d bytes=%u exact-user-PCM-v90 gain-db-x100=-1200",
+    snprintf(message, sizeof(message), "music-bank mounted=%d bytes=%u exact-user-HCA-v94 gain-db-x100=-1200",
              fixdemo_audio_mount_id, (uint32_t)bytes);
     fixdemo_trophy_note(message);
   }
-  if (fixdemo_audio_mount_id < 0 || !fixdemo_audio_wave_pool) return -1;
+  if (fixdemo_audio_mount_id < 0 ||
+      (TROPHY_AUDIO_ENCODE_TYPE == 20u && !fixdemo_audio_wave_pool)) return -1;
   if (!(fixdemo_audio_existing(TROPHY_AUDIO_CUE) & 1)) {
     fixdemo_trophy_note("music-bank owned-cue-not-found");
     return -1;
@@ -238,5 +239,5 @@ static void fixdemo_trophy_audio_install(so_module *module) {
   fixdemo_audio_wave_pool_allocate = (void *)methods[8];
   fixdemo_trophy_audio.ops = (TrophyAudioOps){fixdemo_audio_native_play,
       fixdemo_audio_native_stop, fixdemo_audio_note, NULL};
-  fixdemo_trophy_note("music-optional user-PCM-v90 own-cue-gain=-12dB native-mixer ABI-bound");
+  fixdemo_trophy_note("music-optional user-HCA-v94 own-cue-gain=-12dB existing-native-pool ABI-bound");
 }

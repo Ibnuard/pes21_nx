@@ -1,5 +1,15 @@
 # Master League implementation
 
+## Automatic Home Away audit (v94)
+
+The domestic season and national qualifiers automatically schedule each pair
+twice with reversed home/away fixtures. Completion waits for the entire return
+schedule. Host tests cover two-team, odd-team and eight-team seasons, midway
+save/continue, refused early rollover, duplicate result callbacks and all six
+national qualifying matchdays. Current career knockout competitions are
+single-leg system rules; they do not inherit the standalone Cup/League final
+toggle. No career save layout or historical fixture is changed by this audit.
+
 ## Season archive and competition follow-up (2026-10-15)
 
 Manager Office now has a read-only CAREER ARCHIVE with season reviews and

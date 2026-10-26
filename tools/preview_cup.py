@@ -216,6 +216,25 @@ int main(void) {
   assert(cup_ui_slot_code(competition_frontend_cup_draft(),9,slot_code,sizeof(slot_code))==5u && !strcmp(slot_code,"06A"));
   capture("35-participants-bye-slots");press(B);press(RIGHT);press(A);
   press(Y);press(Y);capture("36-bracket-bye-slots");
+  enter_cup();press(A);press(LEFT);press(DOWN);press(DOWN);
+  for(uint32_t i=0;i<32u;i++)press(LEFT);
+  assert(competition_frontend_cup_team_count()==2u);
+  press(DOWN);if(!competition_frontend_cup_home_away())press(RIGHT);
+  while(competition_frontend_focus()!=5u)press(DOWN);
+  press(A);press(A);press(X);press(B);press(UP);press(RIGHT);
+  press(A);assert(competition_frontend_take_action()==COMPETITION_ACTION_CUP_FIXTURE);
+  uint32_t final_home=0,final_away=0;
+  assert(competition_frontend_cup_match_teams(&final_home,&final_away));
+  competition_frontend_cup_handoff_result(1);competition_frontend_cup_match_result(2,0);
+  competition_frontend_cup_restore_after_match();competition_frontend_pad_event(0,0);
+  assert(!competition_frontend_cup_tournament()->champion);
+  capture("40-two-team-cup-return-leg");
+  press(A);assert(competition_frontend_take_action()==COMPETITION_ACTION_CUP_FIXTURE);
+  assert(competition_frontend_cup_match_teams(&final_home,&final_away));
+  competition_frontend_cup_handoff_result(1);competition_frontend_cup_match_result(0,1);
+  competition_frontend_cup_restore_after_match();competition_frontend_pad_event(0,0);
+  assert(competition_frontend_cup_tournament()->champion==final_home);
+  capture("41-two-team-cup-aggregate-champion");
   return 0;
 }
 '''
@@ -231,7 +250,7 @@ def build_driver(source, logos=()):
         "use_rounded_rect", "fnx_button_color"]
     ui_helpers = ["ml_ui_draw", "ml_ui_rect", "ml_ui_text", "ml_ui_image", "ml_ui_button",
         "ml_ui_center_text", "ml_ui_unread", "ml_ui_art", "ml_ui_icon", "ml_ui_frame", "ml_ui_rank_change",
-        "ml_ui_emblem", "ml_ui_header_icon", "ml_ui_panel", "ml_ui_row", "ml_ui_pills", "ml_ui_toast_card",
+        "ml_ui_emblem", "ml_ui_header_icon", "ml_ui_panel", "ml_ui_row", "ml_ui_pills_count", "ml_ui_pills", "ml_ui_toast_card",
         "ml_ui_page_icon", "ml_ui_paragraph", "ml_ui_confirmation",
         "master_league_draw_layer", "master_league_draw"]
     uniforms = sorted(set(re.findall(r"gl\.(loc_\w+)", source)))
@@ -410,7 +429,7 @@ def main():
         shutil.copy2(ROOT / "source/competition_frontend.c", temp / "competition_frontend.c")
         core = ["competition_entry_draft.c", "cup_tournament.c", "cup_save.c",
             "league_tournament.c", "league_save.c", "master_league.c", "master_league_save.c",
-            "master_league_frontend.c", "master_league_catalog.c", "gameplan_preset.c"]
+            "master_league_frontend.c", "manager_league_dummy.c", "manager_league_motion.c", "manager_league_plan.c", "master_league_catalog.c", "gameplan_preset.c"]
         command = [shutil.which("cc") or shutil.which("gcc"), "-std=c11", "-Wno-constant-logical-operand",
             "-I", str(temp), "-I", str(ROOT / "source"), str(temp / "preview.c"),
             str(temp / "competition_frontend.c"), *[str(ROOT / "source" / name) for name in core],

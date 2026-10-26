@@ -2,6 +2,11 @@
 
 ## Competition reliability and standings follow-up (2026-10-15)
 
+The v94 review extends Home & Away to the standalone League knockout final.
+Pending older finals acquire the return leg; already completed competitions
+retain their recorded result. League save v6 uses the unchanged payload and
+keeps versions 1-5 readable. Career competitions retain their own system rules.
+
 - Played knockout ties require the actual native penalty-shootout winner. A
   missing result leaves the fixture unresolved and retryable; only simulated
   COM matches use the seeded decider. Shootout goals are not added to the match
@@ -95,8 +100,8 @@ of native player-stat timing is still needed.
 With `By Standing`, the highest-ranked club is champion after the last
 matchday; the table and final matchday remain visible. With `Knockout Stages`,
 the top 2 (for 2–3 teams), 4 (for 4–7), or 8 (for 8–32) qualify for a
-knockout. Home & Away applies to knockout rounds before the single-match
-final. Seeds are 1v8/4v5/2v7/3v6 or 1v4/2v3. Y on Standings opens Knockout,
+knockout. Home & Away applies to every knockout round, including the final;
+OFF keeps single-leg ties. Seeds are 1v8/4v5/2v7/3v6 or 1v4/2v3. Y on Standings opens Knockout,
 with two matches linked to their next-round fixture. L/R changes round,
 Y changes page, and X returns to Standings. Each fixture shows a colored code,
 the round name and right-aligned status on one line. Return-leg previews

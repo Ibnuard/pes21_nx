@@ -65,11 +65,21 @@ void cup_tournament_set_rules(CupTournament *cup, int home_away,
   cup->third_place_enabled = third_place != 0 && cup->team_count >= 4u;
 }
 
-static int cup_has_second_leg(const CupTournament *cup, uint32_t round,
-                              uint32_t index) {
-  /* The final and bronze match remain single-game deciders. */
-  return cup->home_away && round + 1u < cup->round_count &&
-         index < cup_tournament_fixture_count(cup, round);
+void cup_tournament_set_final_two_legs(CupTournament *cup, int enabled) {
+  if (!cup || !cup->round_count || cup->round_count > CUP_MAX_ROUNDS || cup->champion)
+    return;
+  CupFixture *final = &cup->fixtures[cup->round_count - 1u][0];
+  if (final->complete || final->first_leg_complete) return;
+  if (enabled && cup->home_away) final->reserved |= CUP_TWO_LEG_FINAL;
+  else final->reserved &= (uint8_t)~CUP_TWO_LEG_FINAL;
+}
+
+int cup_tournament_has_second_leg(const CupTournament *cup, uint32_t round,
+                                  uint32_t index) {
+  return cup && cup->home_away && round < cup->round_count &&
+         index < cup_tournament_fixture_count(cup, round) &&
+         (round + 1u < cup->round_count ||
+          (cup->fixtures[round][index].reserved & CUP_TWO_LEG_FINAL));
 }
 
 static void cup_complete(CupTournament *cup, uint32_t round, uint32_t index,
@@ -86,7 +96,8 @@ static void cup_complete(CupTournament *cup, uint32_t round, uint32_t index,
                                                      : fixture->away;
   fixture->complete = 1;
   fixture->simulated = simulated != 0;
-  fixture->reserved = home_goals == away_goals ? CUP_DECIDED_PENALTIES : 0u;
+  fixture->reserved = (fixture->reserved & CUP_TWO_LEG_FINAL) |
+      (home_goals == away_goals ? CUP_DECIDED_PENALTIES : 0u);
   if (cup->history_count < CUP_MAX_FIXTURES) {
     cup->history_round[cup->history_count] = (uint8_t)round;
     cup->history_index[cup->history_count] = (uint8_t)index;
@@ -182,7 +193,7 @@ int cup_tournament_record_deferred_decided(CupTournament *cup, uint32_t round,
   CupFixture *fixture = &cup->fixtures[round][index];
   if (fixture->complete || !fixture->home || !fixture->away)
     return 0;
-  if (cup_has_second_leg(cup, round, index)) {
+  if (cup_tournament_has_second_leg(cup, round, index)) {
     if (!fixture->first_leg_complete) {
       fixture->first_leg_home_goals = (uint8_t)(home_goals > 99u ? 99u : home_goals);
       fixture->first_leg_away_goals = (uint8_t)(away_goals > 99u ? 99u : away_goals);
@@ -269,7 +280,7 @@ void cup_tournament_advance(CupTournament *cup) {
                             (round * 97u + i * 31u);
       uint32_t home_goals = (roll >> 5) % 4u;
       uint32_t away_goals = (roll >> 13) % 4u;
-      if (cup_has_second_leg(cup, round, i)) {
+      if (cup_tournament_has_second_leg(cup, round, i)) {
         if (!fixture->first_leg_complete) {
           fixture->first_leg_home_goals = (uint8_t)home_goals;
           fixture->first_leg_away_goals = (uint8_t)away_goals;

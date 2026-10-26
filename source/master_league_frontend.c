@@ -1,4 +1,5 @@
 #include "master_league_frontend.h"
+#include "competition_hub_navigation.h"
 #include "master_league_catalog.h"
 #include "exhibition_team_catalog.h"
 #include "fl26_league_catalog_generated.h"

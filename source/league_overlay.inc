@@ -193,7 +193,7 @@ static void league_ui_next(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
     if(l->phase==LEAGUE_PHASE_KNOCKOUT) {
       uint32_t round=0,index=0;league_tournament_next_human(l,NULL,&round,&index);
       const CupFixture *f=cup_tournament_fixture(&l->knockout,round,index);
-      snprintf(label,sizeof(label),"%s%s",league_ui_round(round),l->knockout.home_away && round+1u<l->knockout.round_count
+      snprintf(label,sizeof(label),"%s%s",league_ui_round(round),cup_tournament_has_second_leg(&l->knockout,round,index)
           ? f && f->first_leg_complete ? " - LEG 2" : " - LEG 1" : "");
     }
     cup_ui_text(ui,label,.653f,.292f,.288f,.024f,-3,verts,quads);
@@ -362,7 +362,7 @@ static void league_ui_knockout_card(MasterLeagueRender *ui,uint32_t round,uint32
   const CupTournament *cup=&competition_frontend_league_tournament()->knockout;
   const CupFixture *f=cup_tournament_fixture(cup,round,index);if(!f)return;
   uint32_t home=0,away=0;cup_tournament_schedule_teams(cup,round,index,&home,&away);
-  const int two_leg=cup->home_away && round+1u<cup->round_count;
+  const int two_leg=cup_tournament_has_second_leg(cup,round,index);
   const char *status=f->complete ? ((f->reserved&CUP_DECIDED_PENALTIES) ? "PENALTIES" : two_leg ? "AGGREGATE" : "FULL TIME")
       : two_leg ? (f->first_leg_complete ? "LEG 1 DONE" : "LEG 1 NEXT") : "UPCOMING";
   league_ui_fixture_card(ui,index+1u,league_ui_round(round),status,home,away,f->complete || f->first_leg_complete,
@@ -382,11 +382,13 @@ static void league_ui_bracket(MasterLeagueRender *ui,GLfloat *verts,int *quads) 
     if(cup->champion)cup_ui_badge(ui,cup->champion,.555f,.393f,.220f,verts,quads);
     ml_ui_rect(ui,.512f,.711f,.425f,.166f,.012f,.07f,.18f,.95f,-1,0,1,verts,quads);
     cup_ui_text(ui,cup->champion ? "CHAMPIONS" : "THE TITLE AWAITS",.532f,.741f,.383f,.025f,-1,verts,quads);
-    cup_ui_text(ui,cup->champion ? cup_ui_team(cup->champion) : "ONE FINAL. ONE WINNER.",.532f,.807f,.383f,.033f,-1,verts,quads);
+    cup_ui_text(ui,cup->champion ? cup_ui_team(cup->champion) :
+        cup_tournament_has_second_leg(cup,round,0) ? "TWO LEGS. ONE WINNER." : "ONE FINAL. ONE WINNER.",.532f,.807f,.383f,.033f,-1,verts,quads);
     league_ui_art(ui,2,.060f,.663f,.425f,.214f,verts,quads);
     ml_ui_rect(ui,.060f,.663f,.425f,.214f,.012f,.07f,.18f,.50f,-1,0,1,verts,quads);
     cup_ui_text(ui,"THE FINAL CHAPTER",.080f,.701f,.385f,.033f,-1,verts,quads);
-    cup_ui_text(ui,cup->champion ? "SEASON COMPLETE" : "ONE MATCH FOR THE TITLE",.080f,.814f,.385f,.025f,-1,verts,quads);
+    cup_ui_text(ui,cup->champion ? "SEASON COMPLETE" :
+        cup_tournament_has_second_leg(cup,round,0) ? "AGGREGATE DECIDES THE TITLE" : "ONE MATCH FOR THE TITLE",.080f,.814f,.385f,.025f,-1,verts,quads);
   } else {
     for(uint32_t i=0;i<2u && first+i<count;i++)league_ui_knockout_card(ui,round,first+i,.06f,.352f+i*.277f,.425f,.248f,verts,quads);
     const float edge=.485f,spine=.499f,mid=.476f;

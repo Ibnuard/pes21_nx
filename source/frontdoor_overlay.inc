@@ -2,6 +2,7 @@
  * route, focus, team ID, ready flag, kit, lineup and kickoff transaction.
  * A bounded value snapshot also lets the host preview exercise this exact
  * renderer without booting the game or touching a save. */
+#include "main_menu_layout.h"
 typedef enum {
   FD_NONE, FD_TITLE, FD_MENU, FD_MATCH, FD_MODES, FD_SELECTOR,
   FD_HUB, FD_KITS, FD_STADIUM, FD_SETTINGS,
@@ -25,7 +26,7 @@ typedef struct {
   uint32_t focus, side_count, row_count, total_rows, first_row, action_count;
   uint32_t portrait_previous, portrait_current;
   float portrait_mix;
-  float menu_weights[4];
+  float menu_weights[NX_MAIN_MENU_COUNT];
   float menu_pattern_phase;
   int exhibition, kit_editing, confirm;
   uint32_t confirm_focus;
@@ -36,7 +37,7 @@ typedef struct {
 } FrontdoorView;
 
 typedef struct {
-  float from[4], weights[4];
+  float from[NX_MAIN_MENU_COUNT], weights[NX_MAIN_MENU_COUNT];
   uint64_t started_ns, loop_started_ns;
   float pattern_phase;
   uint32_t target;
@@ -48,7 +49,7 @@ typedef struct {
  * Weights always sum to one: expanding one row cannot grow the whole rail. */
 static void fd_menu_motion_step(FrontdoorMenuMotion *motion,int active,
     uint32_t focus,uint64_t now_ns) {
-  focus%=4u;
+  focus%=NX_MAIN_MENU_COUNT;
   if(!active) {
     memset(motion,0,sizeof(*motion));
     return;
@@ -64,7 +65,7 @@ static void fd_menu_motion_step(FrontdoorMenuMotion *motion,int active,
   float t=now_ns>=motion->started_ns ? (float)(now_ns-motion->started_ns)/260000000.f : 0.f;
   t=fminf(1.f,t);
   const float ease=1.f-(1.f-t)*(1.f-t)*(1.f-t);
-  for(uint32_t i=0;i<4u;i++)
+  for(uint32_t i=0;i<NX_MAIN_MENU_COUNT;i++)
     motion->weights[i]=motion->from[i]+((i==motion->target ? 1.f : 0.f)-motion->from[i])*ease;
   if(focus!=motion->target) {
     memcpy(motion->from,motion->weights,sizeof(motion->from));
@@ -79,8 +80,9 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
     uint32_t menu_focus,uint32_t previous,uint32_t current,float mix,
     const float ready_mix[2]) {
   memset(v,0,sizeof(*v));v->page=page;v->focus=menu_focus;
-  v->menu_weights[menu_focus%4u]=1.f;
-  v->portrait_previous=previous%4u;v->portrait_current=current%4u;v->portrait_mix=mix;
+  v->menu_weights[menu_focus%NX_MAIN_MENU_COUNT]=1.f;
+  v->portrait_previous=page==FD_MENU ? nx_menu_portrait(previous) : previous%4u;
+  v->portrait_current=page==FD_MENU ? nx_menu_portrait(current) : current%4u;v->portrait_mix=mix;
   v->exhibition=pes_controller_exhibition_single_controller_mode();
   v->side_count=2;
   if(page==FD_MATCH || page==FD_MODES) {
@@ -322,13 +324,17 @@ static void fd_header(MasterLeagueRender *ui,const char *title,const char *subti
   fd_text(ui,subtitle,.055f,.107f,.80f,.025f,-1,verts,quads);
   ml_ui_header_icon(ui,icon,.91f,.056f,.072f,verts,quads);
 }
+static void fd_helper_at(MasterLeagueRender *ui,const char *key,const char *label,
+    float cy,float *x,GLfloat *verts,int *quads) {
+  const float h=.0528f,w=h*screen_height/screen_width;
+  ml_ui_image(ui,switch_button_texture(key),0,*x,cy-h*.5f,w,h,verts,quads);
+  const float textw=measure_efootball_line_mode(label,(int)strlen(label),.0333f*screen_height,EFOOTBALL_FONT_BOLD,0)/screen_width;
+  fd_text(ui,label,*x+w+.010f,fd_cap_top(cy,.0333f),textw+.004f,.0333f,-1,verts,quads);
+  *x+=w+.010f+textw+.033f;
+}
 static void fd_helper(MasterLeagueRender *ui,const char *key,const char *label,
     float *x,GLfloat *verts,int *quads) {
-  const float h=.0528f,w=h*screen_height/screen_width;
-  ml_ui_image(ui,switch_button_texture(key),0,*x,.928f,w,h,verts,quads);
-  const float textw=measure_efootball_line_mode(label,(int)strlen(label),.0333f*screen_height,EFOOTBALL_FONT_BOLD,0)/screen_width;
-  fd_text(ui,label,*x+w+.010f,fd_cap_top(.9544f,.0333f),textw+.004f,.0333f,-1,verts,quads);
-  *x+=w+.010f+textw+.033f;
+  fd_helper_at(ui,key,label,.9544f,x,verts,quads);
 }
 static void fd_footer(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
   const FrontdoorPage page=v->page;
@@ -440,22 +446,22 @@ static void fd_title(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *vert
   fd_text(ui,"ANDROSWITCH PROJECT 2026",.059f,.940f,.44f,.0236f,-3,verts,quads);
 }
 static void fd_menu(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
-  static const char *const labels[]={"MATCH","MODES","SETTINGS","CREDITS"};
-  static const uint32_t icons[]={ML_HEADER_MATCH,ML_HEADER_TROPHY,ML_HEADER_SETTINGS,ML_HEADER_MESSAGES};
+  static const char *const labels[]={"MATCH","MODES","ONLINE LEAGUE","SETTINGS","CREDITS"};
+  static const uint32_t icons[]={ML_HEADER_MATCH,ML_HEADER_TROPHY,ML_HEADER_RANKING,ML_HEADER_SETTINGS,ML_HEADER_MESSAGES};
   fd_portrait(ui,v,.560f,.013f,.899f,verts,quads);
   fd_brand(ui,.050f,.063f,.286f,verts,quads);
   /* A 2.17x active tile and compact neighbours share a fixed-height rail.
    * Icons/text grow gently with the row; native focus changes immediately. */
-  float y=.337f;
-  for(uint32_t i=0;i<4u;i++) {
+  float y=.327f;
+  for(uint32_t i=0;i<NX_MAIN_MENU_COUNT;i++) {
     const float amount=fmaxf(0.f,fminf(1.f,v->menu_weights[i]));
-    const float x=.050f,w=.407f,h=.084f+.098f*amount;const int selected=v->focus==i;
+    const float x=.050f,w=.407f,h=.075f+.08775f*amount;const int selected=v->focus==i;
     fd_card(ui,x,y,w,h,selected,0,verts,quads);
     if(selected)fd_menu_pattern_loop(ui,v->menu_pattern_phase,verts);
     const float ih=.046f+.028f*amount,th=.0347f+.007f*amount,cy=y+h*.5f;
     ml_ui_header_icon(ui,icons[i],x+.027f,cy-ih*.5f,ih,verts,quads);
     fd_text(ui,labels[i],x+.084f,fd_cap_top(cy,th),w-.110f,th,selected ? -1 : -2,verts,quads);
-    y+=h+.020f;
+    y+=h+.017f;
   }
 }
 static void fd_match_menu(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {

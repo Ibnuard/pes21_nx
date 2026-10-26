@@ -55,7 +55,7 @@ typedef struct { char name[64]; uint32_t badge, rank, own; int rank_change; Leag
 typedef struct { char home[64],away[64]; uint32_t home_badge,away_badge,hg,ag,complete,own,round,index; } MlBracketMatch;
 typedef struct {
   char title[64],body[256],accept[32],error[112];
-  uint32_t open,selected,destructive;
+  uint32_t open,selected,destructive,information;
 } MlModalView;
 typedef struct {
   uint32_t club_badge,nation_badge,home_badge,away_badge,has_result,home_goals,away_goals;
@@ -77,6 +77,7 @@ typedef struct {
   int action_selected, action_enabled[4];
   uint32_t section, section_count, feed_index, feed_count;
   float feed_progress,feed_opacity;
+  float next_title_size; /* Zero retains the existing production title size. */
   uint32_t navigation_serial;
   int slide_direction;
   char club_name[64], competition[64], balance[32], season_summary[64];

@@ -137,7 +137,11 @@ def replace_atlas(container: bytes, atlas: bytes, candidate_limit: int = 48, min
         output=output[:end]+packed
         new_length=len(output)-base
         struct.pack_into('>I',output,base+12,new_length)
-        struct.pack_into('<I',output,12,new_length)
+        # A raw TXP2 has its own big-endian size at byte 12. Only a real outer
+        # AFP header owns the separate little-endian size at absolute byte 12.
+        # Writing both at base zero corrupts the native loader's admission.
+        if base:
+            struct.pack_into('<I',output,12,new_length)
         output.extend(b'\0'*((-len(output))%16))
     else:
         output[base+offset:base+offset+length]=packed+b'\0'*(length-len(packed))

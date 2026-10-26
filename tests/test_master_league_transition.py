@@ -20,8 +20,9 @@ class CareerTransitionTests(unittest.TestCase):
 #include <assert.h>
 #define PES_2P_TRANSITION_LOADING 1u
 static uint32_t main_menu_2p_transition_active,main_menu_2p_transition_kind;
-static int office,ready;
-static int ml_frontend_plan_editor(void){return office;}
+static uint32_t local_rematch_handoff_cover,main_menu_2p_prematch_hub_active,exhibition_hub_squad_state;
+static int office,manager_office,ready;
+static int native_office_plan_editor(void){return office || manager_office;}
 static int pes_controller_custom_prematch_gameplan_active(void){return ready;}
 '''
         source += function(hooks, 'pes_controller_2p_transition_active')
@@ -42,6 +43,13 @@ int main(void){
  assert(pes_controller_2p_transition_active());
  office=0; /* career restored */
  assert(!pes_controller_2p_transition_active());
+ manager_office=1;assert(pes_controller_2p_transition_active());
+ ready=1;assert(!pes_controller_2p_transition_active());manager_office=0;ready=0;
+ local_rematch_handoff_cover=1;assert(pes_controller_2p_transition_active());
+ assert(pes_controller_2p_transition_kind()==PES_2P_TRANSITION_LOADING);
+ local_rematch_handoff_cover=0;main_menu_2p_prematch_hub_active=1;
+ assert(pes_controller_2p_transition_active());exhibition_hub_squad_state=1;
+ assert(!pes_controller_2p_transition_active());main_menu_2p_prematch_hub_active=0;
  main_menu_2p_transition_active=1;main_menu_2p_transition_kind=2;
  assert(pes_controller_2p_transition_active() && pes_controller_2p_transition_kind()==2);
  return 0;

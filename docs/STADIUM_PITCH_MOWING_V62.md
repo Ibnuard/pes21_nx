@@ -1,5 +1,30 @@
 # Stadium pitch mowing v62
 
+Current follow-up: [Manager review v95](MANAGER_REVIEW_V95.md#pitch-follow-up)
+supersedes the historical counts, color policy and Stamford-only wear below.
+Old Trafford and Signal Iduna now have uniform widths at 14 and 12 strips;
+the other striped stadiums keep their separate cadence and marking anchors.
+
+## Stamford Bridge follow-up v94
+
+Stamford Bridge now uses narrow vertical bands in the diagnostic top view,
+following the user's direction correction: a 10.5 m repeat produces 5.25 m
+alternating strips along the 105 m pitch length (twenty internal edges,
+with half strips at the goal lines). Contrast increases from 8.5% to 15%.
+An existing smooth value-noise helper adds numerous fixed worn-grass patches
+at roughly 1.5-2 m scale, subtracting at most 12% of the diffuse midpoint.
+The hue remains native. Band edges and patches fade under minification;
+all derivatives run before paint/spatial rejection.
+
+This is confined to loaded shell ID 9. Other stadium patterns, weather and
+downstream native detail remain unchanged. The Stamford branch adds four
+arithmetic hash evaluations per pitch fragment, without extra texture reads,
+assets, uniforms or draws. Host tests preserve every accepted native paint
+colour and all native shader texture/alpha operations. This does not establish
+Switch performance or final lighting quality. Generate an isolated diagnostic
+top view with `python tools/preview_pitch_mowing.py --stadium 9 --output <png>`.
+This is a preview of the emitted math, not a device screenshot.
+
 The seven selectable stadiums now have distinct mowing arrangements. Konami
 keeps its accepted bands; six imported shells receive authored alternatives:
 
@@ -9,7 +34,7 @@ keeps its accepted bands; six imported shells receive authored alternatives:
 | Anfield Stadium | Narrow transverse bands |
 | Etihad Stadium | Rectangular checker |
 | Signal Iduna Park | Broad transverse bands |
-| Stamford Bridge | Longitudinal bands |
+| Stamford Bridge | Narrow vertical bands with worn patches (v94) |
 | Old Trafford | Straight alternating transverse bands |
 | Camp Nou | Concentric circular rings |
 
@@ -46,8 +71,9 @@ unrecognized shader bodies are outside the edit.
 `source/stadium_lite_glsl.h` replaces the old diffuse's broad green bands at a
 0.09 linear green midpoint, close to the accepted v17 turf's measured 0.09076
 mean. It preserves the sampled hue ratios and separately mixed fine detail.
-The new arrangement has at most 8.5% variation either side of that midpoint
-before existing lighting/shading. Neutral painted pixels and ground outside
+Other stadium arrangements have at most 8.5% variation either side of that
+midpoint before existing lighting/shading; Stamford's v94 settings are above.
+Neutral painted pixels and ground outside
 the bounded pitch region are returned unchanged. `fwidth` filters band edges
 and fades an undersampled pattern to its midpoint. Derivatives execute before
 the spatial/paint gate; stadium branches depend only on a uniform.

@@ -11,6 +11,7 @@
 #include "cup_save.h"
 #include "league_save.h"
 #include "master_league_frontend.h"
+#include "manager_league_dummy.h"
 #include "scoreboard_theme.h"
 #include "competition_seed.h"
 
@@ -814,6 +815,7 @@ static void competition_rebuild_cup_bracket(void) {
   if (!cup_tournament_valid)
     cup_tournament_set_rules(&cup_tournament, cup_home_away,
                              cup_third_place);
+  cup_tournament_set_final_two_legs(&cup_tournament, cup_home_away);
   competition_bracket_view_active();
 }
 
@@ -1545,6 +1547,13 @@ void competition_frontend_open_modes(void) {
   frontend_skip_input_tick = 1;
 }
 
+void competition_frontend_open_online_league(void) {
+  manager_dummy_open();
+  competition_set_state(COMPETITION_FRONTEND_MANAGER_DUMMY,0);
+  frontend_closing=0;
+  frontend_skip_input_tick=1;
+}
+
 void competition_frontend_close(void) {
   frontend_confirm_kind = COMPETITION_CONFIRM_NONE;
   if (frontend_state != COMPETITION_FRONTEND_NONE)
@@ -2273,8 +2282,8 @@ static int competition_cup_first_leg_pending(void) {
   const CupFixture *fixture = cup_tournament_valid
       ? cup_tournament_fixture(&cup_tournament, cup_pending_round,
                                cup_pending_index) : NULL;
-  return fixture && cup_home_away &&
-         cup_pending_round + 1u < cup_tournament.round_count &&
+  return fixture && cup_tournament_has_second_leg(&cup_tournament,
+         cup_pending_round, cup_pending_index) &&
          !fixture->first_leg_complete;
 }
 int competition_frontend_cup_extra_time(void) {
@@ -2287,15 +2296,16 @@ uint32_t competition_frontend_match_leg(uint8_t *first_home,
                                          uint8_t *first_away) {
   if (first_home) *first_home = 0;
   if (first_away) *first_away = 0;
-  if (ml_frontend_match_active()) return 0u; /* Career domestic cups are single-leg. */
+  if (ml_frontend_match_active()) return 0u; /* Current career knockouts are single-leg; table return fixtures are separate matches. */
   const CupTournament *bracket = NULL;
   const CupFixture *fixture = NULL;
-  uint32_t round = 0, swapped = 0;
+  uint32_t round = 0, index = 0, swapped = 0;
   if ((cup_match_active ||
        frontend_state == COMPETITION_FRONTEND_CUP_BRACKET) &&
       cup_tournament_valid) {
     bracket = &cup_tournament;
     round = cup_pending_round;
+    index = cup_pending_index;
     swapped = cup_match_swapped;
     fixture = cup_tournament_fixture(bracket, round, cup_pending_index);
   } else if ((league_match_active ||
@@ -2304,11 +2314,11 @@ uint32_t competition_frontend_match_leg(uint8_t *first_home,
              league_tournament.phase == LEAGUE_PHASE_KNOCKOUT) {
     bracket = &league_tournament.knockout;
     round = league_pending_round;
+    index = league_pending_index;
     swapped = league_match_swapped;
     fixture = cup_tournament_fixture(bracket, round, league_pending_index);
   }
-  if (!bracket || !fixture || !bracket->home_away ||
-      round + 1u >= bracket->round_count || fixture->complete ||
+  if (!bracket || !fixture || !cup_tournament_has_second_leg(bracket, round, index) || fixture->complete ||
       !fixture->home || !fixture->away)
     return 0;
   if (!fixture->first_leg_complete) return 1;
@@ -2323,9 +2333,8 @@ int competition_frontend_league_extra_time(void) {
   if (league_tournament.phase != LEAGUE_PHASE_KNOCKOUT) return 0;
   const CupFixture *fixture = cup_tournament_fixture(
       &league_tournament.knockout, league_pending_round, league_pending_index);
-  return fixture && (!league_tournament.knockout.home_away ||
-                     league_pending_round + 1u >=
-                         league_tournament.knockout.round_count ||
+  return fixture && (!cup_tournament_has_second_leg(&league_tournament.knockout,
+                     league_pending_round, league_pending_index) ||
                      fixture->first_leg_complete);
 }
 int competition_frontend_league_penalty(void) {
@@ -2351,18 +2360,27 @@ int competition_frontend_cup_live_final_context(
       &cup_tournament, cup_pending_round, cup_pending_index);
   if (!fixture || fixture->complete || fixture->simulated || fixture->winner ||
       !fixture->home || !fixture->away || fixture->home == fixture->away ||
-      fixture->first_leg_complete || fixture->first_leg_home_goals ||
-      fixture->first_leg_away_goals ||
       (!competition_frontend_cup_team_is_human(fixture->home) &&
        !competition_frontend_cup_team_is_human(fixture->away)))
     return 0;
-  /* The core always makes index 0 of the last round a single-leg final,
-   * including Home Away cups. Index 1 is the separate third-place match.
-   * Do not call cup_match_teams() here: that setter recalculates the swap. */
+  const int two_legs = cup_tournament_has_second_leg(&cup_tournament,
+      cup_pending_round, cup_pending_index);
+  if (two_legs ? fixture->first_leg_complete != 1u
+      : (fixture->first_leg_complete || fixture->first_leg_home_goals ||
+         fixture->first_leg_away_goals)) return 0;
+  /* Only the deciding leg may own the trophy. Copy prior goals in the exact
+   * native HOME/AWAY order without changing the fixture or controller mapping. */
   context->native_home_team = cup_match_swapped ? fixture->away : fixture->home;
   context->native_away_team = cup_match_swapped ? fixture->home : fixture->away;
   context->round = cup_pending_round;
   context->fixture_index = cup_pending_index;
+  context->two_leg_decider = two_legs != 0;
+  if (two_legs) {
+    context->first_home_goals = cup_match_swapped ? fixture->first_leg_away_goals
+                                                : fixture->first_leg_home_goals;
+    context->first_away_goals = cup_match_swapped ? fixture->first_leg_home_goals
+                                                : fixture->first_leg_away_goals;
+  }
   return 1;
 }
 uint32_t competition_frontend_scoreboard(uint32_t home, uint32_t away) {
@@ -2636,6 +2654,11 @@ void competition_frontend_league_match_result(uint32_t home_goals,
 }
 
 void competition_frontend_league_restore_after_match(void) {
+  if (manager_dummy_restore()) {
+    competition_set_state(COMPETITION_FRONTEND_MANAGER_DUMMY,0u);
+    frontend_skip_input_tick=1u;
+    return;
+  }
   if (ml_frontend_restore()) {
     competition_set_state(COMPETITION_FRONTEND_MASTER_LEAGUE, 0u);
     frontend_skip_input_tick = 1u;
@@ -2684,7 +2707,8 @@ void competition_frontend_cup_team_picker_result(uint32_t team_id) {
 }
 
 void competition_frontend_manager_name_result(const char *text) {
-  ml_frontend_name_result(text);
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_dummy_name_result(text);
+  else ml_frontend_name_result(text);
   frontend_skip_input_tick = 1u;
 }
 
@@ -2696,6 +2720,7 @@ int competition_frontend_cup_slot_valid(uint32_t slot) {
 uint32_t competition_frontend_cup_news_index(void) { return cup_news_index; }
 float competition_frontend_cup_news_progress(void) { return (float)cup_news_elapsed / 6000.f; }
 void competition_frontend_tick(uint64_t milliseconds) {
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_dummy_tick(milliseconds);
   const uint64_t league_delta = league_news_tick && milliseconds >= league_news_tick ? milliseconds - league_news_tick : 0u;
   league_news_tick = milliseconds;
   if (frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB && league_page == LEAGUE_PAGE_HOME &&
@@ -2769,6 +2794,16 @@ void competition_frontend_pad_event(uint32_t buttons,
                  !competition_save_league_slot(league_active_slot)) {
         competition_set_status("SAVE FAILED - STAYING HERE. OPEN SAVE TO RETRY");
       } else competition_frontend_close();
+    }
+    return;
+  }
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY) {
+    manager_dummy_pad(pressed);
+    switch(manager_dummy_take_action()) {
+      case MD_ACTION_NAME: frontend_pending_action=COMPETITION_ACTION_MANAGER_NAME;break;
+      case MD_ACTION_PLAN: frontend_pending_action=COMPETITION_ACTION_MANAGER_PLAN;break;
+      case MD_ACTION_EXIT: competition_frontend_close();break;
+      default:break;
     }
     return;
   }

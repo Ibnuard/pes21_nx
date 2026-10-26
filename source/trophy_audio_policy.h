@@ -50,8 +50,9 @@ static inline int trophy_audio_plain_hca_header(const void *first,
   if (first_bytes) memcpy(header, first, first_bytes);
   if (first_bytes < TROPHY_AUDIO_HEADER_BYTES)
     memcpy(header + first_bytes, second, TROPHY_AUDIO_HEADER_BYTES - first_bytes);
-  return !memcmp(header, "HCA\0\x02\0\x01\x04", 8) &&
-      !memcmp(header + 56, "ciph\0\0", 6) &&
+  /* The stage verifies cipher=0. Pin the whole owned header, including its
+   * version, declared size and cipher chunk, rather than an old bank's offsets. */
+  return !memcmp(header, "HCA\0", 4) &&
       trophy_audio_hash(header, sizeof(header)) == TROPHY_AUDIO_HEADER_FNV;
 #else
   /* The current user-supplied cue uses a native non-HCA codec. It never enters

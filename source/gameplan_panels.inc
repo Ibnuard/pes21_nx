@@ -7,7 +7,7 @@ typedef struct {
 } EditorRow;
 typedef struct {
   uint32_t page, focus, count, total, first, step, modal_focus, target;
-  int active, picker, loading, setplay;
+  int active, picker, loading, setplay, centered;
   char title[64], subtitle[96], status[96], select_key[8], back_key[8];
   EditorRow rows[9];
 } EditorPanel;
@@ -217,7 +217,7 @@ static void editor_preset_modal(MasterLeagueRender *ui,const EditorPanel *v,floa
 static void editor_panel_emit(MasterLeagueRender *ui,const EditorPanel *v,
     uint32_t side,GLfloat *verts,int *quads) {
   if(!v->active)return;
-  const float x=v->setplay ? .20f : .018f+side*.489f;
+  const float x=v->setplay ? .20f : v->centered ? .2625f : .018f+side*.489f;
   const float w=v->setplay ? .60f : .475f;
   const float h=v->setplay ? .168f+fmaxf(1.f,fminf(v->count,7.f))*.062f+.070f : .651f;
   const float y=v->setplay ? (.98f-h)*.5f : .153f;

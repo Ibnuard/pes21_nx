@@ -10,7 +10,7 @@
 #endif
 
 #define LEAGUE_SAVE_MAGIC 0x314c5846u /* FXL1 */
-#define LEAGUE_SAVE_VERSION 5u /* persisted configurable tie-break semantics */
+#define LEAGUE_SAVE_VERSION 6u /* Home Away includes pending knockout finals */
 
 typedef struct {
   uint32_t magic, version, payload_size, sequence, checksum;
@@ -81,6 +81,12 @@ static int league_save_read_copy(uint32_t slot, uint32_t copy,
     out->state.player_condition = 5u;
   if (header.version < 5u)
     out->state.tournament.reserved[1] = LEAGUE_TIEBREAK_GOAL_DIFFERENCE;
+  /* An already awarded title keeps its historical result. Pending finals
+   * acquire the same Home Away policy as a newly generated bracket. */
+  LeagueTournament *league = &out->state.tournament;
+  if (header.version < 6u && out->state.home_away && league->home_away &&
+      league->phase == LEAGUE_PHASE_KNOCKOUT && !league->knockout.champion)
+    cup_tournament_set_final_two_legs(&league->knockout, 1);
   out->sequence = header.sequence;
   return 1;
 }

@@ -228,7 +228,7 @@ static void cup_ui_next(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   ml_ui_panel(ui,cup->champion ? "CUP CHAMPION" : "NEXT MATCH",cup->champion ? ML_HEADER_TROPHY : ML_HEADER_MATCH,.635f,.190f,.325f,.480f,selected,verts,quads);
   if(fixture) {
     char stage[64];snprintf(stage,sizeof(stage),"%s%s",round+1u==cup->round_count && index==CUP_THIRD_PLACE_INDEX ? "THIRD PLACE" : competition_frontend_cup_round_name(round),
-        cup->home_away && round+1u<cup->round_count ? (fixture->first_leg_complete ? " - LEG 2" : " - LEG 1") : "");
+        cup_tournament_has_second_leg(cup,round,index) ? (fixture->first_leg_complete ? " - LEG 2" : " - LEG 1") : "");
     cup_ui_text(ui,stage,.652f,.289f,.288f,.0222f,-3,verts,quads);
     for(uint32_t side=0;side<2u;side++) {
       const uint32_t team=side ? fixture->away : fixture->home;const float y=.338f+side*.156f;
@@ -269,7 +269,7 @@ static void cup_ui_fixture(MasterLeagueRender *ui,uint32_t round,uint32_t index,
   const CupTournament *cup=competition_frontend_cup_tournament();
   const CupFixture *f=cup_tournament_fixture(cup,round,index);if(!f)return;
   const int bye=f->complete && (!f->home || !f->away);
-  const int two_leg=cup->home_away && round+1u<cup->round_count;
+  const int two_leg=cup_tournament_has_second_leg(cup,round,index);
   uint32_t teams[2]={0};cup_tournament_schedule_teams(cup,round,index,&teams[0],&teams[1]);
   ml_ui_rect(ui,x,y,w,h,.93f,.96f,.99f,1,-1,0,1,verts,quads);
   const int third=round+1u==cup->round_count && index==CUP_THIRD_PLACE_INDEX;

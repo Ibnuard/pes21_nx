@@ -229,9 +229,48 @@ static void unread_tests(MasterLeague *c,MasterLeague *copy) {
   assert(ml_valid(c));
 }
 
+static void automatic_home_away(MasterLeague *c,MasterLeague *copy,uint32_t count) {
+  make_career(c,count);
+  assert(c->league.home_away && c->league.fixture_count==count*(count-1u));
+  assert(!c->cup.home_away); /* Career cups retain their own single-leg policy. */
+  const uint32_t half=c->league.matchday_count/2u;
+  for(uint32_t d=0;d<half;d++)for(uint32_t i=0;i<c->league.matchday_fixture_count[d];i++) {
+    const LeagueFixture *first=league_tournament_matchday_fixture(&c->league,d,i);
+    const LeagueFixture *back=league_tournament_matchday_fixture(&c->league,d+half,i);
+    assert(first->home==back->away && first->away==back->home);
+  }
+  uint32_t played=0u,resumed=0u,steps=0u;MlEvent e;
+  while(ml_next_event(c,&e) && e.kind!=ML_EVENT_SEASON_END) {
+    assert(++steps<160u);
+    for(uint32_t i=0;i<c->club_count;i++)c->clubs[i].cash=INT64_C(10000000000);
+    if(e.kind==ML_EVENT_LEAGUE && e.home && e.away) {
+      assert(ml_record_event(c,&e,e.home==c->settings.club ? 2u : 0u,
+          e.away==c->settings.club ? 2u : 0u,NULL,0u,0));played++;
+    }else assert(ml_simulate_event(c,&e));
+    assert(!ml_simulate_event(c,&e));
+    if(c->league.active_matchday<c->league.matchday_count) {
+      assert(c->league.phase==LEAGUE_PHASE_TABLE && !c->league.knockout.champion);
+      assert(!c->prize_income && !ml_next_season(c));
+    }
+    if(!resumed && c->league.active_matchday==half) {
+      assert(played==count-1u);
+      assert(ml_save_write(0u,c) && ml_save_read(0u,c->content_id,copy));
+      assert(!memcmp(c,copy,sizeof(*c)));*c=*copy;resumed=1u;
+    }
+    assert(ml_valid(c));
+  }
+  assert(resumed && played==2u*(count-1u));
+  assert(c->league.phase==LEAGUE_PHASE_COMPLETE && c->league.knockout.champion==c->settings.club);
+  for(uint32_t i=0;i<c->league.fixture_count;i++)assert(c->league.fixtures[i].complete);
+  assert(c->league.standings[0].played==2u*(count-1u));
+}
+
 int main(void) {
   MasterLeague *c=malloc(sizeof(*c)), *copy=malloc(sizeof(*copy));
   assert(c && copy);
+  automatic_home_away(c,copy,2u);
+  automatic_home_away(c,copy,3u);
+  automatic_home_away(c,copy,8u);
   make_career(c,4u);
   assert(league_tournament_credit_goals(&c->league,101u,1001u,10001u,"Transferred striker",6u));
   assert(!*ml_transfer(c,1u,102u,3u));

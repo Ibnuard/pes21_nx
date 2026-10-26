@@ -20,7 +20,7 @@ class CompetitionRecoveryTests(unittest.TestCase):
             binary = work / "recovery.exe"
             core = ["competition_entry_draft.c", "cup_tournament.c", "cup_save.c",
                     "league_tournament.c", "league_save.c", "master_league.c",
-                    "master_league_save.c", "master_league_frontend.c",
+                    "master_league_save.c", "master_league_frontend.c", "manager_league_dummy.c", "manager_league_motion.c", "manager_league_plan.c",
                     "master_league_catalog.c", "gameplan_preset.c"]
             clang = "clang" in subprocess.check_output([compiler, "--version"], text=True).lower()
             subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror",

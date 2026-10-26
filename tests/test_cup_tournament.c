@@ -45,11 +45,12 @@ static void com_waits_for_player(void) {
   assert(cup.history_count == 4u);
 }
 
-static void two_team_final_has_no_bye_or_second_leg(void) {
+static void two_team_home_away_final_requires_both_legs(void) {
   const uint32_t ids[2] = {710u, 711u};
   CupTournament cup;
   assert(cup_tournament_init(&cup, ids, 2u, ids, 1u, 0x60u));
   cup_tournament_set_rules(&cup, 1, 1);
+  cup_tournament_set_final_two_legs(&cup, 1);
   assert(cup.bracket_size == 2u && cup.round_count == 1u);
   assert(!cup.third_place_enabled);
   assert(cup_tournament_fixture_count(&cup, 0u) == 1u);
@@ -57,9 +58,25 @@ static void two_team_final_has_no_bye_or_second_leg(void) {
   assert(cup.fixtures[0][0].away == ids[1]);
   assert(!cup.fixtures[0][0].complete);
   assert(cup_tournament_record(&cup, 0u, 0u, 2u, 0u));
-  assert(cup.champion == ids[0]);
+  assert(!cup.champion && !cup.history_count && !cup.fixtures[0][0].complete);
+  assert(cup.fixtures[0][0].first_leg_complete);
+  uint32_t round=99u,index=99u;
+  assert(cup_tournament_next_human(&cup,&round,&index) && !round && !index);
+  /* Lose the return match, but win the aggregate 2-1. */
+  assert(cup_tournament_record(&cup, 0u, 0u, 0u, 1u));
+  assert(cup.champion == ids[0] && cup.fixtures[0][0].home_goals==2u && cup.fixtures[0][0].away_goals==1u);
   assert(cup.history_count == 1u);
-  assert(!cup.fixtures[0][0].first_leg_complete);
+  assert(cup_tournament_has_second_leg(&cup,0u,0u));
+  assert(!cup_tournament_has_second_leg(&cup,0u,CUP_THIRD_PLACE_INDEX));
+  assert(!cup_tournament_next_human(&cup,NULL,NULL));
+  assert(cup_tournament_init(&cup, ids, 2u, ids, 1u, 0x61u));
+  cup_tournament_set_rules(&cup,1,0);cup_tournament_set_final_two_legs(&cup,1);
+  assert(cup_tournament_record(&cup,0,0,1,1)); /* Leg 1 may draw. */
+  const CupTournament before=cup;
+  assert(!cup_tournament_record(&cup,0,0,0,0));
+  assert(!memcmp(&before,&cup,sizeof(cup)));
+  assert(cup_tournament_record_decided(&cup,0,0,0,0,ids[1]));
+  assert(cup.champion==ids[1] && (cup.fixtures[0][0].reserved&CUP_DECIDED_PENALTIES));
 }
 
 static void com_waits_for_all_human_fixtures(void) {
@@ -183,7 +200,7 @@ int main(void) {
   run_size(7u);
   run_size(20u);
   run_size(32u);
-  two_team_final_has_no_bye_or_second_leg();
+  two_team_home_away_final_requires_both_legs();
   com_waits_for_player();
   com_waits_for_all_human_fixtures();
   future_final_is_unresolved_not_bye();

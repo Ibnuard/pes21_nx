@@ -492,7 +492,7 @@ int main(void) {
   uint32_t archive_trophies=0u;
   for(uint32_t mask=end_career->history.seasons[0].honours;mask;mask>>=1u)archive_trophies+=mask&1u;
   char archive_label[64];
-  snprintf(archive_label,sizeof(archive_label),"SEASON %u / %u TROPHIES",old_season,archive_trophies);
+  snprintf(archive_label,sizeof(archive_label),"SEASON %u OF %u TROPHIES",old_season,archive_trophies);
   assert(!strcmp(view().rows[1].label,archive_label));
   assert(!strcmp(view().rows[0].value,"1 SEASON"));
   press(A);assert(view().page==ML_PAGE_CAREER_STATS && view().count==5u);

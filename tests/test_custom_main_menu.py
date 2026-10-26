@@ -24,14 +24,12 @@ class CustomMainMenuTests(unittest.TestCase):
 
     def test_vertical_order_preserves_native_actions(self):
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf-8")
-        self.assertRegex(
-            hooks,
-            r"native_to_visual\[4\]\s*=\s*\{0,\s*3,\s*1,\s*2\}",
-        )
-        self.assertRegex(
-            hooks,
-            r"visual_to_native\[4\]\s*=\s*\{0,\s*2,\s*3,\s*1\}",
-        )
+        self.assertIn('return nx_menu_visual(native_index);', hooks)
+        self.assertIn('return nx_menu_native(visual_index);', hooks)
+        self.assertIn('choice==NX_MAIN_MENU_ONLINE_NATIVE', hooks)
+        self.assertIn('competition_frontend_open_online_league();', hooks)
+        # The shared mapping's five rows and unchanged native action IDs are
+        # executed by test_manager_league_dummy.c, including touch hit regions.
         self.assertIn("main_menu_visual_to_native(row)", hooks)
         self.assertIn("main_menu_native_to_visual(main_menu_focus_index)", hooks)
 

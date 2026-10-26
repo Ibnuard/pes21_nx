@@ -231,20 +231,8 @@ static int ml_review_pad(uint32_t pressed) {
   if(page==ML_PAGE_HUB) {
     if(pressed&ML_B)return 0;
     const uint32_t old=hub_section;
-    const int bottom=focus>=2u;
-    if(pressed&ML_UP)focus=focus==4u ? 1u : focus==3u ? 1u : 0u;
-    else if(pressed&ML_DOWN)focus=focus==1u ? 4u : focus<2u ? 2u : focus;
-    else if(pressed&(ML_L|ML_R)) {
-      if((pressed&ML_L) && hub_section)hub_section--;
-      if((pressed&ML_R) && hub_section<3u)hub_section++;
-      focus=bottom ? 2u : 0u;
-    } else if(pressed&ML_LEFT) {
-      if(focus==1u || focus>2u)focus--;
-      else if(hub_section){hub_section--;focus=bottom ? 4u : 1u;}
-    } else if(pressed&ML_RIGHT) {
-      if(focus==0u || (focus>=2u && focus<4u))focus++;
-      else if(hub_section<3u){hub_section++;focus=bottom ? 2u : 0u;}
-    } else if(pressed&ML_X) {if(ml_autosave())ml_toast("Career saved");}
+    if(pressed&(ML_UP|ML_DOWN|ML_L|ML_R|ML_LEFT|ML_RIGHT))fnx_hub_navigate(pressed,&hub_section,&focus);
+    else if(pressed&ML_X) {if(ml_autosave())ml_toast("Career saved");}
     else if(pressed&ML_A) {
       if(focus==3u) {
         if(hub_section==1u){ml_page(ML_PAGE_SQUAD);ml_refresh_players(career.settings.club);}

@@ -146,6 +146,15 @@ int main(void) {
   focus_hub(4);press(A);press(Y);press(L);capture("50-aggregate-result");
   custom_league(19,1,0,1);focus_hub(0);press(A);capture("58-nineteen-participants");
   press(Y);press(Y);capture("59-participants-last-page");
+  custom_league(2,0,1,1);play_match();
+  assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_TABLE);
+  capture("60-two-team-table-return-fixture");play_match();play_match();
+  assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_KNOCKOUT);
+  assert(!competition_frontend_league_tournament()->knockout.champion);
+  capture("61-two-team-final-return-leg");
+  focus_hub(4);press(A);press(Y);capture("62-two-team-final-first-leg-result");
+  play_match();assert(competition_frontend_league_tournament()->phase==LEAGUE_PHASE_COMPLETE);
+  capture("63-two-team-final-aggregate-champion");
   return 0;
 }
 '''
@@ -156,6 +165,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output',nargs='?',type=Path,default=ROOT/'local-debug/league-news-preview')
     parser.add_argument('--geometry-only',action='store_true',help='Skip PNG rasterization for layout regression checks')
+    parser.add_argument('--frames',nargs='+',help='Rasterize only these frame stems; still verify all geometry')
     args=parser.parse_args();output=args.output.resolve();output.mkdir(parents=True,exist_ok=True)
     source=(ROOT/'source/overlay.c').read_text()
     with tempfile.TemporaryDirectory(prefix='pes-league-preview-') as temporary:
@@ -164,7 +174,7 @@ def main():
         (temp/'preview.c').write_text(generated)
         (temp/'ue4_hooks.h').write_text((ROOT/'source/ue4_hooks.h').read_text().replace('#include "so_util.h"','typedef struct so_module so_module;'))
         shutil.copy2(ROOT/'source/competition_frontend.c',temp/'competition_frontend.c')
-        core=['competition_entry_draft.c','cup_tournament.c','cup_save.c','league_tournament.c','league_save.c','master_league.c','master_league_save.c','master_league_frontend.c','master_league_catalog.c','gameplan_preset.c']
+        core=['competition_entry_draft.c','cup_tournament.c','cup_save.c','league_tournament.c','league_save.c','master_league.c','master_league_save.c','master_league_frontend.c', 'manager_league_dummy.c','manager_league_motion.c','manager_league_plan.c','master_league_catalog.c','gameplan_preset.c']
         result=subprocess.run(['cc','-std=c11','-O1','-Wno-constant-logical-operand','-I',str(temp),'-I',str(ROOT/'source'),str(temp/'preview.c'),str(temp/'competition_frontend.c'),*[str(ROOT/'source'/n) for n in core],'-lm','-o',str(temp/'preview')],capture_output=True,text=True)
         if result.returncode:
             (output/'compile-error.txt').write_text(result.stderr)
@@ -173,12 +183,14 @@ def main():
         subprocess.run([str(temp/'preview')],cwd=temp,check=True,timeout=45)
         for name in ['compile-error.txt','driver-debug.c']:
             (output/name).unlink(missing_ok=True)
-        assets=shared.textures(temp)
-        for tex,name in {60:'league_news_v1',61:'league_pearl_v2',62:'competition_actions_v1',63:'league_header_v2'}.items():
-            assets[tex]=Image.open(ROOT/'data'/f'{name}.bin').convert('RGBA')
+        assets={}
+        if not args.geometry_only:
+            assets=shared.textures(temp)
+            for tex,name in {60:'league_news_v1',61:'league_pearl_v2',62:'competition_actions_v1',63:'league_header_v2'}.items():
+                assets[tex]=Image.open(ROOT/'data'/f'{name}.bin').convert('RGBA')
         frames=sorted(temp.glob('*.json'))
         for path in frames:
-            if not args.geometry_only:
+            if not args.geometry_only and (not args.frames or path.stem in args.frames):
                 shared.rasterize(json.loads(path.read_text()),assets).save(output/path.with_suffix('.png').name)
             shutil.copy2(path,output/path.name)
         shared.write_gallery(output,frames)

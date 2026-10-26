@@ -11,11 +11,14 @@
 #include "scoreboard_aggregate_policy.h"
 #include "prematch_kit_navigation.h"
 #include "master_league_frontend.h"
+#include "manager_league_dummy.h"
+#include "main_menu_layout.h"
 #include "exhibition_team_catalog.h"
 #include "exhibition_match_identity.h"
 #include "exhibition_selection_groups.h"
 #include "result_exit_confirm.h"
 #include "gameplan_preset.h"
+#include "manager_league_plan.h"
 #include "experimental_inter_miami.h"
 #include "match_visual_policy.h"
 #include "error.h"
@@ -37,6 +40,8 @@
 #include "team_commentary_policy.h"
 #include "player_commentary_policy.h"
 #include "trophy_audio_policy.h"
+#include "runtime_assets.h"
+#include "manager_league_audio_runtime.inc"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
 #endif
@@ -681,13 +686,11 @@ static const char *main_menu_descriptions[4] = {
     "Graphics and FPS"};
 
 static uint32_t main_menu_native_to_visual(uint32_t native_index) {
-  static const uint8_t native_to_visual[4] = {0, 3, 1, 2};
-  return native_index < 4 ? native_to_visual[native_index] : 0;
+  return nx_menu_visual(native_index);
 }
 
 static uint32_t main_menu_visual_to_native(uint32_t visual_index) {
-  static const uint8_t visual_to_native[4] = {0, 2, 3, 1};
-  return visual_index < 4 ? visual_to_native[visual_index] : 0;
+  return nx_menu_native(visual_index);
 }
 static uint32_t (*mobile_is_mode_offense)(const void *control_mode);
 static uint32_t (*mobile_is_mode_defense)(const void *control_mode);
@@ -887,7 +890,9 @@ static int32_t pes_sound_decode_hca_header(void *decoder,
     const void *first, int64_t first_size, const void *second,
     int64_t second_size, int64_t *consumed) {
   if (decoder) {
-    if (trophy_audio_plain_hca_header(first, first_size, second, second_size))
+    if (trophy_audio_plain_hca_header(first, first_size, second, second_size) ||
+        (first_size>=0 && second_size>=0 && first_size<=UINT32_MAX && second_size<=UINT32_MAX &&
+         manager_league_audio_plain_hca_header(first,(uint32_t)first_size,second,(uint32_t)second_size)))
       sound_hca_set_decryption_table(decoder, NULL, 0);
     const int team_header = team_commentary_indonesia_slot &&
         team_commentary_plain_hca_header(first, first_size, second, second_size);
@@ -2314,6 +2319,8 @@ static void exhibition_gameplan_process_pending(void);
 static void exhibition_gameplan_reset(void);
 static const char *exhibition_team_name(uint32_t team_id);
 
+#include "manager_league_native_plan.inc"
+
 static uint32_t exhibition_physical_team_raw(uint32_t logical_team_id) {
   return exhibition_team_catalog_physical(logical_team_id);
 }
@@ -2949,6 +2956,7 @@ uint32_t pes_controller_2p_team_selector_active_side(void) {
 }
 
 int pes_controller_exhibition_single_controller_mode(void) {
+  if (manager_dummy_plan_editor()) return 1;
   if (live_gameplan_open_requested || live_gameplan_window)
     return live_match_single_controller != 0;
   return __atomic_load_n(&exhibition_session_active, __ATOMIC_ACQUIRE) &&
@@ -3703,7 +3711,7 @@ static int exhibition_sync_prematch_lineup(uint32_t side, void *squad) {
 // screen edits HOME and AWAY independently, so select and save each requested
 // side before publishing the complete match plan back to tmpdb::Match.
 static int exhibition_save_matchplan_sides(uint32_t side_mask) {
-  if (ml_frontend_plan_editor() && !live_gameplan_window) return 0;
+  if (native_office_plan_editor() && !live_gameplan_window) return 0;
   unsigned char *squad_edit = exhibition_get_squad_edit();
   void *plan = exhibition_matchplan_get_instance
                    ? exhibition_matchplan_get_instance() : NULL;
@@ -4708,6 +4716,8 @@ static uint32_t exhibition_pesdb_player_owner(uint32_t player_unique_id) {
 static int exhibition_roster_player_allowed(
     const ExhibitionMasterRoster *roster, uint32_t player_unique_id) {
   if (roster) {
+    const int manager_allowed = manager_dummy_player_allowed(roster->team_id, player_unique_id);
+    if (manager_allowed >= 0) return manager_allowed;
     const int career_allowed = ml_frontend_player_allowed(roster->team_id, player_unique_id);
     if (career_allowed >= 0) return career_allowed;
   }
@@ -4743,6 +4753,18 @@ static uint32_t exhibition_roster_effective_player_count(
 
 static const ExhibitionMasterRoster *exhibition_find_roster(
     uint32_t team_id) {
+  if (manager_dummy_plan_editor()) {
+    uint32_t home=0u,away=0u,count=0u;
+    if (!manager_dummy_plan_teams(&home,&away) || (team_id!=home && team_id!=away)) return NULL;
+    const uint32_t side=team_id==away;
+    static ExhibitionMasterRoster manager_rosters[2];
+    static uint32_t manager_players[2][GAMEPLAN_PRESET_MAX_PLAYERS];
+    static uint8_t manager_shirts[2][GAMEPLAN_PRESET_MAX_PLAYERS];
+    if (!manager_dummy_roster(team_id,manager_players[side],manager_shirts[side],&count) ||
+        count<18u || count>GAMEPLAN_PRESET_MAX_PLAYERS) return NULL;
+    manager_rosters[side]=(ExhibitionMasterRoster){team_id,manager_players[side],manager_shirts[side],count};
+    return &manager_rosters[side];
+  }
   if (ml_frontend_match_active() && ml_frontend_player_allowed(team_id,0u)>=0) {
     /* National fixtures use the paired native national assignments below.
      * Stable per-club storage: a HOME lookup cannot invalidate AWAY's
@@ -5144,7 +5166,7 @@ int pes_controller_2p_transition_active(void) {
   /* The native bootstrap can publish the Hub one frame before opening the
    * office editor. Keep the opaque loading layer until custom Game Plan has
    * actually published its ready state, including the return teardown. */
-  if (ml_frontend_plan_editor() &&
+  if (native_office_plan_editor() &&
       !pes_controller_custom_prematch_gameplan_active()) return 1;
   return __atomic_load_n(&main_menu_2p_transition_active,
                          __ATOMIC_ACQUIRE) != 0;
@@ -5154,7 +5176,7 @@ uint32_t pes_controller_2p_transition_kind(void) {
   if (__atomic_load_n(&local_rematch_handoff_cover,__ATOMIC_ACQUIRE) ||
       (__atomic_load_n(&main_menu_2p_prematch_hub_active,__ATOMIC_ACQUIRE) &&
        !__atomic_load_n(&exhibition_hub_squad_state,__ATOMIC_ACQUIRE))) return PES_2P_TRANSITION_LOADING;
-  if (ml_frontend_plan_editor() &&
+  if (native_office_plan_editor() &&
       !pes_controller_custom_prematch_gameplan_active()) return PES_2P_TRANSITION_LOADING;
   return __atomic_load_n(&main_menu_2p_transition_kind, __ATOMIC_ACQUIRE);
 }
@@ -6640,6 +6662,11 @@ int pes_controller_menu_touch_target(float *normalized_x,
   }
   if (pes_main_menu_controller_active()) {
     const uint32_t index = pes_main_menu_focus_index();
+    if(index==NX_MAIN_MENU_ONLINE_NATIVE) {
+      if(normalized_x)*normalized_x=.5f;
+      if(normalized_y)*normalized_y=.05f;
+      return 1; /* Inert native coordinate; custom confirm queue owns tile 5. */
+    }
     if (index >= 4)
       return 0;
     if (normalized_x)
@@ -8379,7 +8406,7 @@ static void prematch_gameplan_save_and_refresh(uint32_t side) {
     return;
   exhibition_save_matchplan_sides(1u << side);
   prematch_gameplan_refresh_side(side);
-  if (ml_frontend_plan_editor() && !live_gameplan_window)
+  if (native_office_plan_editor() && !live_gameplan_window)
     prematch_gameplan_save_preset(side, ML_CURRENT_PLAN_SLOT);
 }
 
@@ -8449,7 +8476,8 @@ static int prematch_gameplan_replace_player(
   const int committed =
       match_squad_data_get_order_no(squad_data, field_player_id) == bench_order &&
       match_squad_data_get_order_no(squad_data, bench_player_id) == field_order &&
-      (ml_frontend_plan_editor() ? master_league_office_lineup_valid(side,squad_data)
+      (manager_dummy_plan_editor() ? manager_league_office_lineup_valid(side,squad_data)
+       : ml_frontend_plan_editor() ? master_league_office_lineup_valid(side,squad_data)
                                  : exhibition_sync_prematch_lineup(side, squad_data));
   if (!committed) {
     if (match_squad_data_get_order_no(squad_data, field_player_id) != bench_order ||
@@ -8730,7 +8758,7 @@ static void prematch_gameplan_swap(uint32_t side) {
   memcpy(bench_name, bench->name, sizeof(bench_name));
   char note[160];
   snprintf(note,sizeof(note),"v67 bench confirmation side=%u live=%u office=%u field-order=%u bench-order=%u",
-      side,live_gameplan_window!=NULL,ml_frontend_plan_editor()!=0,
+      side,live_gameplan_window!=NULL,native_office_plan_editor()!=0,
       match_squad_data_get_order_no(state->squad_data,field->player_id),
       match_squad_data_get_order_no(state->squad_data,bench->player_id));
   scene_runtime_note("prematch",note);
@@ -8749,7 +8777,7 @@ static void prematch_gameplan_swap(uint32_t side) {
      * native replacement back. Rebuild/rebind BEFORE changing either key;
      * keep the edited SquadData and never reload the native editor here.
      * A career-office edit has no playable Match and keeps its own policy. */
-    if (!ml_frontend_plan_editor() && !exhibition_rebase_prepared_matchplan()) {
+    if (!native_office_plan_editor() && !exhibition_rebase_prepared_matchplan()) {
       scene_runtime_note("prematch", "v67 bench edit source rebuild refused; selection retained");
       return;
     }
@@ -8928,7 +8956,10 @@ static int prematch_gameplan_read_preset(uint32_t side, uint32_t slot,
   if (side > 1u || !preset) return 0;
   const uint32_t team = prematch_gameplan_team_id(side);
   uint32_t canonical = 1;
-  if (ml_frontend_match_active()) {
+  if (manager_dummy_plan_editor()) {
+    if (!manager_dummy_preset_read(team,slot,preset) ||
+        !manager_league_native_plan_shape_valid(preset)) return 0;
+  } else if (ml_frontend_match_active()) {
     if (!ml_frontend_preset_read(team, slot, preset)) return 0;
   } else if (!gameplan_preset_read_scoped(team, slot, preset,
                prematch_gameplan_identity_scope(), &canonical)) return 0;
@@ -8957,7 +8988,9 @@ static void prematch_gameplan_refresh_preset_slots(uint32_t side) {
   GameplanPreset preset;
   for (uint32_t slot = 0; slot < GAMEPLAN_PRESET_SLOTS; ++slot)
     state->preset_exists[slot] =
-        ml_frontend_match_active()
+        manager_dummy_plan_editor()
+        ? manager_dummy_preset_read(prematch_gameplan_team_id(side),slot,&preset) != 0
+        : ml_frontend_match_active()
         ? ml_frontend_preset_read(prematch_gameplan_team_id(side), slot, &preset) != 0
         : gameplan_preset_slot_present(prematch_gameplan_team_id(side), slot);
 }
@@ -8989,6 +9022,7 @@ static int prematch_gameplan_snapshot(uint32_t side, GameplanPreset *out) {
   const TmpdbMatchPlanSettingsValue settings =
       match_squad_data_get_settings(state->squad_data);
   memcpy(preset.settings, &settings, sizeof(settings));
+  if (!manager_league_native_plan_snapshot_members(side,&preset)) return 0;
   *out = preset;
   return gameplan_preset_valid(out);
 }
@@ -9004,6 +9038,11 @@ static int prematch_gameplan_save_preset(uint32_t side, uint32_t slot) {
     if (!native_id) return 0;
     memset(preset.players[i].player_id, 0, sizeof(preset.players[i].player_id));
     memcpy(preset.players[i].player_id, &native_id, sizeof(native_id));
+  }
+  if (manager_dummy_plan_editor()) {
+    if (!manager_league_native_plan_shape_valid(&preset)) return 0;
+    return slot == MANAGER_LEAGUE_CURRENT_PLAN_SLOT ? manager_dummy_store_current_plan(&preset)
+        : manager_dummy_preset_write(preset.team_id,slot,&preset);
   }
   if (ml_frontend_match_active()) {
     return slot == ML_CURRENT_PLAN_SLOT ? ml_frontend_store_current_plan(&preset)
@@ -9075,30 +9114,35 @@ static int prematch_gameplan_restore(uint32_t side, const GameplanPreset *saved)
   }
   TmpdbMatchPlanSettingsValue settings;
   memcpy(&settings, preset.settings, sizeof(settings));
+  if (!manager_league_native_plan_rekey_settings(side,&preset,&settings)) return 0;
   match_squad_data_set_settings(state->squad_data, &settings);
   match_squad_data_set_tactics(state->squad_data, preset.tactics);
   prematch_gameplan_save_and_refresh(side);
   return 1;
 }
 
+#include "manager_league_native_restore.inc"
+
 static int prematch_gameplan_load_preset(uint32_t side, uint32_t slot) {
   GameplanPreset preset;
   return prematch_gameplan_read_preset(side, slot, &preset) &&
-      prematch_gameplan_restore(side, &preset);
+      (manager_dummy_plan_editor() ? manager_league_native_plan_restore(side,&preset)
+                                   : prematch_gameplan_restore(side, &preset));
 }
 
 static int local_rematch_allowed(void) {
   return local_rematch_transition_abi_ok &&
       __atomic_load_n(&local_rematch_valid, __ATOMIC_ACQUIRE) &&
       !competition_frontend_cup_match_active() &&
-      !competition_frontend_league_match_active() && !ml_frontend_match_active();
+      !competition_frontend_league_match_active() && !ml_frontend_match_active() &&
+      !manager_dummy_plan_editor();
 }
 
 static void local_rematch_capture(void) {
   __atomic_store_n(&local_rematch_valid, 0, __ATOMIC_RELEASE);
   if (competition_frontend_cup_match_active() ||
       competition_frontend_league_match_active() || ml_frontend_match_active() ||
-      !local_rematch_session || !pes_controller_native_pad_lab_active()) return;
+      manager_dummy_plan_editor() || !local_rematch_session || !pes_controller_native_pad_lab_active()) return;
   prematch_gameplan_refresh_side(0);
   prematch_gameplan_refresh_side(1);
   GameplanPreset plans[2];
@@ -9226,6 +9270,7 @@ static int exhibition_gameplan_prepare_matchplan(void) {
   debugPrintf("native 2P Game Plan: before squad stats\\n");
   exhibition_refresh_squad_player_stats();
   debugPrintf("native 2P Game Plan: after squad stats\\n");
+  if (!plan_ready && !manager_league_native_plan_seed()) return 0;
   prematch_gameplan_refresh_side(0);
   prematch_gameplan_refresh_side(1);
   if (exhibition_gameplan_sides[0].field_count!=11u ||
@@ -9236,6 +9281,10 @@ static int exhibition_gameplan_prepare_matchplan(void) {
     return 0;
   }
   __atomic_store_n(&exhibition_plan_ready, 1, __ATOMIC_RELEASE);
+  if (manager_league_plan_restore_pending && manager_dummy_plan_editor()) {
+    if (!prematch_gameplan_load_preset(0u,MANAGER_LEAGUE_CURRENT_PLAN_SLOT)) return 0;
+    manager_league_plan_restore_pending=0u;
+  }
   if (master_league_plan_restore_pending && ml_frontend_match_active()) {
     if (!prematch_gameplan_load_preset(0u, ML_CURRENT_PLAN_SLOT)) return 0;
     master_league_plan_restore_pending=0u;
@@ -9319,13 +9368,14 @@ static void prematch_gameplan_process_root(uint32_t side, uint32_t action) {
     state->root_focus =
         (state->root_focus + 1) % PES_PREMATCH_GAMEPLAN_ACTION_COUNT;
   } else if (action == PES_PAUSE_INPUT_BACK && side == 0) {
-    if (ml_frontend_plan_editor()) {
+    if (native_office_plan_editor()) {
       /* Career office edits are permanent. Use the shared canonical preset
        * adapter, then tear down the bootstrap without ever starting Strategy. */
       if (!prematch_gameplan_save_preset(0u, ML_CURRENT_PLAN_SLOT)) {
         state->page = PES_PREMATCH_GAMEPLAN_PAGE_PRESET;
         snprintf(state->preset_status,sizeof(state->preset_status),
-                 "CAREER SAVE FAILED - BACK AND RETRY");
+                 "%s SAVE FAILED - BACK AND RETRY",
+                 manager_dummy_plan_editor() ? "MANAGER" : "CAREER");
         return;
       }
       __atomic_store_n(&main_menu_2p_selector_postbootstrap_host, 1u, __ATOMIC_RELEASE);
@@ -10451,11 +10501,9 @@ int pes_controller_menu_physical_tap(float normalized_x,
     return 0;
   }
     if (pes_main_menu_controller_active()) {
-      if (normalized_x >= 0.055f && normalized_x <= 0.505f &&
-          normalized_y >= 0.315f && normalized_y <= 0.835f) {
-        uint32_t row = (uint32_t)((normalized_y - 0.315f) / 0.135f);
-      if (row > 3u)
-        row = 3u;
+      if (normalized_x >= 0.050f && normalized_x <= 0.457f &&
+          normalized_y >= 0.327f && normalized_y <= 0.858f) {
+        uint32_t row=nx_menu_hit_row(normalized_y,main_menu_native_to_visual(main_menu_focus_index));
       main_menu_apply_focus(main_menu_visual_to_native(row));
     }
     // Custom tiles consume touch locally. Never replay these coordinates
@@ -11386,7 +11434,7 @@ static void main_menu_set_tile_text(void *tile, const char *title,
 }
 
 static void main_menu_apply_focus(uint32_t index) {
-  if (index >= 4)
+  if (index >= NX_MAIN_MENU_COUNT)
     return;
   main_menu_focus_index = index;
   int painted_any = 0;
@@ -11625,7 +11673,8 @@ static int main_menu_start_two_player_match(void) {
     return 0;
   const uint32_t connected = pes_controller_native_hid_connected_mask();
   local_rematch_session = !competition_frontend_cup_match_active() &&
-      !competition_frontend_league_match_active() && !ml_frontend_match_active();
+      !competition_frontend_league_match_active() && !ml_frontend_match_active() &&
+      !manager_dummy_plan_editor();
   const int bootstrap_hub =
       __atomic_load_n(&main_menu_2p_prematch_bootstrap_mode,
                       __ATOMIC_ACQUIRE) == MAIN_MENU_2P_PREMATCH_BOOT_HUB;
@@ -11672,7 +11721,8 @@ static int main_menu_start_exhibition_match(void) {
     return 0;
 
   local_rematch_session = !competition_frontend_cup_match_active() &&
-      !competition_frontend_league_match_active() && !ml_frontend_match_active();
+      !competition_frontend_league_match_active() && !ml_frontend_match_active() &&
+      !manager_dummy_plan_editor();
 
   exhibition_gameplan_begin_prematch();
   __atomic_store_n(&exhibition_hub_squad_state,0u,__ATOMIC_RELEASE);
@@ -11803,11 +11853,12 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
 
   main_menu_2p_native_uniform_track_init();
-  if (ml_frontend_plan_editor() && pes_controller_2p_prematch_hub_active() &&
+  if (native_office_plan_editor() && pes_controller_2p_prematch_hub_active() &&
       !pes_controller_custom_prematch_gameplan_active()) {
     /* Reuse the normal squad initializer/editor, but never expose Kick Off. */
     if (!exhibition_gameplan_open_custom()) {
-      ml_frontend_plan_error();
+      if (manager_dummy_plan_editor()) manager_dummy_plan_error();
+      else ml_frontend_plan_error();
       __atomic_store_n(&main_menu_2p_selector_postbootstrap_host, 1u, __ATOMIC_RELEASE);
       main_menu_2p_team_selector_close();
     }
@@ -11869,7 +11920,7 @@ static void main_menu_2p_prematch_hub_process_pending(void) {
   }
   if (action != 3)
     return;
-  if (ml_frontend_plan_editor()) return; /* No fixture exists in the office. */
+  if (native_office_plan_editor()) return; /* No fixture exists in the office. */
 
   void *listener = exhibition_flow_listener_instance
                        ? *exhibition_flow_listener_instance
@@ -11975,21 +12026,25 @@ static int native_two_player_recovery_tick(void) {
 
 static void main_menu_manager_name_input(void) {
   SwkbdConfig keyboard;
-  char name[ML_NAME_SIZE] = {0};
+  char name[64] = {0};
   if (R_FAILED(swkbdCreate(&keyboard, 0))) {
     competition_frontend_manager_name_result(NULL);
     return;
   }
   swkbdConfigMakePresetDefault(&keyboard);
   swkbdConfigSetType(&keyboard, SwkbdType_QWERTY);
-  swkbdConfigSetHeaderText(&keyboard, "MANAGER NAME");
-  swkbdConfigSetGuideText(&keyboard, "1-31 Latin characters");
+  const int online_dummy=competition_frontend_state()==COMPETITION_FRONTEND_MANAGER_DUMMY;
+  swkbdConfigSetHeaderText(&keyboard, online_dummy ? manager_dummy_input_label() : "MANAGER NAME");
+  const int password=online_dummy && manager_dummy_input_password();
+  if(password)swkbdConfigSetPasswordFlag(&keyboard,1);
+  swkbdConfigSetGuideText(&keyboard,password ? "8 characters minimum" : "Team name or User ID");
   swkbdConfigSetStringLenMin(&keyboard, 1);
-  swkbdConfigSetStringLenMax(&keyboard, ML_NAME_SIZE-1u);
-  swkbdConfigSetInitialText(&keyboard, ml_frontend_manager_name());
+  swkbdConfigSetStringLenMax(&keyboard,password ? 63u : ML_NAME_SIZE-1u);
+  swkbdConfigSetInitialText(&keyboard, online_dummy ? manager_dummy_name() : ml_frontend_manager_name());
   const Result result = swkbdShow(&keyboard, name, sizeof(name));
   swkbdClose(&keyboard);
   competition_frontend_manager_name_result(R_SUCCEEDED(result) ? name : NULL);
+  volatile char *wipe=name;for(size_t i=0;i<sizeof(name);i++)wipe[i]=0;
 }
 
 /* MyClubMain::SetupWindow has completed before this is called. Native child
@@ -12110,6 +12165,10 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     main_menu_activate_cup_fixture();
     return;
   }
+  if (queued_action == COMPETITION_ACTION_MANAGER_PLAN) {
+    main_menu_activate_manager_plan();
+    return;
+  }
   if (queued_action == COMPETITION_ACTION_LEAGUE_FIXTURE) {
     main_menu_activate_league_fixture();
     return;
@@ -12133,6 +12192,8 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
       main_menu_activate_cup_fixture();
     else if (action == COMPETITION_ACTION_LEAGUE_FIXTURE)
       main_menu_activate_league_fixture();
+    else if (action == COMPETITION_ACTION_MANAGER_PLAN)
+      main_menu_activate_manager_plan();
     if (competition_frontend_take_controller_gate_request() &&
         competition_frontend_cup_required_controller_mask() == 3u)
       main_menu_require_two_controller_slots(1);
@@ -12231,7 +12292,7 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
   uint32_t visual = main_menu_native_to_visual(main_menu_focus_index);
   if ((direction == 1 || direction == 3) && visual > 0u)
     visual--;
-  else if ((direction == 2 || direction == 4) && visual < 3u)
+  else if ((direction == 2 || direction == 4) && visual + 1u < NX_MAIN_MENU_COUNT)
     visual++;
   const uint32_t next = main_menu_visual_to_native(visual);
   if (next != main_menu_focus_index)
@@ -12541,7 +12602,7 @@ static void main_menu_activate_league_fixture(void) {
 #ifdef DEBUG_LOG
   if(started && ml_frontend_match_active()) {
     cup_3d_probe_ending_calls=cup_3d_probe_create_calls=cup_3d_probe_result_create_calls=0u;
-    debugPrintf("ml-v5-diag: career match handoff home=%u away=%u office-editor=%u\n",home,away,ml_frontend_plan_editor());
+    debugPrintf("ml-v5-diag: career match handoff home=%u away=%u office-editor=%u\n",home,away,native_office_plan_editor());
   }
 #endif
   competition_frontend_league_handoff_result(started);
@@ -12551,6 +12612,10 @@ static void main_menu_activate_league_fixture(void) {
 }
 
 static void main_menu_activate_choice(uint32_t choice) {
+  if(choice==NX_MAIN_MENU_ONLINE_NATIVE) {
+    competition_frontend_open_online_league();
+    return;
+  }
   /* The native four-tile page remains the stable entry point.  Match and
    * Modes now open the modular competition frontend; the old native setup
    * paths are reached only after the frontend returns an explicit action. */
@@ -17701,6 +17766,11 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   }
   main_menu_2p_team_selector_refresh_ratings();
   main_menu_2p_team_selector_process_pending();
+  { const uint64_t stamp=scene_runtime_ms();ManagerLeagueAudioFrame frame;
+    manager_dummy_audio_frame(&frame,stamp);
+    if(competition_frontend_state()!=COMPETITION_FRONTEND_MANAGER_DUMMY)frame.visible_watch=0;
+    manager_league_audio_publish(&frame);manager_league_audio_native_pump(stamp);
+  }
   league_process_portrait_requests();
   match_hud_process_portrait_requests();
   editor_process_portrait_requests();
@@ -21077,6 +21147,8 @@ void install_ue4_hooks(so_module *module) {
               loose_enabled == 2 ? "fast-validated full loose package (24 CPKs)" :
               loose_enabled == 1 ? "fast-validated loose canary (dt200/dt241)" :
                                    "original OBB");
+  if(sound_hca_decode_header_original && sound_hca_set_decryption_table)
+    manager_league_audio_native_install(module,fixdemo_trophy_verified_elf_sha256);
   /* Both adapters must pass every ABI check before the first patch. A
    * rejected canary retains the ordinary native result and prop factories. */
   if (fixdemo_trophy_canary_validated) {

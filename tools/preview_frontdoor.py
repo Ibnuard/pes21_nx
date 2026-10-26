@@ -49,20 +49,20 @@ static void base(FrontdoorPage page) {
 static void menu(uint32_t focus) {
   base(FD_MENU);view.focus=focus;
   memset(view.menu_weights,0,sizeof(view.menu_weights));view.menu_weights[focus]=1.f;
-  view.portrait_previous=view.portrait_current=focus;
+  view.portrait_previous=view.portrait_current=nx_menu_portrait(focus);
 }
 static void menu_motion(void) {
   FrontdoorMenuMotion motion={0};
   menu(0);fd_menu_motion_step(&motion,1,0,0);
   memcpy(view.menu_weights,motion.weights,sizeof(view.menu_weights));capture("motion-00");
-  const uint32_t focus_order[]={1,2,3,0};
+  const uint32_t focus_order[]={1,2,3,4,0};
   uint32_t index=1;
-  for(uint32_t step=0;step<4;step++) {
+  for(uint32_t step=0;step<NX_MAIN_MENU_COUNT;step++) {
     uint64_t start=(step+1)*1000000000ULL;view.focus=focus_order[step];
     fd_menu_motion_step(&motion,1,view.focus,start);
     for(uint32_t frame=1;frame<=8;frame++) {
       fd_menu_motion_step(&motion,1,view.focus,start+frame*32500000ULL);
-      float sum=0;for(uint32_t i=0;i<4;i++) {
+      float sum=0;for(uint32_t i=0;i<NX_MAIN_MENU_COUNT;i++) {
         assert(motion.weights[i]>=0.f && motion.weights[i]<=1.f);sum+=motion.weights[i];
       }
       assert(fabsf(sum-1.f)<.00001f);
@@ -74,7 +74,7 @@ static void menu_motion(void) {
   /* A quick second tap and reversal retain the current pose exactly. */
   fd_menu_motion_step(&motion,1,1,5000000000ULL);
   fd_menu_motion_step(&motion,1,1,5060000000ULL);
-  float before[4];memcpy(before,motion.weights,sizeof(before));
+  float before[NX_MAIN_MENU_COUNT];memcpy(before,motion.weights,sizeof(before));
   memcpy(view.menu_weights,before,sizeof(before));view.focus=1;capture("retarget-before");
   fd_menu_motion_step(&motion,1,3,5060000000ULL);
   assert(!memcmp(before,motion.weights,sizeof(before)));
@@ -82,7 +82,7 @@ static void menu_motion(void) {
   fd_menu_motion_step(&motion,1,0,5100000000ULL);
   fd_menu_motion_step(&motion,1,0,5360000000ULL);
   assert(motion.weights[0]==1.f);
-  for(uint32_t i=1;i<4;i++)assert(motion.weights[i]==0.f);
+  for(uint32_t i=1;i<NX_MAIN_MENU_COUNT;i++)assert(motion.weights[i]==0.f);
   fd_menu_motion_step(&motion,0,0,5400000000ULL);
   assert(!motion.initialized);
   fd_menu_motion_step(&motion,1,2,5410000000ULL);
@@ -94,7 +94,7 @@ static void menu_motion(void) {
   fd_menu_motion_step(&sparse,1,1,5630000000ULL);
   for(uint64_t time=5510000000ULL;time<=5630000000ULL;time+=10000000ULL)
     fd_menu_motion_step(&dense,1,1,time);
-  for(uint32_t i=0;i<4;i++)assert(fabsf(sparse.weights[i]-dense.weights[i])<.00001f);
+  for(uint32_t i=0;i<NX_MAIN_MENU_COUNT;i++)assert(fabsf(sparse.weights[i]-dense.weights[i])<.00001f);
   /* Idle focused background: one full loop with a fixed border and content. */
   menu(0);memset(&motion,0,sizeof(motion));fd_menu_motion_step(&motion,1,0,0);
   for(uint32_t frame=0;frame<60u;frame++) {
@@ -152,8 +152,9 @@ int main(void) {
   base(FD_TITLE);capture("01-title");
   menu(0);capture("02-main-menu");
   menu(1);capture("03-main-menu-modes");
-  menu(2);capture("04-main-menu-settings");
-  menu(3);capture("05-main-menu-credits");
+  menu(2);capture("04-main-menu-online-league");
+  menu(3);capture("04-main-menu-settings");
+  menu(4);capture("05-main-menu-credits");
   menu_motion();
   base(FD_MATCH);view.row_count=2;
   fd_copy(view.rows[0].label,sizeof(view.rows[0].label),"EXHIBITION");
