@@ -1,9 +1,10 @@
 # Stadium pitch mowing v62
 
-Current follow-up: [Manager review v95](MANAGER_REVIEW_V95.md#pitch-follow-up)
-supersedes the historical counts, color policy and Stamford-only wear below.
-Old Trafford and Signal Iduna now have uniform widths at 14 and 12 strips;
-the other striped stadiums keep their separate cadence and marking anchors.
+Current follow-up: [Old Trafford alignment v96](STADIUM_PITCH_ALIGNMENT_V96.md)
+supersedes its v95 14-strip grid with 20 nearly equal strips that meet the
+retained native paint. [Manager review v95](MANAGER_REVIEW_V95.md#pitch-follow-up)
+still defines the other stadium counts, shared green and wear. Signal Iduna
+retains its uniform 12 strips; other stadium patterns remain unchanged.
 
 ## Stamford Bridge follow-up v94
 

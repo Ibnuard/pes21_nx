@@ -17,7 +17,7 @@ class ManagerLeagueDummyTests(unittest.TestCase):
         cls.temp=tempfile.TemporaryDirectory(prefix='manager-dummy-tests-')
         cls.addClassCleanup(cls.temp.cleanup);cls.work=Path(cls.temp.name)
         cls.exe=cls.work/'dummy-test.exe'
-        subprocess.run(['gcc','-std=c11','-Wall','-Wextra','-Werror','-Wno-misleading-indentation',
+        subprocess.run(['gcc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-misleading-indentation',
             '-I',str(ROOT/'source'),'-I',str(ROOT/'tests'),str(ROOT/'tests/test_manager_league_dummy.c'),
             str(ROOT/'source/manager_league_dummy.c'),str(ROOT/'source/manager_league_motion.c'),str(ROOT/'source/manager_league_plan.c'),str(ROOT/'source/gameplan_preset.c'),'-lm','-pthread','-o',str(cls.exe)],check=True,capture_output=True)
 
@@ -25,7 +25,7 @@ class ManagerLeagueDummyTests(unittest.TestCase):
         work=self.work/'flow';work.mkdir()
         ran=subprocess.run([str(self.exe),'flow'],cwd=work,capture_output=True,timeout=20)
         self.assertEqual(ran.returncode,0,(ran.stdout+ran.stderr).decode(errors='replace'))
-        save=work/'SaveData/manager-league-dummy-v1.dat';before=save.read_bytes()
+        save=work/'SaveData/manager-league-dummy-v2.dat';before=save.read_bytes()
         subprocess.run([str(self.exe),'reload'],cwd=work,check=True,capture_output=True,timeout=20)
         self.assertEqual(before,save.read_bytes())
         profile=(work/'SaveData/manager-league-profile-v2.dat').read_bytes()

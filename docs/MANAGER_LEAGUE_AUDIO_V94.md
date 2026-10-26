@@ -1,6 +1,8 @@
 # Manager League event audio v94
 
 Historical baseline. The v94 device test admitted requests but remained silent.
+The current [v96 native PCM candidate](MANAGER_LEAGUE_AUDIO_V96.md) replaces
+Manager's HCA bank with reviewed PCM recordings and a separate native WAVE pool.
 See [v95 audio evidence and candidate](MANAGER_REVIEW_V95.md#native-audio-evidence-and-candidate)
 for the current routing experiment and dedicated status/position journal.
 

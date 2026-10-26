@@ -86,7 +86,9 @@ static void motion_test(const MdFixture *f) {
 int main(int argc,char **argv) {
   assert(argc==2);
   if(!strcmp(argv[1],"reload")) {
-    manager_dummy_open();assert(view().page==MD_DASHBOARD && !view().tutorial);
+    manager_dummy_open();assert(view().page==MD_REGISTER);manager_dummy_pad(A);assert(view().page==MD_LOGIN);
+    manager_dummy_name_result("androswitch_27");manager_dummy_pad(DOWN);manager_dummy_name_result("Secret-Password-27");
+    manager_dummy_pad(DOWN);manager_dummy_pad(A);assert(view().page==MD_DASHBOARD && !view().tutorial);
     assert(view().balance==4000 && !strcmp(view().user_id,"androswitch_27"));
     MdSave saved;manager_dummy_copy_save(&saved);assert(manager_dummy_valid(&saved));return 0;
   }
@@ -111,12 +113,13 @@ int main(int argc,char **argv) {
   for(uint32_t i=0;i<6;i++)manager_dummy_pad(DOWN);
   assert(view().focus==6);manager_dummy_pad(A);assert(view().page==MD_TEAM_INFO);
   manager_dummy_pad(B);assert(view().page==MD_NEWS && view().focus==6);
-  go(2,3);assert(view().count==MD_MATCH_VISIBLE && view().total==MD_FIXTURES);
+  go(2,2);assert(view().count==MD_MATCH_VISIBLE && view().total==MD_FIXTURES);
   manager_dummy_pad(RIGHT);assert(view().focus==1);manager_dummy_pad(DOWN);assert(view().focus==3);
   manager_dummy_pad(UP);manager_dummy_pad(LEFT);assert(!view().focus);
 
   for(uint32_t day=1;day<=7;day++) {
-    uint64_t t=saved.fixtures[0].kickoff_ms-3u*(uint64_t)MD_DEMO_DAY_MS+(day-1u)*(uint64_t)MD_DEMO_DAY_MS;
+    uint64_t t=day<=3 ? saved.fixtures[0].kickoff_ms-(4u-day)*(uint64_t)MD_PREPARATION_DAY_MS
+                     : saved.fixtures[0].kickoff_ms+(day-4u)*(uint64_t)MD_DEMO_DAY_MS;
     MdWeek week=manager_dummy_week(&saved,t);assert(week.day==day && week.state==(day<=3 ? MD_PRE_LEAGUE : day<=6 ? MD_MATCH_DAY : MD_RESULT));
   }
   go(0,2);assert(view().page==MD_CALENDAR && view().count==MD_WEEK_VISIBLE && view().total==7);

@@ -69,14 +69,14 @@ static void ball_to(MdDot p[23],uint32_t player) {
 }
 void manager_dummy_sample(const MdFixture *f,uint32_t elapsed,MdDot out[23]) {
   MdDot p[23]={0},target[23];uint32_t at=0,half=0,owner=7;
-  if(elapsed>MD_DURATION)elapsed=MD_DURATION;
+  if(elapsed>manager_dummy_duration(f))elapsed=manager_dummy_duration(f);
   for(uint32_t s=0;s<2;s++)for(uint32_t n=0;n<11;n++)p[s*11+n]=(MdDot){0,0,s,n+1};
   p[22].side=2;kickoff(p,0,0);memcpy(target,p,sizeof(p));
   if(step(out,p,target,&at,700,elapsed))return;
   /* Kickoff is a visible backward pass. Everyone begins in their own half. */
   ball_to(target,owner);
   if(step(out,p,target,&at,1400,elapsed))return;
-  for(uint32_t i=0;i<MD_EVENTS;i++) {
+  for(uint32_t i=0;i<manager_dummy_event_count(f);i++) {
     const MdEvent *e=&f->events[i];const uint32_t hash=f->seed^(0x9e3779b9u*(i+1));
     const uint32_t side=e->side,actor=actor_for(p,side,e->player),flip=side^half;
     const float dir=flip ? -1.f : 1.f;

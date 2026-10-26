@@ -141,7 +141,7 @@ static void md_ui_project(MasterLeagueRender *ui,const MdView *v) {
   snprintf(m->left_title,sizeof(m->left_title),"%.63s",v->headline);
   for(uint32_t i=0;i<v->count;i++)md_ui_copy_row(&m->rows[i],&v->rows[i]);
   if(v->page==MD_TEAM_INFO)m->page=ML_PAGE_MARKET_PLAYERS;
-  if(v->page==MD_NAME)m->page=ML_PAGE_MANAGER;
+  if(v->page==MD_NAME || v->page==MD_LOGIN || v->page==MD_SECURE)m->page=ML_PAGE_MANAGER;
   if(v->page==MD_TABLE){m->page=ML_PAGE_TABLE;m->table_count=v->count;
     for(uint32_t i=0;i<v->count;i++){MlTableRow *r=&m->table[i];const MdRow *src=&v->rows[i];
       snprintf(r->name,sizeof(r->name),"%s",src->label+3);r->badge=src->badge;r->rank=v->first+i+1;r->own=!src->team_id;r->stats=src->stats;}}
@@ -203,13 +203,13 @@ static void md_ui_pack(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int
   else snprintf(title,sizeof(title),"%u PLAYERS FROM %u  -  %u POINTS",v->pack_draw,v->pack_pool,v->pack_price);
   fd_center_text(ui,title,.075f,.263f,.85f,.032f,-2,verts,quads);
   if(selecting && !revealing){char count[48];snprintf(count,sizeof(count),"%u OF %u SELECTED",v->pack_selection_count,v->pack_draw);
-    fd_text(ui,count,.725f,.286f,.202f,.021f,-3,verts,quads);}
+    fd_center_text(ui,count,.075f,.296f,.85f,.021f,-3,verts,quads);}
   for(uint32_t i=0;i<v->pack_count;i++) {
     const MdRow *r=&v->pack_players[i];uint32_t col=i%4,row=i/4;
     const float raw=revealing ? fmaxf(0.f,fminf(1.f,((float)v->pack_opening_ms-MD_PACK_UNSEAL_MS-i*70.f)/400.f)) : 1.f;
     const float ease=raw*raw*(3.f-2.f*raw);
     float x=(!selecting && v->pack_count<=4 ? .5f-v->pack_count*.215f*.5f+.015f : .085f)+col*.215f;
-    const float y=.314f+row*(selecting ? .232f : .255f);
+    const float y=(selecting ? .330f : .314f)+row*(selecting ? .232f : .255f);
     const int vertex_first=*quads;
     const uint32_t draw_first=ui->draw_count;
     const int chosen=selecting && !revealing && v->focus==i,checked=selecting && (v->pack_selected&(1u<<i));
@@ -218,6 +218,9 @@ static void md_ui_pack(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int
     if(raw>=.65f) {
       GLuint portrait=gameplan_portrait_texture(r->portrait);if(portrait)ml_ui_image(ui,portrait,0,x+.054f,y+.007f,.077f,.137f,verts,quads);
       char rating[16];snprintf(rating,sizeof(rating),"%u",r->rating);fd_text(ui,rating,x+.012f,y+.018f,.045f,.031f,-1,verts,quads);
+      static const char *const roles[]={"GK","CB","LB","RB","DMF","CMF","LMF","RMF","AMF","LWF","RWF","SS","CF"};
+      fd_rect(ui,x+.010f,y+.105f,.047f,.028f,r->role==0 ? .91f : r->role<4 ? .10f : r->role<9 ? .05f : .83f,r->role==0 ? .55f : r->role<4 ? .36f : r->role<9 ? .58f : .10f,r->role==0 ? .08f : r->role<4 ? .80f : r->role<9 ? .32f : .20f,verts,quads);
+      fd_center_text(ui,r->role<13 ? roles[r->role] : "?",x+.010f,y+.119f,.047f,.019f,-1,verts,quads);
       fd_center_text(ui,r->label,x+.007f,y+.174f,.171f,.0236f,-2,verts,quads);
     } else if(v->badge)ml_ui_image(ui,gl.badge_tex,v->badge,x+.064f,y+.035f,.057f,.1013f,verts,quads);
     if(checked){
@@ -317,12 +320,17 @@ static void md_ui_match_centre(MasterLeagueRender *ui,const MdView *v,GLfloat *v
     fd_center_text(ui,r->label,x+.052f,y+.040f,w-.104f,.024f,ink,verts,quads);
     fd_center_text(ui,r->value,x+.068f,y+.080f,w-.136f,.032f,ink,verts,quads);
     fd_center_text(ui,r->detail,x+.012f,y+.130f,w-.024f,.0195f,chosen ? -1 : -3,verts,quads);
+    if(r->phase==1) {
+      fd_rect(ui,x+w-.067f,y+.008f,.054f,.025f,.91f,.08f,.20f,verts,quads);
+      fd_center_text(ui,"LIVE",x+w-.067f,y+.0205f,.054f,.018f,-1,verts,quads);
+    }
   }
   char range[48];snprintf(range,sizeof(range),"%u-%u OF %u  -  SCHEDULED, LIVE AND REPLAY",v->first+1,v->first+v->count,v->total);
   fd_text(ui,range,.077f,.852f,.81f,.019f,-3,verts,quads);
 }
 static void md_ui_week_schedule(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
-  ml_ui_panel(ui,"WEEK 01 - SCHEDULE",ML_HEADER_CALENDAR,.04f,.205f,.92f,.675f,0,verts,quads);
+  char title[40];snprintf(title,sizeof(title),"WEEK %02u - SCHEDULE",v->week_id);
+  ml_ui_panel(ui,title,ML_HEADER_CALENDAR,.04f,.205f,.92f,.675f,0,verts,quads);
   char range[40];snprintf(range,sizeof(range),"DAYS %u-%u OF %u",v->first+1u,v->first+v->count,v->total);
   fd_text(ui,range,.755f,.232f,.150f,.024f,-1,verts,quads);
   for(uint32_t i=0;i<v->count;i++) {
@@ -339,7 +347,11 @@ static void md_ui_week_schedule(MasterLeagueRender *ui,const MdView *v,GLfloat *
         const MdRow *match=&tile->matches[n];const float yy=y+.068f+n*.034f;
         fd_text(ui,match->value,x+.017f,yy,.082f,.0278f,ink,verts,quads);
         if(match->badge)ml_ui_image(ui,gl.badge_tex,match->badge,x+.108f,yy-.004f,.0191f,.034f,verts,quads);
-        fd_text(ui,match->label,x+.140f,yy,.575f,.0278f,ink,verts,quads);
+        fd_text(ui,match->label,x+.140f,yy,.490f,.0278f,ink,verts,quads);
+        if(match->phase==1) {
+          fd_rect(ui,x+w-.157f,yy-.001f,.063f,.029f,.91f,.08f,.20f,verts,quads);
+          fd_center_text(ui,"LIVE",x+w-.157f,yy+.0135f,.063f,.019f,-1,verts,quads);
+        }
         fd_text(ui,match->detail,x+w-.077f,yy+.002f,.060f,.024f,ink,verts,quads);
       }
     } else {
@@ -354,7 +366,7 @@ static void md_ui_week_schedule(MasterLeagueRender *ui,const MdView *v,GLfloat *
 }
 static void manager_dummy_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
   MdView v;manager_dummy_view(&v);memset(ui,0,sizeof(*ui));
-  if(v.page==MD_DASHBOARD)md_ui_master_hub(ui,&v,verts,quads);
+  if(v.page==MD_DASHBOARD || v.page==MD_LOGOUT || v.page==MD_NEXT_WEEK)md_ui_master_hub(ui,&v,verts,quads);
   else if(v.page==MD_WATCH)md_watch_emit(ui,&v,verts,quads);
   else {
     md_ui_project(ui,&v);ml_ui_chrome(ui,&ui->view,verts,quads);
@@ -365,7 +377,11 @@ static void manager_dummy_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads)
       if(gl.manager_unknown_club_tex)ml_ui_image(ui,gl.manager_unknown_club_tex,0,.133f,.473f,.104f,.185f,verts,quads);
       fd_text(ui,"YOUR CLUB",.282f,.477f,.56f,.042f,-2,verts,quads);
       fd_text(ui,"Choose a club. Create your profile. Join the league.",.282f,.548f,.56f,.027f,-3,verts,quads);
-      fd_card(ui,.282f,.658f,.56f,.096f,1,0,verts,quads);fd_action_content(ui,"GET STARTED",ML_HEADER_MANAGER,.282f,.658f,.56f,.096f,.031f,-1,verts,quads);
+      for(uint32_t i=0;i<2;i++) {
+        const float x=.282f+i*.286f,w=.274f;const int selected=v.focus==i;
+        fd_card(ui,x,.658f,w,.096f,selected,0,verts,quads);
+        fd_action_content(ui,i ? "REGISTER" : "LOGIN",ML_HEADER_MANAGER,x,.658f,w,.096f,.031f,selected ? -1 : -2,verts,quads);
+      }
     } else if(v.page==MD_SHOP)md_ui_shop(ui,&v,verts,quads);
     else if(v.page==MD_PACK_OPENING)md_ui_pack_opening(ui,&v,verts,quads);
     else if(v.page==MD_PACK || v.page==MD_PACK_RESULT || v.page==MD_PACK_SELECT)md_ui_pack(ui,&v,verts,quads);

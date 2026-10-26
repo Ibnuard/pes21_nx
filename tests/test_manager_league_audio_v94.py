@@ -23,7 +23,9 @@ CHECKS = [(0x77e4c90, 0x10, 0x9bdd49ca07a9b0c3),
           (0x6d003e8, 0x1c, 0xf6ff621af0d3a391),
           (0x6d004ec, 0x44, 0xaf5dcafef3170be3),
           (0x6d00480, 0x20, 0x8b2db63ac314e144),
-          (0x77e4b48, 0x14, 0xc9d04bf96671de06)]
+          (0x77e4b48, 0x14, 0xc9d04bf96671de06),
+          (0x7dfac14, 0x64, 0x3ccc0a45c9fa1f8f),
+          (0x7dfac78, 0x12c, 0x6342883cfaa9d68f)]
 
 
 def local_bank():
@@ -175,7 +177,7 @@ def test_actual_native_full_body_guards_and_unchanged_trophy_route():
     native_bodies()
     text = (ROOT / "source/manager_league_audio_runtime.inc").read_text()
     assert "PlayBgm" not in text and "SetCategoryVolume" not in text
-    assert "AllocateWaveVoicePool" not in text and "SetGameOptionVolume" not in text
+    assert "AllocateWaveVoicePool" in text and "SetGameOptionVolume" not in text
     assert "mla_native_play(mla_clips[clip].cue, handle, 0, 0, 0)" in text
     assert "__atomic_store_n(&mla_mounted, 1u, __ATOMIC_RELEASE)" in text
 
@@ -221,7 +223,10 @@ def test_bank_graph_exact_original_payloads_review_binding_and_decode(tmp_path):
 
 
 def test_native_runtime_owner_mount_lifetime_split_headers_and_stale_timeout(tmp_path):
-    bank = (ROOT / "local-debug/manager-review-v95/audio/stage-01/Audio/manager-league-v95.acb").read_bytes()
+    current = ROOT / "local-debug/manager-review-v96/audio/pcm-01/Audio/manager-league-pcm-v96.acb"
+    if not current.exists():
+        pytest.skip("ignored individually reviewed v96 Manager PCM bank required")
+    bank = current.read_bytes()
     bodies = native_bodies()
     top = Utf(bank)
     header = audio.awb_recording(top.blob(0,"AwbFile"),0)[:96]
@@ -239,14 +244,14 @@ static unsigned mounts,plays,stops,reads;
 static uint64_t next_handle=10;
 static int bad_bank,stop_result,status_result;
 static uint32_t guard_index;
-static const uint32_t rvas[]={0x77e4c90,0x6cfff3c,0x6d003e8,0x6d004ec,0x6d00480,0x77e4b48};
+static const uint32_t rvas[]={0x77e4c90,0x6cfff3c,0x6d003e8,0x6d004ec,0x6d00480,0x77e4b48,0x7dfac14,0x7dfac78};
 static uintptr_t so_try_find_addr_rx(so_module *m,const char *n) {
  (void)m;(void)n;return UINT64_C(0x80000000)+rvas[guard_index];}
 static uintptr_t so_find_addr(so_module *m,const char *n) {
  (void)n;return (uintptr_t)m->load_base+rvas[guard_index++];}
 static void scene_runtime_note(const char *a,const char *b){(void)a;(void)b;}
 static void *nx_asset_read(const char *n,uint32_t max,size_t *size) {
- assert(!strcmp(n,"Audio/manager-league-v95.acb")&&max==4194304);++reads;
+ assert(!strcmp(n,"Audio/manager-league-pcm-v96.acb")&&max==16777216);++reads;
  FILE *f=fopen(BANK_PATH,"rb");assert(f);fseek(f,0,SEEK_END);*size=ftell(f);rewind(f);
  uint8_t *b=malloc(*size);assert(fread(b,1,*size,f)==*size);fclose(f);if(bad_bank)b[0]^=1;return b;
 }
@@ -259,20 +264,25 @@ static int32_t stop_stub(uint64_t h,int32_t f,int32_t z){assert(h&&f==100&&!z);+
 static int32_t existing_stub(const char *n){assert(n);return 1;}
 static int32_t status_stub(uint64_t h,uint32_t *s){assert(h&&s);*s=0;return status_result;}
 static int32_t position_stub(uint64_t h,int64_t *p){assert(h&&p);*p=100;return status_result;}
+static int32_t pool_size(const MlaWavePoolConfig *c){
+ assert(sizeof(*c)==28&&!c->identifier&&c->voices==6&&c->channels==2&&c->rate==48000);
+ assert(!c->streaming&&c->renderer==2&&!c->latency);return 4096;}
+static void *pool_allocate(const MlaWavePoolConfig *c,void *w,int32_t n){assert(c->voices==6&&w&&n==4096);return (void*)77;}
 int main(void){
- uint8_t *backing=calloc(1,0x7800000u);assert(backing);so_module m={backing};BODY_COPIES
+ uint8_t *backing=calloc(1,0x8000000u);assert(backing);so_module m={backing};BODY_COPIES
  manager_league_audio_native_install(&m,"wrong");assert(!mla_ready&&!mounts);
  manager_league_audio_native_install(&m,"a27939569d6013502873076b517e8bc0d9f63cabacd17d944d88a8b1dcc8d187");
  assert(mla_ready&&!mounts&&!reads&&(uintptr_t)mla_native_play==UINT64_C(0x86cfff3c));
  mla_native_mount=mount_stub;mla_native_play=play_stub;mla_native_stop=stop_stub;
  mla_native_existing=existing_stub;mla_native_status=status_stub;mla_native_position=position_stub;
+ mla_wave_pool_size=pool_size;mla_wave_pool_allocate=pool_allocate;
  uint8_t hca[96]={HEADER_BYTES};
  assert(!manager_league_audio_plain_hca_header(hca,96,NULL,0));
  ManagerLeagueAudioFrame f={.fixture_token=9,.visible_watch=1,.monotonic_ms=10000};
  manager_league_audio_publish(&f);assert(!mounts&&!plays);manager_league_audio_native_pump(10000);
  assert(mounts==1&&reads==1&&plays==2);
- assert(manager_league_audio_plain_hca_header(hca,96,NULL,0));
- for(unsigned i=0;i<=96;++i)assert(manager_league_audio_plain_hca_header(hca,i,hca+i,96-i));
+ assert(!manager_league_audio_plain_hca_header(hca,96,NULL,0));
+ for(unsigned i=0;i<=96;++i)assert(!manager_league_audio_plain_hca_header(hca,i,hca+i,96-i));
  for(unsigned i=0;i<96;++i){hca[i]^=1;assert(!manager_league_audio_plain_hca_header(hca,96,NULL,0));hca[i]^=1;}
  assert(!manager_league_audio_plain_hca_header(hca,95,NULL,0));
  f.monotonic_ms=10500;f.position_ms=f.event_at_ms=500;f.event_serial=1;f.event_kind=MLA_SHOT;
@@ -287,9 +297,9 @@ int main(void){
  unsigned previous=mounts;uint64_t failed=77;
  assert(mla_play(NULL,MLA_BED,&failed)&&!failed&&mounts==previous&&reads==2);
  assert(mla_play(NULL,MLA_BED,&failed)&&reads==2&&!mla_mounted);
- free(accepted);free(backing);return 0;}
+ free(accepted);free(mla_wave_pool_work);free(backing);return 0;}
 '''
-    code = '#include <stdint.h>\n#define BANK_PATH '+json.dumps((ROOT/"local-debug/manager-review-v95/audio/stage-01/Audio/manager-league-v95.acb").as_posix())+'\n'+arrays+'\n'+code
+    code = '#include <stdint.h>\n#define BANK_PATH '+json.dumps((ROOT/"local-debug/manager-review-v96/audio/pcm-01/Audio/manager-league-pcm-v96.acb").as_posix())+'\n'+arrays+'\n'+code
     code = code.replace("BODY_COPIES",copies).replace("HEADER_BYTES", ",".join(map(str,header)))
     compile_run(tmp_path,code)
 

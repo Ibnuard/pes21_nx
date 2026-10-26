@@ -16,7 +16,6 @@ static void md_watch_header(MasterLeagueRender *ui,const MdView *v,GLfloat *vert
   ml_ui_image(ui,gl.master_league_pearl_tex,0,0,0,1,1,verts,quads);
   char round[64];snprintf(round,sizeof(round),"MANAGER LEAGUE  -  ROUND %02u",v->round);
   fd_text(ui,round,.035f,.024f,.55f,.024f,-2,verts,quads);
-  fd_text(ui,"LOCAL PREVIEW",.714f,.025f,.14f,.021f,-3,verts,quads);
   const char *status=v->watching_replay ? (v->paused ? "PAUSED" : "REPLAY") :
       v->phase==1 ? "LIVE" : v->phase==0 ? "PRE-MATCH" : "FULL TIME";
   fd_rect(ui,.858f,.018f,.112f,.036f,v->phase==1 && !v->watching_replay ? .89f : .03f,.10f,.22f,verts,quads);
@@ -102,15 +101,16 @@ static void md_watch_pitch(MasterLeagueRender *ui,const MdView *v,GLfloat *verts
 }
 static void md_watch_timeline(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
   const float x=.063f,y=.864f,w=.595f;
+  const uint32_t duration=v->duration_ms ? v->duration_ms : MD_DURATION;
   md_watch_rule(ui,x,y,w,.0035f,.55f,.67f,.76f,.65f,verts,quads);
-  if(v->elapsed_ms)md_watch_rule(ui,x,y,w*v->elapsed_ms/MD_DURATION,.0035f,.13f,.80f,.95f,1,verts,quads);
+  if(v->elapsed_ms)md_watch_rule(ui,x,y,w*v->elapsed_ms/duration,.0035f,.13f,.80f,.95f,1,verts,quads);
   for(uint32_t i=0;i<v->timeline_count;i++) {
-    const MdTimelineMark *mark=&v->timeline[i];const float xx=x+w*mark->at_ms/MD_DURATION;
+    const MdTimelineMark *mark=&v->timeline[i];const float xx=x+w*mark->at_ms/duration;
     if(mark->kind==MD_YELLOW)fd_rect(ui,xx-.0025f,y-.006f,.005f,.014f,1,.85f,.20f,verts,quads);
     else if(mark->kind==MD_SUB)md_watch_rule(ui,xx-.002f,y-.005f,.004f,.013f,.20f,.94f,.72f,1,verts,quads);
     else md_ui_circle(ui,xx,y+.001f,mark->kind==MD_GOAL ? .013f : .008f,1,1,1,verts,quads);
   }
-  md_ui_circle(ui,x+w*v->elapsed_ms/MD_DURATION,y+.001f,.010f,.12f,.81f,.97f,verts,quads);
+  md_ui_circle(ui,x+w*v->elapsed_ms/duration,y+.001f,.010f,.12f,.81f,.97f,verts,quads);
   fd_text(ui,"0'",x,.877f,.06f,.0208f,-1,verts,quads);
   fd_center_text(ui,"45'",x+w*.5f-.03f,.886f,.06f,.0208f,-1,verts,quads);
   fd_text(ui,"90'",x+w-.025f,.877f,.04f,.0208f,-1,verts,quads);
@@ -159,7 +159,8 @@ static void md_watch_event(MasterLeagueRender *ui,const MdView *v,GLfloat *verts
   ml_ui_art(ui,v->event_side ? 1 : 0,x,y,.145f,h,verts,quads);
   if(v->event_kind==MD_YELLOW)fd_rect(ui,x+.112f,y+.018f,.017f,.039f,1,.85f,.16f,verts,quads);
   fd_center_text(ui,labels[v->event_kind],x+.012f,y+.075f,.122f,v->event_kind==MD_HALF ? .028f : .041f,-1,verts,quads);
-  char minute[16];snprintf(minute,sizeof(minute),"%u'",(v->elapsed_ms-v->event_age_ms)/2000u);
+  const uint32_t duration=v->duration_ms ? v->duration_ms : MD_DURATION;
+  char minute[16];snprintf(minute,sizeof(minute),"%u'",(uint32_t)((uint64_t)(v->elapsed_ms-v->event_age_ms)*90u/duration));
   fd_text(ui,minute,x+.017f,y+.014f,.08f,.020f,-1,verts,quads);
   const uint32_t badge=v->event_kind==MD_HALF ? 0 : v->event_side ? v->away_badge : v->home_badge;
   if(badge)ml_ui_image(ui,gl.badge_tex,badge,x+.159f,y+.035f,.035f,.062f,verts,quads);

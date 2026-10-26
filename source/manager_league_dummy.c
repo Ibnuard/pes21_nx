@@ -4,6 +4,8 @@
 #include "exhibition_team_catalog.h"
 #include "master_league_catalog.h"
 #include <math.h>
+#include <errno.h>
+#include <stddef.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +17,8 @@
 #endif
 
 #define MD_MAGIC 0x4d4c4431u
-#define MD_FILE "SaveData/manager-league-dummy-v1.dat"
+#define MD_FILE "SaveData/manager-league-dummy-v2.dat"
+#define MD_LEGACY_FILE "SaveData/manager-league-dummy-v1.dat"
 enum {
   B = 1u,
   A = 2u,
@@ -68,6 +71,58 @@ static uint32_t rng(uint32_t *s) {
   return *s;
 }
 #include "manager_league_profile.inc"
+#include "manager_league_auth.h"
+#define MD_AUTH_FILE "SaveData/manager-league-account-v1.dat"
+static MdCredential credential;
+static int credential_state;
+static uint32_t authenticated,login_failures;
+static uint64_t login_retry_at;
+static char login_id[32],password_confirmation[64];
+static int auth_read(const char *path) {
+  MdCredential c;FILE *f=fopen(path,"rb");if(!f)return 0;
+  int ok=fread(&c,1,sizeof(c),f)==sizeof(c) && fgetc(f)==EOF;fclose(f);
+  if(ok && md_auth_valid(&c,md.seed,profile.user_id)){credential=c;md_auth_wipe(&c,sizeof(c));return 1;}
+  md_auth_wipe(&c,sizeof(c));return 0;
+}
+static void auth_load(void) {
+  credential_state=0;md_auth_wipe(&credential,sizeof(credential));
+  if(!md.joined || !profile_ready)return;
+  if(auth_read(MD_AUTH_FILE) || auth_read(MD_AUTH_FILE ".bak")){credential_state=1;return;}
+  struct stat state;
+  const int first_missing=stat(MD_AUTH_FILE,&state) && errno==ENOENT;
+  const int backup_missing=stat(MD_AUTH_FILE ".bak",&state) && errno==ENOENT;
+  if(!first_missing || !backup_missing)credential_state=-1;
+}
+static int auth_store(void) {
+  uint8_t salt[16];
+#ifdef __SWITCH__
+  randomGet(salt,sizeof(salt));
+#else
+  FILE *random=fopen("/dev/urandom","rb");if(!random)return 0;
+  int random_ok=fread(salt,1,sizeof(salt),random)==sizeof(salt);fclose(random);if(!random_ok)return 0;
+#endif
+  MdCredential c;int ok=md_auth_create(&c,md.seed,profile.user_id,password,salt);md_auth_wipe(salt,sizeof(salt));
+  if(!ok)return 0;
+  FILE *f=fopen(MD_AUTH_FILE ".tmp","wb");ok=0;
+  if(f){ok=fwrite(&c,1,sizeof(c),f)==sizeof(c) && !fflush(f);if(fclose(f))ok=0;}
+  if(ok){remove(MD_AUTH_FILE ".bak");FILE *old=fopen(MD_AUTH_FILE,"rb");if(old){fclose(old);if(rename(MD_AUTH_FILE,MD_AUTH_FILE ".bak"))ok=0;}
+    if(ok && rename(MD_AUTH_FILE ".tmp",MD_AUTH_FILE)){rename(MD_AUTH_FILE ".bak",MD_AUTH_FILE);ok=0;}}
+  if(ok){credential=c;credential_state=1;}else remove(MD_AUTH_FILE ".tmp");md_auth_wipe(&c,sizeof(c));return ok;
+}
+static void auth_clear_inputs(void) {
+  md_auth_wipe(password,sizeof(password));md_auth_wipe(password_confirmation,sizeof(password_confirmation));
+}
+static void auth_enter_hub(void) {
+  authenticated=1;auth_clear_inputs();page=MD_DASHBOARD;focus=dashboard_focus=hub_section=0;
+  login_failures=0;login_retry_at=0;notice[0]=0;
+  tutorial=profile.tutorials==7 ? 0 : 1;
+  while(tutorial && (profile.tutorials&(1u<<(tutorial-1))))tutorial=tutorial<3 ? tutorial+1 : 0;
+}
+static void auth_logout(void) {
+  authenticated=0;auth_clear_inputs();md_auth_wipe(login_id,sizeof(login_id));
+  page=MD_REGISTER;focus=0;replay=paused=editor=restore_pending=tutorial=action=0;
+  notice[0]=0;
+}
 static uint32_t timeline_serial;
 static uint64_t roster_lock_attempt;
 static uint32_t calendar_day = 1, schedule_day;
@@ -80,39 +135,45 @@ static uint32_t checksum(const MdSave *s) {
     h = (h ^ p[i]) * 16777619u;
   return h;
 }
+static uint32_t day_duration(const MdSave *save) {
+  return save && save->day_ms ? save->day_ms : MD_DEMO_DAY_MS;
+}
 uint32_t manager_dummy_elapsed(const MdFixture *f, uint64_t now) {
   if (now <= f->kickoff_ms)
     return 0;
   const uint64_t delta = now - f->kickoff_ms;
-  return delta >= MD_DURATION ? MD_DURATION : (uint32_t)delta;
+  const uint32_t duration=manager_dummy_duration(f);
+  return delta >= duration ? duration : (uint32_t)delta;
 }
 uint32_t manager_dummy_phase(const MdFixture *f, uint64_t now) {
-  return now < f->kickoff_ms ? 0u : now - f->kickoff_ms < MD_DURATION ? 1u : 2u;
+  return now < f->kickoff_ms ? 0u : now - f->kickoff_ms < manager_dummy_duration(f) ? 1u : 2u;
 }
 MdWeek manager_dummy_week(const MdSave *save, uint64_t stamp) {
   MdWeek week = {MD_PRE_LEAGUE, 1, 0, 0};
   if (!save || !save->joined)
     return week;
-  uint64_t first = UINT64_MAX, last = 0;
+  uint64_t first = UINT64_MAX, last_end = 0;
+  const uint32_t day_ms=day_duration(save);
   for (uint32_t i = 0; i < MD_FIXTURES; i++) {
     const uint64_t kickoff = save->fixtures[i].kickoff_ms;
     if (kickoff < first)
       first = kickoff;
-    if (kickoff > last)
-      last = kickoff;
+    const uint64_t end=kickoff+manager_dummy_duration(&save->fixtures[i]);
+    if (end > last_end)
+      last_end = end;
   }
   week.first_kickoff_ms = first;
-  week.result_ms = first + 3u * (uint64_t)MD_DEMO_DAY_MS;
+  week.result_ms = first + 3u * (uint64_t)day_ms;
   /* A postponed fixture keeps the cycle open; day seven cannot fabricate a
    * completed table. No outcome is read before the final broadcast ends. */
-  if (last + MD_DURATION > week.result_ms)
-    week.result_ms = last + MD_DURATION;
+  if (last_end > week.result_ms)
+    week.result_ms = last_end;
   if (stamp < first) {
     const uint64_t remaining = first - stamp;
-    week.day = remaining > 2u * MD_DEMO_DAY_MS ? 1u : remaining > MD_DEMO_DAY_MS ? 2u : 3u;
+    week.day = remaining > 2u * MD_PREPARATION_DAY_MS ? 1u : remaining > MD_PREPARATION_DAY_MS ? 2u : 3u;
   } else if (stamp < week.result_ms) {
     week.state = MD_MATCH_DAY;
-    const uint64_t day = (stamp - first) / MD_DEMO_DAY_MS;
+    const uint64_t day = (stamp - first) / day_ms;
     week.day = 4u + (day > 2u ? 2u : (uint32_t)day);
   } else {
     week.state = MD_RESULT;
@@ -122,13 +183,15 @@ MdWeek manager_dummy_week(const MdSave *save, uint64_t stamp) {
 }
 void manager_dummy_score(const MdFixture *f, uint32_t elapsed, uint32_t out[2]) {
   out[0] = out[1] = 0;
-  for (uint32_t i = 0; i < MD_EVENTS; i++)
+  for (uint32_t i = 0; i < manager_dummy_event_count(f); i++)
     if (f->events[i].at_ms <= elapsed && f->events[i].goal && f->events[i].side < 2u)
       out[f->events[i].side]++;
 }
 int manager_dummy_valid(const MdSave *s) {
-  if (s->magic != MD_MAGIC || s->version != 1 || s->bytes != sizeof(*s) ||
+  if (s->magic != MD_MAGIC || s->version != 2 || s->bytes != sizeof(*s) ||
       s->checksum != checksum(s) || s->created > 1 || s->joined > 1 || s->joined > s->created ||
+      s->week_id < 1 || s->week_id > 9999 ||
+      (s->day_ms != MD_DEMO_DAY_MS && s->day_ms != MD_LEGACY_DAY_MS) ||
       s->purchased_mask > 7 || s->formation > 2 || s->mentality > 2 || s->tempo > 2 ||
       !memchr(s->name, 0, sizeof(s->name)) || (s->club && !exhibition_team_catalog_find(s->club)) ||
       (s->created && !s->club) || s->clock_offset_ms < -INT64_C(315360000000) ||
@@ -146,25 +209,33 @@ int manager_dummy_valid(const MdSave *s) {
   for (uint32_t i = 0; i < MD_FIXTURES; i++) {
     const MdFixture *f = &s->fixtures[i];
     if (f->home >= MD_TEAMS || f->away >= MD_TEAMS || f->home == f->away || f->round >= 7 ||
-        f->kickoff_ms < 1000000000000ULL || f->kickoff_ms > 5000000000000ULL)
+        f->kickoff_ms < 1000000000000ULL || f->kickoff_ms > 5000000000000ULL ||
+        !((f->duration_ms==MD_DURATION && f->event_count==MD_EVENTS) ||
+          (f->duration_ms==MD_LEGACY_DURATION && f->event_count==MD_LEGACY_EVENTS)))
       return 0;
     uint32_t a = f->home < f->away ? f->home : f->away, b = f->home ^ f->away ^ a;
     if (pairs[a][b]++)
       return 0;
-    for (uint32_t j = 0; j < i; j++)
-      if (s->fixtures[j].round == f->round &&
-          (s->fixtures[j].home == f->home || s->fixtures[j].away == f->home ||
-           s->fixtures[j].home == f->away || s->fixtures[j].away == f->away))
-        return 0;
+    for (uint32_t j = 0; j < i; j++) {
+      const MdFixture *other=&s->fixtures[j];
+      if (other->home == f->home || other->away == f->home ||
+          other->home == f->away || other->away == f->away) {
+        if (other->round == f->round ||
+            (other->kickoff_ms < f->kickoff_ms+f->duration_ms &&
+             f->kickoff_ms < other->kickoff_ms+manager_dummy_duration(other)))return 0;
+      }
+    }
     uint32_t active[2][11];
     for (uint32_t a = 0; a < 2; a++)
       for (uint32_t n = 0; n < 11; n++)
         active[a][n] = n + 1;
     uint32_t used[2] = {0};
-    for (uint32_t j = 0; j < MD_EVENTS; j++) {
+    uint32_t halves=0;
+    for (uint32_t j = 0; j < f->event_count; j++) {
       const MdEvent *e = &f->events[j];
       if (e->side > 1 || e->kind > MD_HALF || e->goal != (e->kind == MD_GOAL) ||
-          e->at_ms != (j + 1) * 6000u || e->player < 1 || e->player > 18)
+          e->at_ms != (j + 1) * 6000u || e->at_ms>=f->duration_ms || e->player < 1 || e->player > 18 ||
+          (e->kind==MD_HALF && (++halves!=1 || e->at_ms!=f->duration_ms/2u)))
         return 0;
       uint32_t n = 0;
       while (n < 11 && active[e->side][n] != e->player)
@@ -179,6 +250,10 @@ int manager_dummy_valid(const MdSave *s) {
       } else if (e->other)
         return 0;
     }
+    if(halves!=1)return 0;
+    for(uint32_t j=f->event_count;j<MD_EVENTS;j++) {
+      static const MdEvent zero={0};if(memcmp(&f->events[j],&zero,sizeof(zero)))return 0;
+    }
   }
   return 1;
 }
@@ -190,12 +265,15 @@ static int read_file(const char *path, MdSave *out) {
   fclose(f);
   return ok && manager_dummy_valid(out);
 }
+#include "manager_league_archive.inc"
 static int persist(void) {
   if (blocked)
     return 0;
   md.magic = MD_MAGIC;
-  md.version = 1;
+  md.version = 2;
   md.bytes = sizeof(md);
+  if(!md.week_id)md.week_id=1;
+  if(!md.day_ms)md.day_ms=MD_DEMO_DAY_MS;
   md.checksum = checksum(&md);
   mkdir("SaveData", 0700);
   FILE *f = fopen(MD_FILE ".tmp", "wb");
@@ -222,13 +300,47 @@ static int persist(void) {
     }
   }
   snprintf(notice, sizeof(notice), "%s",
-           ok ? "PROFILE SAVED" : "SAVE FAILED - X TO RETRY; KEEP THIS SESSION OPEN");
+           ok ? "" : "Could not save your club. Please try again.");
   return ok;
+}
+static int active_pair_verified(void) {
+  MdSave *saved=calloc(1,sizeof(*saved));MdProfile *players=calloc(1,sizeof(*players));
+  int ok=saved && players && read_file(MD_FILE,saved) && !memcmp(saved,&md,sizeof(md));
+  FILE *f=ok ? fopen(MD_PROFILE_FILE,"rb") : NULL;
+  ok=f && fread(players,1,sizeof(*players),f)==sizeof(*players) && fgetc(f)==EOF;
+  if(f)fclose(f);
+  ok=ok && profile_valid(players) && !memcmp(players,&profile,sizeof(profile));
+  free(saved);free(players);return ok;
+}
+static int finish_transition(void) {
+  /* Never permit later purchases while a prepared journal can still restore
+   * an older wallet on restart. Failure to clear it keeps editing blocked. */
+  if(remove(MD_PENDING_FILE) || file_exists(MD_PENDING_FILE))return 0;
+  remove(MD_PENDING_FILE ".bak");return 1;
 }
 static void load_once(void) {
   if (loaded)
     return;
   loaded = 1;
+  /* A durable two-record journal finishes an interrupted season rollover.
+   * It is removed only after both active files have been verified on disk. */
+  if(file_exists(MD_PENDING_FILE)) {
+    MdArchive *pending=calloc(1,sizeof(*pending));
+    if(pending && archive_read(MD_PENDING_FILE,pending)) {
+      char previous_path[96];archive_path(previous_path,pending->save.week_id-1u);
+      MdArchive *previous=calloc(1,sizeof(*previous));
+      int ok=pending->save.week_id>1u && previous && archive_read(previous_path,previous) &&
+             previous->save.week_id+1u==pending->save.week_id && previous->save.seed==pending->save.seed &&
+             previous->save.club==pending->save.club;
+      if(ok){md=pending->save;profile=pending->players;profile_ready=1;profile_cache();
+        ok=persist() && profile_save() && active_pair_verified();}
+      free(previous);
+      if(ok)ok=finish_transition();
+      if(ok)notice[0]=0;
+      else {blocked=1;snprintf(notice,sizeof(notice),"Could not finish saving the next week. Restart to retry.");}
+    } else {blocked=1;snprintf(notice,sizeof(notice),"Season recovery is unavailable. Existing files are preserved.");}
+    free(pending);return;
+  }
   if (read_file(MD_FILE, &md)) {
     if (md.joined)
       profile_load();
@@ -249,8 +361,18 @@ static void load_once(void) {
     blocked = 1;
     snprintf(notice, sizeof(notice), "OFFLINE SAVE INVALID - ORIGINAL FILES PRESERVED");
   }
+  if(!blocked) {
+    if(read_legacy(MD_LEGACY_FILE,&md) || read_legacy(MD_LEGACY_FILE ".bak",&md)) {
+      if(!persist()){blocked=1;snprintf(notice,sizeof(notice),"Could not import your league. Original files are preserved.");}
+      if(md.joined)profile_load();return;
+    }
+    if(file_exists(MD_LEGACY_FILE) || file_exists(MD_LEGACY_FILE ".bak")) {
+      blocked=1;snprintf(notice,sizeof(notice),"OFFLINE SAVE INVALID - ORIGINAL FILES PRESERVED");
+    }
+  }
   memset(&md, 0, sizeof(md));
   md.balance = 5000;
+  md.week_id=1;md.day_ms=MD_DEMO_DAY_MS;
   md.seed = (uint32_t)(epoch_now ^ (epoch_now >> 32)) | 1u;
 }
 static uint64_t now(void) {
@@ -376,12 +498,16 @@ static void overall_rows(MdRow out[7]) {
     snprintf(out[i].label, sizeof(out[i].label), "%s", name);
     snprintf(out[i].value, sizeof(out[i].value), "%s", value);
     snprintf(out[i].detail, sizeof(out[i].detail), "%s",
-             t ? "Sample history for this dummy opponent" : "Your club's first demo season");
+             t ? "League reputation" : "Your club's first season");
   }
 }
 static void make_fixtures(void) {
-  const uint64_t kickoff = ((now() / 60000u) + 1u) * 60000u + 3u * (uint64_t)MD_DEMO_DAY_MS;
-  uint32_t ring[8] = {0, 1, 2, 3, 4, 5, 6, 7}, n = 0, seed = md.seed;
+  md.day_ms=MD_DEMO_DAY_MS;
+  const uint64_t kickoff = ((now() / 60000u) + 1u) * 60000u + 3u * (uint64_t)MD_PREPARATION_DAY_MS;
+  uint32_t ring[8] = {0, 1, 2, 3, 4, 5, 6, 7}, n = 0;
+  /* Keep account identity stable while each successor week owns a different
+   * deterministic tape. Week one retains its existing seed stream. */
+  uint32_t seed=md.seed^((md.week_id ? md.week_id : 1u)-1u)*0x9e3779b9u;
   for (uint32_t round = 0; round < 7; round++) {
     for (uint32_t i = 0; i < 4; i++) {
       uint32_t a = ring[i], b = ring[7 - i];
@@ -397,30 +523,49 @@ static void make_fixtures(void) {
       f->home = a;
       f->away = b;
       f->round = round;
-      const uint64_t offset = round < 3   ? round * 180000u
-                              : round < 5 ? MD_DEMO_DAY_MS + (round - 3) * 240000u
-                                          : 2u * MD_DEMO_DAY_MS + (round - 5) * 240000u;
+      const uint64_t offset = round < 3   ? round * (uint64_t)MD_DURATION
+                              : round < 5 ? MD_DEMO_DAY_MS + (round - 3) * (uint64_t)MD_DURATION
+                                          : 2u * MD_DEMO_DAY_MS + (round - 5) * (uint64_t)MD_DURATION;
       f->kickoff_ms = kickoff + offset;
       f->seed = rng(&seed);
+      f->duration_ms=MD_DURATION;f->event_count=MD_EVENTS;
       uint32_t s = f->seed, active[2][11];
       for (uint32_t side = 0; side < 2; side++)
         for (uint32_t p = 0; p < 11; p++)
           active[side][p] = p + 1;
-      static const uint32_t kinds[MD_EVENTS] = {
-          MD_PASS, MD_SHOT,    MD_SAVE,    MD_FOUL, MD_PASS, MD_GOAL, MD_CORNER, MD_YELLOW,
-          MD_SHOT, MD_PASS,    MD_OFFSIDE, MD_SAVE, MD_FOUL, MD_PASS, MD_HALF,   MD_PASS,
-          MD_SHOT, MD_CORNER,  MD_GOAL,    MD_SUB,  MD_FOUL, MD_SAVE, MD_SHOT,   MD_PASS,
-          MD_SUB,  MD_OFFSIDE, MD_CORNER,  MD_SAVE, MD_SHOT};
+      static const uint32_t kinds[24] = {
+          MD_PASS,MD_PASS,MD_PASS,MD_SHOT,MD_SAVE,MD_PASS,MD_PASS,MD_FOUL,
+          MD_PASS,MD_PASS,MD_CORNER,MD_PASS,MD_PASS,MD_SHOT,MD_PASS,MD_OFFSIDE,
+          MD_PASS,MD_PASS,MD_SAVE,MD_PASS,MD_YELLOW,MD_PASS,MD_PASS,MD_PASS};
+      /* Outcomes belong to the immutable fixture tape. Prefer ordinary low
+       * scoring games, including goalless draws, without forcing every game
+       * to contain the same number of goals. The legal opportunity slots are
+       * separated from half-time/substitutions and allow full goal restarts. */
+      static const uint8_t goal_weights[16]={0,0,1,1,1,2,2,2,2,3,3,3,3,4,4,5};
+      uint32_t goal_seed=f->seed^(f->seed>>16);
+      goal_seed*=0x7feb352du;goal_seed^=goal_seed>>15;
+      const uint32_t goal_count=goal_weights[goal_seed&15u];
+      uint32_t goal_slots[9]={11,21,33,41,57,68,74,83,95};
+      for(uint32_t j=8;j;j--) {
+        uint32_t k=(rng(&goal_seed)>>16)%(j+1u),swap=goal_slots[j];
+        goal_slots[j]=goal_slots[k];goal_slots[k]=swap;
+      }
+      uint32_t substitutes[2]={12,12};
       for (uint32_t j = 0; j < MD_EVENTS; j++) {
         MdEvent *e = &f->events[j];
         e->at_ms = (j + 1) * 6000u;
         e->side = (rng(&s) >> 16) & 1u;
-        e->kind = kinds[j];
+        e->kind = kinds[j%24u];
+        for(uint32_t g=0;g<goal_count;g++)if(j==goal_slots[g])e->kind=MD_GOAL;
+        if(j==49)e->kind=MD_HALF;
+        if(j==65 || j==79 || j==87 || j==93) {
+          e->kind=MD_SUB;e->side=(j==65 || j==87) ? 0u : 1u;
+        }
         e->goal = e->kind == MD_GOAL;
         uint32_t slot = 1 + (rng(&s) >> 16) % 10u;
         e->player = active[e->side][slot];
         if (e->kind == MD_SUB) {
-          e->other = j == 19 ? 12 : 13;
+          e->other = substitutes[e->side]++;
           active[e->side][slot] = e->other;
         }
       }
@@ -430,6 +575,39 @@ static void make_fixtures(void) {
       ring[j] = ring[j - 1];
     ring[1] = last;
   }
+}
+static int next_week_locked(void) {
+  int ok=0;MdArchive *previous=NULL,*next=NULL;
+  if(blocked || profile_blocked || !profile_ready || !md.joined || md.week_id>=9999 ||
+     manager_dummy_week(&md,now()).state!=MD_RESULT)goto done;
+  previous=calloc(1,sizeof(*previous));next=calloc(1,sizeof(*next));
+  if(!previous || !next)goto done;
+  previous->save=md;previous->players=profile;
+  char path[96];archive_path(path,md.week_id);
+  if(!archive_write(path,previous))goto done;
+  md.week_id++;make_fixtures();profile.roster_locked=0;roster_lock_pending=0;
+  for(uint32_t t=0;t<MD_TEAMS;t++)memcpy(profile.match_roster[t],profile.roster[t],18*sizeof(uint32_t));
+  next->save=md;next->players=profile;
+  if(!archive_write(MD_PENDING_FILE,next)) {
+    md=previous->save;profile=previous->players;profile_cache();goto done;
+  }
+  /* Both complete records and the prior replay snapshot are now durable.
+   * On interruption load_once finishes this same transition, never rerolls. */
+  md=next->save;profile=next->players;
+  if(!persist() || !profile_save()) {
+    blocked=1;snprintf(notice,sizeof(notice),"Could not finish saving the next week. Restart to retry.");goto done;
+  }
+  if(!active_pair_verified()) {blocked=1;snprintf(notice,sizeof(notice),"Next week needs save recovery. Restart to retry.");goto done;}
+  if(!finish_transition()){blocked=1;snprintf(notice,sizeof(notice),"Next week needs save recovery. Restart to retry.");goto done;}
+  history_week=0;timeline_serial++;
+  profile_cache();notice[0]=0;ok=1;
+done:
+  free(previous);free(next);
+  if(!ok && !notice[0])snprintf(notice,sizeof(notice),"Could not start the next week. Your existing league is preserved.");
+  return ok;
+}
+int manager_dummy_next_week(void) {
+  pthread_mutex_lock(&md_mutex);int ok=authenticated && next_week_locked();pthread_mutex_unlock(&md_mutex);return ok;
 }
 void manager_dummy_tick_at(uint64_t ms) {
   pthread_mutex_lock(&md_mutex);
@@ -453,7 +631,7 @@ void manager_dummy_tick_at(uint64_t ms) {
     focus = 0;
   }
   if (page == MD_WATCH && replay && !paused)
-    replay_ms = (uint32_t)fmin((double)MD_DURATION, (double)replay_ms + (double)delta);
+    replay_ms = (uint32_t)fmin((double)manager_dummy_duration(watch_fixture()), (double)replay_ms + (double)delta);
   pthread_mutex_unlock(&md_mutex);
 }
 void manager_dummy_tick(uint64_t monotonic_ms) {
@@ -474,10 +652,10 @@ void manager_dummy_open(void) {
 #endif
   pthread_mutex_lock(&md_mutex);
   load_once();
-  page = md.joined && profile_ready && profile.user_id[0] ? MD_DASHBOARD
-         : md.joined                                      ? MD_NAME
-                                                          : MD_REGISTER;
+  auth_load();
+  page=authenticated && md.joined && profile_ready ? MD_DASHBOARD : MD_REGISTER;
   focus = dashboard_focus = hub_section = 0;
+  if(page==MD_REGISTER && !md.joined)focus=1;
   navigation_serial++;
   slide_direction = 0;
   action = 0;
@@ -493,12 +671,18 @@ void manager_dummy_open(void) {
   pthread_mutex_unlock(&md_mutex);
 }
 const char *manager_dummy_name(void) {
+  if(page==MD_LOGIN)return focus==0 ? login_id : "";
+  if(page==MD_SECURE)return "";
   return focus == 1 ? profile.user_id : focus == 2 ? "" : md.name;
 }
 const char *manager_dummy_input_label(void) {
+  if(page==MD_LOGIN)return focus==0 ? "USER ID" : "PASSWORD";
+  if(page==MD_SECURE)return focus==0 ? "PASSWORD" : "CONFIRM PASSWORD";
   return focus == 1 ? "USER ID" : focus == 2 ? "PASSWORD" : "TEAM NAME";
 }
-int manager_dummy_input_password(void) { return page == MD_NAME && focus == 2; }
+int manager_dummy_input_password(void) {
+  return (page==MD_NAME && focus==2) || (page==MD_LOGIN && focus==1) || page==MD_SECURE;
+}
 static void clear_password(void) {
   volatile char *p = password;
   for (size_t i = 0; i < sizeof(password); i++)
@@ -506,6 +690,19 @@ static void clear_password(void) {
 }
 void manager_dummy_name_result(const char *text) {
   pthread_mutex_lock(&md_mutex);
+  if((page==MD_LOGIN || page==MD_SECURE || (page==MD_NAME && focus==2)) && text) {
+    if(page==MD_LOGIN && focus==0) {
+      if(!md_auth_id(login_id,text))snprintf(notice,sizeof(notice),"Use 3-24 letters, numbers, dots or underscores.");
+    } else {
+      char *target=page==MD_SECURE && focus==1 ? password_confirmation : password;
+      md_auth_wipe(target,64);
+      size_t bytes=strlen(text);int valid=bytes>=8 && bytes<=63;
+      for(size_t i=0;i<bytes && valid;i++)if((unsigned char)text[i]<32 || (unsigned char)text[i]>126)valid=0;
+      if(valid)memcpy(target,text,bytes);
+      else snprintf(notice,sizeof(notice),"Use a password of 8-63 characters.");
+    }
+    pthread_mutex_unlock(&md_mutex);return;
+  }
   if (page == MD_NAME && text) {
     char clean[64] = {0};
     uint32_t n = 0;
@@ -559,7 +756,8 @@ void manager_dummy_copy_save(MdSave *out) {
 static uint32_t schedule_indices(uint32_t out[MD_FIXTURES]) {
   uint32_t n = 0;
   for (uint32_t i = 0; i < MD_FIXTURES; i++) {
-    uint32_t day = md.fixtures[i].round < 3 ? 4 : md.fixtures[i].round < 5 ? 5 : 6;
+    const MdFixture *f=&broadcast_save()->fixtures[i];
+    uint32_t day = f->round < 3 ? 4 : f->round < 5 ? 5 : 6;
     if (!schedule_day || day == schedule_day)
       out[n++] = i;
   }
@@ -606,6 +804,10 @@ void manager_dummy_pad(uint32_t key) {
     if (page == MD_REGISTER || page == MD_DASHBOARD) {
       clear_password();
       action = MD_ACTION_EXIT;
+    } else if(page==MD_LOGIN || page==MD_SECURE) {
+      auth_clear_inputs();page=MD_REGISTER;focus=md.joined ? 0 : 1;notice[0]=0;
+    } else if(page==MD_LOGOUT || page==MD_NEXT_WEEK) {
+      page=MD_DASHBOARD;focus=dashboard_focus;notice[0]=0;
     } else if (page == MD_LEAGUES)
       page = MD_REGISTER;
     else if (page == MD_CLUB) {
@@ -643,18 +845,53 @@ void manager_dummy_pad(uint32_t key) {
       focus = watch_return_focus;
     }
     else if (page == MD_SCHEDULE && schedule_day) {
+      history_week=0;
       page = MD_CALENDAR;
       focus = calendar_day - 1;
     } else {
+      if(page==MD_SCHEDULE)history_week=0;
       page = MD_DASHBOARD;
       focus = dashboard_focus;
     }
     goto done;
   }
   if (page == MD_REGISTER) {
+    if(key&(UP|DOWN|LEFT|RIGHT))focus^=1u;
     if (key & A) {
-      page = MD_LEAGUES;
-      category = club_choice = focus = 0;
+      notice[0]=0;auth_clear_inputs();
+      if(focus==0) {
+        if(!md.joined || !profile_ready)snprintf(notice,sizeof(notice),"No club is stored on this device. Choose Register.");
+        else if(credential_state<0)snprintf(notice,sizeof(notice),"Account data could not be read. Your club has been preserved.");
+        else {page=credential_state ? MD_LOGIN : MD_SECURE;focus=0;md_auth_id(login_id,profile.user_id);}
+      } else if(md.joined)snprintf(notice,sizeof(notice),"A club is already registered on this device. Choose Login.");
+      else {page = MD_LEAGUES;category = club_choice = focus = 0;}
+    }
+    goto done;
+  }
+  if(page==MD_LOGIN || page==MD_SECURE) {
+    if((key&UP) && focus)focus--;
+    else if((key&DOWN) && focus<2)focus++;
+    else if((key&A) && focus<2)action=MD_ACTION_NAME;
+    else if(((key&A) && focus==2) || (key&X)) {
+      if(page==MD_SECURE) {
+        if(!password[0] || strcmp(password,password_confirmation))snprintf(notice,sizeof(notice),"Enter matching passwords to secure your club.");
+        else if(auth_store())auth_enter_hub();
+        else snprintf(notice,sizeof(notice),"Could not save account details. Please try again.");
+      } else if(epoch_now<login_retry_at)snprintf(notice,sizeof(notice),"Please wait before trying to log in again.");
+      else if(md_auth_verify(&credential,md.seed,login_id,password))auth_enter_hub();
+      else {
+        auth_clear_inputs();snprintf(notice,sizeof(notice),"User ID or password is incorrect.");
+        if(++login_failures>=5){login_retry_at=epoch_now+30000u;login_failures=0;}
+      }
+    }
+    goto done;
+  }
+  if(page==MD_LOGOUT || page==MD_NEXT_WEEK) {
+    if(key&(UP|DOWN|LEFT|RIGHT))focus^=1u;
+    if(key&A) {
+      if(focus){page=MD_DASHBOARD;focus=dashboard_focus;}
+      else if(page==MD_LOGOUT){auth_logout();history_week=0;timeline_serial++;}
+      else if(next_week_locked()){page=MD_DASHBOARD;focus=dashboard_focus=hub_section=0;notice[0]=0;}
     }
     goto done;
   }
@@ -712,17 +949,15 @@ void manager_dummy_pad(uint32_t key) {
         snprintf(notice, sizeof(notice), "PROFILE SAVE FAILED - PLEASE RETRY");
         goto done;
       }
+      MdSave before_registration=md;
       if (!md.joined) {
         md.created = md.joined = 1;
         make_fixtures();
       }
       if (persist()) {
-        clear_password();
-        page = MD_DASHBOARD;
-        focus = dashboard_focus = 0;
-        tutorial = profile.tutorials == 7 ? 0 : 1;
-        notice[0] = 0;
-      }
+        if(auth_store())auth_enter_hub();
+        else {page=MD_SECURE;focus=0;auth_clear_inputs();snprintf(notice,sizeof(notice),"Your club is saved. Set a password to finish registration.");}
+      } else md=before_registration;
     }
     goto done;
   }
@@ -734,7 +969,7 @@ void manager_dummy_pad(uint32_t key) {
       static const MdPage destinations[3][5] = {
           {MD_SCHEDULE, MD_NEWS, MD_CALENDAR, MD_TABLE, MD_TEAM_INFO},
           {MD_TEAM_INFO, MD_STRATEGY, MD_SHOP, MD_TEAM_INFO, MD_TEAMS_PAGE},
-          {MD_TABLE, MD_OVERALL, MD_CALENDAR, MD_SCHEDULE, MD_RULES}};
+          {MD_TABLE, MD_OVERALL, MD_SCHEDULE, MD_OVERALL, MD_RULES}};
       dashboard_focus = focus;
       MdPage dest = destinations[hub_section][focus];
       if (!hub_section && !focus) {
@@ -749,6 +984,7 @@ void manager_dummy_pad(uint32_t key) {
         goto done;
       }
       page = dest;
+      history_week=0;
       focus = 0;
       schedule_day = 0;
       if (page == MD_TEAM_INFO) {
@@ -764,16 +1000,8 @@ void manager_dummy_pad(uint32_t key) {
         shop_return = MD_DASHBOARD;
         packs_build();
       }
-    } else if (key & X) {
-      static const int64_t offsets[] = {
-          -3 * MD_DEMO_DAY_MS, 60000, 90000, 200000, MD_DEMO_DAY_MS, 2 * MD_DEMO_DAY_MS,
-          3 * MD_DEMO_DAY_MS};
-      static uint32_t clock_step;
-      uint32_t step = clock_step++ % 7u;
-      md.clock_offset_ms = (int64_t)md.fixtures[0].kickoff_ms + offsets[step] - (int64_t)epoch_now;
-      timeline_serial++;
-      persist();
-    }
+    } else if (key & X) {page=MD_LOGOUT;dashboard_focus=focus;focus=1;}
+    else if((key&Y) && manager_dummy_week(&md,now()).state==MD_RESULT) {page=MD_NEXT_WEEK;dashboard_focus=focus;focus=1;}
     if (old != hub_section) {
       slide_direction = hub_section > old ? 1 : -1;
       navigation_serial++;
@@ -868,6 +1096,7 @@ void manager_dummy_pad(uint32_t key) {
     else if ((key & A) && focus<count) {
       const MdRow *item=&items[focus];
       if(item->identity) {
+        history_week=0;
         watch_return=MD_NEWS;watch_return_focus=focus;
         fixture_choice=item->identity-1;replay=1;replay_ms=paused=0;page=MD_WATCH;timeline_serial++;
       } else {
@@ -922,7 +1151,9 @@ void manager_dummy_pad(uint32_t key) {
         focus -= 4;
     } else if (key & DOWN) {
       if (focus < count) {
-        focus = focus + 4 < count ? focus + 4 : count;
+        if (focus + 4 < count) focus += 4;
+        else if(focus<4 && count>4)focus=count-1;
+        else if (selected_count() == pack_draws[pack_choice]) focus = count;
       }
     } else if (key & A) {
       if (focus == count)
@@ -978,7 +1209,12 @@ void manager_dummy_pad(uint32_t key) {
   }
   if (page == MD_SCHEDULE) {
     uint32_t indices[MD_FIXTURES], count = schedule_indices(indices);
-    if ((key & LEFT) && focus % 2)
+    if(key & (L|R)) {
+      uint32_t wanted=history_week;
+      if(key & L)wanted=history_week ? history_week-1u : md.week_id-1u;
+      else wanted=history_week && history_week+1u<md.week_id ? history_week+1u : 0;
+      if(!history_select(wanted))snprintf(notice,sizeof(notice),"This week's replay archive is unavailable.");
+    } else if ((key & LEFT) && focus % 2)
       focus--;
     else if ((key & RIGHT) && !(focus % 2) && focus + 1 < count)
       focus++;
@@ -991,7 +1227,7 @@ void manager_dummy_pad(uint32_t key) {
     else if ((key & A) && focus < count) {
       watch_return=MD_SCHEDULE;watch_return_focus=focus;
       fixture_choice = indices[focus];
-      replay = manager_dummy_phase(&md.fixtures[fixture_choice], now()) == 2;
+      replay = manager_dummy_phase(watch_fixture(), broadcast_now()) == 2;
       replay_ms = 0;
       paused = 0;
       page = MD_WATCH;
@@ -1000,7 +1236,8 @@ void manager_dummy_pad(uint32_t key) {
     goto done;
   }
   if (page == MD_WATCH) {
-    const uint32_t finished = manager_dummy_phase(&md.fixtures[fixture_choice], now()) == 2;
+    const uint32_t duration=manager_dummy_duration(watch_fixture());
+    const uint32_t finished = manager_dummy_phase(watch_fixture(), broadcast_now()) == 2;
     if (finished && (key & A)) {
       if (!replay) {
         replay = 1;
@@ -1016,7 +1253,7 @@ void manager_dummy_pad(uint32_t key) {
         timeline_serial++;
       }
       if (key & RIGHT) {
-        replay_ms = replay_ms > MD_DURATION - 15000 ? MD_DURATION : replay_ms + 15000;
+        replay_ms = replay_ms > duration - 15000 ? duration : replay_ms + 15000;
         timeline_serial++;
       }
       if (key & X) {
@@ -1040,7 +1277,7 @@ static void row(MdView *v, uint32_t i, const char *label, const char *detail, co
   r->selected = v->focus == v->first + i;
 }
 static void helper(MdView *v, const char *key, const char *label) {
-  if (v->helper_count < 5) {
+  if (v->helper_count < 6) {
     v->helper_key[v->helper_count] = key;
     v->helper_label[v->helper_count++] = label;
   }
@@ -1062,6 +1299,7 @@ void manager_dummy_view(MdView *v) {
   v->slide_direction = slide_direction;
   v->timeline_serial = timeline_serial;
   v->tab = hub_section;
+  v->week_id=md.week_id;v->history_week=history_week;v->archive_count=md.week_id ? md.week_id-1u : 0;
   v->roster_size = profile_ready ? profile.counts[0] : 0;
   v->shop_locked = shop_locked();
   v->week = manager_dummy_week(&md, now());
@@ -1076,17 +1314,18 @@ void manager_dummy_view(MdView *v) {
   copy(v->user_id, sizeof(v->user_id), profile.user_id);
   v->account_field = focus;
   copy(v->club, sizeof(v->club), exhibition_team_catalog_name(md.club));
-  copy(v->status, sizeof(v->status), notice);
+  if(page!=MD_WATCH)copy(v->status, sizeof(v->status), notice);
   v->badge = badge(0);
   v->tutorial = tutorial;
   helper(v, "B", "BACK");
   if (page == MD_REGISTER) {
-    copy(v->headline, sizeof(v->headline), "BUILD YOUR CLUB");
+    copy(v->headline, sizeof(v->headline), "YOUR CLUB. YOUR LEAGUE.");
     copy(v->summary, sizeof(v->summary),
          "Choose a club. Create your manager profile. Join the league.");
-    v->count = 1;
-    row(v, 0, "CREATE YOUR CLUB", "A new week. A new football story.", "START", 0);
-    helper(v, "A", "START");
+    v->count=2;
+    row(v,0,"LOGIN","Continue with your club","",0);
+    row(v,1,"REGISTER","Create a manager profile and choose a club","",0);
+    helper(v,"A","SELECT");
   } else if (page == MD_LEAGUES) {
     copy(v->headline, sizeof(v->headline), "SELECT LEAGUE");
     v->total = EXHIBITION_TEAM_CATEGORY_COUNT;
@@ -1119,16 +1358,29 @@ void manager_dummy_view(MdView *v) {
     helper(v, "A", "SELECT");
   } else if (page == MD_NAME) {
     copy(v->headline, sizeof(v->headline), "CREATE YOUR PROFILE");
-    copy(v->caption, sizeof(v->caption), "LOCAL PROFILE");
+    copy(v->caption, sizeof(v->caption), "YOUR MANAGER ACCOUNT");
     v->count = 4;
     row(v, 0, "TEAM NAME", "Your club name in the league", md.name[0] ? md.name : "ENTER NAME", 0);
     row(v, 1, "USER ID", "3-24 letters, numbers, dot or underscore",
         profile.user_id[0] ? profile.user_id : "ENTER USER ID", 0);
     row(v, 2, "PASSWORD", "8 characters minimum", password[0] ? "PASSWORD SET" : "ENTER PASSWORD",
         0);
-    row(v, 3, "CREATE CLUB", "Password is not saved by this local preview", "CONTINUE", 0);
+    row(v, 3, "CREATE CLUB", "Join the league with your own team", "CONTINUE", 0);
     helper(v, "A", focus == 3 ? "CONTINUE" : "EDIT");
-  } else if (page == MD_DASHBOARD) {
+  } else if(page==MD_LOGIN || page==MD_SECURE) {
+    v->count=3;
+    copy(v->headline,sizeof(v->headline),page==MD_LOGIN ? "WELCOME BACK" : "SECURE YOUR CLUB");
+    copy(v->caption,sizeof(v->caption),page==MD_LOGIN ? "LOG IN TO YOUR CLUB" : "Set a password for your existing local profile");
+    if(page==MD_LOGIN) {
+      row(v,0,"USER ID","Your registered manager ID",login_id[0] ? login_id : "ENTER USER ID",0);
+      row(v,1,"PASSWORD","",password[0] ? "********" : "ENTER PASSWORD",0);
+    } else {
+      row(v,0,"PASSWORD","8-63 characters",password[0] ? "********" : "ENTER PASSWORD",0);
+      row(v,1,"CONFIRM PASSWORD","Enter the same password again",password_confirmation[0] ? "********" : "CONFIRM PASSWORD",0);
+    }
+    row(v,2,page==MD_LOGIN ? "LOGIN" : "SAVE & CONTINUE","","",0);
+    helper(v,"A",focus==2 ? "CONTINUE" : "EDIT");
+  } else if (page == MD_DASHBOARD || page==MD_LOGOUT || page==MD_NEXT_WEEK) {
     static const char *const labels[3][5] = {
         {"NEXT BROADCAST", "CLUB FEED", "MATCH SCHEDULE", "WEEKLY STANDINGS", "CLUB PROFILE"},
         {"MY SQUAD", "STRATEGY", "PLAYER SHOP", "MY SQUAD", "OTHER TEAMS"},
@@ -1140,18 +1392,18 @@ void manager_dummy_view(MdView *v) {
         {"Players, portraits and squad roles", "Open your team Game Plan",
          "Build your squad with points", "Registered players", "Meet your six opponents"},
         {"League points from this season", "Reputation across seasons",
-         "Every live game and full replay", "Sample career reputation",
+         "Every live game and full replay", "Reputation across seasons",
          "Calendar and competition rules"}};
     static const char *const news_titles[] = {"PREPARE FOR THE WEEK AHEAD",
                                               "THE THREE-DAY TITLE RACE", "WEEK 01 IS COMPLETE"};
     static const char *const news_details[] = {
         "Build your squad, shop and prepare your strategy before Match Day.",
         "Follow every scheduled game. The player market is closed for all three days.",
-        "Final standings and every replay are available. Demo rewards are not credited."};
+        "The final standings and every match replay are available."};
     copy(v->headline, sizeof(v->headline), news_titles[v->week.state]);
     copy(v->summary, sizeof(v->summary), news_details[v->week.state]);
-    snprintf(v->caption, sizeof(v->caption), "%s - DAY %u OF 7 - WEEK 01", v->phase_label,
-             v->week.day);
+    snprintf(v->caption, sizeof(v->caption), "%s - DAY %u OF 7 - WEEK %02u", v->phase_label,
+             v->week.day,v->week_id);
     v->count = 5;
     for (uint32_t i = 0; i < 5; i++)
       row(v, i, labels[hub_section][i], details[hub_section][i], "OPEN", 0);
@@ -1166,7 +1418,8 @@ void manager_dummy_view(MdView *v) {
     helper(v, "L", "PREV PAGE");
     helper(v, "R", "NEXT PAGE");
     helper(v, "A", "OPEN");
-    helper(v, "X", "DEMO CLOCK");
+    helper(v,"X","LOGOUT");
+    if(v->week.state==MD_RESULT)helper(v,"Y","NEXT WEEK");
     MdRow ranked[7];
     table_rows(ranked);
     for (uint32_t i = 0; i < 7; i++)
@@ -1174,7 +1427,7 @@ void manager_dummy_view(MdView *v) {
         v->rank = i + 1;
     if (v->week.state == MD_RESULT) {
       snprintf(v->summary, sizeof(v->summary),
-               "Champion: %.48s. All 21 matches finished. No demo reward payout.",
+               "Champion: %.48s. All 21 matches have finished.",
                team_name(ranked[0].team_id));
       if (!hub_section)
         snprintf(v->rows[0].detail, sizeof(v->rows[0].detail), "Champion: %.54s",
@@ -1210,6 +1463,7 @@ void manager_dummy_view(MdView *v) {
       const MdFixture *f = &md.fixtures[index < MD_FIXTURES ? index : MD_FIXTURES - 1];
       MdRow *r = &v->fixture_preview[i];
       uint32_t p = manager_dummy_phase(f, now());
+      r->phase=p;r->badge=badge(f->home);r->away_badge=badge(f->away);
       snprintf(r->label, sizeof(r->label), "%.20s Vs %.20s", team_name(f->home),
                team_name(f->away));
       uint32_t g[2];
@@ -1322,7 +1576,7 @@ void manager_dummy_view(MdView *v) {
   } else if (page == MD_SHOP) {
     copy(v->headline, sizeof(v->headline), "CLUB PACKS");
     snprintf(v->caption, sizeof(v->caption), "%u POINTS - %s", v->balance,
-             shop_locked() ? "SHOP CLOSED" : "DEMO OFFERS");
+             shop_locked() ? "SHOP CLOSED" : "AVAILABLE PACKS");
     v->count = 3;
     static const char *const tiers[] = {"LITE", "MEDIUM", "JUMBO"};
     for (uint32_t i = 0; i < 3; i++) {
@@ -1369,6 +1623,7 @@ void manager_dummy_view(MdView *v) {
       r->portrait = p->portrait_id;
       r->rating = p->overall;
       r->identity = p->identity;
+      r->role = p->position;
     }
     helper(v, "A",
            page == MD_PACK           ? profile.receipts & (1u << k) ? "VIEW RECEIPT" : "OPEN PACK"
@@ -1391,20 +1646,20 @@ void manager_dummy_view(MdView *v) {
       v->count = 5;
     static const char *const labels[] = {"WEEKLY SEASON", "SEVEN CLUBS",     "LEAGUE POINTS",
                                          "WALLET POINTS", "OVERALL RANKING", "LIVE AND REPLAY",
-                                         "LOCAL PREVIEW"};
+                                         "YOUR ACCOUNT"};
     static const char *const details[] = {
         "Pre-League days 1-3. Match Day days 4-6. Result on day 7.",
         "Six opponents. One round robin. 21 matches.",
         "Win 3, draw 1, lose 0. Then goal difference and goals scored.",
         "5,000 starting points. Shop in Pre-League and Result.",
         "Reputation is separate from spendable points.",
-        "Three-minute broadcasts. Join in progress or watch a replay.",
-        "One preview day is 9 minutes. X in the hub advances time."};
+        "Two five-minute halves. Join in progress or watch a replay.",
+        "Log in with your User ID. Log out from the club hub."};
     for (uint32_t i = 0; i < v->count; i++)
       row(v, i, labels[v->first + i], details[v->first + i], "", 0);
   } else if (page == MD_OVERALL) {
     copy(v->headline, sizeof(v->headline), "OVERALL RANKING");
-    copy(v->caption, sizeof(v->caption), "Preview reputation across seasons");
+    copy(v->caption, sizeof(v->caption), "Reputation across seasons");
     v->total = 7;
     v->first = focus / 5 * 5;
     v->count = 7 - v->first;
@@ -1429,12 +1684,13 @@ void manager_dummy_view(MdView *v) {
     for (uint32_t i = 0; i < v->count; i++) {
       const uint32_t d = v->first + i + 1u;
       MdScheduleDay *tile = &v->schedule[i];
-      const uint64_t day_start = d <= 3   ? first - (4u - d) * (uint64_t)MD_DEMO_DAY_MS
-                                 : d <= 6 ? first + (d - 4u) * (uint64_t)MD_DEMO_DAY_MS
+      const uint32_t day_ms=day_duration(&md);
+      const uint64_t day_start = d <= 3   ? first - (4u - d) * (uint64_t)MD_PREPARATION_DAY_MS
+                                 : d <= 6 ? first + (d - 4u) * (uint64_t)day_ms
                                           : v->week.result_ms;
       struct tm local, end;
       manager_local_time(day_start, &local);
-      manager_local_time(day_start + MD_DEMO_DAY_MS, &end);
+      manager_local_time(day_start + (d<=3 ? MD_PREPARATION_DAY_MS : day_ms), &end);
       char label[64], detail[96] = {0}, date[32];
       strftime(date, sizeof(date), "%d %b %Y", &local);
       const char *kind = d <= 3 ? "PREPARATION" : d <= 6 ? "MATCH DAY" : "RESULT";
@@ -1465,6 +1721,7 @@ void manager_dummy_view(MdView *v) {
             copy(match->detail, sizeof(match->detail), f->home == 0 ? "HOME" : "AWAY");
             match->badge = badge(opponent);
             match->team_id = opponent;
+            match->phase=manager_dummy_phase(f,now());
           }
         }
         snprintf(detail, sizeof(detail), "%u MATCHES", tile->match_count);
@@ -1478,6 +1735,8 @@ void manager_dummy_view(MdView *v) {
                                     : "PREPARE");
   } else if (page == MD_SCHEDULE) {
     copy(v->headline, sizeof(v->headline), "MATCH CENTRE");
+    snprintf(v->caption,sizeof(v->caption),"WEEK %02u%s",history_week ? history_week : md.week_id,
+             history_week ? " - ARCHIVED REPLAYS" : "");
     uint32_t indices[MD_FIXTURES];
     v->total = schedule_indices(indices);
     v->first = focus / MD_MATCH_VISIBLE * MD_MATCH_VISIBLE;
@@ -1485,12 +1744,12 @@ void manager_dummy_view(MdView *v) {
     if (v->count > MD_MATCH_VISIBLE)
       v->count = MD_MATCH_VISIBLE;
     for (uint32_t i = 0; i < v->count; i++) {
-      const MdFixture *f = &md.fixtures[indices[v->first + i]];
+      const MdFixture *f = &broadcast_save()->fixtures[indices[v->first + i]];
       char label[64], detail[96], text[40];
-      snprintf(label, sizeof(label), "%.26s Vs %.26s", team_name(f->home), team_name(f->away));
-      uint32_t phase = manager_dummy_phase(f, now());
+      snprintf(label, sizeof(label), "%.26s Vs %.26s", broadcast_team_name(f->home), broadcast_team_name(f->away));
+      uint32_t phase = manager_dummy_phase(f, broadcast_now());
       uint32_t goals[2];
-      manager_dummy_score(f, manager_dummy_elapsed(f, now()), goals);
+      manager_dummy_score(f, manager_dummy_elapsed(f, broadcast_now()), goals);
       struct tm local;
       manager_local_time(f->kickoff_ms, &local);
       char date[32];
@@ -1504,32 +1763,34 @@ void manager_dummy_view(MdView *v) {
         copy(text, sizeof(text), "SCHEDULED");
       else
         snprintf(text, sizeof(text), "%u - %u", goals[0], goals[1]);
-      row(v, i, label, detail, text, badge(f->home));
-      v->rows[i].away_badge = badge(f->away);
+      row(v, i, label, detail, text, broadcast_badge(f->home));
+      v->rows[i].away_badge = broadcast_badge(f->away);
       v->rows[i].phase = phase;
     }
     helper(v, "A", "WATCH MATCH");
+    if(v->archive_count){helper(v,"L","PREV WEEK");helper(v,"R","NEXT WEEK");}
   } else if (page == MD_WATCH) {
-    const MdFixture *f = &md.fixtures[fixture_choice];
-    v->phase = manager_dummy_phase(f, now());
+    const MdFixture *f = watch_fixture();
+    v->phase = manager_dummy_phase(f, broadcast_now());
     v->fixture = fixture_choice;
     v->round = f->round + 1;
-    v->home_badge = badge(f->home);
-    v->away_badge = badge(f->away);
+    v->home_badge = broadcast_badge(f->home);
+    v->away_badge = broadcast_badge(f->away);
     v->watching_replay = replay;
     v->paused = paused;
     v->kickoff_ms = f->kickoff_ms;
-    v->elapsed_ms = replay ? replay_ms : manager_dummy_elapsed(f, now());
-    v->minute = v->elapsed_ms / 2000u;
+    v->duration_ms=manager_dummy_duration(f);
+    v->elapsed_ms = replay ? replay_ms : manager_dummy_elapsed(f, broadcast_now());
+    const uint32_t game_seconds=manager_dummy_game_seconds(f,v->elapsed_ms);
+    v->minute = game_seconds/60u;
     uint32_t goals[2];
     manager_dummy_score(f, v->elapsed_ms, goals);
     v->home_goals = goals[0];
     v->away_goals = goals[1];
     snprintf(v->score, sizeof(v->score), "%u - %u", goals[0], goals[1]);
-    snprintf(v->clock, sizeof(v->clock), "%02u:%02u", v->elapsed_ms / 2000u,
-             (v->elapsed_ms % 2000u) * 60u / 2000u);
-    copy(v->home, sizeof(v->home), team_name(f->home));
-    copy(v->away, sizeof(v->away), team_name(f->away));
+    snprintf(v->clock, sizeof(v->clock), "%02u:%02u",game_seconds/60u,game_seconds%60u);
+    copy(v->home, sizeof(v->home), broadcast_team_name(f->home));
+    copy(v->away, sizeof(v->away), broadcast_team_name(f->away));
     copy(v->headline, sizeof(v->headline),
          replay          ? "MATCH REPLAY"
          : v->phase == 1 ? "LIVE SIMULATION"
@@ -1543,7 +1804,7 @@ void manager_dummy_view(MdView *v) {
     for (uint32_t side = 0; side < 2; side++)
       for (uint32_t n = 0; n < 11; n++)
         active[side][n] = n + 1;
-    for (uint32_t i = 0; i < MD_EVENTS; i++)
+    for (uint32_t i = 0; i < manager_dummy_event_count(f); i++)
       if (f->events[i].at_ms <= v->elapsed_ms) {
         const MdEvent *e = &f->events[i];
         uint32_t side = e->side;
@@ -1556,9 +1817,9 @@ void manager_dummy_view(MdView *v) {
         v->event_other = e->other;
         uint32_t club = side ? f->away : f->home;
         const MlCatalogPlayer *player =
-            profile_ready && e->player <= 18 ? match_squad[club][e->player - 1] : NULL;
+            profile_ready && e->player <= 18 ? ml_catalog_find_identity(broadcast_profile()->match_roster[club][e->player - 1]) : NULL;
         const MlCatalogPlayer *incoming =
-            profile_ready && e->other && e->other <= 18 ? match_squad[club][e->other - 1] : NULL;
+            profile_ready && e->other && e->other <= 18 ? ml_catalog_find_identity(broadcast_profile()->match_roster[club][e->other - 1]) : NULL;
         if (player)
           copy(v->event_name, sizeof(v->event_name), player->name);
         if (incoming)
@@ -1581,14 +1842,14 @@ void manager_dummy_view(MdView *v) {
         }
         if (e->kind == MD_GOAL || e->kind == MD_YELLOW || e->kind == MD_SUB || e->kind == MD_HALF)
           v->timeline[v->timeline_count++] = (MdTimelineMark){e->at_ms, e->kind, e->side};
-        snprintf(v->summary, sizeof(v->summary), "%02u' %s - %.48s", e->at_ms / 2000u,
-                 event_name(e->kind), team_name(side ? f->away : f->home));
+        snprintf(v->summary, sizeof(v->summary), "%02u' %s - %.48s", manager_dummy_game_seconds(f,e->at_ms)/60u,
+                 event_name(e->kind), broadcast_team_name(side ? f->away : f->home));
         v->event_feed[2] = v->event_feed[1];
         v->event_feed[1] = v->event_feed[0];
         snprintf(v->event_feed[0].label, sizeof(v->event_feed[0].label), "%02u' %s",
-                 e->at_ms / 2000u, event_name(e->kind));
+                 manager_dummy_game_seconds(f,e->at_ms)/60u, event_name(e->kind));
         snprintf(v->event_feed[0].detail, sizeof(v->event_feed[0].detail), "%.30s - %.40s",
-                 team_name(club), player ? player->name : "PLAYER");
+                 broadcast_team_name(club), player ? player->name : "PLAYER");
         if (e->kind == MD_SUB)
           snprintf(v->event_feed[0].detail, sizeof(v->event_feed[0].detail), "#%u OFF - #%u ON",
                    e->player, e->other);
@@ -1625,8 +1886,8 @@ void manager_dummy_view(MdView *v) {
         "Your club starts with 5,000 points. Use them in the player shop to strengthen your squad.",
         "Prepare for three days, follow three Match Days, then see the weekly results on day "
         "seven. Every match has a scheduled broadcast and replay.",
-        "Open Squad for your players and Game Plan. The shop offers club packs. In this local "
-        "preview, X in the hub advances the demo clock."};
+        "Open Squad for your players and Game Plan. Open club packs in the shop, choose your "
+        "players, then Confirm to add them to your collection."};
     v->modal.open = 1;
     v->modal.information = 1;
     v->helper_count=0;helper(v,"A",tutorial==3 ? "LET'S BEGIN" : "CONTINUE");
@@ -1635,7 +1896,15 @@ void manager_dummy_view(MdView *v) {
     copy(v->modal.accept, sizeof(v->modal.accept), tutorial == 3 ? "LET'S BEGIN" : "CONTINUE");
     copy(v->modal.error,sizeof(v->modal.error),notice);
   }
-  if(profile_ready && md.joined) {
+  if(page==MD_LOGOUT || page==MD_NEXT_WEEK) {
+    v->modal.open=1;v->modal.selected=focus;v->modal.destructive=page==MD_LOGOUT;
+    copy(v->modal.title,sizeof(v->modal.title),page==MD_LOGOUT ? "LOG OUT OF YOUR CLUB?" : "JOIN THE NEXT WEEK?");
+    copy(v->modal.body,sizeof(v->modal.body),page==MD_LOGOUT ? "Your club, players and progress will stay saved on this device." : "This week's results and replays will be archived. Keep your club and players for the next league.");
+    copy(v->modal.accept,sizeof(v->modal.accept),page==MD_LOGOUT ? "LOGOUT" : "NEXT WEEK");
+    v->focus=dashboard_focus;v->helper_count=0;helper(v,"B","CANCEL");helper(v,"A","SELECT");
+    copy(v->modal.error,sizeof(v->modal.error),notice);
+  }
+  if(authenticated && profile_ready && md.joined) {
     MdRow items[MD_NEWS_MAX];uint32_t n=news_rows(items);
     if(n)v->news_preview=items[(now()/20000u)%n];
   }
@@ -1650,23 +1919,23 @@ void manager_dummy_audio_frame(ManagerLeagueAudioFrame *out, uint64_t monotonic_
   out->monotonic_ms = monotonic_ms;
   out->timeline_serial = timeline_serial;
   if (page == MD_WATCH && md.joined && !editor) {
-    const MdFixture *f = &md.fixtures[fixture_choice];
-    const uint32_t phase = manager_dummy_phase(f, now());
+    const MdFixture *f = watch_fixture();
+    const uint32_t phase = manager_dummy_phase(f, broadcast_now());
     out->fixture_token = ((uint64_t)f->seed << 32) ^ f->kickoff_ms ^ (fixture_choice + 1u);
     out->visible_watch = phase != 0;
     out->replay = replay;
     out->paused = paused;
-    out->position_ms = replay ? replay_ms : manager_dummy_elapsed(f, now());
-    for (uint32_t i = 0; i < MD_EVENTS; i++)
+    out->position_ms = replay ? replay_ms : manager_dummy_elapsed(f, broadcast_now());
+    for (uint32_t i = 0; i < manager_dummy_event_count(f); i++)
       if (f->events[i].at_ms <= out->position_ms) {
         out->event_serial = i + 1;
         out->event_at_ms = f->events[i].at_ms;
         out->event_kind = f->events[i].kind;
         out->event_side = f->events[i].side;
       }
-    if (out->position_ms >= MD_DURATION) {
-      out->event_serial = MD_EVENTS + 1;
-      out->event_at_ms = MD_DURATION;
+    if (out->position_ms >= manager_dummy_duration(f)) {
+      out->event_serial = manager_dummy_event_count(f) + 1;
+      out->event_at_ms = manager_dummy_duration(f);
       out->event_kind = MLA_FULL_TIME;
     }
   }

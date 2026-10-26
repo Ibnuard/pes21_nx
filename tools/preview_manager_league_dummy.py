@@ -51,6 +51,12 @@ static void dashboard_action(uint32_t section,uint32_t target) {
   else if(target>=2){manager_dummy_pad(2048);for(uint32_t i=2;i<target;i++)manager_dummy_pad(8192);}
   manager_dummy_view(&v);assert(v.focus==target);manager_dummy_pad(2);
 }
+static void select_broadcast(uint32_t fixture) {
+  MdView v;manager_dummy_view(&v);assert(v.page==MD_SCHEDULE && !v.focus && fixture<v.total);
+  for(uint32_t i=0;i<fixture/2u;i++)manager_dummy_pad(2048);
+  if(fixture%2u)manager_dummy_pad(8192);
+  manager_dummy_view(&v);assert(v.focus==fixture);manager_dummy_pad(2);
+}
 int main(void) {
   initialize_gl();gl.master_league_pearl_tex=77;gl.frontdoor_flat_tex=70;gl.frontdoor_panels_tex=76;
   for(uint32_t i=0;i<4;i++)gl.main_menu_portrait_tex[i]=72+i;
@@ -70,11 +76,26 @@ int main(void) {
   manager_dummy_tick_at(1793015704100ULL);capture("20b-pack-select",MD_PACK_SELECT);manager_dummy_pad(2);manager_dummy_pad(8192);manager_dummy_pad(2);
   while(1){MdView v;manager_dummy_view(&v);if(v.focus==v.pack_pool)break;manager_dummy_pad(2048);}capture("20c-pack-confirm",MD_PACK_SELECT);
   manager_dummy_pad(2);capture("21-pack-result",MD_PACK_RESULT);
-  manager_dummy_tick_at(save.fixtures[0].kickoff_ms+36500);dashboard_action(2,3);capture("22-match-centre",MD_SCHEDULE);
-  manager_dummy_pad(2);capture("30-live-goal",MD_WATCH);
-  manager_dummy_tick_at(save.fixtures[0].kickoff_ms+18030);capture("31-live-save",MD_WATCH);
-  manager_dummy_tick_at(save.fixtures[0].kickoff_ms+120700);capture("32-live-substitution",MD_WATCH);
-  manager_dummy_tick_at(save.fixtures[0].kickoff_ms+180000);manager_dummy_pad(2);manager_dummy_pad(8192);capture("33-replay",MD_WATCH);
+  uint32_t goal_fixture=0,first_goal=0,first_save=0,first_sub=0;
+  for(uint32_t f=0;f<MD_FIXTURES && !first_goal;f++)
+    for(uint32_t i=0;i<manager_dummy_event_count(&save.fixtures[f]);i++)
+      if(save.fixtures[f].events[i].kind==MD_GOAL) {
+        goal_fixture=f;first_goal=save.fixtures[f].events[i].at_ms;break;
+      }
+  assert(first_goal);
+  for(uint32_t i=0;i<manager_dummy_event_count(&save.fixtures[goal_fixture]);i++) {
+    const MdEvent *e=&save.fixtures[goal_fixture].events[i];
+    if(e->kind==MD_SAVE && !first_save)first_save=e->at_ms;
+    if(e->kind==MD_SUB && !first_sub)first_sub=e->at_ms;
+  }
+  manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_goal+500);dashboard_action(2,2);capture("22-match-centre",MD_SCHEDULE);
+  select_broadcast(goal_fixture);capture("30-live-goal",MD_WATCH);
+  manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_save+30);capture("31-live-save",MD_WATCH);
+  manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_sub+700);capture("32-live-substitution",MD_WATCH);
+  manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+manager_dummy_duration(&save.fixtures[goal_fixture]));manager_dummy_pad(2);manager_dummy_pad(8192);capture("33-replay",MD_WATCH);
+  for(uint32_t i=0;i<MD_FIXTURES;i++)if(!save.fixtures[i].home || !save.fixtures[i].away) {
+    manager_dummy_tick_at(save.fixtures[i].kickoff_ms+25000);dashboard_action(0,2);capture("40d-week-live",MD_CALENDAR);break;
+  }
   manager_dummy_tick_at(save.fixtures[0].kickoff_ms+3u*MD_DEMO_DAY_MS);dashboard_action(0,3);capture("10-standings",MD_TABLE);
   for(int i=0;i<6;i++)manager_dummy_pad(2048);capture("11-standings-page-two",MD_TABLE);
   dashboard_action(0,2);capture("40-week-schedule",MD_CALENDAR);
@@ -83,6 +104,8 @@ int main(void) {
   manager_dummy_pad(2048);manager_dummy_pad(2048);capture("40c-week-result",MD_CALENDAR);
   dashboard_action(1,4);capture("41-other-clubs",MD_TEAMS_PAGE);
   dashboard_action(2,1);capture("42-overall-ranking",MD_OVERALL);
+  manager_dummy_pad(1);manager_dummy_pad(2048);manager_dummy_pad(4096);capture("22a-competition",MD_DASHBOARD);
+  manager_dummy_pad(2);capture("42b-overall-ranking-card",MD_OVERALL);
   dashboard_action(0,1);capture("43-news",MD_NEWS);
   dashboard_action(2,4);capture("44-league-guide",MD_RULES);
 #ifdef MD_ANIMATED
@@ -94,13 +117,20 @@ int main(void) {
     manager_dummy_tick_at(opening.now_ms+i*100);capture(name,i<34 ? MD_PACK_OPENING : MD_PACK_SELECT);}
 #endif
 #ifdef MD_BROADCAST_ANIMATED
-  manager_dummy_tick_at(save.fixtures[0].kickoff_ms);dashboard_action(2,3);manager_dummy_pad(2);
+  manager_dummy_tick_at(save.fixtures[0].kickoff_ms);dashboard_action(2,2);manager_dummy_pad(2);
   for(uint32_t i=0;i<46;i++){char name[48];snprintf(name,sizeof(name),"motion-kickoff-%02u",i);
     manager_dummy_tick_at(save.fixtures[0].kickoff_ms+i*200u);capture(name,MD_WATCH);}
-  uint32_t goal=0;for(uint32_t i=0;i<MD_EVENTS;i++)if(save.fixtures[0].events[i].kind==MD_GOAL){goal=save.fixtures[0].events[i].at_ms;break;}
+  manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_goal-4500u);dashboard_action(2,2);select_broadcast(goal_fixture);
   for(uint32_t i=0;i<46;i++){char name[48];snprintf(name,sizeof(name),"motion-goal-%02u",i);
-    manager_dummy_tick_at(save.fixtures[0].kickoff_ms+goal-4500u+i*200u);capture(name,MD_WATCH);}
+    manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_goal-4500u+i*200u);capture(name,MD_WATCH);}
 #endif
+  MdView final_view;manager_dummy_view(&final_view);
+  for(uint32_t i=0;i<8 && final_view.page!=MD_DASHBOARD;i++){manager_dummy_pad(1);manager_dummy_view(&final_view);}
+  assert(final_view.page==MD_DASHBOARD);manager_dummy_pad(8);capture("07-logout",MD_LOGOUT);
+  manager_dummy_pad(4096);manager_dummy_pad(2);capture("08-login-register",MD_REGISTER);
+  manager_dummy_pad(2);capture("09-login",MD_LOGIN);
+  manager_dummy_name_result("androswitch_27");manager_dummy_pad(2048);manager_dummy_name_result("Preview-Only-Password");
+  manager_dummy_pad(2048);manager_dummy_pad(2);capture("09b-login-return",MD_DASHBOARD);
   return 0;
 }
 '''
@@ -175,7 +205,7 @@ def main():
             cards=animated+''.join(f'<article><h2>{p.stem}</h2><img src="{p.stem}.png" alt="{p.stem}"></article>' for p in paths if not p.stem.startswith('motion-'))
             (out/'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Manager League dummy / C renderer</title><style>body{font:16px system-ui;background:#eaf0f5;color:#192535;margin:30px}article{margin:24px 0}img{width:100%;max-width:1280px;border-radius:12px}h2{font-size:18px}</style><h1>Manager League / native C previews</h1><p>Actual Switch presentation geometry. Offline synthetic fixtures; host previews, not device captures.</p>'+cards,encoding='utf8')
         for path in paths:shutil.copy2(path,out/path.name)
-        sources=['source/manager_league_motion.c','source/manager_league_profile.inc','source/master_league_frontend.h','source/manager_league_dummy.c','source/manager_league_dummy.h','source/manager_league_dummy_overlay.inc','source/manager_league_watch_overlay.inc','source/frontdoor_overlay.inc','source/master_league_overlay.inc','source/competition_hub_navigation.h','source/overlay.c','tools/preview_manager_league_dummy.py','tools/preview_cup.py','tools/preview_frontdoor.py']
+        sources=['source/manager_league_motion.c','source/manager_league_profile.inc','source/manager_league_auth.h','source/manager_league_archive.inc','source/master_league_frontend.h','source/manager_league_dummy.c','source/manager_league_dummy.h','source/manager_league_dummy_overlay.inc','source/manager_league_watch_overlay.inc','source/frontdoor_overlay.inc','source/master_league_overlay.inc','source/competition_hub_navigation.h','source/overlay.c','tools/preview_manager_league_dummy.py','tools/preview_cup.py','tools/preview_frontdoor.py']
         (out/'PROVENANCE.json').write_text(json.dumps({'kind':'actual_C_renderer_host_preview','fixed_host_epoch_ms':1793015700000,'sources':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in sources},'validation':run.stdout.splitlines(),'device_accepted':False,'native_assets':args.native_assets},indent=2)+'\n')
     print(out)
 

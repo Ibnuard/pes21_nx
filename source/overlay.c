@@ -8981,7 +8981,7 @@ static void overlay_render(void) {
     }
   }
 #endif
-  if (config.show_fps && fps.text[0]) {
+  if (config.show_fps && fps.text[0] && competition_display_state!=COMPETITION_FRONTEND_MANAGER_DUMMY && !manager_dummy_plan_editor()) {
     const float gh = (float)screen_height / 30.0f;
     const float gw = gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     quads += emit_line(fps.text, (int)strlen(fps.text), 10.0f, 8.0f,
