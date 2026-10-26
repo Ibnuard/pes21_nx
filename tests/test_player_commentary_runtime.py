@@ -22,6 +22,7 @@ def compile_run(tmp_path, body, *, wrappers=False):
     source = f'#include <assert.h>\n#include "{header}"\n'
     source += '#define scene_runtime_note(a,b) ((void)0)\n'
     if wrappers:
+        source += f'#include "{(ROOT / "source/trophy_audio_policy.h").as_posix()}"\n'
         hooks = (ROOT / "source/ue4_hooks.c").read_text(encoding="utf8")
         first = hooks.index("static uint32_t team_commentary_indonesia_slot;")
         last = hooks.index("\n#ifdef DEBUG_LOG\nstatic int32_t (*sound_cinf_play_original)", first)

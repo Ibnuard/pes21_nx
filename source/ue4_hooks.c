@@ -8,6 +8,7 @@
 #include "aaudio_shim.h"
 #include "config.h"
 #include "competition_frontend.h"
+#include "scoreboard_aggregate_policy.h"
 #include "prematch_kit_navigation.h"
 #include "master_league_frontend.h"
 #include "exhibition_team_catalog.h"
@@ -35,6 +36,7 @@
 #include "stadium_shadow_budget.h"
 #include "team_commentary_policy.h"
 #include "player_commentary_policy.h"
+#include "trophy_audio_policy.h"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
 #endif
@@ -885,6 +887,8 @@ static int32_t pes_sound_decode_hca_header(void *decoder,
     const void *first, int64_t first_size, const void *second,
     int64_t second_size, int64_t *consumed) {
   if (decoder) {
+    if (trophy_audio_plain_hca_header(first, first_size, second, second_size))
+      sound_hca_set_decryption_table(decoder, NULL, 0);
     const int team_header = team_commentary_indonesia_slot &&
         team_commentary_plain_hca_header(first, first_size, second, second_size);
     const int roster_header = player_commentary_enabled &&
@@ -3368,8 +3372,12 @@ static void exhibition_apply_match_settings(void *match) {
   if (exhibition_match_set_leg_type)
     exhibition_match_set_leg_type(match, &native_leg);
   if (exhibition_match_set_first_leg_score) {
-    exhibition_match_set_first_leg_score(match, 0u, first_home);
-    exhibition_match_set_first_leg_score(match, 1u, first_away);
+    /* Frontend scores follow CURRENT teams. Native storage follows the
+     * previous leg and reverses it once in its aggregate HUD/match logic. */
+    const NxNativeFirstLegScore first = nx_native_first_leg_score(
+        active_leg, first_home, first_away);
+    exhibition_match_set_first_leg_score(match, 0u, first.previous_home);
+    exhibition_match_set_first_leg_score(match, 1u, first.previous_away);
   }
   // The mobile match has separate regular/extra-time away-goal flags. A
   // level aggregate goes to ET/PK regardless of which side scored away.
@@ -12622,12 +12630,24 @@ static uint32_t pes_pause_header_init(void *window) {
 static uint32_t pes_pause_guide_update(void *window, uint32_t pad) {
   const uint32_t result = pause_guide_update_original(window, pad);
   static void *hidden_window;
-  if (!exhibition_window_get_window || !match_node_set_alpha) return result;
-  const int hide = pes_controller_pause_skin_active() || live_gameplan_window != NULL;
+  static void *ceremony_root_hidden_window;
+  if (!window || !exhibition_window_get_window || !match_node_set_alpha) return result;
+  // WindowManager publishes the native Next footer to GuideBar's independent
+  // GuiBarWindow. Hiding a result window cannot hide this sibling. Resolve only
+  // this live footer callback's nodes; ordinary cinematics retain their guide.
+  const int ceremony = fixdemo_trophy_ui_active();
+  const int hide = ceremony || pes_controller_pause_skin_active() ||
+                   live_gameplan_window != NULL;
   if (hide || hidden_window == window) {
     void *surface = exhibition_window_get_window(window);
     if (surface) match_node_set_alpha(surface, hide ? 0.0f : 1.0f);
     hidden_window = hide ? window : NULL;
+  }
+  if ((ceremony || ceremony_root_hidden_window == window) &&
+      match_setplay_get_root) {
+    void *root = match_setplay_get_root(window);
+    if (root) match_node_set_alpha(root, ceremony ? 0.0f : 1.0f);
+    ceremony_root_hidden_window = ceremony ? window : NULL;
   }
   return result;
 }
@@ -18037,8 +18057,29 @@ static uintptr_t *find_vtable_method_slot(so_module *module,
 #include "realface_load_probe.inc"
 #include "model_quality_policy.inc"
 #include "fixdemo_trophy_config.inc"
+#define PESNX_TROPHY_SPARKS_RUNTIME 1
+static uint64_t fixdemo_trophy_sparks_active_epoch(void);
+#include "fixdemo_trophy_sparks.inc"
 #include "fixdemo_trophy_props.inc"
+#define PESNX_TROPHY_AUDIO_OBSERVE_RUNTIME 1
+static void fixdemo_trophy_audio_observe(uint64_t now_ms);
 #include "fixdemo_trophy_result.inc"
+#include "fixdemo_trophy_audio.inc"
+
+/* UE observes only atomic ceremony tokens and bounded prop metadata. No saved
+ * native PES object is dereferenced from the world tick. */
+static uint64_t fixdemo_trophy_sparks_active_epoch(void) {
+  return __atomic_load_n(&fixdemo_trophy_ui_token, __ATOMIC_ACQUIRE);
+}
+static void fixdemo_trophy_sparks_update_world(void *world, float seconds) {
+  if (!trophy_sparks.epoch) return;
+  const uint64_t active = fixdemo_trophy_sparks_active_epoch();
+  const uint64_t playing = __atomic_load_n(&fixdemo_trophy_ui_playing_token, __ATOMIC_ACQUIRE);
+  const int skip = active && active == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE);
+  const uint64_t generation = fixdemo_spark_owner_generation(&fixdemo_trophy_prop_lifecycle, active);
+  fixdemo_trophy_sparks_tick(world, seconds, active,
+      active == playing ? playing : 0, generation, skip);
+}
 
 static ObjectInitializerArrayState *find_array_state(Ue4Array *array) {
   ObjectInitializerArrayState *empty = NULL;
@@ -18246,6 +18287,7 @@ static void referee_probe_project(void *model) {
 /* Bounded v73 rain field; native surface physics remains active. */
 #include "weather_scene.inc"
 #include "scoreboard_runtime.inc"
+#include "match_banner_runtime.inc"
 
 static int match_gauge_project_to_overlay(float *x, float *y,
                                           float projection_w,
@@ -18440,6 +18482,7 @@ void install_ue4_hooks(so_module *module) {
   install_weather_scene(module);
   scene_runtime_note("weather surface", "v77 independent Cloudy drift; fixed world-space rain/snow and thin Winter haze retained");
   install_scoreboard_runtime(module);
+  install_match_banner_runtime(module);
 
   // Keep native Day/Night board choice. Only the player-shadow quality decision
   // uses the simple low-quality board while dynamic player casting is filtered separately.
@@ -21040,6 +21083,12 @@ void install_ue4_hooks(so_module *module) {
     const int props_ready = fixdemo_trophy_props_prepare(module);
     const int ending_ready = props_ready && fixdemo_trophy_result_prepare(module);
     if (props_ready && ending_ready) {
+      if (sound_hca_decode_header_original && sound_hca_set_decryption_table)
+        fixdemo_trophy_audio_install(module);
+      else fixdemo_trophy_note("music-codec-hook-unavailable ceremony-retained");
+      if (weather_scene_installed && fixdemo_trophy_sparks_prepare(module))
+        fixdemo_trophy_note("sparks-optional authored-podium-field ABI-bound");
+      else fixdemo_trophy_note("sparks-unavailable optional-ABI-or-world-tick");
       fixdemo_trophy_props_commit();
       fixdemo_trophy_result_commit();
       fixdemo_trophy_status("enabled: final-only trophy canary");

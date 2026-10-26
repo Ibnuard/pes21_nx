@@ -32,6 +32,9 @@ static void (*weather_scalar)(void *,uint64_t,float);
 static NxWeatherWeak weather_match_world={-1,0}, weather_component={-1,0};
 static NxWeatherWeak weather_actor={-1,0}, weather_material={-1,0};
 static int weather_scene_active, weather_scene_attempted;
+#ifndef PESNX_WEATHER_SCENE_HOST_TEST
+static int weather_scene_installed;
+#endif
 static int weather_scene_first_tick;
 static float weather_scene_age,weather_clock;
 static float weather_cloud_clock;
@@ -45,6 +48,9 @@ static unsigned weather_scene_reports;
 static uint64_t weather_clock_name;
 
 static void weather_scene_retire(void) {
+#ifdef PESNX_TROPHY_SPARKS_RUNTIME
+  fixdemo_trophy_sparks_reset();
+#endif
   void *actor=weather_weak_get(&weather_actor);
   if (actor) weather_destroy_actor(actor,0,0);
   weather_weak_set(&weather_actor,NULL);
@@ -131,6 +137,9 @@ static void weather_scene_tick(void *world,int level_tick,float seconds) {
     scene_runtime_note("weather field","first native world tick after spawn begin");
   }
   weather_tick_original(world,level_tick,seconds);
+#ifdef PESNX_TROPHY_SPARKS_RUNTIME
+  fixdemo_trophy_sparks_update_world(world,seconds);
+#endif
   if (first) scene_runtime_note("weather field","first native world tick after spawn returned");
   if (!weather_scene_active) return;
   void *owner=weather_weak_get(&weather_match_world);
@@ -223,6 +232,7 @@ static void install_weather_scene(so_module *module) {
   hook_arm64(base+0x38dd250,(uintptr_t)weather_scene_unload);
   hook_arm64(base+0x38cf4a0,(uintptr_t)weather_scene_destroy);
   hook_arm64(base+0x3924490,(uintptr_t)weather_scene_tick);
+  weather_scene_installed=1;
   scene_runtime_note("weather field","v77 independent Cloudy clock; v75 fixed full-pitch precipitation retained");
 }
 #endif

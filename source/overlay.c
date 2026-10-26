@@ -2148,6 +2148,20 @@ static const char *native_lab_setplay_name(uint32_t context) {
 }
 
 #endif
+static int overlay_cinematic_helper_active(uint32_t ceremony_phase,
+                                            int transition, int goal,
+                                            int goal_helper, int replay) {
+  if (transition) return 0;
+  if (ceremony_phase != PES_CEREMONY_INPUT_NONE)
+    return ceremony_phase == PES_CEREMONY_INPUT_PLAYING;
+  return goal && goal_helper && !replay;
+}
+
+static const char *overlay_cinematic_skip_key(uint32_t profile) {
+  return profile == PES_CONTROLLER_PROFILE_SINGLE_LEFT ? "LEFT" :
+         profile == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B";
+}
+
 static void overlay_render(void) {
   const int live_weather_view=pes_controller_match_hud_inplay();
   const uint32_t weather_choice=pes_controller_stadium_weather();
@@ -2212,18 +2226,20 @@ static void overlay_render(void) {
       controller_snapshot.surface == PES_CONTROLLER_SURFACE_GOAL_DEMO;
   const int goal_demo_player =
       goal_demo_active && controller_snapshot.goal_player;
-  // Replay and generic demo input remains fully active, but does not need a
+  const uint32_t ceremony_phase = pes_controller_ceremony_input_state();
+  // Replay and generic demo input remain fully active, but do not need a
   // controller legend. Those short-lived surfaces can alternate around every
   // transition and made the old "ANY BUTTON - SKIP" text visibly blink. Keep
-  // a helper only for the interactive GoalDemo page where A/B have distinct
-  // meanings.
-  int cinematic_helper_active =
-      !custom_2p_transition && goal_demo_active &&
-      controller_snapshot.goal_helper_visible &&
-      !pes_controller_replay_active();
-  const int cinematic_goal_actions = goal_demo_player;
+  // GoalDemo's A/B actions and show the same Skip row after the checked Cup
+  // ceremony Start. Loading has no actionable helper.
+  int cinematic_helper_active = overlay_cinematic_helper_active(
+      ceremony_phase, custom_2p_transition, goal_demo_active,
+      controller_snapshot.goal_helper_visible, pes_controller_replay_active());
+  const int cinematic_goal_actions =
+      ceremony_phase != PES_CEREMONY_INPUT_PLAYING && goal_demo_player;
   const int cinematic_goal_two_player =
-      goal_demo_active && pes_controller_native_pad_lab_two_player();
+      (goal_demo_active || ceremony_phase == PES_CEREMONY_INPUT_PLAYING) &&
+      pes_controller_native_pad_lab_two_player();
   uint32_t setplay_context =
       !custom_2p_transition &&
       controller_snapshot.surface == PES_CONTROLLER_SURFACE_SETPLAY
@@ -9052,21 +9068,15 @@ static void overlay_render(void) {
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += title_footer_quads;
   }
-  if (cinematic_helper_active) {
+  if (cinematic_helper_active && ceremony_phase != PES_CEREMONY_INPUT_PLAYING) {
     const float helper_radius = 0.022f * (float)screen_height;
     const float skip_y = 0.865f * (float)screen_height;
     const float celebrate_y = 0.945f * (float)screen_height;
     const float generic_y = 0.925f * (float)screen_height;
     const uint32_t profile0 = android_controller_profile(0);
     const uint32_t profile1 = android_controller_profile(1);
-    const char *skip_key0 =
-        profile0 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
-            ? "LEFT"
-            : (profile0 == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B");
-    const char *skip_key1 =
-        profile1 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
-            ? "LEFT"
-            : (profile1 == PES_CONTROLLER_PROFILE_SINGLE_RIGHT ? "A" : "B");
+    const char *skip_key0 = overlay_cinematic_skip_key(profile0);
+    const char *skip_key1 = overlay_cinematic_skip_key(profile1);
     const char *celebrate_key0 =
         profile0 == PES_CONTROLLER_PROFILE_SINGLE_LEFT
             ? "DOWN"
@@ -9135,6 +9145,7 @@ static void overlay_render(void) {
     }
   }
   const char *setplay_keys[7] = {NULL};
+  const char *setplay_alternate_keys[7] = {NULL};
   const char *setplay_labels[7] = {NULL};
   const char *setplay_camera_key = single_joy_setplay ? "SR+LS" : "RS";
   const char *setplay_camera_label = single_joy_setplay ? "HOLD: CAMERA" : "CAMERA";
@@ -9275,6 +9286,16 @@ static void overlay_render(void) {
       setplay_labels[setplay_helper_count++] = "P2 GOALKEEPER";
     }
   }
+  // Cup Skip uses the production set-play sprite, font, anchor and shadow
+  // pipeline. Two different local profiles are alternatives, not a chord.
+  if (cinematic_helper_active && ceremony_phase == PES_CEREMONY_INPUT_PLAYING) {
+    setplay_keys[0] = overlay_cinematic_skip_key(android_controller_profile(0));
+    const char *other = overlay_cinematic_skip_key(android_controller_profile(1));
+    setplay_alternate_keys[0] = cinematic_goal_two_player &&
+        strcmp(setplay_keys[0], other) ? other : NULL;
+    setplay_labels[0] = "SKIP";
+    setplay_helper_count = 1;
+  }
   // One sprite group plus a measured label per row. Rail-button chords use
   // real SL/SR art, not the old text-only L1/R1 badges.
   if(corner_open_count)setplay_helper_count=0;
@@ -9294,7 +9315,8 @@ static void overlay_render(void) {
     const float step = screen_height * 0.066f;
     int has_chord = 0;
     for (uint32_t i = 0; i < setplay_helper_count; ++i)
-      has_chord |= strchr(setplay_keys[i], '+') != NULL;
+      has_chord |= strchr(setplay_keys[i], '+') != NULL ||
+                   setplay_alternate_keys[i] != NULL;
     // Keep both owners' columns stable while either tactics panel is open.
     has_chord |= corner_available_count>1 && single_joy_setplay;
     const float group_w = size * (has_chord ? 2.65f : 1.0f);
@@ -9323,10 +9345,11 @@ static void overlay_render(void) {
       switch_helper_textures[switch_helper_count++] = switch_button_texture(first);
       quads += emit_image_rect(x, start_y + i * step - size * 0.5f,
                                 size, size, verts + quads * 24);
-      if (rail || kick || camera) {
+      if (rail || kick || camera || setplay_alternate_keys[i]) {
         switch_helper_quads[switch_helper_count] = quads;
         switch_helper_textures[switch_helper_count++] =
-            switch_button_texture(rail ? "SR" : camera ? "LS" : "Y");
+            switch_button_texture(setplay_alternate_keys[i] ?
+                setplay_alternate_keys[i] : rail ? "SR" : camera ? "LS" : "Y");
         quads += emit_image_rect(x + group_w - size,
             start_y + i * step - size * 0.5f, size, size, verts + quads * 24);
       }

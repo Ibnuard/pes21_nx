@@ -13,6 +13,9 @@
 #include "fixdemo_prop_backend.h"
 #undef PESNX_FIXDEMO_PROP_BACKEND_RUNTIME
 #include "fixdemo_prop_lifecycle.h"
+#ifdef PESNX_TROPHY_SPARKS_RUNTIME
+#include "fixdemo_spark_owner.h"
+#endif
 
 static FixDemoPropLifecycle fixdemo_trophy_prop_lifecycle;
 static FixDemoPropBackendOps fixdemo_trophy_prop_ops;
@@ -204,10 +207,24 @@ static void fixdemo_trophy_prop_ue_callback(void *ue, void *data) {
   fixdemo_trophy_prop_ue_callback_original(ue, data);
   if (tracked && fixdemo_prop_lifecycle_epoch(&fixdemo_trophy_prop_lifecycle) == ticket.epoch) {
     const int bound = fixdemo_trophy_prop_bound_mesh(ue, &ticket);
-    if (bound >= 0 && fixdemo_prop_lifecycle_complete(&fixdemo_trophy_prop_lifecycle, &ticket, bound) && !ticket.ready)
-      fixdemo_trophy_note(ticket.kind == FIXDEMO_PROP_CUP ?
-          (bound ? "cup-mesh-ready" : "cup-mesh-failed") :
-          (bound ? "podium-mesh-ready" : "podium-mesh-failed"));
+    if (bound >= 0 && fixdemo_prop_lifecycle_complete(&fixdemo_trophy_prop_lifecycle, &ticket, bound)) {
+      if (!ticket.ready)
+        fixdemo_trophy_note(ticket.kind == FIXDEMO_PROP_CUP ?
+            (bound ? "cup-mesh-ready" : "cup-mesh-failed") :
+            (bound ? "podium-mesh-ready" : "podium-mesh-failed"));
+#ifdef PESNX_TROPHY_SPARKS_RUNTIME
+      if (bound == 1 && ticket.kind == FIXDEMO_PROP_PODIUM) {
+        uintptr_t impl = 0, actor = 0, component = 0;
+        /* Same live callback and exact bound-mesh proof above. Retain only UE
+         * weak handles; loading capture cannot allocate or start the effect. */
+        memcpy(&impl, (const char *)ue + 8u, sizeof(impl));
+        memcpy(&actor, (const void *)(impl + 520u), sizeof(actor));
+        memcpy(&component, (const void *)(actor + 816u), sizeof(component));
+        fixdemo_trophy_sparks_observe(ticket.epoch, ticket.generation,
+            (void *)actor, (void *)component, fixdemo_trophy_sparks_active_epoch());
+      }
+#endif
+    }
   }
 }
 

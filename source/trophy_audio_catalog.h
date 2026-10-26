@@ -1,0 +1,13 @@
+/* Generated metadata only; the user recording remains ignored. */
+#ifndef PESNX_TROPHY_AUDIO_CATALOG_H
+#define PESNX_TROPHY_AUDIO_CATALOG_H
+#define TROPHY_AUDIO_ASSET "Audio/trophy-user-pcm-v90.acb"
+#define TROPHY_AUDIO_CUE "FNX_TROPHY_USER_PCM_V90"
+#define TROPHY_AUDIO_ENCODE_TYPE 20u
+#define TROPHY_AUDIO_MAX_BANK_BYTES 4194304u
+#define TROPHY_AUDIO_GAIN_DB_X100 (-1200)
+#define TROPHY_AUDIO_BYTES 2758200u
+#define TROPHY_AUDIO_FNV UINT64_C(0x440e7ca044af5e84)
+#define TROPHY_AUDIO_HEADER_BYTES 44u
+#define TROPHY_AUDIO_HEADER_FNV UINT64_C(0x5c8add3f0c5ef3b6)
+#endif

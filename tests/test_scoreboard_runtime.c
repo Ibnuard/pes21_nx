@@ -42,5 +42,29 @@ int main(void){
    assert(copied[127]==(key?99:0));
  }
  key=27;assert(scoreboard_expand(resource)==17&&copied[127]==0); /* absent theme */
- assert(calls==101);puts("scoreboard temporary ownership, malformed input and repeated-theme fallback passed");
+ assert(calls==101);
+ /* The common banner can replace the native resource without a league theme.
+  * Both selected and fallback packets still require the full source binding. */
+ packet[159]=66;u64(packet+24,nx_asset_hash(packet+32,128));
+ f=fopen("Scoreboards/c0.nxsb","wb");assert(f);assert(fwrite(packet,1,160,f)==160);fclose(f);
+ key=0;assert(scoreboard_expand(resource)==17&&copied[127]==66);
+ key=27;assert(scoreboard_expand(resource)==17&&copied[127]==66);
+ key=9;assert(scoreboard_expand(resource)==17&&copied[127]==99);
+ packet[159]^=1; /* Deliberately malformed selected packet. */
+ f=fopen("Scoreboards/c9.nxsb","wb");assert(f);assert(fwrite(packet,1,160,f)==160);fclose(f);
+ assert(scoreboard_expand(resource)==17&&copied[127]==66);
+ original[30]=1;assert(scoreboard_expand(resource)==17&&copied[127]==0);original[30]=0;
+ assert(!memcmp(resource,before,64));
+ assert(remove("Scoreboards/c0.nxsb")==0);
+ assert(scoreboard_expand(resource)==17&&copied[127]==0);
+ packet[159]=55;u64(packet+24,nx_asset_hash(packet+32,128));
+ f=fopen("Scoreboards/banner-textures.nxsb","wb");assert(f);assert(fwrite(packet,1,160,f)==160);fclose(f);
+ memset(resource+1,0,23);memcpy(resource+1,"licenceTexturePes",18);
+ assert(scoreboard_expand(resource)==17&&copied[127]==55);
+ const char *native_name="afp_licenceTexturePes.apk";
+ resource[0]=1;memcpy(resource+0x10,&native_name,sizeof(native_name));
+ assert(scoreboard_expand(resource)==17&&copied[127]==55);
+ assert(remove("Scoreboards/banner-textures.nxsb")==0);
+ assert(scoreboard_expand(resource)==17&&copied[127]==0);
+ assert(calls==110);puts("scoreboard temporary ownership, malformed input and repeated-theme fallback passed");
 }

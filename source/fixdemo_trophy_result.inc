@@ -9,6 +9,9 @@
  */
 #include "fixdemo_ceremony_policy.h"
 #include "exhibition_match_identity.h"
+#include "trophy_audio_policy.h"
+
+static TrophyAudioState fixdemo_trophy_audio;
 
 typedef struct FixdemoTrophyResultScope {
   void *owner;
@@ -168,6 +171,7 @@ static void fixdemo_trophy_observe_manager(void *manager, const void *owner) {
 }
 
 static void fixdemo_trophy_forget_candidate(void) {
+  trophy_audio_stop(&fixdemo_trophy_audio);
   /* Invalidate asynchronous notifications BEFORE any native destructor. No
    * deletion happens here: only the proven native owner may release objects. */
   __atomic_store_n(&fixdemo_trophy_ui_playing_token, 0, __ATOMIC_RELEASE);
@@ -653,13 +657,16 @@ static void fixdemo_trophy_start(void *manager) {
   /* Preserve the native 30-FPS cinematic request and its saved restore value. */
   fixdemo_trophy_start_original(manager);
   if (manager == fixdemo_trophy_manager && fixdemo_trophy_started && !fixdemo_trophy_abort &&
-      fixdemo_trophy_plan.match_token == __atomic_load_n(&fixdemo_trophy_ui_token, __ATOMIC_ACQUIRE))
+      fixdemo_trophy_plan.match_token == __atomic_load_n(&fixdemo_trophy_ui_token, __ATOMIC_ACQUIRE)) {
     __atomic_store_n(&fixdemo_trophy_ui_playing_token, fixdemo_trophy_plan.match_token, __ATOMIC_RELEASE);
+    trophy_audio_start(&fixdemo_trophy_audio, fixdemo_trophy_plan.match_token);
+  }
 }
 
 static void fixdemo_trophy_end(void *manager) {
   fixdemo_trophy_end_original(manager);
   if (manager == fixdemo_trophy_manager) {
+    trophy_audio_stop(&fixdemo_trophy_audio);
     fixdemo_trophy_finished = 1u;
     fixdemo_trophy_note("ceremony-end native-fps-restored");
   }
@@ -827,8 +834,13 @@ static void fixdemo_trophy_listener(void *listener, const void *context) {
     } else {
       /* Input/UI queues publish tokens only. The current native owner alone
        * applies the same Skip permission consumed by Manager::Exec/ExecMain. */
-      if (token == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE))
+#ifdef PESNX_TROPHY_AUDIO_OBSERVE_RUNTIME
+      fixdemo_trophy_audio_observe(armTicksToNs(armGetSystemTick()) / 1000000u);
+#endif
+      if (token == __atomic_load_n(&fixdemo_trophy_ui_skip, __ATOMIC_ACQUIRE)) {
+        trophy_audio_stop(&fixdemo_trophy_audio);
         ((unsigned char *)manager)[0x55] = 1u;
+      }
       fixdemo_trophy_observe_manager(manager, listener);
       const int failed = fixdemo_trophy_abort ||
           token == __atomic_load_n(&fixdemo_trophy_ui_timeout, __ATOMIC_ACQUIRE) ||

@@ -39,6 +39,7 @@ class CommentaryPolicyTests(unittest.TestCase):
                   '#define scene_runtime_note(area, message) ((void)0)\n')
         source += c_array("base", BASE) + c_array("patch", PATCH) + c_array("target", TARGET)
         if wrappers:
+            source += f'#include "{(ROOT / "source/trophy_audio_policy.h").as_posix()}"\n'
             start = HOOKS.index("static uint32_t team_commentary_indonesia_slot;")
             end = HOOKS.index("\n#ifdef DEBUG_LOG\nstatic int32_t (*sound_cinf_play_original)", start)
             source += HOOKS[start:end]

@@ -46,7 +46,10 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v87 session\n",file);
+    fputs("FootballNX scene v90 session\n",file);
+    fputs("review v90: rounded match banner; smaller competition title; leg-two native aggregate; quieter lossless trophy cue\n",file);
+    fputs("review v89: FootballNX27 white-red-blue match banners; current competition label; production Skip helper; custom ceremony music and optional podium sparks\n",file);
+    fputs("review v88: reflection-independent Cup metal; controller Skip footer; optional FL26 Cup music on native mixer\n",file);
     fputs("review v87: exact native prop paths; contiguous Cup/podium file list; native result footer held with ceremony\n",file);
     fputs("review v86: custom overview and menu input wait for Cup ceremony; cut/prop loading stages journaled\n",file);
     fputs("review v85: trophy Skip waits for native Start, button release and fresh face/Plus press\n",file);

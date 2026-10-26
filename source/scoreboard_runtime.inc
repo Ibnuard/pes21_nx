@@ -24,24 +24,37 @@ static int scoreboard_expand(void *resource) {
   unsigned char *r=resource;
   const char *name=(const char *)r+1;
   if (r[0]&1) memcpy(&name,r+0x10,sizeof(name));
-  if (!name || strnlen(name,256)==256 || !strstr(name,"game2dPes"))
+  if (!name || strnlen(name,256)==256)
     return scoreboard_expand_original(resource);
-  uint32_t key=competition_frontend_scoreboard(
+  const char *leaf=name;
+  for (const char *p=name;*p;++p) if (*p=='/' || *p=='\\') leaf=p+1;
+  const int banner_textures=!strcmp(leaf,"licenceTexturePes") ||
+      !strcmp(leaf,"licenceTexturePes.bin") ||
+      !strcmp(leaf,"afp_licenceTexturePes.apk");
+  if (!banner_textures && !strstr(name,"game2dPes"))
+    return scoreboard_expand_original(resource);
+  uint32_t key=banner_textures ? 0 : competition_frontend_scoreboard(
       __atomic_load_n(&exhibition_home_team_id,__ATOMIC_ACQUIRE),
       __atomic_load_n(&exhibition_away_team_id,__ATOMIC_ACQUIRE));
-  if (!key) return scoreboard_expand_original(resource);
   unsigned char *original;
   uint32_t old_size;
   memcpy(&original,r+0x18,sizeof(original));
   memcpy(&old_size,r+0x20,4);
   char path[64];
-  snprintf(path,sizeof(path),"Scoreboards/c%u.nxsb",key);
-  size_t bytes=0;
-  unsigned char *file=nx_asset_read(path,2000000,&bytes);
+  unsigned char *file=NULL,*replacement=NULL;
   uint32_t new_size=0;
-  unsigned char *replacement=scoreboard_payload(file,bytes,original,old_size,&new_size);
+  /* c0 carries only the common match banner. A missing league theme retains
+   * the native top scorebar while still admitting that separately checked art. */
+  for (unsigned attempt=0;attempt<(key ? 2u : 1u);++attempt) {
+    if (banner_textures) snprintf(path,sizeof(path),"Scoreboards/banner-textures.nxsb");
+    else snprintf(path,sizeof(path),"Scoreboards/c%u.nxsb",attempt ? 0u : key);
+    size_t bytes=0;
+    file=nx_asset_read(path,2000000,&bytes);
+    replacement=scoreboard_payload(file,bytes,original,old_size,&new_size);
+    if (replacement) break;
+    free(file);file=NULL;
+  }
   if (!replacement) {
-    free(file);
     scene_runtime_note("scoreboard","theme absent/incompatible; native UI retained");
     return scoreboard_expand_original(resource);
   }

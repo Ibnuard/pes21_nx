@@ -497,6 +497,11 @@ void ml_frontend_pad(uint32_t pressed) {
 }
 
 int ml_frontend_match_active(void) { return match_active!=0u; }
+const char *ml_frontend_match_competition_name(void) {
+  if (!match_active || plan_editor || !ml_event_is_match(pending.kind)) return "";
+  return pending.kind >= ML_EVENT_CONTINENTAL ? ml_world_name(&career, pending.kind) :
+      pending.kind == ML_EVENT_CUP ? ml_cup_name() : ml_competition_name();
+}
 uint32_t ml_frontend_scoreboard(void) {
   if (!match_active || plan_editor) return NX_SCORE_DEFAULT;
   switch (pending.kind) {
