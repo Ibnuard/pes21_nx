@@ -1,0 +1,143 @@
+{
+  "version": 99,
+  "stadiums": [
+    {
+      "key": "SignalIdunaPark",
+      "vertex_camera_cull": true,
+      "source_id": "st051",
+      "display_name": "SIGNAL IDUNA PARK",
+      "shell_parts": [
+        "back1",
+        "back2",
+        "center1",
+        "center3",
+        "front1",
+        "front2",
+        "left1",
+        "left2",
+        "right1",
+        "right2"
+      ],
+      "triangle_budget": 14712,
+      "min_roof_height_m": 29.0,
+      "roof_cm": [
+        5950.0,
+        3650.0,
+        350.0,
+        3704.42,
+        12250.0,
+        9750.0,
+        5200.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "roof_fit_iou": [
+        1.0,
+        0.9478
+      ],
+      "preserved_crowd_triangles": 9848,
+      "maximum_total_triangles": 24560,
+      "raised_floor_materials": [],
+      "protected_surface_materials": [
+        "M_st051_cncr001_bsm_solid_one",
+        "M_st051_flor101_bsm_solid_one",
+        "M_st051_cncr003_bsm_solid_one",
+        "M_st051_flor002_bsm_solid_one",
+        "M_st051_cncr002_bsm_solid_one",
+        "M_st051_flor102_bsm_solid_one",
+        "M_st051_flor001_bsm_solid_one",
+        "M_st051_flor002_yl_bsm_solid_one",
+        "M_st051_cncr001_bl_bsm_solid_one",
+        "M_st051_cncr002_bsm_bl_solid_one",
+        "M_st051_irpl001_bsm_solid_one"
+      ],
+      "source_face_rules": [
+        {
+          "material": "M_st051_star002_bsm_solid_one",
+          "kind": "wide_panel",
+          "minimum_edge_m": 30,
+          "minimum_area_m2": 4,
+          "expected_source_triangles": 838
+        },
+        {
+          "material": "M_st051_star002_bsm_solid_one",
+          "kind": "upper_stair_band",
+          "minimum_height_m": 15.39,
+          "maximum_height_m": 17.21,
+          "minimum_source_z_m": 69.99,
+          "maximum_source_z_m": 75.51,
+          "expected_source_triangles": 114
+        },
+        {
+          "material": "M_st051_star002_bsm_solid_one",
+          "kind": "central_stair_access",
+          "maximum_abs_source_x_m": 1.61,
+          "minimum_height_m": -0.01,
+          "maximum_height_m": 4.7,
+          "minimum_abs_source_z_m": 39.99,
+          "maximum_abs_source_z_m": 51.01,
+          "expected_source_triangles": 170
+        },
+        {
+          "material": "M_st051_cncr001_bsm_solid_one",
+          "kind": "central_stair_access",
+          "maximum_abs_source_x_m": 1.61,
+          "minimum_height_m": -0.01,
+          "maximum_height_m": 4.7,
+          "minimum_abs_source_z_m": 39.99,
+          "maximum_abs_source_z_m": 51.01,
+          "expected_source_triangles": 6
+        },
+        {
+          "material": "M_st051_flor101_bsm_solid_one",
+          "kind": "central_stair_access",
+          "maximum_abs_source_x_m": 1.61,
+          "minimum_height_m": -0.01,
+          "maximum_height_m": 4.7,
+          "minimum_abs_source_z_m": 39.99,
+          "maximum_abs_source_z_m": 51.01,
+          "expected_source_triangles": 2
+        },
+        {
+          "material": "M_st051_cncr003_bsm_solid_one",
+          "kind": "central_stair_access",
+          "maximum_abs_source_x_m": 1.61,
+          "minimum_height_m": -0.01,
+          "maximum_height_m": 4.7,
+          "minimum_abs_source_z_m": 39.99,
+          "maximum_abs_source_z_m": 51.01,
+          "expected_source_triangles": 30
+        },
+        {
+          "material": "M_st051_cncr002_bsm_solid_one",
+          "kind": "central_stair_access",
+          "maximum_abs_source_x_m": 1.61,
+          "minimum_height_m": -0.01,
+          "maximum_height_m": 4.7,
+          "minimum_abs_source_z_m": 39.99,
+          "maximum_abs_source_z_m": 51.01,
+          "expected_source_triangles": 18
+        },
+        {
+          "material": "M_st051_star001_bsm_solid_one",
+          "kind": "central_stair_access",
+          "maximum_abs_source_x_m": 1.61,
+          "minimum_height_m": -0.01,
+          "maximum_height_m": 4.7,
+          "minimum_abs_source_z_m": 39.99,
+          "maximum_abs_source_z_m": 51.01,
+          "expected_source_triangles": 8
+        }
+      ]
+    }
+  ],
+  "budget_reference": "data/stadiums/konami_budget_reference.json",
+  "scope": "Signal Iduna source lower-tier surfaces and exact central-access treads/risers; other stadiums unchanged"
+}

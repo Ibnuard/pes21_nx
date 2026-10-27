@@ -3,6 +3,18 @@
 The repository root contains only the standard project entry documents.
 Subsystem notes and historical implementation audits live here.
 
+## Manager League review
+
+- [Random preferences, analog scrolling, loading UI and production assets v100](REVIEW_V100.md)
+- [Watch details, paid packs, ranking resets and honours v99](MANAGER_REVIEW_V99.md)
+- [Manager PCM output routing v99](MANAGER_LEAGUE_AUDIO_V99.md)
+- [Custom trophy song gain v99](TROPHY_AUDIO_GAIN_V99.md)
+- [Signal Iduna stair and portal restoration v99](STADIUM_SIGNAL_STAIRS_V99.md)
+- [Currency, club profiles and two leagues per week v98](MANAGER_REVIEW_V98.md)
+- [Signal Iduna stand surfaces v98](STADIUM_SIGNAL_SURFACES_V98.md)
+- [Signal Iduna and Camp Nou pitch alignment v98](STADIUM_PITCH_ALIGNMENT_V98.md)
+- [Local PIN accounts and trophy music v97](MANAGER_REVIEW_V97.md)
+
 ## Data and roster migration
 
 - [PES21 NX master data catalog](MASTER_DATA_CATALOG.md)

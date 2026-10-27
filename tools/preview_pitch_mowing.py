@@ -45,8 +45,8 @@ int main() {
     srgb = np.where(linear <= .0031308, linear * 12.92,
                     1.055 * np.power(linear, 1 / 2.4) - .055)
     labels = ('Anfield Stadium — narrow transverse', 'Etihad Stadium — checker',
-              'Signal Iduna Park — broad transverse', 'Stamford Bridge — narrow vertical / worn grass',
-              'Old Trafford — 20 stripes / native paint alignment', 'Camp Nou — concentric rings')
+              'Signal Iduna Park — 18 stripes / native paint alignment', 'Stamford Bridge — narrow vertical / worn grass',
+              'Old Trafford — 20 stripes / native paint alignment', 'Camp Nou — small center / native circle alignment')
     indices = [dict(zip((1,2,8,9,12,13),range(6)))[stadium]] if stadium is not None else list(range(6))
     fig, axes = plt.subplots(1 if stadium is not None else 2, 1 if stadium is not None else 3,
                              figsize=(12,8) if stadium is not None else (15,7.5),
@@ -55,13 +55,16 @@ int main() {
         image, label = srgb[index], labels[index]
         ax.imshow(np.clip(image, 0, 1), origin='lower', extent=(-54, 54, -34, 34))
         line = dict(edgecolor='#e6eee7', facecolor='none', linewidth=.9)
-        # Old Trafford's mowing now follows the retained mesh/paint UV audit.
+        # Signal Iduna/Old Trafford follow the retained mesh/paint UV audit.
         # Draw those observed fronts, not regulation boxes that are offset by
         # up to 0.28 m in the native artwork. Other previews keep their grid.
-        goal, penalty, six_yard = (52.552, 36.22, 47.257) if index == 4 else (52.5, 36, 47)
+        goal, penalty, six_yard = (52.552, 36.22, 47.257) if index in (2, 4) else (52.5, 36, 47)
         ax.add_patch(Rectangle((-goal, -34), goal*2, 68, **line))
         ax.plot([0, 0], [-34, 34], color='#e6eee7', linewidth=.9)
-        ax.add_patch(Circle((0, 0), 9.15, **line))
+        # Native paint is slightly smaller/offset from regulation dimensions.
+        # Camp Nou's second mowing edge follows this actual white circle.
+        circle_center, circle_radius = ((.01443, .00962), 9.012) if index == 5 else ((0, 0), 9.15)
+        ax.add_patch(Circle(circle_center, circle_radius, **line))
         for side in (-1, 1):
             x = -goal if side < 0 else penalty
             ax.add_patch(Rectangle((x, -20.16), goal-penalty, 40.32, **line))

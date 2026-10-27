@@ -14,6 +14,7 @@
 #include "manager_league_dummy.h"
 #include "scoreboard_theme.h"
 #include "competition_seed.h"
+#include "menu_axis_navigation.h"
 
 #define COMPETITION_MAX_PLAYER_SLOTS 8u
 #define COMPETITION_SAVE_SLOT_COUNT 3u
@@ -35,6 +36,8 @@ static uint32_t frontend_controller_gate_request;
 static uint32_t frontend_input_consumed;
 static uint32_t frontend_skip_input_tick;
 static uint32_t frontend_buttons_latched;
+static uint32_t frontend_axis_repeat;
+static NxMenuAxisRepeat frontend_axis;
 static uint32_t frontend_closing;
 static uint32_t cup_save_pending, league_save_pending;
 static uint32_t cup_shootout_winner, league_shootout_winner;
@@ -2744,6 +2747,17 @@ void competition_frontend_tick(uint64_t milliseconds) {
   }
 }
 
+void competition_frontend_discard_input(uint32_t buttons) {
+  frontend_buttons_latched=buttons;frontend_skip_input_tick=1u;
+  memset(&frontend_axis,0,sizeof(frontend_axis));
+}
+void competition_frontend_axis_event(uint32_t buttons,uint32_t previous_buttons,
+                                    int32_t x,int32_t y,uint64_t now_ms) {
+  buttons=nx_menu_axis_buttons(buttons,x,y);
+  frontend_axis_repeat=nx_menu_axis_repeat(&frontend_axis,buttons,now_ms);
+  competition_frontend_pad_event(buttons,previous_buttons);
+  frontend_axis_repeat=0;
+}
 void competition_frontend_pad_event(uint32_t buttons,
                                     uint32_t previous_buttons) {
   if (!competition_frontend_active())
@@ -2753,7 +2767,7 @@ void competition_frontend_pad_event(uint32_t buttons,
   if (frontend_closing || frontend_state == COMPETITION_FRONTEND_NONE)
     return;
   const uint32_t pressed =
-      buttons & ~frontend_buttons_latched &
+      ((buttons & ~frontend_buttons_latched) | frontend_axis_repeat) &
       (COMPETITION_BUTTON_A | COMPETITION_BUTTON_B |
        COMPETITION_BUTTON_X | COMPETITION_BUTTON_Y | COMPETITION_BUTTON_UP |
        COMPETITION_BUTTON_DOWN | COMPETITION_BUTTON_LEFT |

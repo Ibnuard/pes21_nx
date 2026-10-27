@@ -7,6 +7,24 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from stadium_backing import select_triangles,load_selection,clip_floor_triangles
 
 
+def test_signal_authored_foundation_stays_below_and_outside_camera_box():
+    import json
+    from stadium_backing import signal_foundation_quads
+    from stadium_geometry import overlaps_pitch
+    recipe=json.loads((Path(__file__).resolve().parents[1]/'data/stadiums/signal_foundation_v98.json').read_text())
+    rows,proof=signal_foundation_quads(recipe)
+    assert len(rows)==4 and proof['kind']=='project_authored_underground_foundation'
+    for row in rows:
+        t=np.array(row['positions'])
+        assert np.cross(t[1]-t[0],t[2]-t[0])[1]>0
+        assert np.all(t[:,1]<-.5)
+        assert not overlaps_pitch(t,58,40)
+        assert np.isfinite(row['uv']).all()
+    recipe['quads'][0]['minimum_z_m']=39.9
+    with pytest.raises(ValueError,match='foundation bounds'):
+        signal_foundation_quads(recipe)
+
+
 def wall(x=80.):
     return np.array([[x,0.,-2.],[x,10.,-2.],[x,10.,2.],[x,0.,2.]])
 

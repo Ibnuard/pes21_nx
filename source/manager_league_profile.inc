@@ -3,6 +3,7 @@
  * and the explicit portrait policy. Credentials never enter this record. */
 #define MD_PROFILE_FILE "SaveData/manager-league-profile-v2.dat"
 enum { MD_COLLECTION = 128, MD_REGISTERED = 25, MD_PACKS = 3 };
+enum { MD_PACK_PENDING_SHIFT=8, MD_PACK_PENDING_MASK=7u<<MD_PACK_PENDING_SHIFT };
 typedef struct {
   uint32_t magic, version, bytes, checksum, seed, club, balance, tutorials, has_current_plan,
       roster_locked;
@@ -19,7 +20,6 @@ static const MlCatalogPlayer *squad[MD_TEAMS][MD_REGISTERED], *match_squad[MD_TE
 static uint32_t collection_choice;
 static uint32_t profile_ready, profile_blocked, profile_recovered, roster_lock_pending, editor,
     restore_pending, tutorial;
-static char password[64];
 static const uint32_t pack_draws[3] = {2, 4, 5}, pack_pools[3] = {5, 6, 8};
 /* Local offer fixtures. Production prices and availability come from the API. */
 static const uint32_t pack_prices[3] = {1000, 2200, 3000};
@@ -59,8 +59,10 @@ static int profile_valid(const MdProfile *p) {
       p->checksum != profile_hash(p) || p->seed != md.seed || p->club != md.club ||
       p->catalog[64] || strcmp(p->catalog, ml_catalog_manager_binding_id()) ||
       !memchr(p->user_id, 0, sizeof(p->user_id)) || p->collection_count > MD_COLLECTION ||
-      p->tutorials > 7 || p->receipts > 7 || p->has_current_plan > 1 || p->roster_locked > 1)
+      p->tutorials > 7 || (p->receipts & ~(7u|MD_PACK_PENDING_MASK)) || p->has_current_plan > 1 || p->roster_locked > 1)
     return 0;
+  const uint32_t pending=(p->receipts>>MD_PACK_PENDING_SHIFT)&7u;
+  if((pending && (pending&(pending-1u))) || (pending&p->receipts))return 0;
   ManagerLeaguePlanScope scope;
   if (p->has_current_plan &&
       (!profile_scope(p, &scope) || !manager_league_plan_compatible(&scope, &p->current_plan)))
@@ -71,7 +73,7 @@ static int profile_valid(const MdProfile *p) {
       if (!ml_catalog_find_identity(p->match_roster[t][n]))
         return 0;
   for (uint32_t i = 0; i < 3; i++)
-    if (p->receipts & (1u << i))
+    if (p->receipts & ((1u << i)|(1u << (i+MD_PACK_PENDING_SHIFT))))
       cost += pack_prices[i];
   if (cost > md.balance || p->balance != md.balance - cost)
     return 0;
@@ -148,19 +150,22 @@ static int profile_read(const char *path) {
   profile_cache();
   return 1;
 }
+static void profile_prepare(MdProfile *p,const MdSave *save,uint64_t at) {
+  if (save->joined && at >= competition_start(save))
+    p->roster_locked = 1;
+  if (!p->roster_locked &&
+      (!save->joined || manager_dummy_week(save, at).state == MD_PRE_LEAGUE))
+    for (uint32_t t = 0; t < MD_TEAMS; t++)
+      memcpy(p->match_roster[t], p->roster[t], 18 * sizeof(uint32_t));
+  p->magic = 0x4d4c5032u;
+  p->version = 2;
+  p->bytes = sizeof(*p);
+  p->checksum = profile_hash(p);
+}
 static int profile_save(void) {
   if (profile_blocked || blocked)
     return 0;
-  if (md.joined && now() >= manager_dummy_week(&md, now()).first_kickoff_ms)
-    profile.roster_locked = 1;
-  if (!profile.roster_locked &&
-      (!md.joined || manager_dummy_week(&md, now()).state == MD_PRE_LEAGUE))
-    for (uint32_t t = 0; t < MD_TEAMS; t++)
-      memcpy(profile.match_roster[t], profile.roster[t], 18 * sizeof(uint32_t));
-  profile.magic = 0x4d4c5032u;
-  profile.version = 2;
-  profile.bytes = sizeof(profile);
-  profile.checksum = profile_hash(&profile);
+  profile_prepare(&profile,&md,now());
   if (!profile_valid(&profile))
     return 0;
   mkdir("SaveData", 0700);
@@ -311,76 +316,5 @@ static uint32_t selected_count(void) {
     n += (pack_selected >> i) & 1u;
   return n;
 }
-static void pack_open(void) {
-  uint32_t k = pack_choice;
-  if (profile.receipts & (1u << k)) {
-    page = MD_PACK_RESULT;
-    focus = 0;
-    return;
-  }
-  if (shop_locked()) {
-    snprintf(notice, sizeof(notice), "SHOP CLOSED DURING MATCH DAY");
-    return;
-  }
-  if (!profile_ready || !pack_pool[k][pack_pools[k] - 1]) {
-    snprintf(notice, sizeof(notice), "PACK CATALOG UNAVAILABLE");
-    return;
-  }
-  if (profile.balance < pack_prices[k]) {
-    snprintf(notice, sizeof(notice), "NOT ENOUGH POINTS");
-    return;
-  }
-  pack_selected = 0;
-  pack_opened_at = epoch_now;
-  page = MD_PACK_OPENING;
-  focus = 0;
-  notice[0] = 0;
-}
-static void pack_confirm(void) {
-  const uint32_t k = pack_choice;
-  if (shop_locked()) {
-    snprintf(notice, sizeof(notice), "SHOP CLOSED DURING MATCH DAY");
-    return;
-  }
-  if (profile.receipts & (1u << k)) {
-    page = MD_PACK_RESULT;
-    focus = 0;
-    return;
-  }
-  if (!profile_ready || !pack_pool[k][pack_pools[k] - 1] || selected_count() != pack_draws[k] ||
-      pack_selected >= (1u << pack_pools[k])) {
-    snprintf(notice, sizeof(notice), "COMPLETE YOUR PLAYER SELECTION");
-    return;
-  }
-  if (profile.balance < pack_prices[k]) {
-    snprintf(notice, sizeof(notice), "NOT ENOUGH POINTS");
-    return;
-  }
-  if (profile.collection_count + pack_draws[k] > MD_COLLECTION) {
-    snprintf(notice, sizeof(notice), "COLLECTION FULL");
-    return;
-  }
-  MdProfile before = profile;
-  uint32_t n = 0;
-  for (uint32_t i = 0; i < pack_pools[k]; i++)
-    if (pack_selected & (1u << i)) {
-      uint32_t id = pack_pool[k][i]->identity;
-      profile.receipt_players[k][n++] = id;
-      profile.collection[profile.collection_count++] = id;
-      if (profile.counts[0] < MD_REGISTERED)
-        profile.roster[0][profile.counts[0]++] = id;
-    }
-  profile.has_current_plan = 0;
-  memset(&profile.current_plan, 0, sizeof(profile.current_plan));
-  profile.balance -= pack_prices[k];
-  profile.receipts |= 1u << k;
-  if (!profile_save()) {
-    profile = before;
-    snprintf(notice, sizeof(notice), "PURCHASE NOT SAVED - NO POINTS CHARGED");
-    return;
-  }
-  profile_cache();
-  page = MD_PACK_RESULT;
-  focus = 0;
-  notice[0] = 0;
-}
+static void pack_open(void);
+static void pack_confirm(void);

@@ -155,8 +155,8 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
     }
     snprintf(v->subtitle,sizeof(v->subtitle),"%s OF %s - %s",
         pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
-        pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
-        nx_weather_label(pes_controller_stadium_weather()));
+        nx_time_preference_label(pes_controller_stadium_time_preference()),
+        pes_controller_stadium_weather_preference()==NX_WEATHER_RANDOM ? "RANDOM" : nx_weather_label(pes_controller_stadium_weather_preference()));
   }
   if(page==FD_KITS)v->kit_editing=pes_controller_2p_prematch_kit_editing();
   if(page==FD_STADIUM) {
@@ -164,13 +164,14 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
     static const char *const grass[]={"SHORT","NORMAL","LONG"};
     static const char *const pitch[]={"DRY","NORMAL","WET"};
     const char *values[]={pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index()),
-      pes_controller_stadium_is_day() ? "DAY" : "NIGHT",
-      nx_weather_label(pes_controller_stadium_weather()),
-      pes_controller_stadium_season() ? "WINTER" : "SUMMER",
+      nx_time_preference_label(pes_controller_stadium_time_preference()),
+      pes_controller_stadium_weather_preference()==NX_WEATHER_RANDOM ? "RANDOM" : nx_weather_label(pes_controller_stadium_weather_preference()),
+      nx_season_preference_label(pes_controller_stadium_season_preference()),
       grass[pes_controller_stadium_turf_length()%3u],pitch[pes_controller_stadium_pitch_condition()%3u]};
     v->row_count=v->total_rows=6;
     fd_copy(v->status,sizeof(v->status),
-        pes_controller_stadium_weather() >= NX_WEATHER_RAIN
+        (pes_controller_stadium_time_preference()==NX_TIME_RANDOM || pes_controller_stadium_weather_preference()==NX_WEATHER_RANDOM || pes_controller_stadium_season_preference()==NX_SEASON_RANDOM)
+          ? "RANDOM OPTIONS ARE CHOSEN FOR EACH MATCH" : pes_controller_stadium_weather() >= NX_WEATHER_RAIN
           ? (pes_controller_stadium_season() ? "WET SURFACE WITH SNOW REMNANTS" : "WET SURFACE WITH WATER PATCHES")
           : "GRASS AND PITCH AFFECT BALL SURFACE; WINTER CHANGES SEASON");
     for(uint32_t i=0;i<6u;i++) {

@@ -129,7 +129,7 @@ static unsigned reads,mounts,plays,corrupt;
 static uintptr_t so_try_find_addr_rx(so_module *m,const char *s) {(void)m;(void)s;return 0;}
 static uintptr_t so_find_addr(so_module *m,const char *s) {(void)m;(void)s;return 0;}
 static void fixdemo_trophy_note(const char *s) {assert(s && *s);}
-static void *nx_asset_read(const char *p,size_t limit,size_t *bytes) {
+static void *nx_asset_read_production(const char *p,size_t limit,size_t *bytes) {
   assert(!strcmp(p,TROPHY_AUDIO_ASSET) && limit==TROPHY_AUDIO_MAX_BANK_BYTES);++reads;
   *bytes=0;if(!corrupt)return NULL;
   *bytes=TROPHY_AUDIO_BYTES;return calloc(1,*bytes);

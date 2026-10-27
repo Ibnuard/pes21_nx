@@ -215,6 +215,9 @@ void competition_frontend_tick(uint64_t milliseconds);
 
 void competition_frontend_pad_event(uint32_t buttons,
                                     uint32_t previous_buttons);
+void competition_frontend_axis_event(uint32_t buttons,uint32_t previous_buttons,
+                                    int32_t x,int32_t y,uint64_t now_ms);
+void competition_frontend_discard_input(uint32_t buttons);
 uint32_t competition_frontend_take_action(void);
 int competition_frontend_take_controller_gate_request(void);
 int competition_frontend_take_input_consumed(void);

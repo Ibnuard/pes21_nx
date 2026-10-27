@@ -24,11 +24,17 @@ parser.add_argument('--meshoptimizer', type=Path)
 parser.add_argument('--node', type=Path)
 parser.add_argument('--weld-mm',type=float,default=0.,help='Offline position weld; loop UV seams stay separate')
 parser.add_argument('--floor-underlay-material',action='append',default=[])
+parser.add_argument('--protect-surface-material',action='append',default=[],
+                    help='Reviewed venue-specific concrete/walkway surface with fixed borders')
+parser.add_argument('--preserve-surface-rule',action='append',default=[],
+                    help='JSON rule for exact source panels before stair clustering')
 parser.add_argument('--polygon-python')
 parser.add_argument('--polygon-modules')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
 if not .5 <= args.triangle_ratio <= 1 or bool(args.crowd_area) != bool(args.crowd_atlas):
     raise ValueError('Use ratio .5..1 and provide both crowd area and atlas')
+if args.protect_surface_material and not args.meshoptimizer:
+    raise ValueError('Reviewed surfaces require the fixed-border reducer')
 work = args.work.resolve()
 output = args.output.resolve() if args.output else work
 output.mkdir(parents=True, exist_ok=True)
@@ -91,7 +97,8 @@ if args.target_triangles is not None:
 if ratio < 1 and args.meshoptimizer:
     from blender_stadium_reduction import reduce
     report['border_reduction'] = reduce(shell,args.target_triangles,output,str(args.node),str(args.meshoptimizer),
-        args.floor_underlay_material,args.polygon_python,args.polygon_modules)
+        args.floor_underlay_material,args.polygon_python,args.polygon_modules,args.protect_surface_material,
+        [json.loads(rule) for rule in args.preserve_surface_rule])
 elif ratio < 1:
     modifier = shell.modifiers.new('Mobile shell reduction', 'DECIMATE')
     modifier.ratio = ratio

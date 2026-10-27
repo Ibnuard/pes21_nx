@@ -31,7 +31,7 @@ class ManagerLeagueDummyTests(unittest.TestCase):
         profile=(work/'SaveData/manager-league-profile-v2.dat').read_bytes()
         self.assertNotIn(b'Secret-Password-27',profile)
 
-    def test_failed_purchase_preserves_wallet_and_save(self):
+    def test_interrupted_paid_purchase_requires_recovery(self):
         work=self.work/'shopfail';work.mkdir()
         subprocess.run([str(self.exe),'shopfail'],cwd=work,check=True,capture_output=True,timeout=20)
 

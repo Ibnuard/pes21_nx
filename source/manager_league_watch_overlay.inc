@@ -183,3 +183,19 @@ static void md_watch_emit(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,
   md_watch_stats(ui,v,verts,quads);
   md_watch_event(ui,v,verts,quads);
 }
+static void md_watch_touchline(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  ml_ui_rect(ui,0,0,1,.925f,.015f,.035f,.09f,.72f,-1,0,1,verts,quads);
+  ml_ui_panel(ui,"MATCH TOUCHLINE",ML_HEADER_MATCH,.105f,.176f,.790f,.710f,0,verts,quads);
+  char title[96];snprintf(title,sizeof(title),"%.32s  %s  %.32s",v->home,v->score,v->away);
+  fd_center_text(ui,title,.125f,.281f,.750f,.0278f,-2,verts,quads);
+  fd_center_text(ui,"RECORDED MATCH EVENTS - NEWEST FIRST",.125f,.318f,.750f,.021f,-3,verts,quads);
+  for(uint32_t i=0;i<v->touchline_count;i++) {
+    MlViewRow row={0};const MdRow *r=&v->touchline[i];
+    snprintf(row.label,sizeof(row.label),"%s",r->label);snprintf(row.detail,sizeof(row.detail),"%s",r->detail);
+    snprintf(row.value,sizeof(row.value),"%s",r->value);row.badge=r->badge;row.enabled=1;
+    ml_ui_row(ui,&row,.125f,.352f+i*.090f,.750f,.080f,r->selected,0,verts,quads);
+  }
+  if(!v->touchline_count)fd_center_text(ui,"KICKOFF - THE MATCH IS GETTING STARTED",.125f,.528f,.750f,.029f,-3,verts,quads);
+  char range[48];snprintf(range,sizeof(range),"%u-%u OF %u EVENTS",v->touchline_count ? v->touchline_first+1 : 0,v->touchline_first+v->touchline_count,v->touchline_total);
+  fd_center_text(ui,range,.125f,.849f,.750f,.021f,-3,verts,quads);
+}

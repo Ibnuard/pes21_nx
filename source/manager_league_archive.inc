@@ -32,7 +32,8 @@ static int read_legacy(const char *path,MdSave *out) {
   FILE *f=fopen(path,"rb");int ok=f && fread(old,1,sizeof(*old),f)==sizeof(*old) && fgetc(f)==EOF;
   if(f)fclose(f);
   if(!ok || old->magic!=MD_MAGIC || old->version!=1 || old->bytes!=sizeof(*old) ||
-     old->checksum!=record_hash(old,sizeof(*old),offsetof(MdSaveV1,checksum))) {free(old);return 0;}
+     old->checksum!=record_hash(old,sizeof(*old),offsetof(MdSaveV1,checksum)) ||
+     (old->purchased_mask&~MD_LEGACY_PURCHASES)) {free(old);return 0;}
   memset(out,0,sizeof(*out));
   memcpy(out,old,offsetof(MdSaveV1,fixtures));
   out->version=2;out->bytes=sizeof(*out);out->week_id=1;out->day_ms=MD_LEGACY_DAY_MS;
@@ -51,17 +52,21 @@ static int file_exists(const char *path) {
 static void archive_path(char path[96],uint32_t week) {
   snprintf(path,96,"SaveData/manager-league-week-%04u.dat",week);
 }
-static int archive_valid(const MdArchive *a) {
-  if(a->magic!=0x4d4c4132u || a->version!=2 || a->bytes!=sizeof(*a) ||
-     a->checksum!=record_hash(a,sizeof(*a),offsetof(MdArchive,checksum)) ||
-     !manager_dummy_valid(&a->save) || !a->save.joined)return 0;
-  /* Profile validation depends only on these three account bindings. Never
-   * replace the active season to inspect a historical immutable record. */
+static int account_pair_valid(const MdSave *s,const MdProfile *p) {
+  if(!manager_dummy_valid(s))return 0;
+  /* Inspect another immutable record without replacing the active season. */
   uint32_t seed=md.seed,club=md.club,balance=md.balance;
-  md.seed=a->save.seed;md.club=a->save.club;md.balance=a->save.balance;
-  int ok=profile_valid(&a->players);
+  md.seed=s->seed;md.club=s->club;md.balance=s->balance;
+  int ok=profile_valid(p);
   md.seed=seed;md.club=club;md.balance=balance;return ok;
 }
+static int archive_pair_valid(const MdArchive *a) {
+  if(a->magic!=0x4d4c4132u || a->version!=2 || a->bytes!=sizeof(*a) ||
+     a->checksum!=record_hash(a,sizeof(*a),offsetof(MdArchive,checksum)) ||
+     !account_pair_valid(&a->save,&a->players))return 0;
+  return 1;
+}
+static int archive_valid(const MdArchive *a) {return archive_pair_valid(a) && a->save.joined;}
 static int archive_read(const char *path,MdArchive *out) {
   FILE *f=fopen(path,"rb");if(!f)return 0;
   int ok=fread(out,1,sizeof(*out),f)==sizeof(*out) && fgetc(f)==EOF;fclose(f);
@@ -113,6 +118,6 @@ static int history_select(uint32_t week) {
   history_week=week;focus=schedule_day=0;timeline_serial++;return 1;
 }
 int manager_dummy_history_select(uint32_t week) {
-  pthread_mutex_lock(&md_mutex);int ok=authenticated && page==MD_SCHEDULE && history_select(week);
+  pthread_mutex_lock(&md_mutex);int ok=authenticated && (page==MD_SCHEDULE || page==MD_TEAM_HISTORY) && history_select(week);
   pthread_mutex_unlock(&md_mutex);return ok;
 }

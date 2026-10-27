@@ -11,6 +11,38 @@ import json
 from pathlib import Path
 
 
+def signal_foundation_quads(recipe):
+    """Project-authored underground completion of two measured apron gaps.
+
+    This is deliberately distinct from unchanged source-face restoration.
+    The floor is below the camera exclusion and outside its horizontal box;
+    it never fills the protected playing surface or moves an original face.
+    """
+    import numpy as np
+    from stadium_geometry import overlaps_pitch
+    expected=[dict(minimum_x_m=-30.,maximum_x_m=-14.,minimum_z_m=40.01,maximum_z_m=44.5),
+              dict(minimum_x_m=14.,maximum_x_m=30.,minimum_z_m=40.01,maximum_z_m=44.5)]
+    if (recipe.get('key')!='SignalIdunaPark' or recipe.get('kind')!='authored_apron_foundation' or
+            recipe.get('plane_m')!=-.6 or recipe.get('quads')!=expected):
+        raise ValueError('Unreviewed Signal Iduna foundation bounds')
+    result=[]
+    for q in expected:
+        x0,x1=q['minimum_x_m'],q['maximum_x_m'];z0,z1=q['minimum_z_m'],q['maximum_z_m']
+        points=[[x0,-.6,z0],[x0,-.6,z1],[x1,-.6,z1],[x1,-.6,z0]]
+        uv=[(0.,0.),(0.,1.),(1.,1.),(1.,0.)]
+        for ids in ((0,1,2),(0,2,3)):
+            tri=np.array([points[i] for i in ids])
+            if overlaps_pitch(tri,58.,40.):
+                raise ValueError('Foundation overlaps the protected camera/pitch box')
+            result.append(dict(positions=tri.tolist(),normal=[0.,1.,0.],
+                               uv=[uv[i] for i in ids],source_triangle=None,
+                               winding_flipped=False))
+    return result,dict(kind='project_authored_underground_foundation',triangles=4,
+        plane_m=-.6,protected_half_x_m=58.,protected_half_z_m=40.,
+        camera_box_bottom_clearance_m=.1,quads=expected,
+        policy_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+
+
 def clip_floor_triangles(positions, indices, *, plane_m, expected_source_triangles,
                         protected_half_x_m=58., protected_half_z_m=40.):
     """Clip only an owned planar underground floor, preserving its outline.

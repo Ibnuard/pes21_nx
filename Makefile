@@ -62,6 +62,9 @@ DIAGNOSTICS ?= 0
 PERF_TRACE ?= 0
 NEAR_CAMERA_TRACE ?= 0
 STARTUP_RENDER_AUDIT ?= 0
+# The current Manager front-end is a local fixture preview. Set to 0 for a
+# connected deployment so its users cannot advance an authoritative clock.
+MANAGER_LEAGUE_DEV_CLOCK ?= 1
 # Inter Miami original-ID/MLS integration is part of the stable runtime.
 # Keep the variable as an opt-out build switch for rollback and bisecting.
 PES_EXPERIMENT_INTER_MIAMI ?= 1
@@ -89,6 +92,7 @@ CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) $
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -DNDEBUG \
 			-DPES_NX_VERSION=\"$(APP_VERSION)\"
+CFLAGS += -DMANAGER_LEAGUE_DEV_CLOCK=$(MANAGER_LEAGUE_DEV_CLOCK)
 
 ifneq ($(strip $(LINK_BUILD_ID)),)
 CFLAGS	+=	-DPESNX_BUILD_ID=\"$(LINK_BUILD_ID)\"

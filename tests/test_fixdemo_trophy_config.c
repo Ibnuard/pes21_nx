@@ -251,6 +251,10 @@ int main(int argc, char **argv) {
     assert(!strcmp(previous, stale));
     assert(strstr(current, "revision=v60 app=test-app build=" PESNX_BUILD_ID));
     assert(strstr(current, "marker absent") && !strstr(current, "v49"));
+  } else if (!strcmp(test,"production-archive")) {
+    package();assert(remove("trophy-canary.txt")==0);
+    assert(fixdemo_trophy_config_bootstrap(2,NULL));accepted();
+    assert(fopen("trophy-canary.txt","rb")==NULL);
   } else if (!strcmp(test, "valid-and-abi")) {
     package();
     assert(fixdemo_trophy_config_bootstrap(2, NULL));

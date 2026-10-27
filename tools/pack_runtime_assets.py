@@ -20,6 +20,7 @@ FOLDERS = {"CupLogos": (".png", 2_000_000),
            "LeagueLogos": (".png", 2_000_000),
            "Commentary": (".nxcp", 1_048_576),
            "Animations": (".nxra", 524_288),
+           "ManagerLeague": (".png", 65_536),
            "Scoreboards": (".nxsb", 2_000_000)}
 PLAYER_AUDIO_PREFIX = "commentary/players-v59"
 PLAYER_SEED = "commentary/players-v53.nxcp"
@@ -49,6 +50,12 @@ def asset_limit(name: str) -> int:
         return 8 * 1024 * 1024
     if key == REFEREE_TOKEN:
         return 128
+    if key == "runtime/trophy.cfg":
+        return 512
+    if key == "audio/manager-league-pcm-v96.acb":
+        return 16 * 1024 * 1024
+    if key == "audio/trophy-user-hca-v100.acb":
+        return 2 * 1024 * 1024
     if key == PLAYER_AUDIO_PREFIX + "/catalog-id.txt":
         return 64
     parts = key.split("/")
@@ -82,6 +89,9 @@ def collect(root: Path) -> dict[str, Path]:
             if not path.is_file() or path.suffix.lower() != suffix:
                 continue
             add(path, folder + "/" + path.name)
+    for name in ('Audio/manager-league-pcm-v96.acb','Audio/trophy-user-hca-v100.acb','Runtime/trophy.cfg'):
+        path=base/name
+        if path.is_file():add(path,name)
     audio = base / "Commentary/players-v59/audio"
     if audio.is_dir():
         for path in sorted(audio.iterdir()):

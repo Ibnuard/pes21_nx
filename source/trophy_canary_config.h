@@ -10,6 +10,7 @@
 #define PESNX_TROPHY_CPK_SHA256 "3c2bc88b75211f08356f777d56b11e3430d3ea81815b4d165e35418da634c9a2"
 #define PESNX_TROPHY_PAK_SHA256 "18ac86c560e360b8a7f3caf4b4cff1200f0ad6a03ce0d4b92ed3976e12301d31"
 #define PESNX_TROPHY_MARKER_HEADER "PESNX_TROPHY_CANARY_V1\n"
+#define PESNX_TROPHY_RUNTIME_HEADER "PESNX_TROPHY_RUNTIME_V1\n"
 
 typedef struct {
   char cpk_sha256[65];
@@ -34,8 +35,12 @@ static inline int trophy_canary_parse(const char *text, size_t length,
   if (!output) return 0;
   memset(output, 0, sizeof(*output));
   static const char *const labels[] = {"cpk_sha256=", "manifest_sha256=", "pak_sha256="};
-  const size_t header = sizeof(PESNX_TROPHY_MARKER_HEADER) - 1u;
-  if (!text || length < header || memcmp(text, PESNX_TROPHY_MARKER_HEADER, header)) return 0;
+  size_t header = sizeof(PESNX_TROPHY_MARKER_HEADER) - 1u;
+  if(!text)return 0;
+  if(length>=sizeof(PESNX_TROPHY_RUNTIME_HEADER)-1u &&
+     !memcmp(text,PESNX_TROPHY_RUNTIME_HEADER,sizeof(PESNX_TROPHY_RUNTIME_HEADER)-1u))
+    header=sizeof(PESNX_TROPHY_RUNTIME_HEADER)-1u;
+  else if(length<header || memcmp(text,PESNX_TROPHY_MARKER_HEADER,header))return 0;
   TrophyCanaryConfig parsed = {0};
   char *fields[] = {parsed.cpk_sha256, parsed.manifest_sha256, parsed.pak_sha256};
   size_t cursor = header;

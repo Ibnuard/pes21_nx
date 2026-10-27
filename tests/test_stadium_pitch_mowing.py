@@ -16,7 +16,92 @@ from stadium_lite_preview import host_math
 
 
 class StadiumPitchMowingTests(unittest.TestCase):
-    def test_owned_old_trafford_edges_are_inside_retained_white_paint(self):
+    def test_signal_iduna_goal_area_has_complete_near_uniform_stripes(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        build_and_run(cc,host_math()+r'''
+int main() {
+ nxStadiumProfile=8;const vec3 grass(.033,.09,.009);
+ const float edges[]={0,3622.f/6,3622.f*2/6,3622.f*3/6,3622.f*4/6,
+  3622.f*5/6,3622,4173.85f,4725.7f,5255.2f};
+ float narrowest=10000,widest=0;
+ for(int i=0;i<10;i++) {
+  for(int side=-1;side<=1;side+=2) {
+   float x=edges[i]*side;
+   assert(fabsf(nxMowingSignalIduna(x))<.0002f);
+   assert(fabsf(nxPitchMowing(grass,vec3(x-3,1700,0)).g-
+                 nxPitchMowing(grass,vec3(x+3,1700,0)).g)>.024f);
+  }
+  if(i) {float w=edges[i]-edges[i-1];narrowest=min(narrowest,w);widest=max(widest,w);}
+ }
+ // All nine strips per half have a usable interior, including behind goal area.
+ assert(widest/narrowest<1.141f);
+ for(int i=1;i<10;i++)for(int side=-1;side<=1;side+=2) {
+  float center=side*(edges[i]+edges[i-1])*.5f;
+  assert(fabsf(nxMowingSignalIduna(center-100))>.99f);
+  assert(nxMowingSignalIduna(center-100)==nxMowingSignalIduna(center+100));
+ }
+}
+''')
+
+    def test_camp_nou_has_small_center_then_native_circle_edge(self):
+        cc=shutil.which('g++')
+        if not cc:self.skipTest('Host C++ compiler unavailable')
+        build_and_run(cc,host_math()+r'''
+int main() {
+ const vec2 center(1.443f,.962f);
+ assert(nxMowingCampNou(center)>.99f);
+ // A small central disc, second edge at retained native center-circle paint,
+ // followed by equal radial spacing; no band edge halfway through that line.
+ const float radii[]={300.4f,901.2f,1502.f,2102.8f,2703.6f,3304.4f};
+ for(float radius:radii)for(int degrees=0;degrees<360;degrees+=5) {
+  float a=degrees*3.14159265f/180;
+  const vec2 direction(cosf(a),sinf(a));
+  assert(fabsf(nxMowingCampNou(center+direction*radius))<.0002f);
+  assert(nxMowingCampNou(center+direction*(radius-3))*
+         nxMowingCampNou(center+direction*(radius+3))<-.99f);
+ }
+ assert(fabsf(nxMowingCampNou(center+vec2(901.2f,0)))<.0002f);
+}
+''')
+
+    def test_owned_camp_nou_second_ring_lands_on_native_circle_paint(self):
+        import json
+        path=ROOT/'local-debug/day-roof-grass-v1/pitch-mesh/Assets/bg_lighting_AM1/Meshes/st029_pitch_2.gltf'
+        textures=ROOT/'local-debug/pitch-recreate/verify-final/PesMobile/Content/Assets/bg_lighting_AM1/Textures'
+        if not path.is_file() or not all((textures/('pitch_'+side+'_bsm_alp.uexp')).is_file() for side in ('l','r')):
+            self.skipTest('Optional retained native pitch mesh/paint fixtures unavailable')
+        import numpy as np
+        from audit_stadium_optimization import accessor
+        from cooked_texture import Texture
+        document=json.loads(path.read_text())
+        blob=(path.parent/document['buffers'][0]['uri']).read_bytes()
+        native=[]
+        for slot,side in ((3,'l'),(4,'r')):
+            primitive=next(p for p in document['meshes'][0]['primitives'] if p['material']==slot)
+            positions=accessor(document,blob,primitive['attributes']['POSITION'])[:,[0,2]]
+            uv=accessor(document,blob,primitive['attributes']['TEXCOORD_0'])
+            triangles=accessor(document,blob,primitive['indices']).reshape(-1,3)
+            pixels=np.asarray(Texture(textures/('pitch_'+side+'_bsm_alp.uexp')).decode())[...,:3]
+            paint=(pixels.min(2)>=78)&(pixels.max(2)-pixels.min(2)<=48)
+            for triangle in triangles:
+                matrix=np.vstack((positions[triangle].T,np.ones(3)))
+                if abs(np.linalg.det(matrix))>1e-10:
+                    native.append((np.linalg.inv(matrix),uv[triangle],paint))
+        # Retained material paint is smaller than a regulation 9.15 m circle.
+        # Check every degree by native triangle interpolation, not an affine fit.
+        for degrees in range(360):
+            angle=degrees*np.pi/180
+            point=[.01443+np.cos(angle)*9.012,.00962+np.sin(angle)*9.012,1]
+            hits=[]
+            for inverse,uv,paint in native:
+                bary=inverse@point
+                if min(bary)<-.0000001:continue
+                u,v=bary@uv;height,width=paint.shape
+                hits.append(paint[min(int(v*height),height-1),min(int(u*width),width-1)])
+            self.assertTrue(any(hits),'Ring misses retained white paint at degree '+str(degrees))
+
+    def test_owned_signal_and_old_trafford_anchors_are_inside_retained_white_paint(self):
         import json
         path=ROOT/'local-debug/day-roof-grass-v1/pitch-mesh/Assets/bg_lighting_AM1/Meshes/st029_pitch_2.gltf'
         textures=ROOT/'local-debug/pitch-recreate/verify-final/PesMobile/Content/Assets/bg_lighting_AM1/Textures'
@@ -103,26 +188,17 @@ int main() {
         build_and_run(cc,host_math()+r'''
 int main() {
  const vec3 grass(.03,.09,.01);const int ids[]={0,1,8,9,12};
- const int expected[]={18,20,12,22,20};
+ const int expected[]={18,20,18,22,20};
  for(int i=0;i<5;i++) {
   nxStadiumProfile=ids[i];int edges=0;float last=0;
   for(int x=-5249;x<5250;x+=2) {
    // Remove shared wear by reading the authored band field independently.
     float mid=ids[i]==9?8:ids[i]==1?7:6,box=2;
-   float band=ids[i]==8?nxMowingBand(x/1750.f+.25f):ids[i]==12?nxMowingOldTrafford(x):nxMowingAligned(x,mid,box);
+   float band=ids[i]==8?nxMowingSignalIduna(x):ids[i]==12?nxMowingOldTrafford(x):nxMowingAligned(x,mid,box);
    if(last*band<0)edges++;if(fabsf(band)>.01f)last=band;
   }
   assert(edges==expected[i]-1);
-  if(ids[i]==8) {
-   const float width=875.f;float last_edge=-5250;
-   for(float x=-5250+width;x<=5251;x+=width) {
-    float period=width*2;
-    assert(fabsf(nxMowingBand(x/period+.25f))<.0001f);
-    assert(fabsf(x-last_edge-width)<.001f);last_edge=x;
-   }
-   continue;
-  }
-  if(ids[i]==12)continue; // measured native paint bounds checked above
+  if(ids[i]==8 || ids[i]==12)continue; // measured native paint bounds checked separately
   float mid=ids[i]==9?8:ids[i]==1?7:6,box=2;
   const float anchors[]={-5250,-4700,-3600,0,3600,4700,5250};
   for(float x:anchors)assert(fabsf(nxMowingAligned(x,mid,box))<.0001f);
@@ -144,7 +220,7 @@ int main() {
  for(int id:ids) {
   nxStadiumProfile=id;
   for(int x=-5000;x<=5000;x+=123)for(int y=-3200;y<=3200;y+=131) {
-   float band=id==9?nxMowingAligned(x,8,2):id==8?nxMowingBand(x/1750.f+.25f):id==12?nxMowingOldTrafford(x):id==2?(nxMowingAligned(x,3,1)+nxMowingBand(y/1700.f))*.5f:id==13?nxMowingBand(length(vec2(x,y))/1700.f):id==1?nxMowingAligned(x,7,2):nxMowingAligned(x,6,2);
+   float band=id==9?nxMowingAligned(x,8,2):id==8?nxMowingSignalIduna(x):id==12?nxMowingOldTrafford(x):id==2?(nxMowingAligned(x,3,1)+nxMowingBand(y/1700.f))*.5f:id==13?nxMowingCampNou(vec2(x,y)):id==1?nxMowingAligned(x,7,2):nxMowingAligned(x,6,2);
    const vec3 p(x,y,0),g=nxPitchMowing(grass,p);float clean=.09f*(1+.15f*band);
    assert(clean-g.g>=-.000001f && clean-g.g<=.010801f);
    assert(fabsf(g.r/g.g-.033f/.09f)<.000001f && fabsf(g.b/g.g-.009f/.09f)<.000001f);
@@ -156,7 +232,7 @@ int main() {
  // Ring geometry stays circular; patch modulation does not redefine its path.
  for(int radius=100;radius<5000;radius+=100)for(int angle=0;angle<360;angle+=15) {
   float a=angle*3.14159265f/180;
-  assert(fabsf(nxMowingBand(length(vec2(cosf(a)*radius,sinf(a)*radius))/1700.f)-nxMowingBand(radius/1700.f))<.0001f);
+  assert(fabsf(nxMowingCampNou(vec2(1.443f+cosf(a)*radius,.962f+sinf(a)*radius))-nxMowingBand(radius/1201.6f))<.0001f);
  }
 }
 ''')
@@ -351,7 +427,7 @@ int main() {
             self.assertNotIn(forbidden, helper)
         # One distance operation is confined to Camp Nou's uniform branch.
         self.assertEqual(helper.count('length('), 1)
-        self.assertIn('else band=nxMowingBand(length(world.xy)/1700.0)', helper)
+        self.assertIn('else band=nxMowingCampNou(world.xy)', helper)
         self.assertIn('fwidth(coordinate)', helper)
 
 

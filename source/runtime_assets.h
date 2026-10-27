@@ -131,4 +131,10 @@ done:
   fclose(f);
   return bytes;
 }
+/* Reviewed production assets prefer the consolidated copy. Legacy loose
+ * installs remain readable while upgrading; no extraction is performed. */
+static inline void *nx_asset_read_production(const char *path,size_t max_bytes,size_t *size) {
+  void *data=nx_asset_read_archive(NX_ASSET_ARCHIVE,path,max_bytes,size);
+  return data ? data : nx_asset_read(path,max_bytes,size);
+}
 #endif

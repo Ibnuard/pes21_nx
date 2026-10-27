@@ -7,7 +7,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
-    "missing-marker", "valid-and-abi", "baseline", "marker-invalid",
+    "missing-marker", "valid-and-abi", "production-archive", "baseline", "marker-invalid",
     "marker-open", "marker-read", "marker-close",
     *(f"hash-mismatch-{i}" for i in range(4)),
     "asset-open", "asset-read", "asset-close", "asset-empty", "asset-size",
@@ -61,6 +61,14 @@ def bootstrap_executable(tmp_path_factory):
 def test_bootstrap_actual_include(bootstrap_executable, tmp_path, scenario):
     (tmp_path / "LooseCpk").mkdir()
     (tmp_path / "PesMobile/Content/Paks").mkdir(parents=True)
+    if scenario=='production-archive':
+        import sys
+        sys.path.insert(0,str(ROOT/'tools'))
+        from pack_runtime_assets import pack_entries
+        config=('PESNX_TROPHY_RUNTIME_V1\ncpk_sha256=3c2bc88b75211f08356f777d56b11e3430d3ea81815b4d165e35418da634c9a2\n'
+            'manifest_sha256=123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0\n'
+            'pak_sha256=18ac86c560e360b8a7f3caf4b4cff1200f0ad6a03ce0d4b92ed3976e12301d31\n').encode()
+        pack_entries({'Runtime/trophy.cfg':config},tmp_path/'FootballNX.assets')
     result = subprocess.run(
         [str(bootstrap_executable["explicit"]), scenario], cwd=tmp_path,
         capture_output=True, text=True, timeout=15,

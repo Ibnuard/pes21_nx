@@ -32,7 +32,8 @@ def test_quiet_full_recording_and_native_music_routing():
     bank,audio,report=local_bank()
     sealed=ROOT/'local-debug/presentation-v90/music-01/Audio/trophy-user-pcm-v90.acb'
     assert bank==music.build_bank(sealed.read_bytes(),audio)
-    assert (ROOT/'source/trophy_audio_catalog.h').read_text()==music.catalog(bank,audio)
+    # Historical v94 is sealed after the v97 per-cue level adjustment.
+    assert (FOLDER/'trophy_audio_catalog.h').read_text()==music.catalog(bank,audio)
     assert hashlib.sha256(bank).hexdigest()==report['bank_sha256']
     assert report['independent_decoded_samples']==688128 and report['gain_db']==-12
     assert report['snr_db']>37 and report['decoded_peak']<.26 and not report['clipped_samples']
@@ -44,10 +45,13 @@ def test_quiet_full_recording_and_native_music_routing():
 
 
 def test_playback_succeeds_without_allocating_a_wave_pool(tmp_path):
-    bank,_,_=local_bank()
-    old='static void *nx_asset_read(const char *p,size_t limit,size_t *bytes){(void)p;(void)limit;*bytes=0;return NULL;}'
+    local_bank()
+    # The production reader pins the current bank, not the sealed historical one.
+    from test_trophy_audio_v100 import local_bank as current_bank, FOLDER as current_folder
+    current_bank()
+    old='static void *nx_asset_read_production(const char *p,size_t limit,size_t *bytes){(void)p;(void)limit;*bytes=0;return NULL;}'
     replacement=r'''static unsigned reads;
-static void *nx_asset_read(const char *p,size_t limit,size_t *bytes){
+static void *nx_asset_read_production(const char *p,size_t limit,size_t *bytes){
  assert(!strcmp(p,TROPHY_AUDIO_ASSET) && limit==TROPHY_AUDIO_MAX_BANK_BYTES);++reads;
  FILE *f=fopen(BANK_PATH,"rb");assert(f);fseek(f,0,SEEK_END);*bytes=ftell(f);rewind(f);
  void *data=malloc(*bytes);assert(data && fread(data,1,*bytes,f)==*bytes);fclose(f);return data;}
@@ -76,7 +80,9 @@ int main(void){
  assert(reads==1&&mounts==1&&plays==2&&!pool_calls);
  assert(trophy_audio_stop(&fixdemo_trophy_audio));free(fixdemo_audio_bank);return 0;}
 '''
-    compile_run(tmp_path,'#define BANK_PATH '+json.dumps((FOLDER/music.ASSET).as_posix())+'\n'+code)
+    from stage_trophy_gain_music import V100
+    current_asset=V100.asset
+    compile_run(tmp_path,'#define BANK_PATH '+json.dumps((current_folder/current_asset).as_posix())+'\n'+code)
 
 
 def native_headers_and_packets():

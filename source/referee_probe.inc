@@ -174,7 +174,7 @@ static void referee_probe_set_display(int visible) {
 
 static void referee_probe_note(const char *text) {
   scene_runtime_note("referee",text);
-#ifndef PESNX_REFEREE_PROBE_HOST_TEST
+#if defined(DIAGNOSTICS) && !defined(PESNX_REFEREE_PROBE_HOST_TEST)
   FILE *file = fopen("referee-probe.status", "w");
   if (file) { fputs(text, file); fputc('\n', file); fclose(file); }
 #else
@@ -805,12 +805,8 @@ static int referee_probe_kickoff_contract(so_module *module) {
   return 1;
 }
 static void install_referee_probe(so_module *module) {
-  size_t length = 0;
-  char *token = nx_asset_read("referee-probe.txt", 128u, &length);
-  const int enabled = token && length >= 22u &&
-      !memcmp(token, "PESNX_REFEREE_PROBE_V1", 22u);
-  free(token);
-  if (!enabled) return;
+  /* Production installation is gated by the existing native ABI and valid
+   * motion bank below; an experimental enable-token is no longer required. */
   const char *create_symbol =
       "_ZN5match5Human11CreateModelERKN4draw4load11HumanLoadIdE";
   if (!so_try_find_addr_rx(module, create_symbol)) return;
@@ -941,7 +937,7 @@ static void install_referee_probe(so_module *module) {
 #undef REFEREE_BIND
   if (stadium_canary_installed) referee_loaded_original=stadium_loaded_canary;
   size_t animation_size=0;
-  referee_animation_data=nx_asset_read("Animations/referee.nxra",REFEREE_ANIMATION_LIMIT,&animation_size);
+  referee_animation_data=nx_asset_read_production("Animations/referee.nxra",REFEREE_ANIMATION_LIMIT,&animation_size);
   if (!referee_animation_bind(&referee_animation_bank,referee_animation_data,animation_size)) {
     free(referee_animation_data);referee_animation_data=NULL;
     referee_probe_note("Referee v54 requires a valid Animations/referee.nxra bank; disabled.");

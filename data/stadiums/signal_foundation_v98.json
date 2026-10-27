@@ -1,0 +1,9 @@
+{
+  "key": "SignalIdunaPark",
+  "kind": "authored_apron_foundation",
+  "plane_m": -0.6,
+  "quads": [
+    {"minimum_x_m": -30.0, "maximum_x_m": -14.0, "minimum_z_m": 40.01, "maximum_z_m": 44.5},
+    {"minimum_x_m": 14.0, "maximum_x_m": 30.0, "minimum_z_m": 40.01, "maximum_z_m": 44.5}
+  ]
+}

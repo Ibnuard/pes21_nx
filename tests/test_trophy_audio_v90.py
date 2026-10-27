@@ -162,7 +162,7 @@ def test_exact_audible_native_route_has_no_double_full_volume_bus_send():
     assert [(row["bus_name"], row["gain"]) for row in result["bus_sends"]] == [("MasterOut", 0), ("BUS8", 1)]
     assert not result["parallel_full_volume_master_and_bus8_sends"]
     audio = (ROOT / "source/fixdemo_trophy_audio.inc").read_text()
-    assert "TROPHY_AUDIO_MAX_BANK_BYTES" in audio and "own-cue-gain=-12dB" in audio
+    assert "TROPHY_AUDIO_MAX_BANK_BYTES" in audio and "TROPHY_AUDIO_GAIN_DB_X100" in audio
     assert "SetCategoryVolume" not in audio and "SetGameOptionVolume" not in audio
 
 

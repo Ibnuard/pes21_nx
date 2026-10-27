@@ -175,7 +175,7 @@ def native_bodies():
 
 def test_actual_native_full_body_guards_and_unchanged_trophy_route():
     native_bodies()
-    text = (ROOT / "source/manager_league_audio_runtime.inc").read_text()
+    text = (ROOT / "tests/fixtures/manager_league_native_audio_v96.inc").read_text()
     assert "PlayBgm" not in text and "SetCategoryVolume" not in text
     assert "AllocateWaveVoicePool" in text and "SetGameOptionVolume" not in text
     assert "mla_native_play(mla_clips[clip].cue, handle, 0, 0, 0)" in text
@@ -255,7 +255,7 @@ static void *nx_asset_read(const char *n,uint32_t max,size_t *size) {
  FILE *f=fopen(BANK_PATH,"rb");assert(f);fseek(f,0,SEEK_END);*size=ftell(f);rewind(f);
  uint8_t *b=malloc(*size);assert(fread(b,1,*size,f)==*size);fclose(f);if(bad_bank)b[0]^=1;return b;
 }
-#include "manager_league_audio_runtime.inc"
+#include "fixtures/manager_league_native_audio_v96.inc"
 static int32_t mount_stub(void *p,uint32_t n,void *w,const char *s,int16_t *id){
  assert(p&&n==MLA_BANK_BYTES&&!w&&!s);++mounts;*id=9;return 0;}
 static int32_t play_stub(const char *n,uint64_t *h,int32_t a,int32_t b,uint32_t c){

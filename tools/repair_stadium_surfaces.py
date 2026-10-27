@@ -38,7 +38,7 @@ def run(config,manifest,work,keys):
         inputs={str(p):sha(p) for p in paths}
         for name in ('stadium_shell_fbx.py','blender_stadium_reduction.py','meshopt_stadium_reduce.mjs',
                      'stadium_atlas.py','optimize_stadium_shell.py','repair_stadium_apron.py',
-                     'stadium_apron_geometry.py','stadium_floor_underlay.py'):
+                     'stadium_apron_geometry.py','stadium_floor_underlay.py','stadium_surface_policy.py'):
             path=root/'tools'/name;inputs[str(path)]=sha(path)
         inputs[config['meshoptimizer']]=sha(config['meshoptimizer'])
         contract=hashlib.sha256(json.dumps(dict(inputs=inputs,row=row),sort_keys=True).encode()).hexdigest()
@@ -55,6 +55,8 @@ def run(config,manifest,work,keys):
         print('SURFACES',key,flush=True)
         underlays=[]
         for material in row.get('floor_underlay_materials',[]):underlays+=['--floor-underlay-material',material]
+        for material in row.get('protected_surface_materials',[]):underlays+=['--protect-surface-material',material]
+        for rule in row.get('source_face_rules',[]):underlays+=['--preserve-surface-rule',json.dumps(rule)]
         blender('stadium_shell_fbx.py',[source.parent,'--output',raw,'--target-triangles',row['triangle_budget'],
             '--crowd-profile',source,'--node',config['node'],'--meshoptimizer',config['meshoptimizer'],
             '--polygon-python',sys.executable,'--polygon-modules',config['polygon_modules'],*underlays],'rebuild')

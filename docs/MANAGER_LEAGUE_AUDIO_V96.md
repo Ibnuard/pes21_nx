@@ -1,5 +1,10 @@
 # Manager League native PCM audio candidate v96
 
+Historical rejected candidate. The v98 device journal reports that private
+WAVE voice-pool allocation returns null before bank mounting. The current
+[v99 output-buffer path](MANAGER_LEAGUE_AUDIO_V99.md) reuses these exact reviewed
+PCM bytes through the already audible AudioOut output, without a CRI pool.
+
 The v95 device journal admits each request but then returns `0x80000010`
 (retired handle), with no play position, by the first 100 ms observation. This
 includes the 21 second supporter bed and multi-second speech, not only the 77 ms

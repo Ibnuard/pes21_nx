@@ -1,3 +1,5 @@
+#include "match_preferences.h"
+#include "loading_popup.h"
 /* overlay.c -- small FPS counter drawn over the game's output
  *
  * Rendered from the eglSwapBuffers hook when config.show_fps is set, using a
@@ -1372,7 +1374,7 @@ static void prepare_main_menu_assets(int active) {
       master_league_pearl_v2_bin, master_league_pearl_v2_bin_end);
   uploaded &= upload_main_menu_png(gl.master_league_cards_tex,
       master_league_cards_v2_bin, master_league_cards_v2_bin_end);
-  { size_t size=0;uint8_t *bytes=nx_asset_read("ManagerLeague/unknown-club.png",65536u,&size);
+  { size_t size=0;uint8_t *bytes=nx_asset_read_production("ManagerLeague/unknown-club.png",65536u,&size);
     if(bytes){if(!upload_main_menu_png(gl.manager_unknown_club_tex,bytes,bytes+size))gl.manager_unknown_club_tex=0;free(bytes);}
     else gl.manager_unknown_club_tex=0;
   }
@@ -1857,6 +1859,7 @@ static int emit_gameplan_condition_arrow(float cx, float cy, float size,
 #include "league_overlay.inc"
 #include "frontdoor_overlay.inc"
 #include "manager_league_dummy_overlay.inc"
+#include "loading_popup_overlay.inc"
 #include "gameplan_panels.inc"
 #include "corner_tactics_overlay.inc"
 
@@ -4028,6 +4031,14 @@ static void overlay_render(void) {
           EFOOTBALL_FONT_STENCIL, verts + quads * 24);
       prematch_gameplan_white_text_quads += line_quads;
       quads += line_quads;
+      if(manager_dummy_plan_editor()) {
+        char cash[40];snprintf(cash,sizeof(cash),"NX CASH  %u",manager_dummy_cash());
+        const float cash_width=measure_efootball_line(cash,(int)strlen(cash),header_meta_gh,EFOOTBALL_FONT_BOLD);
+        line_quads=emit_efootball_line(cash,(int)strlen(cash),
+            half_x[side]+half_w-cash_width-.012f*screen_width,
+            header_y+.017f*screen_height,header_meta_gh,EFOOTBALL_FONT_BOLD,verts+quads*24);
+        prematch_gameplan_white_text_quads+=line_quads;quads+=line_quads;
+      }
       char stats[48];
       snprintf(stats, sizeof(stats), "SPIRIT %u  POWER %u",
                pes_controller_custom_prematch_gameplan_team_spirit(side),
@@ -7499,11 +7510,11 @@ static void overlay_render(void) {
       } else if (row == 0) {
         value = pes_controller_stadium_catalog_label(pes_controller_2p_prematch_hub_stadium_index());
       } else if (row == 1) {
-        value = pes_controller_stadium_is_day() ? "DAY" : "NIGHT";
+        value = nx_time_preference_label(pes_controller_stadium_time_preference());
       } else if (row == 2) {
-        value = nx_weather_label(pes_controller_stadium_weather());
+        value = pes_controller_stadium_weather_preference()==NX_WEATHER_RANDOM ? "RANDOM" : nx_weather_label(pes_controller_stadium_weather_preference());
       } else if (row == 3) {
-        value = pes_controller_stadium_season() ? "WINTER" : "SUMMER";
+        value = nx_season_preference_label(pes_controller_stadium_season_preference());
       } else if (row == 4) {
         static const char *const turf_options[3] = {"SHORT", "NORMAL", "LONG"};
         value = turf_options[pes_controller_stadium_turf_length() % 3u];
@@ -10053,6 +10064,9 @@ overlay_geometry_ready:
   // so mesa/nouveau's client-array streaming path is untested here and wedges
   // the GPU channel. Matching the engine's pattern avoids it.
   glBindBuffer(GL_ARRAY_BUFFER, gl.vbo);
+  static MasterLeagueRender loading_ui;
+  NxLoadingView loading_view;nx_loading_snapshot(&loading_view);
+  nx_loading_emit(&loading_ui,&loading_view,armTicksToNs(armGetSystemTick())/1000000u,verts,&quads);
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)quads * 24 * sizeof(GLfloat), verts, GL_DYNAMIC_DRAW);
   // The game can render the swap surface through a fixed 1024x576 backbuffer
   // even when pes21_nx.cfg advertises a 1280x720 window. Using the configured
@@ -11996,6 +12010,7 @@ overlay_geometry_ready:
 
 #undef ADD_SWITCH_HELPER
 
+  if(loading_ui.draw_count)master_league_draw(&loading_ui);
 overlay_restore:
   // Restores the complete engine layout, including its element buffer, without
   // re-querying or rebuilding each attribute. The read framebuffer stays native.

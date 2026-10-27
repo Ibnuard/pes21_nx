@@ -46,7 +46,8 @@ static inline void scene_runtime_begin(void) {
   }
   FILE *file=fopen("scene-runtime.log","wb");
   if (file) {
-    fputs("FootballNX scene v96 session\n",file);
+    fputs("FootballNX scene v100 session\n",file);
+    fputs("review v100: random climate; analog scroll; loading popup; consolidated production assets; trophy gain\n",file);
     fputs("review v96: local Login Register Logout; corrected Competition routes; centered pack selection and position badges; ten-minute fixtures with preserved legacy replays and weekly archive; scheduled LIVE badges; measured Old Trafford paint alignment; owned PCM WAVE mixer candidate\n",file);
     fputs("review v95: one-action welcome; centered single-club Manager plan; two-column Match Centre; saved league news; centered footer; possession and restart dot tape\n",file);
     fputs("review v95: sealed pack opening and separate full-aspect player reveal; shared grass wear; uniform Old Trafford/Signal strips; three-tone Etihad; optional BUS8 Manager audio candidate with separate status journal\n",file);

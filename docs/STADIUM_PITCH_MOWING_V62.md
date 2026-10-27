@@ -1,10 +1,13 @@
 # Stadium pitch mowing v62
 
-Current follow-up: [Old Trafford alignment v96](STADIUM_PITCH_ALIGNMENT_V96.md)
+Current follow-up: [Signal Iduna/Camp Nou alignment v98](STADIUM_PITCH_ALIGNMENT_V98.md)
+gives Signal Iduna eighteen nearly equal strips anchored to retained white
+paint, and aligns Camp Nou's second ring with the native center circle.
+[Old Trafford alignment v96](STADIUM_PITCH_ALIGNMENT_V96.md)
 supersedes its v95 14-strip grid with 20 nearly equal strips that meet the
 retained native paint. [Manager review v95](MANAGER_REVIEW_V95.md#pitch-follow-up)
-still defines the other stadium counts, shared green and wear. Signal Iduna
-retains its uniform 12 strips; other stadium patterns remain unchanged.
+still defines the other stadium counts, shared green and wear. Other stadium
+patterns remain unchanged.
 
 ## Stamford Bridge follow-up v94
 

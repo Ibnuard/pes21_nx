@@ -117,7 +117,7 @@ static int fixdemo_audio_native_play(void *context, uint64_t *handle) {
     if (fixdemo_audio_attempted_mount) return -1;
     fixdemo_audio_attempted_mount = 1u;
     size_t bytes = 0;
-    void *bank = nx_asset_read(TROPHY_AUDIO_ASSET, TROPHY_AUDIO_MAX_BANK_BYTES, &bytes);
+    void *bank = nx_asset_read_production(TROPHY_AUDIO_ASSET, TROPHY_AUDIO_MAX_BANK_BYTES, &bytes);
     if (!bank || bytes != TROPHY_AUDIO_BYTES ||
         trophy_audio_hash(bank, (uint32_t)bytes) != TROPHY_AUDIO_FNV) {
       free(bank);
@@ -148,9 +148,9 @@ static int fixdemo_audio_native_play(void *context, uint64_t *handle) {
       fixdemo_trophy_note("music-bank accepted-unexpected-id cached-without-playback");
       return -1;
     }
-    char message[112];
-    snprintf(message, sizeof(message), "music-bank mounted=%d bytes=%u exact-user-HCA-v94 gain-db-x100=-1200",
-             fixdemo_audio_mount_id, (uint32_t)bytes);
+    char message[144];
+    snprintf(message, sizeof(message), "music-bank mounted=%d bytes=%u exact-user-HCA-v100 gain-db-x100=%d baked-once unchanged-native-route",
+             fixdemo_audio_mount_id, (uint32_t)bytes, TROPHY_AUDIO_GAIN_DB_X100);
     fixdemo_trophy_note(message);
   }
   if (fixdemo_audio_mount_id < 0 ||
@@ -239,5 +239,9 @@ static void fixdemo_trophy_audio_install(so_module *module) {
   fixdemo_audio_wave_pool_allocate = (void *)methods[8];
   fixdemo_trophy_audio.ops = (TrophyAudioOps){fixdemo_audio_native_play,
       fixdemo_audio_native_stop, fixdemo_audio_note, NULL};
-  fixdemo_trophy_note("music-optional user-HCA-v94 own-cue-gain=-12dB existing-native-pool ABI-bound");
+  char message[144];
+  snprintf(message, sizeof(message),
+      "music-optional user-HCA-v100 own-cue-gain-db-x100=%d baked-once existing-native-pool ABI-bound",
+      TROPHY_AUDIO_GAIN_DB_X100);
+  fixdemo_trophy_note(message);
 }

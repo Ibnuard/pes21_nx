@@ -1,5 +1,6 @@
 /* Boot-only opt-in and bounded lifecycle journal. No gameplay polling here. */
 #include "trophy_canary_config.h"
+#include "runtime_assets.h"
 #include <errno.h>
 #include <switch/crypto/sha256.h>
 
@@ -7,7 +8,7 @@
 #define PESNX_BUILD_ID "unavailable"
 #endif
 
-const char pesnx_trophy_canary_capability[] = "PESNX trophy runtime canary v1";
+const char pesnx_trophy_canary_capability[] = "PESNX trophy production runtime v1";
 static char fixdemo_trophy_verified_elf_sha256[65];
 static int fixdemo_trophy_canary_validated;
 static uint32_t fixdemo_trophy_note_count;
@@ -200,9 +201,11 @@ static int fixdemo_trophy_config_bootstrap(int full_loose_mode, const char *base
     fixdemo_trophy_status(detail);
     return 0;
   }
+  size_t production_length=0;
+  char *production=nx_asset_read_archive(NX_ASSET_ARCHIVE,"Runtime/trophy.cfg",512u,&production_length);
   errno = 0;
-  FILE *marker = fopen("trophy-canary.txt", "rb");
-  if (!marker) {
+  FILE *marker = production ? NULL : fopen("trophy-canary.txt", "rb");
+  if (!marker && !production) {
     const int error = errno;
     fixdemo_trophy_io_reject(error == ENOENT ? "marker absent" : "marker open failed",
                             "trophy-canary.txt", error);
@@ -210,11 +213,12 @@ static int fixdemo_trophy_config_bootstrap(int full_loose_mode, const char *base
   }
   char text[512];
   errno = 0;
-  const size_t length = fread(text, 1, sizeof(text), marker);
-  const int read_ok = !ferror(marker);
+  const size_t length = production ? production_length : fread(text, 1, sizeof(text), marker);
+  if(production){memcpy(text,production,length);free(production);}
+  const int read_ok = !marker || !ferror(marker);
   int error = errno;
   errno = 0;
-  const int close_ok = fclose(marker) == 0;
+  const int close_ok = !marker || fclose(marker) == 0;
   if (read_ok && !close_ok) error = errno;
   if (!read_ok || !close_ok) {
     fixdemo_trophy_io_reject(!read_ok ? "marker read failed" : "marker close failed",

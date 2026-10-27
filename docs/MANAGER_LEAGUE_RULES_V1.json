@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "status": "design_draft_not_implemented",
-  "updated_date": "2026-10-26",
+  "updated_date": "2026-10-27",
   "confirmed_product_rules": {
-    "cycle_days": 7,
-    "registration_days": 3,
-    "competition_days": 3,
-    "settlement_days": 1,
+    "cycle_days": 3,
+    "registration_days": 1,
+    "competition_days": 2,
+    "settlement_days": 0,
     "minimum_teams": 7,
     "multiple_matches_per_day": true,
     "starter_ovr_min": 60,
@@ -17,23 +17,57 @@
     "league_winner_receives_points": true,
     "manager_ranking_required": true,
     "asynchronous_server_simulation": true,
-    "presentation_seconds": 180,
+    "presentation_seconds": 600,
     "shop_model": "club_player_packs",
     "shop_pack_tiers": [
       "lite",
       "medium",
       "jumbo"
     ],
-    "shop_pack_availability_source": "api"
+    "shop_pack_availability_source": "api",
+    "real_week_days": 7,
+    "league_cycles_per_week": 2,
+    "currency_name": "NX Cash",
+    "entry_grant_nx_cash": 1500,
+    "weekly_calendar": {
+      "Monday": "preparation",
+      "Tuesday": "matches",
+      "Wednesday": "matches_and_results",
+      "Thursday": "preparation",
+      "Friday": "matches",
+      "Saturday": "matches_and_results",
+      "Sunday": "overview"
+    },
+    "starting_wallet_nx_cash": 5000,
+    "league_rewards_nx_cash": {
+      "first": 5000,
+      "second": 4000,
+      "third": 3000,
+      "other_finishers": 0
+    },
+    "participation_includes_first_league": true,
+    "participation_and_prizes_add_to_existing_wallet": true,
+    "grant_policy": "starting_wallet_once; participation_once_per_joined_league; podium_once_after_final_fixture",
+    "overall_rank_reset_real_days": 14,
+    "ranking_reset_weekday": "Monday",
+    "ranking_reset_time_wib": "00:00",
+    "permanent_league_champion_history": true
   },
   "proposed_defaults_not_yet_balance_approved": {
     "timezone": "Asia/Jakarta",
-    "registration_start_weekday": "Monday",
+    "registration_start_weekday": [
+      "Monday",
+      "Thursday"
+    ],
     "registration_start_time": "00:00",
-    "registration_end_exclusive_weekday": "Thursday",
+    "registration_end_exclusive_weekday": [
+      "Tuesday",
+      "Friday"
+    ],
     "registration_end_exclusive_time": "00:00",
     "competition_weekdays": [
-      "Thursday",
+      "Tuesday",
+      "Wednesday",
       "Friday",
       "Saturday"
     ],
@@ -75,7 +109,6 @@
     "maximum_roster_size": 25,
     "same_catalog_player_multiple_active_instances_per_club": false,
     "same_catalog_player_allowed_in_different_clubs": true,
-    "grant_policy": "once_per_account_completed_onboarding",
     "wallet_and_roster_persist_between_weeks": true,
     "competition_roster_attributes_locked": true,
     "tactics_locked_per_round": true,
@@ -84,15 +117,9 @@
     "market_locked_for_competition_entries": true,
     "p2p_trading_gifting_or_point_transfers": false,
     "release_player_point_refund": 0,
-    "weekly_rewards_points": {
-      "first": 2000,
-      "second": 1000,
-      "third": 750,
-      "other_valid_participants": 250
-    },
     "ranking_points_formula": "floor(1000 * (team_count - final_rank) / (team_count - 1))",
     "ranking_points_spendable": false,
-    "maximum_ranked_entries_per_account_per_week": 1,
+    "maximum_ranked_entries_per_account_per_week": 2,
     "account_club_limit": 1,
     "below_minimum_policy": "not_started_no_awards_preserve_owned_assets",
     "incomplete_fixture_policy": "suspend_group_no_invented_result_or_award",
@@ -177,6 +204,7 @@
       }
     },
     "confirm_required": true,
-    "debit_and_grant": "atomic_after_explicit_confirm"
+    "debit_and_grant": "debit_once_after_open_payment_confirmation; persist_paid_pool; grant_after_explicit_subset_confirmation",
+    "pending_paid_pack": "resume_same_pool_and_selection_after_restart; no_back_until_grant; no_second_debit"
   }
 }

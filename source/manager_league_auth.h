@@ -5,7 +5,8 @@
 #include <string.h>
 
 /* Local prototype credentials only. Server authentication and global account
- * uniqueness require a backend. No password or reusable session is persisted. */
+ * uniqueness require a backend. No PIN/password or reusable session persists.
+ * v1 is read only for one-time password verification; v2 creates PIN gates. */
 enum { MD_AUTH_ROUNDS=120000 };
 typedef struct {
   uint32_t magic,version,bytes,rounds,seed,checksum;
@@ -53,7 +54,9 @@ static inline void md_sha_final(MdSha *c,uint8_t out[32]) {
   uint64_t bits=c->bytes*8;c->block[c->used++]=128;
   if(c->used>56){memset(c->block+c->used,0,64-c->used);md_sha_block(c,c->block);c->used=0;}
   memset(c->block+c->used,0,56-c->used);for(uint32_t i=0;i<8;i++)c->block[63-i]=(uint8_t)(bits>>(i*8));md_sha_block(c,c->block);
-  for(uint32_t i=0;i<32;i++)out[i]=(uint8_t)(c->h[i/4]>>(24-(i%4)*8));md_auth_wipe(c,sizeof(*c));
+  for(uint32_t i=0;i<32;i++)
+    out[i]=(uint8_t)(c->h[i/4]>>(24-(i%4)*8));
+  md_auth_wipe(c,sizeof(*c));
 }
 static inline void md_auth_kdf(const char *password,const uint8_t salt[16],uint32_t rounds,uint8_t out[32]) {
   MdSha in=md_sha_init(),outer=md_sha_init();uint8_t pad[64],u[32],key[32],first[20];size_t n=strlen(password);
@@ -71,25 +74,40 @@ static inline void md_auth_kdf(const char *password,const uint8_t salt[16],uint3
 }
 static inline int md_auth_id(char out[32],const char *id) {
   size_t n=strlen(id);if(n<3 || n>24)return 0;memset(out,0,32);
-  for(size_t i=0;i<n;i++){char ch=id[i];if(ch>='A'&&ch<='Z')ch+=(char)('a'-'A');
-    if(!((ch>='a'&&ch<='z')||(ch>='0'&&ch<='9')||ch=='.'||ch=='_'))return 0;out[i]=ch;}return 1;
+  for(size_t i=0;i<n;i++) {
+    char ch=id[i];if(ch>='A'&&ch<='Z')ch+=(char)('a'-'A');
+    if(!((ch>='a'&&ch<='z')||(ch>='0'&&ch<='9')||ch=='.'||ch=='_'))return 0;
+    out[i]=ch;
+  }
+  return 1;
 }
 static inline uint32_t md_auth_checksum(const MdCredential *p) {
   MdCredential c=*p;c.checksum=0;const uint8_t *b=(const uint8_t *)&c;uint32_t h=2166136261u;
-  for(size_t i=0;i<sizeof(c);i++)h=(h^b[i])*16777619u;md_auth_wipe(&c,sizeof(c));return h;
+  for(size_t i=0;i<sizeof(c);i++)
+    h=(h^b[i])*16777619u;
+  md_auth_wipe(&c,sizeof(c));return h;
 }
 static inline int md_auth_valid(const MdCredential *p,uint32_t seed,const char *id) {
-  char canonical[32];return md_auth_id(canonical,id) && p->magic==0x4d4c4131u && p->version==1 && p->bytes==sizeof(*p) &&
+  char canonical[32];return md_auth_id(canonical,id) && p->magic==0x4d4c4131u && (p->version==1 || p->version==2) && p->bytes==sizeof(*p) &&
     p->rounds==MD_AUTH_ROUNDS && p->seed==seed && !memcmp(canonical,p->user_id,32) && p->checksum==md_auth_checksum(p);
 }
-static inline int md_auth_create(MdCredential *p,uint32_t seed,const char *id,const char *password,const uint8_t salt[16]) {
-  if(strlen(password)<8 || strlen(password)>63)return 0;memset(p,0,sizeof(*p));if(!md_auth_id(p->user_id,id))return 0;
-  p->magic=0x4d4c4131u;p->version=1;p->bytes=sizeof(*p);p->rounds=MD_AUTH_ROUNDS;p->seed=seed;memcpy(p->salt,salt,16);
-  md_auth_kdf(password,salt,p->rounds,p->verifier);p->checksum=md_auth_checksum(p);return 1;
+static inline int md_auth_pin_valid(const char *pin) {
+  if(!pin || strlen(pin)!=4)return 0;
+  for(uint32_t i=0;i<4;i++)if(pin[i]<'0' || pin[i]>'9')return 0;
+  return 1;
+}
+static inline int md_auth_create(MdCredential *p,uint32_t seed,const char *id,const char *pin,const uint8_t salt[16]) {
+  if(!md_auth_pin_valid(pin))return 0;
+  memset(p,0,sizeof(*p));
+  if(!md_auth_id(p->user_id,id))return 0;
+  p->magic=0x4d4c4131u;p->version=2;p->bytes=sizeof(*p);p->rounds=MD_AUTH_ROUNDS;p->seed=seed;memcpy(p->salt,salt,16);
+  md_auth_kdf(pin,salt,p->rounds,p->verifier);p->checksum=md_auth_checksum(p);return 1;
 }
 static inline int md_auth_verify(const MdCredential *p,uint32_t seed,const char *id,const char *password) {
-  if(!md_auth_valid(p,seed,id) || strlen(password)<8 || strlen(password)>63)return 0;
+  if(!md_auth_valid(p,seed,id) || (p->version==2 ? !md_auth_pin_valid(password) : (strlen(password)<8 || strlen(password)>63)))return 0;
   uint8_t hash[32],different=0;md_auth_kdf(password,p->salt,p->rounds,hash);
-  for(uint32_t i=0;i<32;i++)different|=hash[i]^p->verifier[i];md_auth_wipe(hash,32);return !different;
+  for(uint32_t i=0;i<32;i++)
+    different|=hash[i]^p->verifier[i];
+  md_auth_wipe(hash,32);return !different;
 }
 #endif

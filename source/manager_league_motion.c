@@ -116,6 +116,10 @@ void manager_dummy_sample(const MdFixture *f,uint32_t elapsed,MdDot out[23]) {
      * coordinate is introduced at an event boundary. */
     float progress=shot ? .76f : e->kind==MD_CORNER ? .90f : .43f+(hash%18)*.012f;
     float x=flip ? 1-progress : progress,y=.28f+((hash>>8)%45)*.01f;
+    if(e->kind==MD_PASS && e->other) {
+      x=bound(p[actor].x+dir*.025f,.06f,.94f);
+      y=bound(p[actor].y+((int)((hash>>8)%5)-2)*.008f,.08f,.92f);
+    }
     uint32_t carrier=owner;
     if(carrier/11!=side) {
       /* A visible contested pass/interception hands over possession. */
@@ -143,7 +147,7 @@ void manager_dummy_sample(const MdFixture *f,uint32_t elapsed,MdDot out[23]) {
     if(step(out,p,target,&at,e->at_ms-contact,elapsed))return;
     memcpy(target,p,sizeof(p));
     if(e->kind==MD_PASS) {
-      uint32_t receiver=nearest(p,side,bound(x+dir*.17f,.08f,.92f),1-y);
+      uint32_t receiver=e->other ? actor_for(p,side,e->other) : nearest(p,side,bound(x+dir*.17f,.08f,.92f),1-y);
       if(receiver==actor)receiver=side*11+5+(hash%3);
       ball_to(target,receiver);owner=receiver;
     } else if(shot) {

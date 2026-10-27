@@ -10,6 +10,86 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tools'))
 
 
+def test_reviewed_venue_concrete_uses_fixed_border_scope_only():
+    from stadium_surface_policy import protected_surface
+    reviewed=('M_st051_cncr001_bsm_solid_one','M_st051_flor101_bsm_solid_one')
+    assert all(protected_surface(name, reviewed) for name in reviewed)
+    assert not protected_surface(reviewed[0])
+    assert not protected_surface('M_unreviewed_cncr001_bsm_solid_one', reviewed)
+    assert not protected_surface('M_unreviewed_flor101_bsm_solid_one', reviewed)
+    assert protected_surface('M_original_star002_bsm_solid_one', reviewed)
+
+
+def test_original_panels_are_source_bound_without_filling_openings():
+    import numpy as np
+    from stadium_surface_policy import preserved_source_faces
+    p=np.array([[-40,-70,16],[40,-70,16],[40,-70,16.4],
+                [0,-72,16.8],[1,-72,16.8],[1,-72,17],
+                [0,-20,1],[1,-20,1],[1,-20,1.2]])
+    ids=np.arange(9).reshape(-1,3)
+    rules=[dict(kind='wide_panel',minimum_edge_m=30,minimum_area_m2=4,expected_source_triangles=1),
+           dict(kind='upper_stair_band',minimum_height_m=16.7,maximum_height_m=17.1,
+                minimum_source_z_m=71.9,maximum_source_z_m=72.1,expected_source_triangles=1)]
+    assert preserved_source_faces(p,ids,rules)==[0,1]
+    rules[0]['expected_source_triangles']=2
+    with pytest.raises(ValueError,match='count changed'):
+        preserved_source_faces(p,ids,rules)
+
+
+def test_selected_riser_survives_clustering_with_exact_source_uvs(tmp_path):
+    import numpy as np
+    module=ROOT/'local-inputs/meshoptimizer-tools-v1/node_modules/meshoptimizer/meshopt_simplifier.js'
+    node=shutil.which('node')
+    if not node or not module.is_file():pytest.skip('Optional local Node/meshoptimizer unavailable')
+    # A very wide, thin original riser behind disconnected small stair boxes.
+    # Clustering may remove stair detail but must retain its structural cover.
+    p=[[-40,0,0],[40,0,0],[40,0,.4],[-40,0,.4]]
+    uv=[[0,0],[80,0],[80,.4],[0,.4]];ids=[0,1,2,0,2,3]
+    for i in range(4100):
+        x=(i%100)*.01;y=(i//100)*.01;offset=len(p)
+        p.extend([[x,1+y,0],[x+.005,1+y,0],[x,1+y,.005]])
+        uv.extend([[x,y],[x+.005,y],[x,y+.005]]);ids.extend([offset,offset+1,offset+2])
+    source=tmp_path/'in.json';output=tmp_path/'out.json'
+    row=dict(name='reviewed_riser',positions=np.array(p).reshape(-1).tolist(),
+             uv=np.array(uv).reshape(-1).tolist(),indices=ids,preserve_triangles=[0,1])
+    source.write_text(json.dumps(dict(materials=[row],ratio=.01,error=.5,cluster_relative_error=.008)))
+    subprocess.run([node,str(ROOT/'tools/meshopt_stadium_reduce.mjs'),str(module),str(source),str(output)],check=True)
+    result=json.loads(output.read_text())[0];tri=np.array(p)[np.array(result['indices']).reshape(-1,3)]
+    # Both original triangles retain their actual source coordinates and UVs;
+    # no replacement slab is invented across a neighbouring source opening.
+    panel=tri[np.all(tri[:,:,1]==0,axis=1)]
+    assert sum(np.linalg.norm(np.cross(t[1]-t[0],t[2]-t[0]))*.5 for t in panel)==pytest.approx(32)
+    assert np.array(uv)[np.array(result['indices'][-6:])].tolist()==np.array(uv)[ids[:6]].tolist()
+    assert result['preserved_source_triangles']==2
+    row['preserve_triangles']=[999999]
+    source.write_text(json.dumps(dict(materials=[row],ratio=.01,error=.5)))
+    rejected=subprocess.run([node,str(ROOT/'tools/meshopt_stadium_reduce.mjs'),str(module),str(source),str(output)],capture_output=True)
+    assert rejected.returncode!=0 and b'Invalid preserved source panels' in rejected.stderr
+
+
+def test_central_access_keeps_both_source_stairways_with_bounded_selection():
+    import numpy as np
+    from stadium_surface_policy import preserved_source_faces
+    # Blender basis: source lateral X, negated source Z, source height.
+    # Two real access treads, adjacent seating, and a face crossing the edge.
+    p=np.array([[-1,-45,1],[1,-45,1],[1,-45.2,1],
+                [-1,45,2],[1,45,2],[1,45.2,2],
+                [3,-45,1],[4,-45,1],[4,-45.2,1],
+                [-1,-45,1],[1,-45,1],[1,-45.2,9]],dtype=float)
+    ids=np.arange(12).reshape(-1,3)
+    rule=dict(kind='central_stair_access',maximum_abs_source_x_m=1.51,
+              minimum_height_m=-.01,maximum_height_m=4.7,
+              minimum_abs_source_z_m=39.99,maximum_abs_source_z_m=51.01,
+              expected_source_triangles=2)
+    assert preserved_source_faces(p,ids,[rule])==[0,1]
+    rule['expected_source_triangles']=3
+    with pytest.raises(ValueError,match='count changed'):
+        preserved_source_faces(p,ids,[rule])
+    rule['maximum_abs_source_x_m']=10
+    with pytest.raises(ValueError,match='access bounds'):
+        preserved_source_faces(p,ids,[rule])
+
+
 def test_stair_open_outline_survives_aggressive_target(tmp_path):
     module=ROOT/'local-inputs/meshoptimizer-tools-v1/node_modules/meshoptimizer/meshopt_simplifier.js'
     node=shutil.which('node')

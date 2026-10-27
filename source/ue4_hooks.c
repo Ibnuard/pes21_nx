@@ -1,3 +1,5 @@
+#include "match_preferences.h"
+#include "loading_popup.h"
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
@@ -1398,9 +1400,14 @@ static _Alignas(4) uint32_t exhibition_team_picker_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_popup_open;
 static _Alignas(4) uint32_t exhibition_settings_popup_open;
 static _Alignas(4) uint32_t exhibition_cpu_level_value = 2;
-// The native TutorialMatch bootstrap starts in Day. Our custom match flows
-// default to Night; a player can still choose Day in Stadium settings.
+// UI defaults to Random. This concrete bootstrap value is replaced once
+// per pre-match session before native match settings are applied.
 static _Alignas(4) uint32_t exhibition_settings_time_zone = 1u;
+static _Alignas(4) uint32_t exhibition_time_preference=NX_TIME_RANDOM;
+static _Alignas(4) uint32_t exhibition_weather_preference=NX_WEATHER_RANDOM;
+static _Alignas(4) uint32_t exhibition_season_preference=NX_SEASON_RANDOM;
+static _Alignas(4) uint32_t exhibition_environment_resolved;
+static _Alignas(4) uint32_t exhibition_environment_generation=1u;
 #ifdef PERF_TRACE
 static _Alignas(4) uint32_t stadium_perf_match_id;
 static _Alignas(4) uint32_t stadium_perf_camera_type;
@@ -1422,6 +1429,19 @@ static _Alignas(4) uint32_t exhibition_settings_weather;
 static _Alignas(4) uint32_t exhibition_settings_season;
 static _Alignas(4) uint32_t exhibition_settings_turf_length = 1u;
 static _Alignas(4) uint32_t exhibition_settings_pitch_condition = 1u;
+
+uint32_t pes_controller_stadium_time_preference(void){return __atomic_load_n(&exhibition_time_preference,__ATOMIC_ACQUIRE);}
+uint32_t pes_controller_stadium_weather_preference(void){return __atomic_load_n(&exhibition_weather_preference,__ATOMIC_ACQUIRE);}
+uint32_t pes_controller_stadium_season_preference(void){return __atomic_load_n(&exhibition_season_preference,__ATOMIC_ACQUIRE);}
+static void exhibition_resolve_environment(void) {
+  const uint32_t generation=__atomic_load_n(&exhibition_environment_generation,__ATOMIC_ACQUIRE);
+  if(__atomic_load_n(&exhibition_environment_resolved,__ATOMIC_ACQUIRE)==generation)return;
+  uint64_t ticks=armGetSystemTick();uint32_t seed=(uint32_t)ticks^(uint32_t)(ticks>>32);
+  __atomic_store_n(&exhibition_settings_time_zone,nx_preference_resolve(pes_controller_stadium_time_preference(),2,&seed),__ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_weather,nx_preference_resolve(pes_controller_stadium_weather_preference(),3,&seed),__ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_settings_season,nx_preference_resolve(pes_controller_stadium_season_preference(),2,&seed),__ATOMIC_RELEASE);
+  __atomic_store_n(&exhibition_environment_resolved,generation,__ATOMIC_RELEASE);
+}
 
 uint32_t pes_controller_stadium_weather(void) {
   return __atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
@@ -2575,7 +2595,7 @@ static void main_menu_2p_team_selector_open(void) {
   main_menu_2p_uniform_preview_clear_pending();
   exhibition_discard_pre_strategy_squad_snapshot();
   exhibition_gameplan_reset();
-  __atomic_store_n(&exhibition_settings_time_zone, 1u, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
   __atomic_store_n(&main_menu_2p_prematch_hub_active, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_2p_prematch_hub_page,
                    MAIN_MENU_2P_PREMATCH_PAGE_MAIN, __ATOMIC_RELEASE);
@@ -2845,6 +2865,7 @@ static int main_menu_2p_team_selector_confirm(uint32_t pad) {
 void pes_controller_2p_team_selector_pad_event(uint32_t pad,
                                                 uint32_t buttons,
                                                 uint32_t previous_buttons) {
+  if(nx_loading_active()){if(pad<2)main_menu_2p_team_selector_input_armed[pad]=0;return;}
   if (!__atomic_load_n(&main_menu_2p_team_selector_active, __ATOMIC_ACQUIRE) ||
       pad > 1)
     return;
@@ -3060,6 +3081,7 @@ uint32_t pes_controller_2p_team_selector_selected_team(uint32_t pad) {
 void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
                                                uint32_t buttons,
                                                uint32_t previous_buttons) {
+  if(nx_loading_active()){if(pad<2)main_menu_2p_prematch_hub_input_armed[pad]=0;return;}
   // Team Selection is the only dual-focus frontend.  Once both teams are
   // confirmed, the pre-match hub follows the console flow and belongs to P1.
   if (!pes_controller_2p_prematch_hub_active() || pad != 0)
@@ -3138,29 +3160,20 @@ void pes_controller_2p_prematch_hub_pad_event(uint32_t pad,
       row = (row + 1u) % rows;
     } else if (pressed & ((1u << 12) | (1u << 13) | (1u << 1))) {
       const int direction = (pressed & (1u << 12)) ? -1 : 1;
-      void *match = exhibition_settings_match
-                        ? exhibition_settings_match
-                        : exhibition_get_tmpdb_match();
       if (row == 0) {
         const uint32_t count = pes_controller_stadium_catalog_count();
         stadium = stadium < count ? stadium : 0;
         stadium = direction < 0 ? (stadium ? stadium - 1 : count - 1)
                                 : (stadium + 1) % count;
       } else if (row == 1u) {
-        const uint32_t value = !__atomic_load_n(
-            &exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
-        if (match && exhibition_match_set_time_zone)
-          exhibition_match_set_time_zone(match, value);
-        __atomic_store_n(&exhibition_settings_time_zone, value,
-                         __ATOMIC_RELEASE);
+        __atomic_store_n(&exhibition_time_preference,nx_preference_next(pes_controller_stadium_time_preference(),2,direction),__ATOMIC_RELEASE);
+        __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
       } else if (row == 2u) {
-        uint32_t w = __atomic_load_n(&exhibition_settings_weather, __ATOMIC_ACQUIRE);
-        w = direction < 0 ? (w ? w - 1u : NX_WEATHER_COUNT - 1u)
-                          : (w + 1u) % NX_WEATHER_COUNT;
-        __atomic_store_n(&exhibition_settings_weather, w, __ATOMIC_RELEASE);
+        __atomic_store_n(&exhibition_weather_preference,nx_preference_next(pes_controller_stadium_weather_preference(),3,direction),__ATOMIC_RELEASE);
+        __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
       } else if (row == 3u) {
-        uint32_t s = !__atomic_load_n(&exhibition_settings_season, __ATOMIC_ACQUIRE);
-        __atomic_store_n(&exhibition_settings_season, s, __ATOMIC_RELEASE);
+        __atomic_store_n(&exhibition_season_preference,nx_preference_next(pes_controller_stadium_season_preference(),2,direction),__ATOMIC_RELEASE);
+        __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
       } else if (row == 4u) {
         uint32_t tl = __atomic_load_n(&exhibition_settings_turf_length, __ATOMIC_ACQUIRE);
         tl = direction < 0 ? (tl ? tl - 1u : 2u) : (tl + 1u) % 3u;
@@ -3318,6 +3331,8 @@ static void exhibition_apply_match_settings(void *match) {
     match = exhibition_get_tmpdb_match();
   if (!match)
     return;
+
+  exhibition_resolve_environment();
 
   const uint32_t time_zone = __atomic_load_n(
       &exhibition_settings_time_zone, __ATOMIC_ACQUIRE);
@@ -3904,8 +3919,8 @@ static int exhibition_refresh_match_settings(void) {
     return 1;
   }
 
-  // Do not import the native bootstrap's Day value over our Night default or
-  // a deliberate Day choice made in the custom Stadium page.
+  // Native bootstrap values must not overwrite the selected preference or
+  // reroll the resolved lighting for an existing pre-match transaction.
   uint32_t time_zone = __atomic_load_n(&exhibition_settings_time_zone,
                                        __ATOMIC_ACQUIRE);
   uint32_t match_time = exhibition_match_get_match_time
@@ -3956,8 +3971,11 @@ static void exhibition_adjust_match_setting(int direction) {
         value = (value + 1u) % EXHIBITION_CPU_LEVEL_COUNT;
       exhibition_apply_cpu_level(value, match);
     } else {
-      value = !__atomic_load_n(&exhibition_settings_time_zone,
-                               __ATOMIC_ACQUIRE);
+      value = nx_preference_next(pes_controller_stadium_time_preference(),2,direction);
+      __atomic_store_n(&exhibition_time_preference,value,__ATOMIC_RELEASE);
+      __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
+      exhibition_resolve_environment();
+      value=__atomic_load_n(&exhibition_settings_time_zone,__ATOMIC_ACQUIRE);
       if (exhibition_match_set_time_zone)
         exhibition_match_set_time_zone(match, value);
       __atomic_store_n(&exhibition_settings_time_zone, value,
@@ -7129,10 +7147,7 @@ const char *pes_controller_custom_match_settings_value(uint32_t index) {
                : exhibition_cpu_level_labels[2];
   }
   if (index == 0)
-    return __atomic_load_n(&exhibition_settings_time_zone,
-                           __ATOMIC_ACQUIRE)
-               ? "NIGHT"
-               : "DAY";
+    return nx_time_preference_label(pes_controller_stadium_time_preference());
   if (index == 1) {
     const uint32_t minutes = __atomic_load_n(&exhibition_settings_match_time,
                                              __ATOMIC_ACQUIRE);
@@ -10461,6 +10476,7 @@ void pes_controller_menu_tap(float normalized_x, float normalized_y) {
 
 int pes_controller_menu_physical_tap(float normalized_x,
                                      float normalized_y) {
+  if(nx_loading_active())return 1;
   if (pes_controller_start_prompt(NULL, NULL)) {
     // A physical tap on the launch prompt follows the same one-shot path as
     // controller A. The game's original touch stream still receives the tap.
@@ -11678,6 +11694,7 @@ static int main_menu_start_two_player_match(void) {
   const int bootstrap_hub =
       __atomic_load_n(&main_menu_2p_prematch_bootstrap_mode,
                       __ATOMIC_ACQUIRE) == MAIN_MENU_2P_PREMATCH_BOOT_HUB;
+  __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
   exhibition_gameplan_begin_prematch();
   __atomic_store_n(&exhibition_hub_squad_state,0u,__ATOMIC_RELEASE);
   exhibition_discard_pre_strategy_squad_snapshot();
@@ -11724,6 +11741,7 @@ static int main_menu_start_exhibition_match(void) {
       !competition_frontend_league_match_active() && !ml_frontend_match_active() &&
       !manager_dummy_plan_editor();
 
+  __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
   exhibition_gameplan_begin_prematch();
   __atomic_store_n(&exhibition_hub_squad_state,0u,__ATOMIC_RELEASE);
   exhibition_discard_pre_strategy_squad_snapshot();
@@ -12146,6 +12164,7 @@ static int local_rematch_process_pending(void) {
 }
 
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
+  if(nx_loading_active()){competition_frontend_discard_input(buttons);return;}
   if (local_rematch_process_pending()) return;
   /* A can arrive through the touch/menu bridge one frame before the raw pad
    * sample.  Drain an action produced by that bridge before checking the
@@ -12179,7 +12198,10 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
   if (competition_frontend_active()) {
     ml_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
     competition_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
-    competition_frontend_pad_event(buttons, previous_buttons);
+    const uint64_t menu_axes=__atomic_load_n(&cobra_pad_input,__ATOMIC_ACQUIRE);
+    competition_frontend_axis_event(buttons,previous_buttons,
+        (int16_t)(menu_axes>>32),(int16_t)(menu_axes>>48),
+        armTicksToNs(armGetSystemTick())/1000000u);
     const uint32_t action = competition_frontend_take_action();
     if (action == COMPETITION_ACTION_MANAGER_NAME) {
       main_menu_manager_name_input();
@@ -12517,7 +12539,7 @@ static void main_menu_activate_cup_fixture(void) {
   }
   __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_settings_time_zone, 1u, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
   __atomic_store_n(&exhibition_settings_match_time,
                    competition_frontend_cup_game_time(), __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_settings_extra_time,
@@ -12569,7 +12591,7 @@ static void main_menu_activate_league_fixture(void) {
       ml_frontend_career()->current_plan.player_count != 0u;
   __atomic_store_n(&exhibition_home_team_id, home, __ATOMIC_RELEASE);
   __atomic_store_n(&exhibition_away_team_id, away, __ATOMIC_RELEASE);
-  __atomic_store_n(&exhibition_settings_time_zone, 1u, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&exhibition_environment_generation,1u,__ATOMIC_ACQ_REL);
   __atomic_store_n(&exhibition_settings_match_time,
                    competition_frontend_cup_game_time(), __ATOMIC_RELEASE);
   /* League phase permits draws; knockout fixtures must produce a winner. */
@@ -17854,7 +17876,7 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
     if (p1_menu_input)
       pes_main_menu_pad_event(current, previous);
     pes_exhibition_search_pad_event(current, previous);
-    if ((p1_menu_input && competition_frontend_take_input_consumed()) ||
+    if (nx_loading_active() || (p1_menu_input && competition_frontend_take_input_consumed()) ||
         (competition_frontend_active() && !p1_menu_input) ||
         __atomic_load_n(&main_menu_info_popup, __ATOMIC_ACQUIRE) !=
             MAIN_MENU_INFO_CLOSED ||
@@ -21147,8 +21169,9 @@ void install_ue4_hooks(so_module *module) {
               loose_enabled == 2 ? "fast-validated full loose package (24 CPKs)" :
               loose_enabled == 1 ? "fast-validated loose canary (dt200/dt241)" :
                                    "original OBB");
-  if(sound_hca_decode_header_original && sound_hca_set_decryption_table)
-    manager_league_audio_native_install(module,fixdemo_trophy_verified_elf_sha256);
+  /* Manager blends reviewed PCM into the existing output buffer and has no
+   * dependency on the optional native HCA commentary decoder hooks. */
+  manager_league_audio_native_install(module,fixdemo_trophy_verified_elf_sha256);
   /* Both adapters must pass every ABI check before the first patch. A
    * rejected canary retains the ordinary native result and prop factories. */
   if (fixdemo_trophy_canary_validated) {
@@ -21163,7 +21186,7 @@ void install_ue4_hooks(so_module *module) {
       else fixdemo_trophy_note("sparks-unavailable optional-ABI-or-world-tick");
       fixdemo_trophy_props_commit();
       fixdemo_trophy_result_commit();
-      fixdemo_trophy_status("enabled: final-only trophy canary");
+      fixdemo_trophy_status("enabled: final-only trophy production runtime");
     } else {
       fixdemo_trophy_canary_validated = 0;
       fixdemo_trophy_status(props_ready ?

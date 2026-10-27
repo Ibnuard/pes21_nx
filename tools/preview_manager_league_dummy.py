@@ -4,6 +4,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,9 @@ static void capture(const char *name,MdPage expected) {
     menu.portrait_previous=menu.portrait_current=nx_menu_portrait(2);menu.portrait_mix=1;
     frontdoor_emit(&ui,&menu,verts,&quads);
   } else {manager_dummy_emit(&ui,verts,&quads);if(strncmp(name,"motion",6)){preview_ticks+=200000000ull;quads=0;manager_dummy_emit(&ui,verts,&quads);}}
+  NxLoadingView loading;nx_loading_snapshot(&loading);
+  if(loading.token){MasterLeagueRender busy;nx_loading_emit(&busy,&loading,1200u,verts,&quads);
+    assert(ui.draw_count+busy.draw_count<384);memcpy(ui.draws+ui.draw_count,busy.draws,busy.draw_count*sizeof(*busy.draws));ui.draw_count+=busy.draw_count;}
   assert(quads<4096 && ui.draw_count<384);
   for(int i=4096*24;i<4096*24+8;i++)assert(verts[i]==12345);
   for(int i=0;i<quads*24;i+=4)assert(isfinite(verts[i]) && isfinite(verts[i+1]) && fabsf(verts[i])<=1.002f && fabsf(verts[i+1])<=1.002f);
@@ -52,11 +56,21 @@ static void dashboard_action(uint32_t section,uint32_t target) {
   manager_dummy_view(&v);assert(v.focus==target);manager_dummy_pad(2);
 }
 static void select_broadcast(uint32_t fixture) {
-  MdView v;manager_dummy_view(&v);assert(v.page==MD_SCHEDULE && !v.focus && fixture<v.total);
-  for(uint32_t i=0;i<fixture/2u;i++)manager_dummy_pad(2048);
-  if(fixture%2u)manager_dummy_pad(8192);
-  manager_dummy_view(&v);assert(v.focus==fixture);manager_dummy_pad(2);
+  MdView v;manager_dummy_view(&v);assert(v.page==MD_SCHEDULE);
+  for(uint32_t tries=0;tries<40;tries++) {
+    manager_dummy_view(&v);
+    for(uint32_t i=0;i<v.count;i++)if(v.rows[i].identity==fixture+1) {
+      uint32_t target=v.first+i;
+      while(v.focus/2>target/2){manager_dummy_pad(1024);manager_dummy_view(&v);}
+      while(v.focus/2<target/2){manager_dummy_pad(2048);manager_dummy_view(&v);}
+      if(v.focus<target)manager_dummy_pad(8192);else if(v.focus>target)manager_dummy_pad(4096);
+      manager_dummy_pad(2);return;
+    }
+    if(v.focus+2<v.total)manager_dummy_pad(2048);else manager_dummy_pad(128);
+  }
+  assert(!"fixture not found in match sections");
 }
+#include "manager_pin_controller_fixture.inc"
 int main(void) {
   initialize_gl();gl.master_league_pearl_tex=77;gl.frontdoor_flat_tex=70;gl.frontdoor_panels_tex=76;
   for(uint32_t i=0;i<4;i++)gl.main_menu_portrait_tex[i]=72+i;
@@ -67,12 +81,15 @@ int main(void) {
   manager_dummy_open();manager_dummy_tick_at(1793015700000ULL);capture("00-main-menu",(MdPage)99);capture("01-registration",MD_REGISTER);
   manager_dummy_pad(2);capture("02-league-selection",MD_LEAGUES);manager_dummy_pad(2);capture("03-club-selection",MD_CLUB);
   manager_dummy_pad(2);manager_dummy_name_result("Androswitch FC");manager_dummy_pad(2048);manager_dummy_name_result("androswitch_27");
-  manager_dummy_pad(2048);manager_dummy_name_result("Preview-Only-Password");capture("04-account",MD_NAME);
+  manager_dummy_pad(2048);manager_dummy_pad(2);capture("04a-pin-create",MD_NAME);
+  test_pin_key(10);test_pin_key(3);capture("04b-pin-masked",MD_NAME);test_pin_key(6);test_pin_key(1);test_pin_key(11);
+  capture("04c-pin-confirm",MD_NAME);test_pin_digits("0472");capture("04-account",MD_NAME);
   manager_dummy_pad(8);capture("05-tutorial",MD_DASHBOARD);for(int i=0;i<3;i++)manager_dummy_pad(2);capture("06-dashboard",MD_DASHBOARD);
   MdSave save;manager_dummy_copy_save(&save);
   dashboard_action(1,0);capture("12-team-info",MD_TEAM_INFO);manager_dummy_pad(2);capture("13-player-profile",MD_PLAYER_INFO);
   dashboard_action(1,2);capture("19-player-shop",MD_SHOP);manager_dummy_pad(2);capture("20-pack-pool",MD_PACK);
-  manager_dummy_pad(2);manager_dummy_tick_at(1793015700600ULL);capture("20a-pack-opening",MD_PACK_OPENING);
+  manager_dummy_pad(2);capture("20d-pack-payment",MD_PACK_BUY);manager_dummy_pad(4096);manager_dummy_pad(2);
+  manager_dummy_tick_at(1793015700600ULL);capture("20a-pack-opening",MD_PACK_OPENING);
   manager_dummy_tick_at(1793015704100ULL);capture("20b-pack-select",MD_PACK_SELECT);manager_dummy_pad(2);manager_dummy_pad(8192);manager_dummy_pad(2);
   while(1){MdView v;manager_dummy_view(&v);if(v.focus==v.pack_pool)break;manager_dummy_pad(2048);}capture("20c-pack-confirm",MD_PACK_SELECT);
   manager_dummy_pad(2);capture("21-pack-result",MD_PACK_RESULT);
@@ -89,32 +106,46 @@ int main(void) {
     if(e->kind==MD_SUB && !first_sub)first_sub=e->at_ms;
   }
   manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_goal+500);dashboard_action(2,2);capture("22-match-centre",MD_SCHEDULE);
-  select_broadcast(goal_fixture);capture("30-live-goal",MD_WATCH);
+  manager_dummy_pad(128);capture("22b-scheduled",MD_SCHEDULE);manager_dummy_pad(128);capture("22c-ended",MD_SCHEDULE);
+  manager_dummy_pad(128);select_broadcast(goal_fixture);capture("30-live-goal",MD_WATCH);
+  manager_dummy_pad(4);capture("30a-touchline-detail",MD_WATCH);for(uint32_t i=0;i<8;i++)manager_dummy_pad(2048);capture("30b-touchline-scrolled",MD_WATCH);manager_dummy_pad(1);
   manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_save+30);capture("31-live-save",MD_WATCH);
   manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+first_sub+700);capture("32-live-substitution",MD_WATCH);
   manager_dummy_tick_at(save.fixtures[goal_fixture].kickoff_ms+manager_dummy_duration(&save.fixtures[goal_fixture]));manager_dummy_pad(2);manager_dummy_pad(8192);capture("33-replay",MD_WATCH);
   for(uint32_t i=0;i<MD_FIXTURES;i++)if(!save.fixtures[i].home || !save.fixtures[i].away) {
     manager_dummy_tick_at(save.fixtures[i].kickoff_ms+25000);dashboard_action(0,2);capture("40d-week-live",MD_CALENDAR);break;
   }
-  manager_dummy_tick_at(save.fixtures[0].kickoff_ms+3u*MD_DEMO_DAY_MS);dashboard_action(0,3);capture("10-standings",MD_TABLE);
+  manager_dummy_tick_at(save.fixtures[MD_FIXTURES-1].kickoff_ms+manager_dummy_duration(&save.fixtures[MD_FIXTURES-1]));dashboard_action(0,3);capture("10-standings",MD_TABLE);
   for(int i=0;i<6;i++)manager_dummy_pad(2048);capture("11-standings-page-two",MD_TABLE);
   dashboard_action(0,2);capture("40-week-schedule",MD_CALENDAR);
   for(uint32_t i=0;i<6;i++)manager_dummy_pad(1024);capture("40a-week-preparation",MD_CALENDAR);
   for(uint32_t i=0;i<4;i++)manager_dummy_pad(2048);capture("40b-week-match-days",MD_CALENDAR);
   manager_dummy_pad(2048);manager_dummy_pad(2048);capture("40c-week-result",MD_CALENDAR);
   dashboard_action(1,4);capture("41-other-clubs",MD_TEAMS_PAGE);
-  dashboard_action(2,1);capture("42-overall-ranking",MD_OVERALL);
-  manager_dummy_pad(1);manager_dummy_pad(2048);manager_dummy_pad(4096);capture("22a-competition",MD_DASHBOARD);
+  manager_dummy_pad(2);capture("41a-own-club-profile",MD_CLUB_PROFILE);
+  manager_dummy_pad(2048);manager_dummy_pad(2048);manager_dummy_pad(2);capture("41b-club-history",MD_TEAM_HISTORY);
+  manager_dummy_pad(1);manager_dummy_pad(1);manager_dummy_pad(2048);manager_dummy_pad(2);capture("41c-opponent-profile",MD_CLUB_PROFILE);
+  for(uint32_t i=0;i<4;i++)manager_dummy_pad(2048);manager_dummy_pad(2);capture("41d-opponent-game-plan",MD_CLUB_PLAN);
+  manager_dummy_pad(1);manager_dummy_pad(2048);manager_dummy_pad(2);capture("41e-league-rewards",MD_REWARDS);for(uint32_t i=0;i<4;i++)manager_dummy_pad(2048);capture("41h-league-rewards-scrolled",MD_REWARDS);
+  dashboard_action(1,0);manager_dummy_pad(8);manager_dummy_pad(2);capture("41f-registration-message",MD_COLLECTION_PAGE);
+  manager_dummy_pad(2);capture("41g-message-dismissed",MD_COLLECTION_PAGE);
+  dashboard_action(2,1);capture("42c-champions",MD_CHAMPIONS);manager_dummy_pad(2);capture("42d-champion",MD_CHAMPION);
+  dashboard_action(2,3);capture("42-overall-ranking",MD_OVERALL);
+  manager_dummy_pad(1);capture("22a-competition",MD_DASHBOARD);
   manager_dummy_pad(2);capture("42b-overall-ranking-card",MD_OVERALL);
   dashboard_action(0,1);capture("43-news",MD_NEWS);
   dashboard_action(2,4);capture("44-league-guide",MD_RULES);
+  uint64_t loading=nx_loading_begin("CONNECTING","Contacting the league server...");capture("45-loading",MD_RULES);nx_loading_finish(loading);
 #ifdef MD_ANIMATED
   dashboard_action(1,2);
   for(uint32_t i=0;i<28;i++){char name[48];snprintf(name,sizeof(name),"motion-focus-%02u",i);preview_ticks+=500000000;capture(name,MD_SHOP);}
   manager_dummy_pad(8192);manager_dummy_pad(8192);manager_dummy_pad(2);manager_dummy_pad(2);
+  manager_dummy_pad(4096);manager_dummy_pad(2);
   MdView opening;manager_dummy_view(&opening);assert(opening.page==MD_PACK_OPENING);
   for(uint32_t i=0;i<44;i++){char name[48];snprintf(name,sizeof(name),"motion-open-%02u",i);preview_ticks+=100000000;
     manager_dummy_tick_at(opening.now_ms+i*100);capture(name,i<34 ? MD_PACK_OPENING : MD_PACK_SELECT);}
+  for(uint32_t i=0;i<5;i++){if(i==4)manager_dummy_pad(2048);manager_dummy_pad(2);if(i<3)manager_dummy_pad(8192);}
+  manager_dummy_pad(2048);manager_dummy_pad(2);
 #endif
 #ifdef MD_BROADCAST_ANIMATED
   manager_dummy_tick_at(save.fixtures[0].kickoff_ms);dashboard_action(2,2);manager_dummy_pad(2);
@@ -129,7 +160,8 @@ int main(void) {
   assert(final_view.page==MD_DASHBOARD);manager_dummy_pad(8);capture("07-logout",MD_LOGOUT);
   manager_dummy_pad(4096);manager_dummy_pad(2);capture("08-login-register",MD_REGISTER);
   manager_dummy_pad(2);capture("09-login",MD_LOGIN);
-  manager_dummy_name_result("androswitch_27");manager_dummy_pad(2048);manager_dummy_name_result("Preview-Only-Password");
+  manager_dummy_name_result("androswitch_27");manager_dummy_pad(2048);manager_dummy_pad(2);capture("09a-pin-login",MD_LOGIN);
+  test_pin_digits("0472");
   manager_dummy_pad(2048);manager_dummy_pad(2);capture("09b-login-return",MD_DASHBOARD);
   return 0;
 }
@@ -144,6 +176,7 @@ def main():
     parser.add_argument('--native-assets',action='store_true',help='Use ignored exact paired catalog, crests and portraits for local visual review')
     parser.add_argument('--animate-broadcast',action='store_true',help='Capture actual kickoff and goal/restart C timelines')
     args=parser.parse_args();out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
+    native_inputs={}
     overlay=(ROOT/'source/overlay.c').read_text(encoding='utf8')
     base=frontdoor.build_driver(overlay).removesuffix(frontdoor.DRIVER)
     ml=(ROOT/'source/master_league_overlay.inc').read_text()
@@ -151,18 +184,28 @@ def main():
     helpers+='\ntypedef struct {uint32_t serial;uint64_t began;} MlUiMotion;\n'+shared.function(ml,'ml_ui_navigation_slide')
     base=base.replace('static GLuint gameplan_portrait_texture(uint32_t id) { (void)id;return 0; }','static GLuint gameplan_portrait_texture(uint32_t id) {return id ? 200000u+id : 0;}')
     if args.native_assets:base+='\nint ml_add_player(MasterLeague *c,uint32_t team,const MlPlayer *p){(void)c;(void)team;(void)p;return 0;}\n'
-    source=base+'\n'+shared.function(overlay,'emit_segment')+'\n'+helpers+'\n#include "manager_league_dummy.h"\n'+(ROOT/'source/manager_league_dummy_overlay.inc').read_text()+'\n'+DRIVER
+    source=base+'\n'+shared.function(overlay,'emit_segment')+'\n'+helpers+'\n#include "manager_league_dummy.h"\n'+(ROOT/'source/manager_league_dummy_overlay.inc').read_text()+'\n#include "loading_popup.h"\n'+(ROOT/'source/loading_popup_overlay.inc').read_text()+'\n'+DRIVER
     with tempfile.TemporaryDirectory(prefix='manager-dummy-preview-') as temp:
         work=Path(temp);(work/'preview.c').write_text(source,encoding='utf8')
         if not args.native_assets:source=source.replace('#include \"manager_league_dummy.h\"','#include \"manager_league_dummy.h\"\n#include \"manager_league_catalog_fixture.inc\"',1);(work/'preview.c').write_text(source,encoding='utf8')
         (work/'ue4_hooks.h').write_text((ROOT/'source/ue4_hooks.h').read_text().replace('#include "so_util.h"','typedef struct so_module so_module;'))
         exe=work/'preview.exe'
         native=[str(ROOT/'source/master_league_catalog.c'),'-DML_CATALOG_INCLUDE=\"'+(ROOT/'local-debug/master-league-v1/master_league_catalog_generated.inc').as_posix()+'\"','-ffunction-sections','-Wl,--gc-sections'] if args.native_assets else []
+        if args.native_assets:
+            paired=ROOT/'local-debug/native-club-presentation-2026-10-05-v1/selector'
+            team_header=work/'paired-team-catalog.h'
+            team_header.write_text((ROOT/'source/exhibition_team_catalog.h').read_text().replace(
+                '"exhibition_teams_migration_generated.inc"','"paired-team-data.inc"'))
+            shutil.copy2(paired/'exhibition_teams_migration_generated.inc',work/'paired-team-data.inc')
+            shutil.copy2(paired/'badge_atlas.h',work/'paired-badge-atlas.h')
+            # Match build-wsl's paired catalog/atlas substitutions without
+            # rewriting the checkout or borrowing a mismatched badge slot.
+            native+=['-include','paired-team-catalog.h','-include','paired-badge-atlas.h']
         if args.animate_shop:native+=['-DMD_ANIMATED=1']
         if args.animate_broadcast:native+=['-DMD_BROADCAST_ANIMATED=1']
         result=subprocess.run([shutil.which('gcc'),'-std=c11','-O1','-D_POSIX_C_SOURCE=200809L',
           '-Dclock_gettime=md_preview_clock_gettime','-I',str(work),'-I',str(ROOT/'source'),'-I',str(ROOT/'tests'),
-          str(work/'preview.c'),str(ROOT/'source/manager_league_dummy.c'),str(ROOT/'source/manager_league_motion.c'),str(ROOT/'source/manager_league_plan.c'),str(ROOT/'source/gameplan_preset.c'),*native,'-lm','-pthread','-o',str(exe)],capture_output=True,text=True)
+          str(work/'preview.c'),str(ROOT/'source/manager_league_dummy.c'),str(ROOT/'source/loading_popup.c'),str(ROOT/'source/manager_league_motion.c'),str(ROOT/'source/manager_league_plan.c'),str(ROOT/'source/gameplan_preset.c'),*native,'-lm','-pthread','-o',str(exe)],cwd=work,capture_output=True,text=True)
         if result.returncode:raise RuntimeError(result.stderr)
         run=subprocess.run([str(exe)],cwd=work,capture_output=True,text=True,timeout=40)
         if run.returncode:raise RuntimeError(run.stdout+'\n'+run.stderr)
@@ -178,10 +221,16 @@ def main():
                 from build_fl26_cup_catalog import index_cpk,decoded_member
                 from io import BytesIO
                 assets[78]=Image.open(placeholder).convert('RGBA')
+                badge_header=(paired/'badge_atlas.h').read_text()
+                def badge_define(name):return int(re.search(r'#define '+name+r' (\d+)',badge_header)[1])
+                cell=badge_define('BADGE_CELL_SIZE')
+                assets[3]=Image.frombytes('RGBA',(cell*badge_define('BADGE_ATLAS_COLS'),cell*badge_define('BADGE_ATLAS_ROWS')),(paired/'badge_atlas.bin').read_bytes())
                 archive=ROOT/'local-debug/native-club-presentation-2026-10-05-v1/LooseCpk/dt241_mobile_all.cpk'
                 index,base_offset=index_cpk(archive)
                 portrait_ids={d['texture']-200000 for p in paths for d in json.loads(p.read_text()) if d['texture']>=200000}
                 for portrait in portrait_ids:assets[portrait+200000]=Image.open(BytesIO(decoded_member(archive,index,base_offset,f'common/player/{portrait}.png'))).convert('RGBA')
+                for path in [paired/'badge_atlas.bin',paired/'badge_atlas.h',paired/'exhibition_teams_migration_generated.inc',ROOT/'local-debug/master-league-v1/master_league_catalog_generated.inc',archive,placeholder]:
+                    native_inputs[path.relative_to(ROOT).as_posix()]=hashlib.sha256(path.read_bytes()).hexdigest()
             else:
                 # Public previews retain neutral portrait tiles, explicitly synthetic.
                 from PIL import ImageDraw
@@ -205,8 +254,8 @@ def main():
             cards=animated+''.join(f'<article><h2>{p.stem}</h2><img src="{p.stem}.png" alt="{p.stem}"></article>' for p in paths if not p.stem.startswith('motion-'))
             (out/'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Manager League dummy / C renderer</title><style>body{font:16px system-ui;background:#eaf0f5;color:#192535;margin:30px}article{margin:24px 0}img{width:100%;max-width:1280px;border-radius:12px}h2{font-size:18px}</style><h1>Manager League / native C previews</h1><p>Actual Switch presentation geometry. Offline synthetic fixtures; host previews, not device captures.</p>'+cards,encoding='utf8')
         for path in paths:shutil.copy2(path,out/path.name)
-        sources=['source/manager_league_motion.c','source/manager_league_profile.inc','source/manager_league_auth.h','source/manager_league_archive.inc','source/master_league_frontend.h','source/manager_league_dummy.c','source/manager_league_dummy.h','source/manager_league_dummy_overlay.inc','source/manager_league_watch_overlay.inc','source/frontdoor_overlay.inc','source/master_league_overlay.inc','source/competition_hub_navigation.h','source/overlay.c','tools/preview_manager_league_dummy.py','tools/preview_cup.py','tools/preview_frontdoor.py']
-        (out/'PROVENANCE.json').write_text(json.dumps({'kind':'actual_C_renderer_host_preview','fixed_host_epoch_ms':1793015700000,'sources':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in sources},'validation':run.stdout.splitlines(),'device_accepted':False,'native_assets':args.native_assets},indent=2)+'\n')
+        sources=['source/loading_popup.c','source/loading_popup.h','source/loading_popup_overlay.inc','source/match_preferences.h','source/menu_axis_navigation.h','source/manager_league_motion.c','source/manager_league_profile.inc','source/manager_league_auth.h','source/manager_league_pin.inc','source/manager_league_archive.inc','source/manager_league_wallet.inc','source/manager_league_pack.inc','source/manager_league_ranking.inc','source/manager_league_review_view.inc','source/manager_league_calendar.inc','source/manager_league_calendar_view.inc','source/manager_league_club_view.inc','source/master_league_frontend.h','source/manager_league_dummy.c','source/manager_league_dummy.h','source/manager_league_dummy_overlay.inc','source/manager_league_watch_overlay.inc','source/frontdoor_overlay.inc','source/master_league_overlay.inc','source/competition_hub_navigation.h','source/overlay.c','tests/manager_pin_controller_fixture.inc','tools/preview_manager_league_dummy.py','tools/preview_cup.py','tools/preview_frontdoor.py']
+        (out/'PROVENANCE.json').write_text(json.dumps({'kind':'actual_C_renderer_host_preview','fixed_host_epoch_ms':1793015700000,'sources':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in sources},'validation':run.stdout.splitlines(),'device_accepted':False,'native_assets':args.native_assets,'native_inputs':native_inputs},indent=2)+'\n')
     print(out)
 
 if __name__=='__main__':main()

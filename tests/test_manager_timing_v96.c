@@ -14,9 +14,9 @@ static void new_club(void) {
   epoch_now=1793015700000ULL;memset(&md,0,sizeof(md));md.balance=5000;
   md.seed=1729;md.club=100;md.week_id=1;md.day_ms=MD_DEMO_DAY_MS;
   strcpy(md.name,"Timing United");assert(profile_create());strcpy(profile.user_id,"timing_manager");
-  assert(profile_save());md.created=md.joined=1;make_fixtures();assert(persist());
-  packs_build();pack_choice=0;pack_selected=3;pack_confirm();
-  assert(profile.receipts==1 && profile.balance==4000 && profile.collection_count==20);
+  assert(profile_save());md.created=md.joined=1;make_fixtures();assert(persist());assert(grant_entry_locked(NULL));
+  packs_build();pack_choice=0;pack_buy();pack_selected=3;pack_confirm();
+  assert(profile.receipts==1 && profile.balance==5500 && profile.collection_count==20);
 }
 static void assert_timing(void) {
   assert(manager_dummy_valid(&md));
@@ -63,10 +63,16 @@ static void assert_timing(void) {
     if(f->home==g->home || f->home==g->away || f->away==g->home || f->away==g->away)
       assert(f->kickoff_ms+f->duration_ms<=g->kickoff_ms || g->kickoff_ms+g->duration_ms<=f->kickoff_ms);
   }
+  MdSave old_clock=md;old_clock.day_ms=MD_DEMO_DAY_MS;
+  for(uint32_t i=0;i<MD_FIXTURES;i++) {
+    uint32_t r=old_clock.fixtures[i].round;
+    old_clock.fixtures[i].kickoff_ms=md.fixtures[0].kickoff_ms+
+        (r<3 ? r*(uint64_t)MD_DURATION : r<5 ? MD_DEMO_DAY_MS+(r-3)*(uint64_t)MD_DURATION : 2u*MD_DEMO_DAY_MS+(r-5)*(uint64_t)MD_DURATION);
+  }
   for(uint32_t day=1;day<=7;day++) {
     uint64_t t=day<=3 ? md.fixtures[0].kickoff_ms-(4u-day)*(uint64_t)MD_PREPARATION_DAY_MS
-                     : md.fixtures[0].kickoff_ms+(day-4u)*(uint64_t)md.day_ms;
-    MdWeek week=manager_dummy_week(&md,t);assert(week.day==day);
+                     : md.fixtures[0].kickoff_ms+(day-4u)*(uint64_t)MD_DEMO_DAY_MS;
+    MdWeek week=manager_dummy_week(&old_clock,t);assert(week.day==day);
     assert(week.state==(day<=3 ? MD_PRE_LEAGUE : day<=6 ? MD_MATCH_DAY : MD_RESULT));
   }
   page=MD_WATCH;fixture_choice=0;epoch_now=md.fixtures[0].kickoff_ms+300000;
@@ -77,7 +83,7 @@ static void assert_timing(void) {
   assert(audio.event_kind==MLA_FULL_TIME && audio.event_serial==100 && audio.event_at_ms==600000);
 }
 static void write_legacy(void) {
-  new_club();MdSaveV1 old={0};
+  new_club();md.balance=5000;md.purchased_mask=0;profile.balance=4000;assert(persist());assert(profile_save());MdSaveV1 old={0};
   memcpy(&old,&md,offsetof(MdSaveV1,fixtures));old.version=1;old.bytes=sizeof(old);
   uint64_t first=md.fixtures[0].kickoff_ms;
   static const uint32_t kinds[MD_LEGACY_EVENTS]={
@@ -119,7 +125,7 @@ static void assert_import(void) {
 static void result_time(void) {epoch_now=manager_dummy_week(&md,UINT64_MAX).result_ms;}
 static void assert_history(void) {
   assert(md.week_id==2 && profile_ready && !blocked);assert_timing();
-  assert(profile.receipts==1 && profile.balance==4000 && profile.collection_count==20 && profile.counts[0]==20);
+  assert(profile.receipts==1 && profile.collection_count==20 && profile.counts[0]==20);
   strcpy(md.name,"Renamed United");assert(persist());
   uint32_t p=profile.match_roster[0][1];profile.match_roster[0][1]=profile.match_roster[0][2];profile.match_roster[0][2]=p;
   assert(profile_save());
@@ -131,6 +137,7 @@ static void assert_history(void) {
   assert(old_score[0]!=new_score[0] || old_score[1]!=new_score[1]);
   MdArchive on_disk;char historical_path[96];archive_path(historical_path,1);
   assert(archive_read(historical_path,&on_disk));
+  assert(profile.balance==on_disk.players.balance+MD_ENTRY_CASH);
   assert(on_disk.save.fixtures[0].seed==history.save.fixtures[0].seed &&
          !memcmp(on_disk.save.fixtures,history.save.fixtures,sizeof(history.save.fixtures)));
   assert(!strcmp(broadcast_team_name(0),"Timing United"));
@@ -141,7 +148,7 @@ static void assert_history(void) {
   assert(v.elapsed_ms==0 && v.watching_replay && v.duration_ms==manager_dummy_duration(&history.save.fixtures[0]));
   manager_dummy_pad(RIGHT);manager_dummy_view(&v);assert(v.elapsed_ms==15000);
   manager_dummy_pad(B);assert(page==MD_SCHEDULE && history_week==1);
-  manager_dummy_pad(R);assert(!history_week);manager_dummy_pad(L);assert(history_week==1);
+  manager_dummy_pad(Y);assert(!history_week);manager_dummy_pad(X);assert(history_week==1);
   manager_dummy_pad(B);assert(page==MD_DASHBOARD && !history_week);
 }
 int main(int argc,char **argv) {
@@ -171,6 +178,9 @@ int main(int argc,char **argv) {
     return 0;
   }
   result_time();
+  /* Settle the completed league before injecting a successor-write failure;
+   * wallet recovery has a separate fault-injection test. */
+  assert(settle_rewards_locked());
   if(!strcmp(argv[1],"interrupt")) {
     assert(!mkdir(MD_FILE ".tmp",0700));assert(!manager_dummy_next_week());
     assert(blocked && file_exists(MD_PENDING_FILE));return 0;

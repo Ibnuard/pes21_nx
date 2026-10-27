@@ -10,10 +10,11 @@ from pathlib import Path
 import subprocess
 import bpy
 import bmesh
-import re
+from stadium_surface_policy import protected_surface, preserved_source_faces
 
 
-def reduce(shell, target, folder, node, module, underlay_materials=(), polygon_python=None, polygon_modules=None):
+def reduce(shell, target, folder, node, module, underlay_materials=(), polygon_python=None, polygon_modules=None,
+           reviewed_surfaces=(), surface_face_rules=()):
     mesh=shell.data
     bm=bmesh.new();bm.from_mesh(mesh)
     bmesh.ops.triangulate(bm,faces=list(bm.faces));bm.to_mesh(mesh);bm.free()
@@ -24,7 +25,7 @@ def reduce(shell, target, folder, node, module, underlay_materials=(), polygon_p
         # Treat the complete stair surface independently of facade/roof detail.
         triangles=[t for t in mesh.loop_triangles if t.material_index==mi]
         if not triangles:continue
-        if not re.search(r'stair|stir|_star[0-9_]|_conc[0-9_]|_cncr324_|walkway|flatramp',mat.name):continue
+        if not protected_surface(mat.name, reviewed_surfaces):continue
         protected_faces.update(t.polygon_index for t in triangles)
         row=dict(name=mat.name,positions=[],uv=[],indices=[],originals=[],slot=mi)
         lookup={}
@@ -37,6 +38,15 @@ def reduce(shell, target, folder, node, module, underlay_materials=(), polygon_p
                     row['positions'].extend(round(c,3) for c in mesh.vertices[vi].co);row['uv'].extend(uv)
                 row['indices'].append(lookup[key])
         rows.append(row)
+    if (len(set(reviewed_surfaces)) != len(reviewed_surfaces) or
+            set(reviewed_surfaces) - {row['name'] for row in rows}):
+        raise ValueError('Reviewed protected surface material not found or repeated')
+    if set(rule['material'] for rule in surface_face_rules)-{row['name'] for row in rows}:
+        raise ValueError('Reviewed source panel material not found')
+    for row in rows:
+        rules=[rule for rule in surface_face_rules if rule['material']==row['name']]
+        if rules:
+            row['preserve_triangles']=preserved_source_faces(row['positions'],row['indices'],rules)
     before=len(mesh.loop_triangles)
     underlays=[]
     if underlay_materials:
@@ -103,6 +113,8 @@ def reduce(shell, target, folder, node, module, underlay_materials=(), polygon_p
     proof=dict(before=before,after=after,target=target,
                protected_open_borders_locked=all(r['method']=='fixed_border' for r in result),
                protected_surface='whole stair/concrete treads and risers',
+               reviewed_surface_materials=list(reviewed_surfaces),
+               source_face_rules=list(surface_face_rules),
                cluster_relative_error=cluster_error,
                backing_triangles=backing_total,
                backing_materials=[r['name'] for r in underlays],

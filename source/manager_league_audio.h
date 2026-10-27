@@ -22,7 +22,10 @@ typedef struct ManagerLeagueAudioFrame {
   uint32_t event_serial, event_at_ms, event_kind, event_side;
 } ManagerLeagueAudioFrame;
 
-/* Publication performs only a short snapshot copy. All native mixer activity
- * is deferred to manager_league_audio_native_pump on its serialized owner. */
+/* Publication performs only a short snapshot copy. The serialized game owner
+ * processes event policy; only the existing output callback blends PCM. */
 void manager_league_audio_publish(const ManagerLeagueAudioFrame *frame);
+/* Existing final AudioOut buffer only: stereo PCM16 at 48 kHz. No device,
+ * allocation, native mixer request or I/O is performed by this callback. */
+void manager_league_audio_mix_pcm(int16_t *output, uint32_t frames, uint64_t monotonic_ms);
 #endif

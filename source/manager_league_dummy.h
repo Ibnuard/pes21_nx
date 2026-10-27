@@ -10,6 +10,9 @@ enum { MD_TEAMS=7, MD_FIXTURES=21, MD_EVENTS=99, MD_DURATION=600000,
        MD_LEGACY_EVENTS=29, MD_LEGACY_DURATION=180000, MD_LEGACY_DAY_MS=540000, MD_PREPARATION_DAY_MS=540000,
        MD_NAME_SIZE=32, MD_ROWS=7, MD_WEEK_VISIBLE=3, MD_DEMO_DAY_MS=1800000,
        MD_PACK_UNSEAL_MS=2400, MD_PACK_OPEN_MS=3400, MD_MATCH_VISIBLE=6 };
+enum { MD_CALENDAR_DAY_MS=86400000, MD_LEAGUE_TIMEZONE_MS=25200000 };
+enum { MD_LEGACY_PURCHASES=7u, MD_ENTRY_GRANTED=256u, MD_REWARD_SETTLED=512u,
+       MD_STARTING_CASH=5000u, MD_ENTRY_CASH=1500u };
 enum { MD_PRE_LEAGUE, MD_MATCH_DAY, MD_RESULT };
 typedef struct {
   uint32_t state,day;
@@ -20,7 +23,9 @@ typedef enum { MD_REGISTER, MD_CLUB, MD_NAME, MD_STRATEGY, MD_JOIN,
                MD_TEAM_INFO, MD_WATCH, MD_PLAYER_INFO, MD_SHOP, MD_NEWS,
                MD_OVERALL, MD_RULES, MD_LEAGUES, MD_CALENDAR, MD_PACK,
                MD_PACK_RESULT, MD_COLLECTION_PAGE, MD_REPLACE_PLAYER, MD_PACK_OPENING, MD_PACK_SELECT,
-               MD_LOGIN, MD_SECURE, MD_LOGOUT, MD_NEXT_WEEK } MdPage;
+               MD_LOGIN, MD_SECURE, MD_LOGOUT, MD_NEXT_WEEK, MD_MIGRATE,
+               MD_CLUB_PROFILE, MD_TEAM_HISTORY, MD_CLUB_PLAN, MD_REWARDS,
+               MD_PACK_BUY, MD_CHAMPIONS, MD_CHAMPION } MdPage;
 enum { MD_ACTION_NONE, MD_ACTION_NAME, MD_ACTION_EXIT, MD_ACTION_PLAN };
 enum { MD_PASS, MD_SHOT, MD_GOAL, MD_FOUL, MD_YELLOW, MD_SUB,
        MD_OFFSIDE, MD_CORNER, MD_SAVE, MD_HALF };
@@ -65,12 +70,13 @@ typedef struct {
 typedef struct {
   char period[40];
   uint32_t match_count;
-  MdRow matches[3];
+  MdRow matches[4];
 } MdScheduleDay;
 typedef struct {
   float x,y; uint32_t side,number;
 } MdDot;
 typedef struct { uint32_t at_ms,kind,side; } MdTimelineMark;
+typedef struct {char label[64];uint32_t portrait,rating,role,identity;} MdPlanPlayer;
 typedef struct {
   MdPage page;
   char title[64], subtitle[96], status[112], club[64], name[MD_NAME_SIZE];
@@ -89,7 +95,8 @@ typedef struct {
   uint32_t event_serial,timeline_serial,event_at_ms;
   uint32_t fouls[2],corners[2],cards[2],substitutions[2],roster_size,shop_locked;
   uint64_t now_ms,kickoff_ms;
-  MdRow rows[MD_ROWS];
+  /* Watch's modal and ordinary list pages are mutually exclusive. */
+  union { MdRow rows[MD_ROWS]; MdRow touchline[MD_ROWS]; };
   MdScheduleDay schedule[MD_WEEK_VISIBLE];
   MdRow table_preview[3],fixture_preview[3];
   MdRow event_feed[3];
@@ -107,6 +114,13 @@ typedef struct {
   MlCalendarCell calendar[42];
   MdRow squad_preview[3],pack_players[8];
   uint32_t pack_count,pack_selected,pack_selection_count,pack_opening_ms;
+  /* Controller PIN presentation exposes counts only, never entered digits. */
+  uint32_t pin_open,pin_cursor,pin_length,pin_confirming,pin_creating;
+  uint32_t league_points,club_team,club_power,club_rating,club_rank,club_reputation;
+  MdPlanPlayer plan_players[18];
+  uint32_t touchline_open,touchline_first,touchline_count,touchline_total;
+  uint32_t match_group,match_groups[3],match_group_first;
+  uint64_t rank_reset_ms;
 } MdView;
 
 void manager_dummy_open(void);
@@ -114,6 +128,7 @@ void manager_dummy_pad(uint32_t pressed);
 void manager_dummy_tick(uint64_t monotonic_ms);
 void manager_dummy_tick_at(uint64_t epoch_ms); /* Injected clock for host QA. */
 void manager_dummy_view(MdView *out);
+uint32_t manager_dummy_cash(void);
 void manager_dummy_audio_frame(ManagerLeagueAudioFrame *out,uint64_t monotonic_ms);
 uint32_t manager_dummy_take_action(void);
 const char *manager_dummy_name(void);

@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "util.h"
+#include "manager_league_audio.h"
 
 enum {
   AAUDIO_OK = 0,
@@ -423,6 +424,8 @@ static int aaudio_fill_output_buffer(AAudioStream *stream,
   uint64_t source_frames = 0;
   if (!aaudio_render_output(stream, buffer->nx.buffer, &source_frames))
     return 0;
+  manager_league_audio_mix_pcm(buffer->nx.buffer, AAUDIO_AUDOUT_BUFFER_FRAMES,
+      armTicksToNs(armGetSystemTick()) / 1000000u);
   buffer->source_frames = source_frames;
   buffer->nx.data_size =
       AAUDIO_AUDOUT_BUFFER_FRAMES * AAUDIO_AUDOUT_CHANNEL_COUNT *

@@ -175,7 +175,7 @@ static uintptr_t so_try_find_addr_rx(so_module *m,const char *s){(void)m;(void)s
 static uintptr_t so_find_addr(so_module *m,const char *s){(void)m;(void)s;return 0;}
 static unsigned notes,status_calls,position_calls,gain_calls;
 static void fixdemo_trophy_note(const char *s){assert(s && *s);++notes;}
-static void *nx_asset_read(const char *p,size_t limit,size_t *bytes){(void)p;(void)limit;*bytes=0;return NULL;}
+static void *nx_asset_read_production(const char *p,size_t limit,size_t *bytes){(void)p;(void)limit;*bytes=0;return NULL;}
 #include "fixdemo_trophy_audio.inc"
 static int32_t status_result,stop_result;
 static int32_t status(uint64_t handle,uint32_t *flags){assert(handle);++status_calls;*flags=1u<<20;return status_result;}

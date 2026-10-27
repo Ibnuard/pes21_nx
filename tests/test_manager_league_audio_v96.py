@@ -69,7 +69,7 @@ static uintptr_t so_try_find_addr_rx(so_module *m,const char *n){(void)m;(void)n
 static uintptr_t so_find_addr(so_module *m,const char *n){(void)m;(void)n;return 0;}
 static void scene_runtime_note(const char *a,const char *b){(void)a;(void)b;}
 static void *nx_asset_read(const char *n,uint32_t max,size_t *size){(void)n;(void)max;(void)size;return NULL;}
-#include "manager_league_audio_runtime.inc"
+#include "fixtures/manager_league_native_audio_v96.inc"
 static unsigned size_calls, allocations, fail_allocate;
 static int32_t required=4096;
 static int32_t size_stub(const MlaWavePoolConfig *c){

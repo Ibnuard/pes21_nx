@@ -14,7 +14,7 @@ import bpy
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from stadium_backing import load_selection, backing_budget_allowed
+from stadium_backing import load_selection, backing_budget_allowed, signal_foundation_quads
 
 
 def restore(recipe_path, output):
@@ -26,6 +26,13 @@ def restore(recipe_path, output):
         rows, source = load_selection(item['source_gltf'], **item['selection'])
         for row in rows:
             row['atlas_source_material']=item.get('atlas_source_material',recipe['atlas_source_material'])
+        backing.extend(rows);sources.append(source)
+    if 'authored_foundation' in recipe:
+        foundation=recipe['authored_foundation']
+        if (foundation['key']!=recipe['key'] or len(backing)):
+            raise ValueError('Authored foundation must be a separate reviewed completion')
+        rows,source=signal_foundation_quads(foundation)
+        for row in rows:row['atlas_source_material']=recipe['atlas_source_material']
         backing.extend(rows);sources.append(source)
     output = Path(output).resolve()
     if output.exists():
