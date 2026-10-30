@@ -13,9 +13,10 @@ static void scene_runtime_note(const char *a,const char *b){(void)a;(void)b;}
 static uint8_t registry[0x500],info[0x1700],ai[2][0xb8b4],anime[8];
 static uint8_t lists[2][0x4000],units[2][0x48],inputs[2][0x30];
 static uint32_t match_hud_session_serial=1;
-static int two_player=1,ready=1,native_calls;
+static int two_player=1,ready=1,native_calls,nameplates_ready,start_during_native;
 static int pes_controller_native_pad_lab_active(void){return 1;}
 static int pes_controller_native_pad_lab_two_player(void){return two_player;}
+static int pes_controller_nameplate_ready(void){return nameplates_ready;}
 static void *get_registry(void){return registry;}
 static const void *get_ai(const void *r,uint32_t side){assert(r==registry && side<2);return ai[side];}
 static const void *get_anime(const void *r,uint32_t player){assert(r==registry && player<=21);return anime;}
@@ -28,6 +29,7 @@ static uint32_t original(void *unit,const void *input,uint32_t kind) {
   /* Model native Init/menu work; the adapter must retain it, then clear only
    * the hidden-menu bytes before returning the custom native command. */
   ((uint8_t *)unit)[0x38]=1;((uint8_t *)unit)[0x39]=1;
+  if(start_during_native)nameplates_ready=1;
   ((uint8_t *)unit)[0x22]=0xab;return 0x6e;
 }
 static void u32(void *base,size_t off,uint32_t n){memcpy((char *)base+off,&n,4);}
@@ -98,6 +100,33 @@ int main(int argc,char **argv) {
     uint32_t command;uint8_t option;
     assert(!fnx_corner_take(0,corner_native_epochs[0],clock_ms,&command,&option));
     FnxCornerView v;fnx_corner_view(0,clock_ms,&v);assert(!v.available);
+  } else if(!strcmp(argv[1],"nameplate-start") ||
+            !strcmp(argv[1],"nameplate-start-during-native")) {
+    /* COM can begin its corner between selection and native consumption.
+     * Broad SET_PLAY/anime context remains valid during this transition. */
+    select_up(0);select_up(1);
+    start_during_native=!strcmp(argv[1],"nameplate-start-during-native");
+    nameplates_ready=!start_during_native;
+    assert(!corner_native_main(units[0],inputs[0],70,original));
+    assert(!corner_native_main(units[1],inputs[1],71,original));
+    assert(native_calls==2 && !units[0][0x19] && !units[1][0x19]);
+    for(unsigned pad=0;pad<2;pad++) {
+      FnxCornerView v;fnx_corner_view(pad,clock_ms,&v);
+      assert(!v.available && !v.open);
+      assert(!fnx_corner_input(pad,clock_ms,1,1,FNX_CORNER_UP,0));
+      assert(corner_native_observe(lists[pad],inputs[pad],pad,0)==70+pad);
+      fnx_corner_view(pad,clock_ms,&v);assert(!v.available);
+    }
+  } else if(!strcmp(argv[1],"nameplate-return")) {
+    select_up(0);nameplates_ready=1;
+    assert(!corner_native_main(units[0],inputs[0],70,original));
+    /* A hidden HUD does not revive the old corner/pending command. */
+    nameplates_ready=0;
+    assert(!corner_native_main(units[0],inputs[0],70,original));
+    FnxCornerView v;fnx_corner_view(0,clock_ms,&v);assert(!v.available);
+    assert(corner_native_observe(lists[0],inputs[0],0,0)==70);
+    fnx_corner_view(0,clock_ms,&v);assert(v.available && !v.open);
+    select_up(0);assert(corner_native_main(units[0],inputs[0],70,original)==0x6e);
   } else if(!strcmp(argv[1],"other-restart-list")) {
     const uint32_t kinds[]={62,64,72,75,91,92,93};
     for(unsigned i=0;i<sizeof(kinds)/sizeof(kinds[0]);i++) {

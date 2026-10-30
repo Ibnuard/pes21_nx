@@ -11,8 +11,9 @@ typedef struct {
 } CornerPad;
 static CornerPad pads[2];
 static pthread_mutex_t corner_mutex=PTHREAD_MUTEX_INITIALIZER;
+static int nameplate_ready;
 static int fresh(const CornerPad *p,uint64_t now) {
-  return p->mode && now>=p->seen && now-p->seen<=250;
+  return !nameplate_ready && p->mode && now>=p->seen && now-p->seen<=250;
 }
 /* Directions are UP, RIGHT, DOWN, LEFT. These are native command options,
  * not physical PadId values (which change with native camera orientation). */
@@ -40,6 +41,23 @@ static uint32_t current(const CornerPad *p) {
 void fnx_corner_reset(void) {
   pthread_mutex_lock(&corner_mutex);
   memset(pads,0,sizeof(pads));
+  nameplate_ready=0;
+  pthread_mutex_unlock(&corner_mutex);
+}
+void fnx_corner_set_nameplate_ready(int ready) {
+  pthread_mutex_lock(&corner_mutex);
+  ready=ready!=0;
+  if(nameplate_ready!=ready) {
+    nameplate_ready=ready;
+    for(unsigned pad=0;pad<2;pad++) {
+      CornerPad *p=&pads[pad];
+      /* Do not keep the modal release latch when live play takes ownership.
+       * The user's movement and kick buttons must reach native input now.
+       * Clear availability on both edges: a hidden/expired HUD by itself
+       * cannot revive a corner heartbeat from the previous kick. */
+      p->mode=p->open=p->page=p->pending=p->release=0;
+    }
+  }
   pthread_mutex_unlock(&corner_mutex);
 }
 void fnx_corner_publish(uint32_t pad,uint64_t epoch,uint32_t mode,

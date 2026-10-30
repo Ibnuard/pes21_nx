@@ -1,6 +1,7 @@
 static uint32_t corner_tactics_hid(uint32_t pad,uint64_t now,int allowed,
     int connected,uint32_t profile,u64 buttons,u64 menu_buttons,
     float x,float y,float rx,float ry) {
+  fnx_corner_set_nameplate_ready(pes_controller_nameplate_ready());
   uint32_t keys=0;
   const int full=profile==PES_CONTROLLER_PROFILE_FULL;
   int neutral=fabsf(x)<.2f && fabsf(y)<.2f && fabsf(rx)<.2f && fabsf(ry)<.2f;

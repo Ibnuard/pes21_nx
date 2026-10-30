@@ -7,6 +7,7 @@
 
 #include "android_shim.h"
 #include "config.h"
+#include "custom_playlist.h"
 #include "error.h"
 #include "hooks.h"
 #include "imports.h"
@@ -353,6 +354,7 @@ int main(void) {
 
   if (read_config(CONFIG_NAME) < 0)
     write_config(CONFIG_NAME);
+  custom_playlist_init("playlist", config.custom_playlist != 0);
   set_screen_size();
   check_syscalls();
   check_data();

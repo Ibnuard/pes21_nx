@@ -182,10 +182,10 @@ static void frontdoor_snapshot(FrontdoorView *v,FrontdoorPage page,
   if(page==FD_SETTINGS || page==FD_PAUSE_SETTINGS || page==FD_VIDEO) {
     const int pause=page==FD_PAUSE_SETTINGS,video=page==FD_VIDEO;
     v->focus=pause ? pes_controller_pause_settings_focus() : video ? pes_controller_custom_video_settings_focus() : pes_controller_custom_match_settings_focus();
-    v->total_rows=pause ? pes_controller_pause_settings_count() : video ? 2u : pes_controller_custom_match_settings_count();
+    v->total_rows=pause ? pes_controller_pause_settings_count() : video ? pes_controller_custom_video_settings_count() : pes_controller_custom_match_settings_count();
     v->row_count=v->total_rows<6u ? v->total_rows : 6u;
     if(v->row_count && v->focus>=v->row_count)v->first_row=v->focus-v->row_count+1u;
-    fd_copy(v->title,sizeof(v->title),pause ? pes_controller_pause_settings_title() : video ? "VIDEO SETTINGS" : "GENERAL SETTINGS");
+    fd_copy(v->title,sizeof(v->title),pause ? pes_controller_pause_settings_title() : video ? "SETTINGS" : "GENERAL SETTINGS");
     for(uint32_t i=0;i<v->row_count;i++) {
       const uint32_t row=v->first_row+i;
       fd_copy(v->rows[i].label,sizeof(v->rows[i].label),pause ? pes_controller_pause_settings_label(row) : video ? pes_controller_custom_video_settings_label(row) : pes_controller_custom_match_settings_label(row));
@@ -365,7 +365,7 @@ static void fd_footer(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *ver
   }else {
     fd_helper(ui,"A",page==FD_SELECTOR ? "CONFIRM" : page>=FD_KITS ? "CHANGE" : "SELECT",&x,verts,quads);
     if(page!=FD_MENU)fd_helper(ui,"B","BACK",&x,verts,quads);
-    if(page==FD_VIDEO)fd_helper(ui,"X","APPLY",&x,verts,quads);
+    if(page==FD_VIDEO)fd_helper(ui,"ZL","PLAYLIST INFO",&x,verts,quads);
     if(page==FD_SELECTOR) {
       fd_helper(ui,"UP","PREVIOUS",&x,verts,quads);
       fd_helper(ui,"DOWN","NEXT",&x,verts,quads);
@@ -612,7 +612,7 @@ static void fd_kits(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts
 }
 static void fd_settings(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
   fd_header(ui,v->page==FD_STADIUM ? "STADIUM" : v->title[0] ? v->title : "GENERAL SETTINGS",
-      v->page==FD_VIDEO ? "DISPLAY SETTINGS" : v->page==FD_PAUSE_SETTINGS ? "MATCH PREFERENCES" : "MATCH PREFERENCES",ML_HEADER_SETTINGS,verts,quads);
+      v->page==FD_VIDEO ? "DISPLAY AND AUDIO" : v->page==FD_PAUSE_SETTINGS ? "MATCH PREFERENCES" : "MATCH PREFERENCES",ML_HEADER_SETTINGS,verts,quads);
   const float h=.032f+v->row_count*.09f,y=.20f+(.664f-h)*.5f;
   fd_card(ui,.11f,y,.78f,h,0,0,verts,quads);
   for(uint32_t i=0;i<v->row_count && i<6u;i++) {
@@ -633,6 +633,13 @@ static void fd_settings(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *v
     fd_center_text(ui,v->status,.12f,.852f,.76f,.023f,-3,verts,quads);
 }
 static void fd_info(MasterLeagueRender *ui,const FrontdoorView *v,GLfloat *verts,int *quads) {
+  if(!strcmp(v->title,"CUSTOM PLAYLIST")) {
+    fd_header(ui,v->title,"",ML_HEADER_SETTINGS,verts,quads);
+    fd_card(ui,.12f,.265f,.76f,.510f,0,0,verts,quads);
+    for(uint32_t i=0;i<v->row_count && i<6u;i++)
+      fd_center_text(ui,v->rows[i].label,.15f,.350f+i*.076f,.70f,.0306f,-2,verts,quads);
+    return;
+  }
   fd_header(ui,v->title[0] ? v->title : "CREDITS","FOOTBALLNX ANDROSWITCH PROJECT",ML_HEADER_MESSAGES,verts,quads);
   fd_card(ui,.16f,.244f,.68f,.578f,0,0,verts,quads);
   fd_brand(ui,.34f,.295f,.32f,verts,quads);

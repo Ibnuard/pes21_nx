@@ -81,6 +81,7 @@ static int corner_native_list_conflicts(const void *list) {
 }
 static uint32_t corner_native_observe(void *list,const void *input,uint32_t pad,
                                       int conflicting_restart) {
+  fnx_corner_set_nameplate_ready(pes_controller_nameplate_ready());
   CornerNativeContext context;
   if(pad>1)return 0;
   int valid=corner_native_context(input,pad,&context) &&
@@ -105,6 +106,9 @@ static uint32_t corner_native_observe(void *list,const void *input,uint32_t pad,
 }
 static uint32_t corner_native_main(void *unit,const void *input,uint32_t kind,
     uint32_t (*original)(void *,const void *,uint32_t)) {
+  /* Recheck at consumption: a kick can start after HID queued the choice.
+   * Keep native Init/lifecycle below, but never commit that stale choice. */
+  fnx_corner_set_nameplate_ready(pes_controller_nameplate_ready());
   uint32_t player=UINT32_MAX;
   if(input)memcpy(&player,(const char *)input+0x24,4);
   uint32_t pad=player<11 ? 0 : 1;
@@ -118,6 +122,7 @@ static uint32_t corner_native_main(void *unit,const void *input,uint32_t kind,
   uint32_t result=original ? original(unit,input,kind) : 0;
   if(!owned)return result;
   memset((char *)unit+0x38,0,2);
+  fnx_corner_set_nameplate_ready(pes_controller_nameplate_ready());
   uint32_t command=0;uint8_t option=0;
   if(fnx_corner_take(pad,corner_native_epochs[pad],scene_runtime_ms(),
                      &command,&option)) {

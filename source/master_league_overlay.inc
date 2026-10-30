@@ -272,14 +272,22 @@ static void ml_ui_row(MasterLeagueRender *ui,const MlViewRow *row,float x,float 
   else ml_ui_rect(ui,x,y,w,h,row->enabled ? .93f : .89f,row->enabled ? .96f : .91f,.98f,1,-1,0,1,verts,quads);
   if(row->unread)ml_ui_unread(ui,x+w-.020f,y+.010f,verts,quads);
   const float icon_h=fminf(h-.012f,.061f),icon_w=icon_h*screen_height/screen_width;
-  const int has_icon=row->badge || row->portrait || row->league_logo || row->emblem;
+  const int has_icon=row->badge || row->portrait || row->rating || row->league_logo || row->emblem;
   const float icon_span=has_icon ? icon_w+.010f+(row->badge && row->portrait ? icon_w+.008f : 0.f) : 0.f;
   if(row->emblem && !row->badge && !row->portrait)ml_ui_emblem(ui,row->emblem-1u,x+.010f,y+(h-icon_h)*.5f,icon_h,verts,quads);
   if(row->badge && !row->league_logo)ml_ui_image(ui,gl.badge_tex,row->badge,
       x+.010f+(row->portrait ? icon_w+.008f : 0.f),y+(h-icon_h)*.5f,icon_w,icon_h,verts,quads);
-  if(row->portrait) {
+  if(row->portrait || row->rating) {
     const GLuint tex=gameplan_portrait_texture(row->portrait);
     if(tex)ml_ui_image(ui,tex,0,x+.010f,y+(h-icon_h)*.5f,icon_w,icon_h,verts,quads);
+    else {
+      /* A player always has a portrait slot, including missing/loading assets. */
+      const float px=x+.010f,py=y+(h-icon_h)*.5f;
+      ml_ui_rect(ui,px+icon_w*.28f,py,icon_w*.44f,icon_h*.42f,.53f,.60f,.66f,1,-1,0,1,verts,quads);
+      if(ui->draw_count)ui->draws[ui->draw_count-1].round.radius=icon_h*.21f*screen_height;
+      ml_ui_rect(ui,px+icon_w*.08f,py+icon_h*.40f,icon_w*.84f,icon_h*.60f,.53f,.60f,.66f,1,-1,0,1,verts,quads);
+      if(ui->draw_count)ui->draws[ui->draw_count-1].round.radius=icon_h*.18f*screen_height;
+    }
   }
   if(row->league_logo) {
     const uint32_t index=row->league_logo-1u;

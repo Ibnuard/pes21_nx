@@ -174,8 +174,8 @@ def main():
         (temp/'preview.c').write_text(generated)
         (temp/'ue4_hooks.h').write_text((ROOT/'source/ue4_hooks.h').read_text().replace('#include "so_util.h"','typedef struct so_module so_module;'))
         shutil.copy2(ROOT/'source/competition_frontend.c',temp/'competition_frontend.c')
-        core=['competition_entry_draft.c','cup_tournament.c','cup_save.c','league_tournament.c','league_save.c','master_league.c','master_league_save.c','master_league_frontend.c', 'manager_league_dummy.c','manager_league_motion.c','manager_league_plan.c','master_league_catalog.c','gameplan_preset.c']
-        result=subprocess.run(['cc','-std=c11','-O1','-Wno-constant-logical-operand','-I',str(temp),'-I',str(ROOT/'source'),str(temp/'preview.c'),str(temp/'competition_frontend.c'),*[str(ROOT/'source'/n) for n in core],'-lm','-o',str(temp/'preview')],capture_output=True,text=True)
+        core=['competition_entry_draft.c','cup_tournament.c','cup_save.c','league_tournament.c','league_save.c','master_league.c','master_league_save.c','master_league_frontend.c', 'manager_league_dummy.c','manager_league_client.c','manager_league_online.c','manager_online_json.c','manager_online_http.c','loading_popup.c','manager_league_motion.c','manager_league_plan.c','master_league_catalog.c','gameplan_preset.c']
+        result=subprocess.run(['cc','-std=c11','-O1','-Wno-constant-logical-operand','-I',str(temp),'-I',str(ROOT/'source'),str(temp/'preview.c'),str(temp/'competition_frontend.c'),*[str(ROOT/'source'/n) for n in core],'-lm','-pthread','-o',str(temp/'preview')],capture_output=True,text=True)
         if result.returncode:
             (output/'compile-error.txt').write_text(result.stderr)
             (output/'driver-debug.c').write_text(generated)

@@ -1,4 +1,8 @@
+#include "gameplan_layout.h"
 /* Exact shared FootballNX presentation primitives; no extra GL program/assets. */
+#include "manager_league_client.h"
+#include "manager_league_hub.h"
+#include <time.h>
 static void md_ui_right_text(MasterLeagueRender *ui,const char *text,float right,float cy,
     float height,GLfloat *verts,int *quads) {
   float width=fminf(.22f,measure_efootball_line_mode(text,(int)strlen(text),height*screen_height,EFOOTBALL_FONT_BOLD,0)/screen_width);
@@ -9,11 +13,13 @@ static void md_ui_chrome(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,i
   ml_ui_art(ui,0,.03f,.03f,.94f,.133f,verts,quads);
   const float tx=v->badge ? .119f : .057f;
   if(v->badge)ml_ui_image(ui,gl.badge_tex,v->badge,.050f,.052f,.051f,.091f,verts,quads);
-  ml_ui_text(ui,"MANAGER LEAGUE",tx,.049f,.57f,.0472f,1,-1,0,1,verts,quads);
+  ml_ui_text(ui,v->online_test?"ONLINEDEV - TEST":"MANAGER LEAGUE",tx,.049f,.57f,.0472f,1,-1,0,1,verts,quads);
   ml_ui_text(ui,v->caption[0] ? v->caption : v->subtitle,tx,.114f,.61f,.0278f,2,-1,0,1,verts,quads);
-  md_ui_right_text(ui,"NX CASH",.950f,.066f,.0222f,verts,quads);
-  char cash[24];snprintf(cash,sizeof(cash),"%u",v->balance);
-  md_ui_right_text(ui,cash,.950f,.115f,.0389f,verts,quads);
+  if(!v->online || v->online_cash_available){
+    md_ui_right_text(ui,"NX CASH",.950f,.066f,.0222f,verts,quads);
+    char cash[24];snprintf(cash,sizeof(cash),"%llu",(unsigned long long)(v->online?v->online_cash:v->balance));
+    md_ui_right_text(ui,cash,.950f,.115f,.0389f,verts,quads);
+  }
 }
 static void md_ui_circle(MasterLeagueRender *ui,float x,float y,float h,
     float r,float g,float b,GLfloat *verts,int *quads) {
@@ -70,8 +76,87 @@ static void md_ui_pitch(MasterLeagueRender *ui,const MdView *v,float x,float y,
     fd_center_text(ui,detail,bx+.014f,by+.083f,bw-.028f,.023f,-1,verts,quads);
   }
 }
+/* Online cards use only published API data. Do not populate the legacy
+ * local league table, feed or opponent previews with synthetic values. */
+static void md_ui_online_hub(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  static const char *const tabs[]={"HOME","MY TEAM","LEAGUE"};
+  md_ui_chrome(ui,v,verts,quads);
+  for(uint32_t i=0;i<3;i++) {
+    const float x=.10f+i*.275f;fd_card(ui,x,.199f,.25f,.048f,v->tab==i,0,verts,quads);
+    fd_text(ui,tabs[i],x+.018f,.211f,.224f,.025f,v->tab==i ? -1 : -2,verts,quads);
+  }
+  for(uint32_t i=0;i<(v->tab?4u:5u);i++) {
+    const MdRow *r=&v->rows[i];const float gap=24.f/screen_width,small=(.92f-2.f*gap)/3.f;const float x=i<2 ? .04f+i*(.92f+gap)*.5f : .04f+(i-2)*(small+gap);
+    const float top_h=v->tab?(.833f-.280f-24.f/screen_height)*.5f:.219f;
+    const float y=i<2 ? .280f : .280f+top_h+24.f/screen_height,w=i<2 ? (.92f-gap)*.5f : small,h=i<2 ? top_h : .833f-y;
+    const int selected=v->focus==i;
+    if(v->tab&&i>=2){
+      float bx=.04f+(i-2)*(.92f+gap)*.5f;
+      uint32_t icon=v->tab==1?(i==2?ML_HEADER_FINANCE:ML_HEADER_TRANSFER):(i==2?ML_HEADER_MANAGER:ML_HEADER_CALENDAR);
+      const char *label=v->tab==1?(i==2?"CLUB PACKS":"UPCOMING"):(i==2?"SIGN OUT":"HOW TO PLAY");
+      ml_ui_panel(ui,r->label,icon,bx,y,(.92f-gap)*.5f,h,selected,verts,quads);
+      float tw=(.92f-gap)*.5f;
+      ml_ui_art(ui,v->tab==1?(i==2?2:3):(i==2?3:2),bx+.010f,y+.088f,tw-.020f,h-.105f,verts,quads);
+      fd_text(ui,label,bx+.027f,y+.115f,tw-.054f,.034f,-1,verts,quads);
+      if(v->tab==1&&i==2)fd_text(ui,"LITE   MEDIUM   JUMBO",bx+.027f,y+.203f,tw-.054f,.024f,-1,verts,quads);
+      continue;
+    }
+    if(i<2){
+      ml_ui_frame(ui,x,y,w,h,selected,verts,quads);fd_card(ui,x,y,w,h,0,0,verts,quads);
+      ml_ui_art(ui,i==1 ? 1 : 0,x,y,w,h,verts,quads);
+      int live=!v->tab&&!i&&v->hub_phase==MH_MATCH&&v->hub_live;
+      fd_text(ui,r->label,x+.020f,y+.024f,w-(live?.128f:.040f),.0333f,-1,verts,quads);
+      if(live){
+        fd_rect(ui,x+w-.095f,y+.022f,.075f,.040f,.91f,.05f,.18f,verts,quads);
+        fd_center_text(ui,"LIVE",x+w-.095f,y+.042f,.075f,.0236f,-1,verts,quads);
+      }
+      if(i==1&&!v->tab&&v->news_preview_count){
+        fd_text(ui,v->news_preview.label,x+.020f,y+.075f,w-.040f,.030f,-1,verts,quads);
+        fd_text(ui,v->news_preview.detail,x+.020f,y+.123f,w-.040f,.0236f,-1,verts,quads);
+      }else fd_text(ui,r->detail,x+.020f,y+.095f,w-.040f,!v->tab&&!i?.036f:.026f,-1,verts,quads);
+      if(strcmp(r->value,"OPEN"))fd_text(ui,r->value,x+.020f,y+h-.041f,w-.040f,.0236f,-1,verts,quads);
+    }else {
+      static const uint32_t icons[3]={ML_HEADER_CALENDAR,ML_HEADER_RANKING,ML_HEADER_SAVE};
+      ml_ui_panel(ui,r->label,icons[i-2],x,y,w,h,selected,verts,quads);
+      if(i==3&&!v->tab){
+        for(uint32_t n=0;n<v->table_preview_count;n++){
+          const MdRow *item=&v->table_preview[n];float yy=y+.086f+n*.065f;
+          fd_card(ui,x+.010f,yy,w-.020f,.059f,0,0,verts,quads);
+          char rank[8];snprintf(rank,sizeof(rank),"%u",n+1);fd_text(ui,rank,x+.019f,yy+.017f,.022f,.024f,-2,verts,quads);
+          if(item->badge)ml_ui_image(ui,gl.badge_tex,item->badge,x+.043f,yy+.007f,.026f,.046f,verts,quads);
+          const char *name=strstr(item->label,". ");name=name?name+2:item->label;
+          fd_text(ui,name,x+.077f,yy+.016f,w-.148f,.0236f,-2,verts,quads);
+          fd_text(ui,item->value,x+w-.062f,yy+.017f,.053f,.0236f,-2,verts,quads);
+        }
+        if(!v->table_preview_count){fd_text(ui,"AWAITING THE LEAGUE TABLE",x+.017f,y+.120f,w-.034f,.025f,-2,verts,quads);}
+      }else if(i==2&&!v->tab){
+        const char *days[]={"M","T","W","T","F","S","S"};float cw=(w-.034f)/7.f;
+        for(unsigned d=0;d<7;d++){float xx=x+.017f+d*cw;int today=v->history_week==d;
+          fd_rect(ui,xx,y+.104f,cw-.003f,.054f,today?.03f:.89f,today?.34f:.95f,today?.72f:.99f,verts,quads);
+          fd_center_text(ui,days[d],xx,y+.130f,cw-.003f,.024f,today?-1:-2,verts,quads);
+          fd_rect(ui,xx,y+.164f,cw-.003f,.006f,d<3?.03f:d<6?.87f:.16f,d<3?.34f:d<6?.15f:.61f,.59f,verts,quads);
+        }
+        fd_text(ui,"W1",x+.017f,y+.190f,w*.25f,.026f,-2,verts,quads);
+        fd_text(ui,"W2",x+.017f+cw*3,y+.190f,w*.25f,.026f,-2,verts,quads);
+        fd_text(ui,"TODAY",x+.017f,y+.244f,.070f,.022f,-2,verts,quads);
+        const char *phases[]={"","REGISTRATION","PREPARATION","MATCH DAY","LEAGUE END"};
+        fd_text(ui,phases[v->hub_phase<5?v->hub_phase:0],x+.090f,y+.240f,w-.107f,.027f,-2,verts,quads);
+      }else if(i==4&&!v->tab){
+        if(v->badge)ml_ui_image(ui,gl.badge_tex,v->badge,x+.020f,y+.094f,.050f,.089f,verts,quads);
+        fd_text(ui,v->name,x+.083f,y+.103f,w-.100f,.027f,-2,verts,quads);
+        char detail[64];snprintf(detail,sizeof(detail),"%u PLAYERS",v->roster_size);fd_text(ui,detail,x+.083f,y+.147f,w-.100f,.025f,-2,verts,quads);
+        snprintf(detail,sizeof(detail),"%u LEAGUE POINTS",v->league_points);fd_text(ui,detail,x+.020f,y+.202f,w-.040f,.032f,-2,verts,quads);
+        
+      }
+    }
+  }
+  ml_ui_image(ui,switch_button_texture("L"),0,.056f,.204f,.020f,.035f,verts,quads);
+  ml_ui_image(ui,switch_button_texture("R"),0,.924f,.204f,.020f,.035f,verts,quads);
+  ml_ui_pills_count(ui,v->tab,3,.872f,verts,quads);
+}
 /* Bind read-only dummy data to the exact production Master League hub. */
 static void md_ui_master_hub(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  if(v->online||v->hub_revised){md_ui_online_hub(ui,v,verts,quads);return;}
   MlView *hub=&ui->view;hub->page=ML_PAGE_HUB;hub->badge=v->badge;
   hub->section=v->tab==2u ? 3u : v->tab;hub->section_count=3;hub->selected=v->focus;hub->count=hub->total=5;
   hub->next_title_size=.0347f;
@@ -129,7 +214,7 @@ static void md_ui_master_hub(MasterLeagueRender *ui,const MdView *v,GLfloat *ver
     snprintf(story->headline,sizeof(story->headline),"BUILD YOUR SQUAD");
     snprintf(story->summary,sizeof(story->summary),"%u NX Cash available in the player shop.",v->balance);
     snprintf(story->stat_value[0],sizeof(story->stat_value[0]),"%s",v->shop_locked ? "CLOSED" : "OPEN");
-    snprintf(story->stat_value[1],sizeof(story->stat_value[1]),"%u",v->roster_size-18);
+    snprintf(story->stat_value[1],sizeof(story->stat_value[1]),"%u",v->roster_size>18?v->roster_size-18:0);
   }
   story->has_result=v->last_complete;story->home_goals=v->last_hg;story->away_goals=v->last_ag;
   story->home_badge=v->last_home_badge;story->away_badge=v->last_away_badge;
@@ -155,15 +240,37 @@ static void md_ui_project(MasterLeagueRender *ui,const MdView *v) {
   m->badge=v->badge;snprintf(m->title,sizeof(m->title),"MANAGER LEAGUE");
   snprintf(m->caption,sizeof(m->caption),"%.95s",v->caption[0] ? v->caption : v->subtitle);
   snprintf(m->left_title,sizeof(m->left_title),"%.63s",v->headline);
-  for(uint32_t i=0;i<v->count;i++)md_ui_copy_row(&m->rows[i],&v->rows[i]);
-  if(v->page==MD_TEAM_INFO)m->page=ML_PAGE_MARKET_PLAYERS;
+  for(uint32_t i=0;i<v->count;i++){md_ui_copy_row(&m->rows[i],&v->rows[i]);if(v->online&&(v->page==MD_PAYMENT_RECOVERY||v->page==MD_ONLINEDEV||v->page==MD_PROMOTION||v->page==MD_PLAN_SETTINGS))m->rows[i].detail[0]=0;}
+  if(v->page==MD_TEAM_INFO||v->page==MD_PLAN_RESERVES||v->page==MD_PURCHASE_HISTORY)m->page=ML_PAGE_MARKET_PLAYERS;
   if(v->page==MD_NAME || v->page==MD_LOGIN || v->page==MD_SECURE || v->page==MD_MIGRATE)m->page=ML_PAGE_MANAGER;
   if(v->page==MD_TABLE){m->page=ML_PAGE_TABLE;m->table_count=v->count;
     for(uint32_t i=0;i<v->count;i++){MlTableRow *r=&m->table[i];const MdRow *src=&v->rows[i];
-      snprintf(r->name,sizeof(r->name),"%s",src->label+3);r->badge=src->badge;r->rank=v->first+i+1;r->own=!src->team_id;r->stats=src->stats;}}
+      const char *name=strstr(src->label,". ");snprintf(r->name,sizeof(r->name),"%s",name?name+2:src->label);r->badge=src->badge;r->rank=v->first+i+1;r->own=v->online?src->selected:!src->team_id;r->stats=src->stats;}}
   if(v->page==MD_CALENDAR){m->page=ML_PAGE_CALENDAR;m->calendar_count=42;memcpy(m->calendar,v->calendar,sizeof(v->calendar));
     snprintf(m->calendar_month,sizeof(m->calendar_month),"%.47s",v->headline);snprintf(m->calendar_detail,sizeof(m->calendar_detail),"%s",v->caption);}
 
+}
+/* Adapt registration data to the existing Master League settings drawer.
+ * Keep its row geometry, badge treatment, selection frame and scroll bar. */
+static void md_ui_registration_picker(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  MlView *m=&ui->view;
+  MlDrawerView *d=&m->drawer;
+  d->open=1;d->serial=0x80000000u | (uint32_t)v->page;
+  d->count=m->count;d->total=m->total;d->first=m->first;d->selected=m->selected;
+  snprintf(d->title,sizeof(d->title),"%.63s",v->headline);
+  for(uint32_t i=0;i<d->count;i++){d->rows[i]=m->rows[i];d->rows[i].detail[0]=0;d->rows[i].value[0]=0;}
+  m->page=ML_PAGE_SETTINGS;m->count=m->total=2;m->first=0;m->selected=v->page==MD_CLUB;
+  snprintf(m->left_title,sizeof(m->left_title),"YOUR CLUB");
+  memset(m->rows,0,sizeof(m->rows));
+  const ExhibitionTeamCategory *c=v->picker_category<EXHIBITION_TEAM_CATEGORY_COUNT ? &exhibition_team_categories[v->picker_category] : NULL;
+  snprintf(m->rows[0].label,sizeof(m->rows[0].label),"LEAGUE");
+  snprintf(m->rows[0].detail,sizeof(m->rows[0].detail),"%s",c ? c->label : "CHOOSE LEAGUE");
+  m->rows[0].badge=c ? c->badge_slot : 0;m->rows[0].enabled=1;
+  snprintf(m->rows[1].label,sizeof(m->rows[1].label),"CLUB");
+  const MdRow *selected=v->page==MD_CLUB && v->focus>=v->first && v->focus-v->first<v->count ? &v->rows[v->focus-v->first] : NULL;
+  snprintf(m->rows[1].detail,sizeof(m->rows[1].detail),"%s",selected ? selected->label : "CHOOSE CLUB");
+  m->rows[1].badge=selected ? selected->badge : 0;m->rows[1].enabled=1;
+  ml_ui_primary(ui,verts,quads);
 }
 static void md_ui_moving_art(MasterLeagueRender *ui,uint32_t sprite,float x,float y,float w,float h,float phase,GLfloat *verts,int *quads) {
   const int first=*quads;ml_ui_art(ui,sprite,x,y,w,h,verts,quads);
@@ -173,7 +280,7 @@ static void md_ui_moving_art(MasterLeagueRender *ui,uint32_t sprite,float x,floa
   d->uv[0]=u+du;d->uv[1]=v+dv;d->uv[2]=uw*zoom;d->uv[3]=vh*zoom;
 }
 static void md_ui_shop(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
-  for(uint32_t i=0;i<3;i++) {
+  for(uint32_t i=0;i<v->count && i<3;i++) {
     const MdRow *r=&v->rows[i];const float x=.080f+i*.285f,w=.265f;const int chosen=v->focus==i;
     ml_ui_frame(ui,x,.238f,w,.618f,chosen,verts,quads);
     fd_card(ui,x,.238f,w,.618f,0,0,verts,quads);
@@ -203,12 +310,10 @@ static void md_ui_pack(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int
     fd_text(ui,v->headline,.502f,.320f,.280f,.033f,-2,verts,quads);
     char terms[64];snprintf(terms,sizeof(terms),"SELECT %u FROM %u",v->pack_draw,v->pack_pool);
     fd_text(ui,terms,.502f,.405f,.280f,.030f,-2,verts,quads);
-    fd_text(ui,"Reveal the pool. Choose your players.",.502f,.465f,.280f,.023f,-3,verts,quads);
     snprintf(terms,sizeof(terms),"%u NX CASH",v->pack_price);
     fd_text(ui,terms,.502f,.553f,.280f,.030f,-2,verts,quads);
     fd_card(ui,.502f,.654f,.275f,.077f,1,0,verts,quads);
-    fd_center_text(ui,v->helper_label[v->helper_count-1],.512f,.6925f,.255f,.031f,-1,verts,quads);
-    fd_center_text(ui,"Confirm payment to open. Your paid pack is saved until you choose your players.",.21f,.835f,.58f,.022f,-3,verts,quads);
+    fd_center_text(ui,"BUY",.512f,.6925f,.255f,.031f,-1,verts,quads);
     return;
   }
   fd_card(ui,.045f,.225f,.910f,selecting ? .575f : .653f,0,0,verts,quads);
@@ -232,7 +337,9 @@ static void md_ui_pack(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int
     if(chosen)ml_ui_frame(ui,x,y,.185f,.216f,1,verts,quads);
     fd_card(ui,x,y,.185f,.216f,0,0,verts,quads);ml_ui_art(ui,col%2,x,y,.185f,.144f,verts,quads);
     if(raw>=.65f) {
-      GLuint portrait=gameplan_portrait_texture(r->portrait);if(portrait)ml_ui_image(ui,portrait,0,x+.054f,y+.007f,.077f,.137f,verts,quads);
+      GLuint portrait=r->portrait?gameplan_portrait_texture(r->portrait):0;
+      if(portrait)ml_ui_image(ui,portrait,0,x+.054f,y+.007f,.077f,.137f,verts,quads);
+      else {md_ui_circle(ui,x+.0925f,y+.044f,.040f,.60f,.66f,.70f,verts,quads);fd_rect(ui,x+.068f,y+.068f,.049f,.066f,.53f,.60f,.66f,verts,quads);}
       char rating[16];snprintf(rating,sizeof(rating),"%u",r->rating);fd_text(ui,rating,x+.012f,y+.018f,.045f,.031f,-1,verts,quads);
       static const char *const roles[]={"GK","CB","LB","RB","DMF","CMF","LMF","RMF","AMF","LWF","RWF","SS","CF"};
       fd_rect(ui,x+.010f,y+.105f,.047f,.028f,r->role==0 ? .91f : r->role<4 ? .10f : r->role<9 ? .05f : .83f,r->role==0 ? .55f : r->role<4 ? .36f : r->role<9 ? .58f : .10f,r->role==0 ? .08f : r->role<4 ? .80f : r->role<9 ? .32f : .20f,verts,quads);
@@ -266,7 +373,7 @@ static void md_ui_pack(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int
   if(selecting && !revealing){const int ready=v->pack_selection_count==v->pack_draw;
     fd_card(ui,.295f,.833f,.410f,.065f,v->focus==v->pack_pool && ready,0,verts,quads);
     fd_center_text(ui,ready ? "CONFIRM" : "COMPLETE YOUR SELECTION",.310f,.865f,.380f,.029f,v->focus==v->pack_pool && ready ? -1 : ready ? -2 : -3,verts,quads);
-  } else fd_center_text(ui,revealing ? "REVEALING YOUR PLAYERS" : "Your receipt is saved. Open Squad to register players from your collection.",.080f,.851f,.84f,.021f,-3,verts,quads);
+  } else if(revealing)fd_center_text(ui,"REVEALING YOUR PLAYERS",.080f,.851f,.84f,.028f,-2,verts,quads);
 }
 static void md_ui_pack_opening(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
   if(v->pack_opening_ms>=MD_PACK_UNSEAL_MS){md_ui_pack(ui,v,verts,quads);return;}
@@ -324,6 +431,21 @@ static void md_ui_pack_opening(MasterLeagueRender *ui,const MdView *v,GLfloat *v
     }
   }
   fd_center_text(ui,burst>0 ? "YOUR SELECTION AWAITS" : "OPENING CLUB PACK",.25f,.84f,.5f,.030f,-2,verts,quads);
+}
+static void md_ui_match_history(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads){
+  ml_ui_panel(ui,"MATCH HISTORY",ML_HEADER_MATCH,.055f,.205f,.890f,.675f,0,verts,quads);
+  for(unsigned i=0;i<v->count;i++){
+    const MdRow *r=&v->rows[i];float x=.073f,y=.300f+i*.102f,w=.854f;int ink=v->focus==v->first+i?-1:-2;
+    MlViewRow surface={0};surface.enabled=1;ml_ui_row(ui,&surface,x,y,w,.090f,ink==-1,0,verts,quads);
+    if(r->badge)ml_ui_image(ui,gl.badge_tex,r->badge,x+.015f,y+.014f,.034f,.060f,verts,quads);
+    if(r->away_badge)ml_ui_image(ui,gl.badge_tex,r->away_badge,x+w-.049f,y+.014f,.034f,.060f,verts,quads);
+    fd_text(ui,r->label,x+.070f,y+.012f,w-.220f,.029f,ink,verts,quads);
+    fd_text(ui,r->detail,x+.070f,y+.053f,w-.220f,.022f,ink,verts,quads);
+    fd_center_text(ui,r->value,x+w-.150f,y+.044f,.085f,.033f,ink,verts,quads);
+  }
+  if(!v->count)fd_center_text(ui,"NO COMPLETED MATCHES YET",.12f,.53f,.76f,.031f,-2,verts,quads);
+  char label[64];snprintf(label,sizeof(label),"%u-%u OF %u",v->count?v->first+1:0,v->first+v->count,v->total);
+  fd_center_text(ui,label,.2f,.848f,.6f,.024f,-2,verts,quads);
 }
 static void md_ui_match_centre(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
   ml_ui_panel(ui,v->page==MD_TEAM_HISTORY ? "CLUB MATCH HISTORY" : "MATCH CENTRE",ML_HEADER_MATCH,.055f,.205f,.890f,.675f,0,verts,quads);
@@ -414,12 +536,19 @@ static void md_ui_club_profile(MasterLeagueRender *ui,const MdView *v,GLfloat *v
   if(v->badge)ml_ui_image(ui,gl.badge_tex,v->badge,.160f,.310f,.090f,.160f,verts,quads);
   fd_center_text(ui,v->headline,.075f,.510f,.265f,.0333f,-2,verts,quads);
   fd_center_text(ui,v->club,.075f,.561f,.265f,.0222f,-3,verts,quads);
-  char text[64];snprintf(text,sizeof(text),"POWER %u  -  OVR %u",v->club_power,v->club_rating);
+  char text[64];
+  if(v->online)snprintf(text,sizeof(text),"%u REGISTERED PLAYERS",v->roster_size);
+  else snprintf(text,sizeof(text),"POWER %u  -  OVR %u",v->club_power,v->club_rating);
   fd_center_text(ui,text,.075f,.639f,.265f,.025f,-2,verts,quads);
-  snprintf(text,sizeof(text),"LEAGUE POSITION %u",v->club_rank);
+  if(v->online&&!v->club_rank)snprintf(text,sizeof(text),"LEAGUE - NOT RANKED");
+  else snprintf(text,sizeof(text),"LEAGUE POSITION %u",v->club_rank);
   fd_center_text(ui,text,.075f,.697f,.265f,.025f,-2,verts,quads);
-  snprintf(text,sizeof(text),"%u RP - CURRENT 14 DAYS",v->club_reputation);
-  fd_center_text(ui,text,.075f,.755f,.265f,.025f,-3,verts,quads);
+  snprintf(text,sizeof(text),"%u LEAGUE POINTS",v->league_points);
+  fd_center_text(ui,text,.075f,.750f,.265f,.025f,-2,verts,quads);
+  if(v->page==MD_OPPONENT_PROFILE)snprintf(text,sizeof(text),"TEAM OVR %u",v->club_rating);
+  else if(v->online&&!v->season_label[0])snprintf(text,sizeof(text),"MONTHLY RANKING NOT PUBLISHED");
+  else snprintf(text,sizeof(text),"%u PTS - CURRENT MONTH",v->club_reputation);
+  fd_center_text(ui,text,.075f,.798f,.265f,.021f,-3,verts,quads);
   for(uint32_t i=0;i<v->count;i++) {
     MlViewRow r={0};md_ui_copy_row(&r,&v->rows[i]);
     ml_ui_row(ui,&r,.366f,.300f+i*.103f,.552f,.091f,v->focus==v->first+i,0,verts,quads);
@@ -428,9 +557,13 @@ static void md_ui_club_profile(MasterLeagueRender *ui,const MdView *v,GLfloat *v
   fd_text(ui,range,.376f,.846f,.51f,.0208f,-3,verts,quads);
 }
 static void md_ui_club_plan(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
-  /* Same centered one-club arrangement as the editable Game Plan, with no
-   * edit controls or native squad transaction behind this read-only view. */
-  const float x=.215f,y=.225f,w=.355f,h=.574f;
+  const float gx=(1.f-GP_GROUP_W)*.5f;
+  const float x=gx+GP_PITCH_DX,y=GP_PITCH_Y,w=GP_PITCH_W,h=GP_PITCH_H;
+  ml_ui_image(ui,gl.master_league_pearl_tex,0,0,0,1,1,verts,quads);
+  ml_ui_art(ui,0,gx,.025f,GP_GROUP_W,.120f,verts,quads);
+  if(v->badge)ml_ui_image(ui,gl.badge_tex,v->badge,gx+.012f,.044f,.045f,.080f,verts,quads);
+  fd_text(ui,v->plan_editable?"YOUR GAME PLAN":v->headline,gx+.066f,.048f,GP_GROUP_W-.080f,.030f,-1,verts,quads);
+  fd_text(ui,v->plan_formation,gx+.066f,.102f,.20f,.026f,-1,verts,quads);
   fd_rect(ui,x,y,w,h,.055f,.23f,.15f,verts,quads);
   for(uint32_t i=0;i<10;i+=2)fd_rect(ui,x,y+h*i/10,w,h/10,.065f,.25f,.17f,verts,quads);
   const float left=x+.008f,right=x+w-.008f,top=y+.014f,bottom=y+h-.014f,tx=.0015f,ty=.0026f;
@@ -452,29 +585,146 @@ static void md_ui_club_plan(MasterLeagueRender *ui,const MdView *v,GLfloat *vert
   static const float py[11]={.84f,.64f,.64f,.64f,.64f,.43f,.43f,.43f,.17f,.17f,.17f};
   static const char *const roles[]={"GK","CB","LB","RB","DMF","CMF","LMF","RMF","AMF","LWF","RWF","SS","CF"};
   for(uint32_t i=0;i<11;i++) {
-    const MdPlanPlayer *p=&v->plan_players[i];const float cx=x+px[i]*w,cy=y+py[i]*h;
-    GLuint tex=p->portrait ? gameplan_portrait_texture(p->portrait) : 0;
-    if(tex)ml_ui_image(ui,tex,0,cx-.0225f,cy-.040f,.045f,.080f,verts,quads);
-    fd_rect(ui,cx-.035f,cy+.022f,.070f,.023f,.02f,.07f,.05f,verts,quads);
-    char label[24];snprintf(label,sizeof(label),"%s %u",p->role<13 ? roles[p->role] : "",p->rating);
-    fd_center_text(ui,label,cx-.035f,cy+.034f,.070f,.019f,-1,verts,quads);
-    fd_center_text(ui,p->label,cx-.045f,cy+.060f,.090f,.020f,-1,verts,quads);
+    const MdPlanPlayer *p=&v->plan_players[i];
+    const float nx=v->online?v->plan_dots[i].x:px[i],ny=v->online?v->plan_dots[i].y:py[i];
+    const float xx=x+nx*(w-GP_PLAYER_W),yy=y+ny*(h-GP_PLAYER_H),cx=xx+GP_PLAYER_W*.5f;
+    const int chosen=v->plan_editable&&(v->focus==i||v->plan_pick==i);
+    GLuint tex=p->portrait?gameplan_portrait_texture(p->portrait):0;
+    if(tex)ml_ui_image(ui,tex,0,cx-.015f,yy,.030f,.0533f,verts,quads);
+    else {md_ui_circle(ui,cx,yy+.014f,.021f,.60f,.66f,.70f,verts,quads);fd_rect(ui,cx-.012f,yy+.025f,.024f,.029f,.53f,.60f,.66f,verts,quads);}
+    if(chosen)ml_ui_frame(ui,xx-.002f,yy-.003f,GP_PLAYER_W+.004f,GP_PLAYER_H+.006f,1,verts,quads);
+    fd_rect(ui,xx+GP_PLAYER_W*.04f,yy+.051f,GP_PLAYER_W*.92f,.022f,.02f,.07f,.05f,verts,quads);
+    char label[24];snprintf(label,sizeof(label),"%s %u",p->role<13?roles[p->role]:"",p->rating);
+    fd_center_text(ui,label,xx,yy+.062f,GP_PLAYER_W,.0192f,-1,verts,quads);
+    fd_text(ui,p->label,xx-GP_PLAYER_W*.11f,yy+.074f,GP_PLAYER_W*1.22f,.0278f,-1,verts,quads);
   }
-  for(uint32_t i=11;i<18;i++) {
+  unsigned plan_count=v->plan_count>=18&&v->plan_count<=MD_PLAN_PLAYERS?v->plan_count:18;
+  unsigned bench_count=plan_count-11,bench_focus=v->focus>=11&&v->focus<plan_count?v->focus-11:v->plan_bench_focus;
+  unsigned bench_start=bench_focus>3?bench_focus-3:0;if(bench_start+7>bench_count)bench_start=bench_count-7;
+  for(uint32_t n=0;n<7;n++) {
+    uint32_t i=11+bench_start+n;
     const MdPlanPlayer *p=&v->plan_players[i];MlViewRow r={0};
     snprintf(r.label,sizeof(r.label),"%s",p->label);r.portrait=p->portrait;r.rating=p->rating;r.role=p->role;
     snprintf(r.detail,sizeof(r.detail),"%s",p->role<13 ? roles[p->role] : "");r.enabled=1;
-    ml_ui_row(ui,&r,.586f,.225f+(i-11)*.082f,.203f,.075f,0,0,verts,quads);
+    ml_ui_row(ui,&r,gx+GP_BENCH_DX,GP_PITCH_Y+n*(GP_PITCH_H/7.f),GP_BENCH_W,GP_PITCH_H/7.f-.009f,v->plan_editable&&(v->focus==i||v->plan_pick==i),0,verts,quads);
   }
-  fd_text(ui,v->summary,.225f,.823f,.40f,.0306f,-2,verts,quads);
-  fd_center_text(ui,"USING THE LATEST SAVED TEAM DATA",.215f,.871f,.574f,.0236f,-3,verts,quads);
+  if(bench_count>7){float sx=gx+GP_BENCH_DX+GP_BENCH_W+.003f;fd_rect(ui,sx,GP_PITCH_Y,.003f,GP_PITCH_H,.76f,.84f,.89f,verts,quads);fd_rect(ui,sx,GP_PITCH_Y+GP_PITCH_H*bench_start/bench_count,.003f,GP_PITCH_H*7/bench_count,.02f,.34f,.76f,verts,quads);}
+  if(v->plan_editable){
+    static const char *const labels[]={"SUBSTITUTE","FORMATION","TACTIC","POSITIONS"};
+    const float bw=(GP_GROUP_W-3.f*GP_ACTION_GAP)/4.f;
+    unsigned root=v->online?MD_PLAN_PLAYERS:18;
+    for(unsigned i=0;i<4;i++){float bx=gx+i*(bw+GP_ACTION_GAP);fd_card(ui,bx,GP_ACTION_Y,bw,GP_ACTION_H,v->focus==root+i,0,verts,quads);fd_center_text(ui,labels[i],bx+.003f,GP_ACTION_Y+GP_ACTION_H*.5f,bw-.006f,.024f,v->focus==root+i?-1:-2,verts,quads);}
+  }else {
+    fd_card(ui,gx,GP_ACTION_Y,GP_GROUP_W,GP_ACTION_H,0,0,verts,quads);
+    fd_center_text(ui,"LATEST SAVED TEAM DATA",gx+.012f,GP_ACTION_Y+GP_ACTION_H*.5f,GP_GROUP_W-.024f,.026f,-2,verts,quads);
+  }
+}
+static void md_ui_league_clubs(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  ml_ui_panel(ui,v->headline,ML_HEADER_SQUAD,.13f,.205f,.74f,.670f,0,verts,quads);
+  const float top=.280f+24.f/screen_height,bottom=.875f-24.f/screen_height,gap=12.f/screen_height;
+  const float rh=v->count?(bottom-top-gap*(v->count-1))/v->count:0;
+  for(unsigned i=0;i<v->count;i++){MlViewRow r={0};md_ui_copy_row(&r,&v->rows[i]);
+    ml_ui_row(ui,&r,.13f+24.f/screen_width,top+i*(rh+gap),.74f-48.f/screen_width,rh,v->focus==v->first+i,0,verts,quads);}
+}
+static void md_ui_seven_days(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  ml_ui_panel(ui,v->headline,ML_HEADER_CALENDAR,.09f,.205f,.82f,.685f,0,verts,quads);
+  const unsigned first=v->focus>2?v->focus-2:0,start=first>3?3:first;
+  const float gap=12.f/screen_height,top=.280f+24.f/screen_height,bottom=.835f,rh=(bottom-top-3.f*gap)/4.f;
+  for(unsigned n=0;n<4;n++){
+    unsigned i=start+n;const MdRow *r=&v->rows[i];float y=top+n*(rh+gap);
+    if(v->focus==i)ml_ui_frame(ui,.108f,y,.784f,rh,1,verts,quads);
+    fd_card(ui,.108f,y,.784f,rh,0,0,verts,quads);
+    if(r->selected){fd_rect(ui,.108f,y,.784f,rh,.84f,.95f,1.f,verts,quads);fd_rect(ui,.108f,y,.005f,rh,.02f,.55f,.78f,verts,quads);}
+    fd_text(ui,r->label,.125f,y+.020f,.48f,.028f,-2,verts,quads);
+    fd_text(ui,r->detail,.125f,y+.065f,.54f,.026f,-2,verts,quads);
+    fd_center_text(ui,r->value,.686f,y+rh*.5f,.114f,.025f,-2,verts,quads);
+    if(r->selected){fd_rect(ui,.810f,y+rh*.5f-.018f,.067f,.036f,.035f,.27f,.55f,verts,quads);fd_center_text(ui,"TODAY",.810f,y+rh*.5f,.067f,.022f,-1,verts,quads);}
+  }
+  char range[32];snprintf(range,sizeof(range),"%u-%u OF 7 DAYS",start+1,start+4);fd_center_text(ui,range,.1f,.867f,.8f,.0236f,-2,verts,quads);
+
+}
+static void md_ui_activity(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  int players=v->page==MD_PLAYER_FEED;
+  ml_ui_panel(ui,v->headline,players?ML_HEADER_RANKING:ML_HEADER_NEWS,.07f,.205f,.86f,.685f,0,verts,quads);
+  if(players){
+    static const char *const labels[]={"TOP SCORERS","RISING STARS"};
+    for(uint32_t i=0;i<2;i++){float x=.088f+i*.416f;fd_card(ui,x,.301f,.408f,.042f,v->feed_section==i,0,verts,quads);fd_center_text(ui,labels[i],x,.322f,.408f,.0236f,v->feed_section==i?-1:-2,verts,quads);}
+  }
+  for(uint32_t i=0;i<v->count&&i<3;i++){
+    const MdFeedItem *f=&v->feed[i];const MdRow *r=&f->row;float y=players?.371f+i*.153f:.308f+i*.172f,h=players?.140f:.151f;
+    if(v->focus==v->first+i)ml_ui_frame(ui,.088f,y,.824f,h,1,verts,quads);
+    fd_card(ui,.088f,y,.824f,h,0,0,verts,quads);
+    if(r->identity||r->portrait){GLuint tex=r->portrait?gameplan_portrait_texture(r->portrait):0;
+      if(tex)ml_ui_image(ui,tex,0,.102f,y+.014f,.052f,.092f,verts,quads);
+      else {md_ui_circle(ui,.128f,y+.039f,.035f,.53f,.60f,.66f,verts,quads);fd_rect(ui,.111f,y+.056f,.034f,.043f,.53f,.60f,.66f,verts,quads);}
+      if(r->badge)ml_ui_image(ui,gl.badge_tex,r->badge,.136f,y+.083f,.025f,.044f,verts,quads);
+    }else if(r->badge)ml_ui_image(ui,gl.badge_tex,r->badge,.104f,y+.030f,.050f,.089f,verts,quads);
+    else if(gl.manager_unknown_club_tex)ml_ui_image(ui,gl.manager_unknown_club_tex,0,.104f,y+.030f,.050f,.089f,verts,quads);
+    if(r->away_badge)ml_ui_image(ui,gl.badge_tex,r->away_badge,.855f,y+.026f,.040f,.071f,verts,quads);
+    fd_text(ui,r->label,.177f,y+.019f,players?.40f:.66f,.028f,-2,verts,quads);
+    if(players){
+      fd_text(ui,f->body,.177f,y+.055f,.40f,.026f,-2,verts,quads);
+      static const char *const labels[]={"GOALS","ASSISTS","MATCH OVR"};
+      for(unsigned j=0;j<3;j++){
+        float x=.598f+j*.098f;char number[16];
+        if(j==1&&!f->assists_known)snprintf(number,sizeof(number),"--");
+        else snprintf(number,sizeof(number),"%u",j==0?f->goals:j==1?f->assists:r->rating);
+        fd_center_text(ui,labels[j],x,y+.038f,.091f,.0185f,-3,verts,quads);
+        fd_center_text(ui,number,x,y+.084f,.091f,.032f,-2,verts,quads);
+      }
+    }else ml_ui_paragraph(ui,f->body,.177f,y+.052f,r->away_badge?.66f:.71f,.026f,2u,-2,verts,quads);
+    fd_text(ui,f->context,.177f,y+(players?.110f:.120f),players?.40f:.71f,.021f,-3,verts,quads);
+  }
+  if(!v->count)fd_center_text(ui,v->empty_detail,.10f,.53f,.80f,.029f,-3,verts,quads);
+  char range[64];if(v->count)snprintf(range,sizeof(range),"%u-%u OF %u",v->first+1,v->first+v->count,v->total);else snprintf(range,sizeof(range),"NO PUBLISHED RECORDS");
+  fd_center_text(ui,range,.1f,.852f,.80f,.021f,-3,verts,quads);
+  
+}
+static void md_ui_monthly_ranking(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
+  ml_ui_panel(ui,"LEAGUE RANKING",ML_HEADER_RANKING,.07f,.205f,.86f,.685f,0,verts,quads);
+  static const char *const tabs[]={"CURRENT SEASON","PAST SEASON"};
+  for(unsigned i=0;i<2;i++){float x=.088f+i*.416f;fd_card(ui,x,.301f,.408f,.042f,v->ranking_section==i,0,verts,quads);fd_center_text(ui,tabs[i],x,.322f,.408f,.0236f,v->ranking_section==i?-1:-2,verts,quads);}
+  char caption[112];
+  if(v->ranking_section)snprintf(caption,sizeof(caption),"CHAMPIONS FROM ALL COMPLETED SEASONS");
+  else {time_t seconds=(time_t)(v->rank_reset_ms/1000u+25200u);struct tm date;char reset[24]="";
+    if(v->rank_reset_ms&&gmtime_r(&seconds,&date))strftime(reset,sizeof(reset),"%d %b %Y",&date);
+    snprintf(caption,sizeof(caption),"%s - RESETS %s 00:00 WIB",v->season_label,reset);
+  }
+  fd_center_text(ui,caption,.09f,.373f,.82f,.022f,-3,verts,quads);
+  for(unsigned i=0;i<v->count&&i<5;i++){
+    const MdRow *r=&v->rows[i];float y=.410f+i*.079f;
+    if(v->focus==v->first+i)ml_ui_frame(ui,.088f,y,.824f,.068f,1,verts,quads);
+    fd_card(ui,.088f,y,.824f,.068f,0,0,verts,quads);
+    if(r->badge)ml_ui_image(ui,gl.badge_tex,r->badge,.101f,y+.010f,.028f,.050f,verts,quads);
+    else if(gl.manager_unknown_club_tex)ml_ui_image(ui,gl.manager_unknown_club_tex,0,.101f,y+.010f,.028f,.050f,verts,quads);
+    fd_text(ui,r->label,.144f,y+.008f,.60f,.025f,-2,verts,quads);
+    fd_text(ui,r->detail,.144f,y+.041f,.60f,.019f,-3,verts,quads);
+    fd_center_text(ui,r->value,.755f,y+.034f,.143f,.026f,-2,verts,quads);
+  }
+  if(!v->count)fd_center_text(ui,v->empty_detail,.10f,.56f,.80f,.028f,-3,verts,quads);
+  char range[48];snprintf(range,sizeof(range),"%u-%u OF %u",v->count?v->ranking_offset+v->first+1:0,v->ranking_offset+v->first+v->count,v->total);
+  fd_center_text(ui,range,.1f,.818f,.8f,.020f,-3,verts,quads);
+
+}
+static void md_ui_owned_players(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads){
+  static const char *const roles[]={"GK","CB","LB","RB","DMF","CMF","LMF","RMF","AMF","LWF","RWF","SS","CF"};
+  ml_ui_panel(ui,v->headline,ML_HEADER_TRANSFER,.13f,.205f,.74f,.675f,0,verts,quads);
+  for(unsigned i=0;i<v->count;i++){
+    const MdRow *p=&v->rows[i];MlViewRow r={0};md_ui_copy_row(&r,p);
+    snprintf(r.detail,sizeof(r.detail),"%s",p->role<13?roles[p->role]:"");
+    float y=.300f+i*.103f;int selected=v->focus==v->first+i;
+    ml_ui_row(ui,&r,.148f,y,.704f,.091f,selected,0,verts,quads);
+    if(v->page==MD_PURCHASE_HISTORY)fd_text(ui,p->detail,.600f,y+.057f,.205f,.024f,selected?-1:-2,verts,quads);
+  }
+  if(v->total){char range[40];snprintf(range,sizeof(range),"%u-%u OF %u",v->first+1,v->first+v->count,v->total);fd_center_text(ui,range,.15f,.842f,.70f,.024f,-2,verts,quads);}
+  else fd_center_text(ui,v->summary,.16f,.505f,.68f,.028f,-2,verts,quads);
 }
 static void manager_dummy_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads) {
-  MdView v;manager_dummy_view(&v);memset(ui,0,sizeof(*ui));
+  MdView v;manager_client_view(&v);memset(ui,0,sizeof(*ui));
   if(v.page==MD_DASHBOARD || v.page==MD_LOGOUT || v.page==MD_NEXT_WEEK)md_ui_master_hub(ui,&v,verts,quads);
   else if(v.page==MD_WATCH)md_watch_emit(ui,&v,verts,quads);
   else {
-    md_ui_project(ui,&v);md_ui_chrome(ui,&v,verts,quads);
+    md_ui_project(ui,&v);if(v.page!=MD_CLUB_PLAN)md_ui_chrome(ui,&v,verts,quads);
     if(v.page==MD_REGISTER) {
       fd_card(ui,.075f,.245f,.850f,.590f,0,0,verts,quads);
       ml_ui_art(ui,0,.075f,.245f,.850f,.175f,verts,quads);
@@ -487,20 +737,30 @@ static void manager_dummy_emit(MasterLeagueRender *ui,GLfloat *verts,int *quads)
         fd_card(ui,x,.658f,w,.096f,selected,0,verts,quads);
         fd_action_content(ui,i ? "REGISTER" : "LOGIN",ML_HEADER_MANAGER,x,.658f,w,.096f,.031f,selected ? -1 : -2,verts,quads);
       }
-    } else if(v.page==MD_SHOP)md_ui_shop(ui,&v,verts,quads);
+    } else if(v.page==MD_LEAGUES||v.page==MD_CLUB)md_ui_registration_picker(ui,&v,verts,quads);
+    else if((v.page==MD_SHOP||v.page==MD_SHOP_CLUBS))md_ui_shop(ui,&v,verts,quads);
     else if(v.page==MD_PACK_OPENING)md_ui_pack_opening(ui,&v,verts,quads);
     else if(v.page==MD_PACK || v.page==MD_PACK_BUY || v.page==MD_PACK_RESULT || v.page==MD_PACK_SELECT)md_ui_pack(ui,&v,verts,quads);
-    else if(v.page==MD_TABLE)ml_ui_table(ui,verts,quads);
+    else if(v.page==MD_TABLE){
+      if(v.online&&!v.count){ml_ui_panel(ui,"LEAGUE STANDINGS",ML_HEADER_RANKING,.04f,.205f,.92f,.675f,0,verts,quads);fd_center_text(ui,"AWAITING THE LEAGUE TABLE",.08f,.45f,.84f,.032f,-2,verts,quads);fd_center_text(ui,v.summary,.08f,.53f,.84f,.026f,-3,verts,quads);fd_center_text(ui,v.empty_detail,.08f,.60f,.84f,.0236f,-3,verts,quads);}
+      else ml_ui_table(ui,verts,quads);
+    }
+    else if(v.page==MD_TEAM_HISTORY && v.online)md_ui_match_history(ui,&v,verts,quads);
     else if(v.page==MD_SCHEDULE || v.page==MD_TEAM_HISTORY)md_ui_match_centre(ui,&v,verts,quads);
     else if(v.page==MD_CALENDAR)md_ui_week_schedule(ui,&v,verts,quads);
-    else if(v.page==MD_CLUB_PROFILE)md_ui_club_profile(ui,&v,verts,quads);
+    else if(v.page==MD_WEEK_SCHEDULE)md_ui_seven_days(ui,&v,verts,quads);
+    else if(v.page==MD_NEWS||v.page==MD_PLAYER_FEED)md_ui_activity(ui,&v,verts,quads);
+    else if(v.page==MD_OVERALL)md_ui_monthly_ranking(ui,&v,verts,quads);
+    else if(v.page==MD_CLUB_PROFILE || v.page==MD_OPPONENT_PROFILE)md_ui_club_profile(ui,&v,verts,quads);
     else if(v.page==MD_CLUB_PLAN)md_ui_club_plan(ui,&v,verts,quads);
+    else if(v.page==MD_TEAMS_PAGE)md_ui_league_clubs(ui,&v,verts,quads);
+    else if(v.page==MD_PURCHASE_HISTORY||v.page==MD_PLAN_RESERVES)md_ui_owned_players(ui,&v,verts,quads);
     else ml_ui_primary(ui,verts,quads);
   }
   fd_rect(ui,0,.925f,1,.075f,.025f,.10f,.28f,verts,quads);ui->draws[ui->draw_count-1].round.radius=0;
   float hx=.035f;for(uint32_t i=0;i<v.helper_count;i++)fd_helper_at(ui,v.helper_key[i],v.helper_label[i],.9625f,&hx,verts,quads);
   if(v.pin_open)md_ui_pin(ui,&v,verts,quads);
   if(v.touchline_open)md_watch_touchline(ui,&v,verts,quads);
-  if(v.page==MD_OVERALL || (v.page==MD_CHAMPIONS && !v.count))fd_center_text(ui,v.summary,.075f,.865f,.850f,.0222f,-3,verts,quads);
+  if(v.page==MD_CHAMPIONS && !v.count)fd_center_text(ui,v.summary,.075f,.865f,.850f,.0222f,-3,verts,quads);
   if(v.modal.open){ui->view.modal=v.modal;ml_ui_confirmation(ui,verts,quads);}
 }

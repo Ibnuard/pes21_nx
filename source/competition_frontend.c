@@ -12,6 +12,7 @@
 #include "league_save.h"
 #include "master_league_frontend.h"
 #include "manager_league_dummy.h"
+#include "manager_league_client.h"
 #include "scoreboard_theme.h"
 #include "competition_seed.h"
 #include "menu_axis_navigation.h"
@@ -37,6 +38,7 @@ static uint32_t frontend_input_consumed;
 static uint32_t frontend_skip_input_tick;
 static uint32_t frontend_buttons_latched;
 static uint32_t frontend_axis_repeat;
+static int32_t frontend_sample_x,frontend_sample_y;
 static NxMenuAxisRepeat frontend_axis;
 static uint32_t frontend_closing;
 static uint32_t cup_save_pending, league_save_pending;
@@ -1551,13 +1553,20 @@ void competition_frontend_open_modes(void) {
 }
 
 void competition_frontend_open_online_league(void) {
-  manager_dummy_open();
+  manager_client_open(0);
+  competition_set_state(COMPETITION_FRONTEND_MANAGER_DUMMY,0);
+  frontend_closing=0;
+  frontend_skip_input_tick=1;
+}
+void competition_frontend_open_manager_dev(void) {
+  manager_client_open(1);
   competition_set_state(COMPETITION_FRONTEND_MANAGER_DUMMY,0);
   frontend_closing=0;
   frontend_skip_input_tick=1;
 }
 
 void competition_frontend_close(void) {
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_client_close();
   frontend_confirm_kind = COMPETITION_CONFIRM_NONE;
   if (frontend_state != COMPETITION_FRONTEND_NONE)
     frontend_closing = 1;
@@ -1572,6 +1581,7 @@ void competition_frontend_close(void) {
 }
 
 void competition_frontend_finish_close(void) {
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_client_close();
   frontend_confirm_kind = COMPETITION_CONFIRM_NONE;
   frontend_closing = 0;
   frontend_state = COMPETITION_FRONTEND_NONE;
@@ -2331,7 +2341,7 @@ uint32_t competition_frontend_match_leg(uint8_t *first_home,
                                        : fixture->first_leg_away_goals;
   return 2;
 }
-int competition_frontend_league_extra_time(void) {
+static int league_deciding_fixture(void) {
   if (ml_frontend_match_active()) return ml_frontend_match_is_cup();
   if (league_tournament.phase != LEAGUE_PHASE_KNOCKOUT) return 0;
   const CupFixture *fixture = cup_tournament_fixture(
@@ -2340,8 +2350,12 @@ int competition_frontend_league_extra_time(void) {
                      league_pending_round, league_pending_index) ||
                      fixture->first_leg_complete);
 }
+int competition_frontend_league_extra_time(void) {
+  if (ml_frontend_match_active()) return ml_frontend_match_is_cup();
+  return cup_extra_time && league_deciding_fixture();
+}
 int competition_frontend_league_penalty(void) {
-  return competition_frontend_league_extra_time();
+  return league_deciding_fixture();
 }
 int competition_frontend_cup_match_active(void) { return cup_match_active != 0; }
 int competition_frontend_cup_live_final_context(
@@ -2710,7 +2724,7 @@ void competition_frontend_cup_team_picker_result(uint32_t team_id) {
 }
 
 void competition_frontend_manager_name_result(const char *text) {
-  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_dummy_name_result(text);
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_client_name_result(text);
   else ml_frontend_name_result(text);
   frontend_skip_input_tick = 1u;
 }
@@ -2723,7 +2737,7 @@ int competition_frontend_cup_slot_valid(uint32_t slot) {
 uint32_t competition_frontend_cup_news_index(void) { return cup_news_index; }
 float competition_frontend_cup_news_progress(void) { return (float)cup_news_elapsed / 6000.f; }
 void competition_frontend_tick(uint64_t milliseconds) {
-  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_dummy_tick(milliseconds);
+  if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY)manager_client_tick(milliseconds);
   const uint64_t league_delta = league_news_tick && milliseconds >= league_news_tick ? milliseconds - league_news_tick : 0u;
   league_news_tick = milliseconds;
   if (frontend_state == COMPETITION_FRONTEND_LEAGUE_HUB && league_page == LEAGUE_PAGE_HOME &&
@@ -2753,10 +2767,11 @@ void competition_frontend_discard_input(uint32_t buttons) {
 }
 void competition_frontend_axis_event(uint32_t buttons,uint32_t previous_buttons,
                                     int32_t x,int32_t y,uint64_t now_ms) {
+  frontend_sample_x=x;frontend_sample_y=y;
   buttons=nx_menu_axis_buttons(buttons,x,y);
   frontend_axis_repeat=nx_menu_axis_repeat(&frontend_axis,buttons,now_ms);
   competition_frontend_pad_event(buttons,previous_buttons);
-  frontend_axis_repeat=0;
+  frontend_axis_repeat=0;frontend_sample_x=frontend_sample_y=0;
 }
 void competition_frontend_pad_event(uint32_t buttons,
                                     uint32_t previous_buttons) {
@@ -2772,13 +2787,13 @@ void competition_frontend_pad_event(uint32_t buttons,
        COMPETITION_BUTTON_X | COMPETITION_BUTTON_Y | COMPETITION_BUTTON_UP |
        COMPETITION_BUTTON_DOWN | COMPETITION_BUTTON_LEFT |
        COMPETITION_BUTTON_RIGHT | COMPETITION_BUTTON_L |
-       COMPETITION_BUTTON_R);
+       COMPETITION_BUTTON_R | (frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY ? 32u : 0u));
   frontend_buttons_latched =
       buttons & (COMPETITION_BUTTON_A | COMPETITION_BUTTON_B |
                  COMPETITION_BUTTON_X | COMPETITION_BUTTON_Y |
                  COMPETITION_BUTTON_UP | COMPETITION_BUTTON_DOWN |
                  COMPETITION_BUTTON_LEFT | COMPETITION_BUTTON_RIGHT |
-                 COMPETITION_BUTTON_L | COMPETITION_BUTTON_R);
+                 COMPETITION_BUTTON_L | COMPETITION_BUTTON_R | (frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY ? 32u : 0u));
   if (frontend_skip_input_tick) {
     frontend_skip_input_tick = 0;
     return;
@@ -2812,8 +2827,8 @@ void competition_frontend_pad_event(uint32_t buttons,
     return;
   }
   if(frontend_state==COMPETITION_FRONTEND_MANAGER_DUMMY) {
-    manager_dummy_pad(pressed);
-    switch(manager_dummy_take_action()) {
+    manager_client_sample(buttons,pressed,frontend_sample_x,frontend_sample_y);
+    switch(manager_client_take_action()) {
       case MD_ACTION_NAME: frontend_pending_action=COMPETITION_ACTION_MANAGER_NAME;break;
       case MD_ACTION_PLAN: frontend_pending_action=COMPETITION_ACTION_MANAGER_PLAN;break;
       case MD_ACTION_EXIT: competition_frontend_close();break;

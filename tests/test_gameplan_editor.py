@@ -41,8 +41,11 @@ class GameplanEditorTests(unittest.TestCase):
             hooks.index("static void (*match_squad_data_set_formation)"):
             hooks.index("static uint32_t (*match_squad_data_get_team_power)")
         ]
-        presets = hooks[
-            hooks.index("static const PrematchFormationPreset prematch_formation_presets"):
+        presets = '#include "gameplan_shapes.h"\n#include "gameplan_gesture.h"\n' + \
+            'typedef FnxGameplanShape PrematchFormationPreset;\n' + \
+            '#define prematch_formation_presets fnx_gameplan_shapes\n' + \
+            '#define PREMATCH_FORMATION_PRESET_COUNT FNX_GAMEPLAN_SHAPE_COUNT\n' + hooks[
+            hooks.index("#define PREMATCH_ROLE_OPTION_COUNT"):
             hooks.index("static void prematch_gameplan_reset_side")
         ]
         definitions = "\n".join(
@@ -62,8 +65,7 @@ class GameplanEditorTests(unittest.TestCase):
             definitions,
             *[struct(hooks, name) for name in (
                 "TmpdbFormationValue", "TmpdbMatchPlanSettingsValue",
-                "PrematchGameplanPlayer", "PrematchGameplanSide",
-                "PrematchFormationPreset")],
+                "PrematchGameplanPlayer", "PrematchGameplanSide")],
             presets, native_declarations,
             "static PrematchGameplanSide exhibition_gameplan_sides[2];\n"
             "static uint32_t exhibition_gameplan_custom_action[2];\n"
@@ -174,6 +176,9 @@ class GameplanEditorTests(unittest.TestCase):
 
     def test_condition_toggle_is_per_side(self):
         self.run_case("condition")
+
+    def test_user_id_underscore_has_visible_baseline_raster_and_advance(self):
+        self.run_case("user-id")
 
 
 if __name__ == "__main__":

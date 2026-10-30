@@ -207,13 +207,18 @@ int main(void) {
   static const char *const camera[]={"CAMERA TYPE","HEIGHT","ZOOM","ANGLE"};
   for(uint32_t i=0;i<4;i++) {fd_copy(view.rows[i].label,sizeof(view.rows[i].label),camera[i]);fd_copy(view.rows[i].value,sizeof(view.rows[i].value),i ? "5" : "DYNAMIC WIDE");}
   capture("29-pause-camera-settings");
-  base(FD_VIDEO);view.row_count=view.total_rows=2;fd_copy(view.title,sizeof(view.title),"VIDEO SETTINGS");
+  base(FD_VIDEO);view.row_count=view.total_rows=3;view.focus=2;fd_copy(view.title,sizeof(view.title),"SETTINGS");
   fd_copy(view.rows[0].label,sizeof(view.rows[0].label),"GRAPHICS");fd_copy(view.rows[0].value,sizeof(view.rows[0].value),"HIGH");
-  fd_copy(view.rows[1].label,sizeof(view.rows[1].label),"FRAME RATE");fd_copy(view.rows[1].value,sizeof(view.rows[1].value),"60 FPS");capture("30-video-settings");
+  fd_copy(view.rows[1].label,sizeof(view.rows[1].label),"FRAME RATE");fd_copy(view.rows[1].value,sizeof(view.rows[1].value),"60 FPS");
+  fd_copy(view.rows[2].label,sizeof(view.rows[2].label),"CUSTOM PLAYLIST");fd_copy(view.rows[2].value,sizeof(view.rows[2].value),"ON");capture("30-video-settings");
   base(FD_INFO);view.row_count=3;
   fd_copy(view.rows[0].label,sizeof(view.rows[0].label),"Port & Mod By Ibnuard");
   fd_copy(view.rows[1].label,sizeof(view.rows[1].label),"Support: androswitch.vercel.app");
   fd_copy(view.rows[2].label,sizeof(view.rows[2].label),"Version: production candidate");capture("31-credits");
+  base(FD_INFO);view.row_count=5;fd_copy(view.title,sizeof(view.title),"CUSTOM PLAYLIST");
+  static const char *const playlist_info[]={"Put your MP3 files in:","sdmc:/switch/pes21_nx/playlist/","Tracks play in filename order, in menus only.","Switch OFF then ON to reload the folder.","No playable tracks? Native music stays on."};
+  for(uint32_t i=0;i<5;i++)fd_copy(view.rows[i].label,sizeof(view.rows[i].label),playlist_info[i]);
+  capture("31a-playlist-info");
   base(FD_LOADING);capture("32-loading");
   hub();view.page=FD_VS;capture("33-prematch-loading");
   hub();view.page=FD_PAUSE;view.focus=0;

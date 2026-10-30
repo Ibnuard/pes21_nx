@@ -9,11 +9,14 @@
 
 #include "aaudio_shim.h"
 #include "config.h"
+#include "custom_playlist.h"
 #include "competition_frontend.h"
 #include "scoreboard_aggregate_policy.h"
 #include "prematch_kit_navigation.h"
 #include "master_league_frontend.h"
 #include "manager_league_dummy.h"
+#include "manager_league_client.h"
+#include "manager_dev_shortcut.h"
 #include "main_menu_layout.h"
 #include "exhibition_team_catalog.h"
 #include "exhibition_match_identity.h"
@@ -44,6 +47,7 @@
 #include "trophy_audio_policy.h"
 #include "runtime_assets.h"
 #include "manager_league_audio_runtime.inc"
+#include "custom_playlist_native.inc"
 #ifdef DEBUG_LOG
 #include "stadium_diagnostic_policy.h"
 #endif
@@ -212,6 +216,7 @@ static void pes_stadium_shadow_filter(void *packet, const void *bounds,
 }
 
 static _Alignas(8) uint64_t cobra_pad_input;
+static _Alignas(4) uint32_t main_menu_screen_axes;
 static _Alignas(4) uint32_t cobra_pad_right_input;
 static _Alignas(4) uint32_t cobra_pad_connected;
 static _Alignas(8) uint64_t cobra_pad_input_p2;
@@ -1846,9 +1851,17 @@ static uint32_t pause_stamina_disp(void *model, uint32_t index) {
   return 0u;
 }
 
+int pes_controller_nameplate_ready(void) {
+  if (!pes_controller_match_hud_inplay()) return 0;
+  const uint64_t seen=__atomic_load_n(&match_scoreboard_visible_tick,__ATOMIC_ACQUIRE);
+  const uint64_t now=armGetSystemTick();
+  return seen && now>=seen && armTicksToNs(now-seen)<=80000000ULL &&
+      __atomic_load_n(&match_scoreboard_visible,__ATOMIC_ACQUIRE);
+}
+
 uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
                                      uint32_t capacity) {
-  if (!bars || !capacity || !pes_controller_match_hud_inplay() ||
+  if (!bars || !capacity || !pes_controller_nameplate_ready() ||
       pes_mobile_control_active_mode() == PES_MOBILE_CONTROL_UNKNOWN)
     return 0u;
 
@@ -1867,13 +1880,6 @@ uint32_t pes_controller_stamina_bars(PesStaminaBarSnapshot *bars,
   }
   if (!__atomic_load_n(&pause_settings_show_nameplate, __ATOMIC_ACQUIRE))
     return 0u;
-  const uint64_t scoreboard_tick = __atomic_load_n(
-      &match_scoreboard_visible_tick, __ATOMIC_ACQUIRE);
-  if (!scoreboard_tick ||
-      armTicksToNs(armGetSystemTick() - scoreboard_tick) > 80000000ULL ||
-      !__atomic_load_n(&match_scoreboard_visible, __ATOMIC_ACQUIRE))
-    return 0u;
-
   PesControllerSnapshot surface = {0};
   pes_controller_surface_cached_snapshot(&surface);
   if (surface.surface != PES_CONTROLLER_SURFACE_NONE ||
@@ -2248,6 +2254,7 @@ enum {
   MAIN_MENU_INFO_CLOSED = 0,
   MAIN_MENU_INFO_CREDITS = 1,
   MAIN_MENU_INFO_TWO_PLAYER = 2,
+  MAIN_MENU_INFO_PLAYLIST = 3,
 };
 
 enum {
@@ -7195,12 +7202,16 @@ int pes_controller_custom_video_settings_active(void) {
 }
 
 uint32_t pes_controller_custom_video_settings_focus(void) {
-  return main_menu_video_focus_index < 2 ? main_menu_video_focus_index : 0;
+  return main_menu_video_focus_index < 3 ? main_menu_video_focus_index : 0;
+}
+
+uint32_t pes_controller_custom_video_settings_count(void) {
+  return 3;
 }
 
 const char *pes_controller_custom_video_settings_label(uint32_t index) {
-  static const char *const labels[] = {"GRAPHICS", "FRAME RATE"};
-  return index < 2 ? labels[index] : "";
+  static const char *const labels[] = {"GRAPHICS", "FRAME RATE", "CUSTOM PLAYLIST"};
+  return index < 3 ? labels[index] : "";
 }
 
 const char *pes_controller_custom_video_settings_value(uint32_t index) {
@@ -7213,6 +7224,7 @@ const char *pes_controller_custom_video_settings_value(uint32_t index) {
     return __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE)
                ? "30 FPS"
                : "60 FPS";
+  if (index == 2) return config.custom_playlist ? "ON" : "OFF";
   return "";
 }
 
@@ -7361,50 +7373,11 @@ static const char *prematch_gameplan_role_label(uint32_t role) {
   return role < sizeof(labels) / sizeof(labels[0]) ? labels[role] : "SUB";
 }
 
-typedef struct {
-  const char *label;
-  uint8_t role[11];
-  uint8_t x[11];
-  uint8_t y[11];
-} PrematchFormationPreset;
-
-// Native Vector2C stores {depth, width}: depth 0..48 increases toward attack,
-// width 0..105 increases to the right. Roles follow prematch_gameplan_role_label.
-static const PrematchFormationPreset prematch_formation_presets[] = {
-    {"4-3-3", {0,2,1,1,3,5,4,5,9,12,10},
-      {52,10,38,67,95,25,52,80,26,52,78},
-      {2,12,12,12,12,25,25,25,42,42,42}},
-    {"4-2-3-1", {0,2,1,1,3,4,4,6,8,7,12},
-      {52,10,38,67,95,35,70,14,52,91,52},
-      {2,12,12,12,12,23,23,34,34,34,44}},
-    {"4-4-2", {0,2,1,1,3,6,5,5,7,12,12},
-      {52,10,38,67,95,12,36,68,92,35,70},
-      {2,12,12,12,12,25,25,25,25,42,42}},
-    {"4-1-4-1", {0,2,1,1,3,4,6,5,5,7,12},
-      {52,10,38,67,95,52,12,36,68,92,52},
-      {2,12,12,12,12,22,32,32,32,32,44}},
-    {"4-3-1-2", {0,2,1,1,3,5,4,5,8,12,12},
-      {52,10,38,67,95,25,52,80,52,38,67},
-      {2,12,12,12,12,25,25,25,33,42,42}},
-    {"4-2-2-2", {0,2,1,1,3,4,4,8,8,12,12},
-      {52,10,38,67,95,35,70,30,74,40,64},
-      {2,12,12,12,12,23,23,31,31,42,42}},
-    {"3-5-2", {0,1,1,1,6,5,4,5,7,12,12},
-      {52,20,52,84,15,36,52,68,89,38,67},
-      {2,12,12,12,24,24,24,24,24,42,42}},
-    {"3-4-3", {0,1,1,1,6,5,5,7,9,12,10},
-      {52,20,52,84,12,36,68,92,28,52,76},
-      {2,12,12,12,25,25,25,25,42,42,42}},
-    {"5-3-2", {0,2,1,1,1,3,5,4,5,12,12},
-      {52,8,30,52,74,97,25,52,80,38,67},
-      {2,16,12,12,12,16,27,25,27,42,42}},
-    {"5-4-1", {0,2,1,1,1,3,6,5,5,7,12},
-      {52,8,30,52,74,97,12,36,68,93,52},
-      {2,16,12,12,12,16,29,27,27,29,42}},
-};
-
-#define PREMATCH_FORMATION_PRESET_COUNT \
-    (sizeof(prematch_formation_presets) / sizeof(prematch_formation_presets[0]))
+#include "gameplan_shapes.h"
+#include "gameplan_gesture.h"
+typedef FnxGameplanShape PrematchFormationPreset;
+#define prematch_formation_presets fnx_gameplan_shapes
+#define PREMATCH_FORMATION_PRESET_COUNT FNX_GAMEPLAN_SHAPE_COUNT
 #define PREMATCH_ROLE_OPTION_COUNT 13u
 
 static void prematch_gameplan_reset_side(PrematchGameplanSide *state) {
@@ -8524,28 +8497,8 @@ static void prematch_gameplan_store_formation(void *squad, uint32_t tactics,
 
 // Native longitudinal coordinate: own goal 0, opponent goal 48; width 0..105.
 // Midfield includes the standard AMF preset at 34. Central attack allows only SS/CF.
-static uint32_t prematch_gameplan_zone_role(uint32_t current, uint32_t x,
-                                           uint32_t y, uint32_t cycle) {
-  if (current == 0) return 0; // Never turn a keeper into an outfield player.
-  uint32_t options[4], count = 0;
-  if (y <= 17) {
-    options[count++] = 1;
-    if (x < 30) options[count++] = 2;
-    else if (x > 75) options[count++] = 3;
-  } else if (y <= 35) {
-    options[count++] = 4; options[count++] = 5; options[count++] = 8;
-    if (x < 30) options[count++] = 6;
-    else if (x > 75) options[count++] = 7;
-  } else {
-    options[count++] = 11; options[count++] = 12;
-    if (x < 30) options[count++] = 9;
-    else if (x > 75) options[count++] = 10;
-  }
-  for (uint32_t i = 0; i < count; i++)
-    if (options[i] == current) return options[(i + (cycle != 0)) % count];
-  if (y <= 17) return x < 30 ? 2 : x > 75 ? 3 : 1;
-  if (y <= 35) return x < 30 ? 6 : x > 75 ? 7 : y <= 23 ? 4 : y <= 29 ? 5 : 8;
-  return x < 30 ? 9 : x > 75 ? 10 : y <= 40 ? 11 : 12;
+static uint32_t prematch_gameplan_zone_role(uint32_t current,uint32_t x,uint32_t y,uint32_t cycle){
+  return fnx_gameplan_zone_role(current,x,y,cycle);
 }
 
 static void prematch_gameplan_reset_default(uint32_t side) {
@@ -8679,15 +8632,9 @@ static void prematch_gameplan_drag_field(uint32_t side, uint32_t buttons,
   if (!axis_y)
     dy = ((buttons & PES_GAMEPLAN_BUTTON_DOWN) != 0) -
          ((buttons & PES_GAMEPLAN_BUTTON_UP) != 0);
-  const float seconds = fminf(
-      (float)armTicksToNs(now - state->position_drag_update_tick) / 1e9f, 0.05f);
-  state->position_drag_update_tick = now;
-  state->position_drag_x = fminf(255.0f, fmaxf(0.0f,
-      state->position_drag_x + dx * 96.0f * seconds));
-  state->position_drag_y = fminf(255.0f, fmaxf(0.0f,
-      state->position_drag_y + dy * 96.0f * seconds));
-  if (player->role == 0)
-    state->position_drag_y = fmaxf(state->position_drag_y, 165.0f);
+  fnx_gameplan_drag(&state->position_drag_x,&state->position_drag_y,player->role==0,dx,dy,
+      armTicksToNs(now-state->position_drag_update_tick)/1000000ULL);
+  state->position_drag_update_tick=now;
   // Invert and scale the overlay coordinates back into native Vector2C.
   const uint8_t position[2] = {
       (uint8_t)((255.0f - state->position_drag_y) * 48.0f / 255.0f + 0.5f),
@@ -9771,7 +9718,7 @@ static void exhibition_gameplan_process_pending(void) {
       if (state->position_dragging == 2 &&
           (sample & PES_GAMEPLAN_BUTTON_A)) {
         const uint64_t held_ns = armTicksToNs(now - state->position_drag_tick);
-        if (held_ns >= 220000000ULL) {
+        if (held_ns >= FNX_GAMEPLAN_HOLD_MS * 1000000ULL) {
           state->position_dragging = 1;
           state->position_drag_update_tick = now;
           state->selected_area = PREMATCH_GAMEPLAN_NO_SELECTION;
@@ -10201,6 +10148,8 @@ const char *pes_controller_custom_info_popup_title(void) {
     return "CREDITS";
   if (popup == MAIN_MENU_INFO_TWO_PLAYER)
     return "2 PLAYER";
+  if (popup == MAIN_MENU_INFO_PLAYLIST)
+    return "CUSTOM PLAYLIST";
   return "";
 }
 
@@ -10218,6 +10167,8 @@ uint32_t pes_controller_custom_info_popup_line_count(void) {
     return 3;
   if (popup == MAIN_MENU_INFO_TWO_PLAYER)
     return 3;
+  if (popup == MAIN_MENU_INFO_PLAYLIST)
+    return 5;
   return 0;
 }
 
@@ -10351,6 +10302,16 @@ const char *pes_controller_custom_info_popup_line(uint32_t index) {
         "Version: " PES_NX_VERSION,
     };
     return index < 3 ? lines[index] : "";
+  }
+  if (popup == MAIN_MENU_INFO_PLAYLIST) {
+    static const char *const lines[] = {
+        "Put your MP3 files in:",
+        "sdmc:/switch/pes21_nx/playlist/",
+        "Tracks play in filename order, in menus only.",
+        "Switch OFF then ON to reload the folder.",
+        "Use real MP3 audio; renaming AAC/M4A is not conversion.",
+    };
+    return index < 5 ? lines[index] : "";
   }
   if (popup == MAIN_MENU_INFO_TWO_PLAYER) {
     const uint32_t connected =
@@ -10503,13 +10464,13 @@ int pes_controller_menu_physical_tap(float normalized_x,
         main_menu_video_adjust(2);
       return 0;
     }
-    if (normalized_x >= 0.22f && normalized_x <= 0.78f &&
-        normalized_y >= 0.30f && normalized_y < 0.61f) {
-      int index = (int)floorf((normalized_y - 0.32f) / 0.145f);
+    if (normalized_x >= 0.126f && normalized_x <= 0.874f &&
+        normalized_y >= 0.402f && normalized_y < 0.659f) {
+      int index = (int)floorf((normalized_y - 0.402f) / 0.09f);
       if (index < 0)
         index = 0;
-      if (index > 1)
-        index = 1;
+      if (index > 2)
+        index = 2;
       main_menu_video_focus_index = (uint32_t)index;
       main_menu_video_focus_direction = 0;
       main_menu_video_adjust(2);
@@ -11474,6 +11435,16 @@ static uint64_t main_menu_focus_now_ms(void) {
 }
 
 static void main_menu_video_apply(uint32_t index, uint32_t value) {
+  if (index == 2) {
+    const int previous = config.custom_playlist;
+    config.custom_playlist = value != 0;
+    if (write_config(CONFIG_NAME) != 0) {
+      config.custom_playlist = previous;
+      return;
+    }
+    custom_playlist_enable(config.custom_playlist);
+    return;
+  }
   if (index == 0) {
     if (value > 2u)
       value = 2u;
@@ -11536,13 +11507,14 @@ static void main_menu_video_adjust(int direction) {
   if (!direction ||
       !__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE))
     return;
-  const uint32_t focus = main_menu_video_focus_index < 2
+  const uint32_t focus = main_menu_video_focus_index < 3
                              ? main_menu_video_focus_index
                              : 0;
   const uint32_t current =
       focus == 0
           ? __atomic_load_n(&main_menu_video_graphics, __ATOMIC_ACQUIRE)
-          : __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE);
+          : focus == 1 ? __atomic_load_n(&main_menu_video_frame_rate, __ATOMIC_ACQUIRE)
+                       : (uint32_t)!!config.custom_playlist;
   // Left/right select an absolute value for the two-state FPS row. Graphics
   // keeps the stock LOW/STANDARD/HIGH order and wraps only for the explicit
   // A/tap cycle action.
@@ -11554,6 +11526,8 @@ static void main_menu_video_adjust(int direction) {
   } else if (focus == 1) {
     // FPS enum order is inverted: left=30 (1), right=60 (0).
     value = direction > 0 ? 0u : 1u;
+  } else if (focus == 2) {
+    value = direction > 0;
   } else {
     value = direction > 0 ? (current < 2u ? current + 1u : 2u)
                           : (current > 0u ? current - 1u : 0u);
@@ -11603,7 +11577,7 @@ static void main_menu_video_close(void) {
 
 static void main_menu_info_open(uint32_t popup) {
   if (popup != MAIN_MENU_INFO_CREDITS &&
-      popup != MAIN_MENU_INFO_TWO_PLAYER)
+      popup != MAIN_MENU_INFO_TWO_PLAYER && popup != MAIN_MENU_INFO_PLAYLIST)
     return;
   __atomic_store_n(&main_menu_info_popup, popup, __ATOMIC_RELEASE);
   __atomic_store_n(&main_menu_controller_active, 1, __ATOMIC_RELEASE);
@@ -11617,6 +11591,7 @@ static void main_menu_info_close(void) {
       &main_menu_info_popup, MAIN_MENU_INFO_CLOSED, __ATOMIC_ACQ_REL);
   if (popup == MAIN_MENU_INFO_CLOSED)
     return;
+  if (popup == MAIN_MENU_INFO_PLAYLIST) return;
   main_menu_apply_focus(popup == MAIN_MENU_INFO_CREDITS ? 1u : 2u);
   debugPrintf("UE4 menu: custom info closed type=%u\n", popup);
 }
@@ -12052,13 +12027,14 @@ static void main_menu_manager_name_input(void) {
   swkbdConfigMakePresetDefault(&keyboard);
   swkbdConfigSetType(&keyboard, SwkbdType_QWERTY);
   const int online_dummy=competition_frontend_state()==COMPETITION_FRONTEND_MANAGER_DUMMY;
-  swkbdConfigSetHeaderText(&keyboard, online_dummy ? manager_dummy_input_label() : "MANAGER NAME");
-  const int password=online_dummy && manager_dummy_input_password();
+  swkbdConfigSetHeaderText(&keyboard, online_dummy ? manager_client_input_label() : "MANAGER NAME");
+  const int password=online_dummy && manager_client_input_password();
+  const int promotion=online_dummy && manager_client_input_promotion();
   if(password)swkbdConfigSetPasswordFlag(&keyboard,1);
-  swkbdConfigSetGuideText(&keyboard,password ? "8 characters minimum" : "Team name or User ID");
+  swkbdConfigSetGuideText(&keyboard,promotion ? "Promotion code: letters and numbers; hyphens optional" : password ? "8 characters minimum" : "Team name or User ID");
   swkbdConfigSetStringLenMin(&keyboard, 1);
-  swkbdConfigSetStringLenMax(&keyboard,password ? 63u : ML_NAME_SIZE-1u);
-  swkbdConfigSetInitialText(&keyboard, online_dummy ? manager_dummy_name() : ml_frontend_manager_name());
+  swkbdConfigSetStringLenMax(&keyboard,password || promotion ? 63u : ML_NAME_SIZE-1u);
+  swkbdConfigSetInitialText(&keyboard, online_dummy ? manager_client_name() : ml_frontend_manager_name());
   const Result result = swkbdShow(&keyboard, name, sizeof(name));
   swkbdClose(&keyboard);
   competition_frontend_manager_name_result(R_SUCCEEDED(result) ? name : NULL);
@@ -12163,7 +12139,28 @@ static int local_rematch_process_pending(void) {
   return 0;
 }
 
+void pes_main_menu_pad_axes(float x, float y) {
+  const int16_t sx=(int16_t)(x*32767.f),sy=(int16_t)(y*32767.f);
+  const uint32_t axes=(uint32_t)(uint16_t)sx|((uint32_t)(uint16_t)sy<<16);
+  __atomic_store_n(&main_menu_screen_axes,axes,__ATOMIC_RELEASE);
+}
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
+  static NxManagerDevShortcut dev_shortcut;
+  /* Network completion and TEST-clock polling must progress while the loading
+   * cover blocks controller input. In particular, the clock cover is released
+   * by the frontend tick itself, rather than by the HTTP worker. */
+  if (competition_frontend_active()) {
+    const uint64_t now=armTicksToNs(armGetSystemTick())/1000000u;
+    ml_frontend_tick(now);
+    competition_frontend_tick(now);
+  }
+  const int dev_eligible=__atomic_load_n(&main_menu_controller_active,__ATOMIC_ACQUIRE) &&
+      !competition_frontend_active() && !nx_loading_active() &&
+      __atomic_load_n(&main_menu_info_popup,__ATOMIC_ACQUIRE)==MAIN_MENU_INFO_CLOSED &&
+      !__atomic_load_n(&main_menu_video_settings_open,__ATOMIC_ACQUIRE) &&
+      !pes_controller_start_prompt(NULL,NULL);
+  int dev=nx_manager_dev_shortcut(&dev_shortcut,buttons,dev_eligible,main_menu_focus_now_ms());
+  if(dev){if(dev==2){competition_frontend_open_manager_dev();competition_frontend_discard_input(buttons);}return;}
   if(nx_loading_active()){competition_frontend_discard_input(buttons);return;}
   if (local_rematch_process_pending()) return;
   /* A can arrive through the touch/menu bridge one frame before the raw pad
@@ -12196,11 +12193,9 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     return;
 
   if (competition_frontend_active()) {
-    ml_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
-    competition_frontend_tick(armTicksToNs(armGetSystemTick())/1000000u);
-    const uint64_t menu_axes=__atomic_load_n(&cobra_pad_input,__ATOMIC_ACQUIRE);
+    const uint32_t menu_axes=__atomic_load_n(&main_menu_screen_axes,__ATOMIC_ACQUIRE);
     competition_frontend_axis_event(buttons,previous_buttons,
-        (int16_t)(menu_axes>>32),(int16_t)(menu_axes>>48),
+        (int16_t)menu_axes,(int16_t)(menu_axes>>16),
         armTicksToNs(armGetSystemTick())/1000000u);
     const uint32_t action = competition_frontend_take_action();
     if (action == COMPETITION_ACTION_MANAGER_NAME) {
@@ -12234,6 +12229,7 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
 
   if (__atomic_load_n(&main_menu_video_settings_open, __ATOMIC_ACQUIRE)) {
     const uint32_t apply_held = (buttons & (1u << 3)) != 0;
+    if (buttons & (1u << 5)) { main_menu_info_open(MAIN_MENU_INFO_PLAYLIST); return; }
     if (apply_held) {
       if (!main_menu_video_apply_held)
         main_menu_video_apply_current();
@@ -12272,7 +12268,7 @@ void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons) {
     main_menu_video_focus_repeat_ms = now;
     if (direction == 1 && main_menu_video_focus_index > 0)
       main_menu_video_focus_index--;
-    else if (direction == 2 && main_menu_video_focus_index < 1)
+    else if (direction == 2 && main_menu_video_focus_index < 2)
       main_menu_video_focus_index++;
     else if (direction == 3 || direction == 4)
       main_menu_video_adjust(direction == 3 ? -1 : 1);
@@ -17789,8 +17785,15 @@ uintptr_t cobra_pad_apply_input(void *pad_ptr) {
   main_menu_2p_team_selector_refresh_ratings();
   main_menu_2p_team_selector_process_pending();
   { const uint64_t stamp=scene_runtime_ms();ManagerLeagueAudioFrame frame;
-    manager_dummy_audio_frame(&frame,stamp);
+    manager_client_audio_frame(&frame,stamp);
     if(competition_frontend_state()!=COMPETITION_FRONTEND_MANAGER_DUMMY)frame.visible_watch=0;
+    const int playlist_menu=(pes_main_menu_controller_active() ||
+        competition_frontend_state()!=COMPETITION_FRONTEND_NONE ||
+        pes_controller_2p_team_selector_active() || pes_controller_2p_prematch_hub_active()) &&
+        !pes_controller_2p_transition_active() && !frame.visible_watch &&
+        pes_mobile_control_active_mode()==PES_MOBILE_CONTROL_UNKNOWN &&
+        !pes_controller_pause_skin_active() && !pes_controller_match_result_skin();
+    custom_playlist_native_tick(playlist_menu,stamp);
     manager_league_audio_publish(&frame);manager_league_audio_native_pump(stamp);
   }
   league_process_portrait_requests();
@@ -21033,6 +21036,7 @@ void install_ue4_hooks(so_module *module) {
           module, "_ZN5sound3sys12MusicManager15m_IsInitializedE"),
       (const uint64_t *)so_try_find_addr_rx(
           module, "_ZN5sound3sys12MusicManager6m_hCueE"));
+  custom_playlist_native_install(module);
   sound_file_binder_get_instance =
       (void *)so_try_find_addr_rx(
           module, "_ZN3sys10FileBinder11GetInstanceEv");

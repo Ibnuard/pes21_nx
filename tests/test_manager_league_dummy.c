@@ -91,8 +91,26 @@ static void motion_test(const MdFixture *f) {
 }
 int main(int argc,char **argv) {
   assert(argc==2);
+  if(!strcmp(argv[1],"monthly")){
+    onboard();MdSave saved;manager_dummy_copy_save(&saved);go(2,1);
+    assert(view()->page==MD_OVERALL&&!view()->ranking_section);
+    for(uint32_t i=0;i<view()->count;i++)assert(!strcmp(view()->rows[i].value,"500 PTS"));
+    manager_dummy_tick_at(manager_dummy_week(&saved,UINT64_MAX).result_ms+1);go(2,1);
+    assert(!strcmp(view()->rows[0].value,"2500 PTS")&&!strcmp(view()->rows[1].value,"2000 PTS")&&!strcmp(view()->rows[2].value,"1500 PTS"));
+    for(unsigned i=0;i<20;i++)assert(!strcmp(view()->rows[0].value,"2500 PTS")); /* Reading is not another reward. */
+    manager_dummy_tick_at(1793466000000ULL);go(2,1);
+    for(uint32_t i=0;i<view()->count;i++)assert(!strcmp(view()->rows[i].value,"0 PTS"));
+    manager_dummy_pad(R);assert(view()->ranking_section==1&&view()->total==1&&strstr(view()->rows[0].detail,"October 2026")&&!strcmp(view()->rows[0].value,"2500 PTS"));
+    manager_dummy_pad(L);assert(!view()->ranking_section&&!strcmp(view()->rows[0].value,"0 PTS"));
+    go(2,3);assert(view()->page==MD_RULES&&view()->total==12);
+    return 0;
+  }
   if(!strcmp(argv[1],"reload")) {
-    manager_dummy_open();assert(view()->page==MD_REGISTER);manager_dummy_pad(A);assert(view()->page==MD_LOGIN);
+    manager_dummy_open();assert(view()->page==MD_REGISTER);
+    /* Reload at the original test's last clock. The host's real date may be
+     * later and legitimately settle a league while logging in. */
+    MdSave snapshot;manager_dummy_copy_save(&snapshot);manager_dummy_tick_at(snapshot.fixtures[0].kickoff_ms+MD_DURATION);
+    manager_dummy_pad(A);assert(view()->page==MD_LOGIN);
     manager_dummy_name_result("androswitch_27");manager_dummy_pad(DOWN);test_enter_pin("0472",0);
     manager_dummy_pad(DOWN);manager_dummy_pad(A);assert(view()->page==MD_DASHBOARD && !view()->tutorial);
     assert(view()->balance==5500 && !strcmp(view()->user_id,"androswitch_27"));
@@ -120,10 +138,6 @@ int main(int argc,char **argv) {
   for(uint32_t i=0;i<6;i++)manager_dummy_pad(DOWN);
   assert(view()->focus==6);manager_dummy_pad(A);assert(view()->page==MD_CLUB_PROFILE);
   manager_dummy_pad(B);assert(view()->page==MD_NEWS && view()->focus==6);
-  go(2,2);assert(view()->count==MD_MATCH_VISIBLE && view()->total==MD_FIXTURES);
-  manager_dummy_pad(RIGHT);assert(view()->focus==1);manager_dummy_pad(DOWN);assert(view()->focus==3);
-  manager_dummy_pad(UP);manager_dummy_pad(LEFT);assert(!view()->focus);
-
   MdSave legacy_clock=saved;legacy_clock.day_ms=MD_DEMO_DAY_MS;
   for(uint32_t i=0;i<MD_FIXTURES;i++) {
     uint32_t r=legacy_clock.fixtures[i].round;
@@ -135,39 +149,26 @@ int main(int argc,char **argv) {
                      : saved.fixtures[0].kickoff_ms+(day-4u)*(uint64_t)MD_DEMO_DAY_MS;
     MdWeek week=manager_dummy_week(&legacy_clock,t);assert(week.day==day && week.state==(day<=3 ? MD_PRE_LEAGUE : day<=6 ? MD_MATCH_DAY : MD_RESULT));
   }
-  go(0,2);assert(view()->page==MD_CALENDAR && view()->count==MD_WEEK_VISIBLE && view()->total==7);
-  uint32_t own_matches=0;
-  for(uint32_t d=0;d<7;d++) {
-    MdView week=*view();assert(week.focus==d && week.focus>=week.first && week.focus<week.first+week.count);
-    assert(week.count==3 && week.first<=4 && week.first+week.count<=week.total);
-    for(uint32_t i=0;i<week.count;i++)assert(strlen(week.rows[i].value)>=10 && strchr(week.schedule[i].period,':'));
-    uint32_t i=week.focus-week.first;assert(week.rows[i].selected);
-    MdScheduleDay *tile=&week.schedule[i];uint32_t expected=0;
-    for(uint32_t f=0;f<MD_FIXTURES;f++) {
-      const MdFixture *match=&saved.fixtures[f];time_t stamp=(time_t)(match->kickoff_ms/1000u+7u*3600u);struct tm local;gmtime_r(&stamp,&local);
-      uint32_t day=(local.tm_wday+6u)%7u;
-      if(day==d && (match->home==0 || match->away==0)) {
-        assert(expected<tile->match_count);
-        MdRow *opponent=&tile->matches[expected++];
-        assert(opponent->team_id==(match->home ? match->home : match->away));
-        assert(!strncmp(opponent->label,"Vs ",3) && strlen(opponent->label)>3 && strchr(opponent->value,':') && opponent->badge);
-        assert(!strcmp(opponent->detail,match->home==0 ? "HOME" : "AWAY"));
-      }
-    }
-    assert(tile->match_count==expected);own_matches+=expected;
-    if(d==1) {
-      manager_dummy_pad(A);assert(view()->page==MD_SCHEDULE && view()->total==12);
-      manager_dummy_pad(B);assert(view()->page==MD_CALENDAR && view()->focus==d);
-    }
-    manager_dummy_pad(DOWN);
+  go(0,0);assert(view()->modal.information && strstr(view()->rows[0].value,"REGISTERED"));manager_dummy_pad(A);
+  go(0,3);assert(view()->modal.information && view()->page==MD_DASHBOARD);manager_dummy_pad(A);
+  go(1,1);assert(view()->modal.information && view()->page==MD_DASHBOARD);manager_dummy_pad(A);
+  go(1,3);assert(view()->modal.information && strstr(view()->modal.body,"upcoming"));manager_dummy_pad(A);
+  go(0,2);assert(view()->page==MD_WEEK_SCHEDULE && view()->count==7 && view()->total==7);
+  for(uint32_t i=0;i<7;i++)manager_dummy_pad(UP);
+  for(uint32_t day=0;day<7;day++){
+    MdView week=*view();assert(week.focus==day&&week.first==0&&week.count==7);
+    assert(strstr(week.rows[day].value,day<3?"W1":"W2"));
+    assert(week.rows[0].selected&&!week.rows[1].selected); /* TODAY does not follow focus. */
+    manager_dummy_pad(A);assert(view()->page==MD_WEEK_SCHEDULE);manager_dummy_pad(DOWN);
   }
-  assert(own_matches==6 && view()->focus==6 && view()->first==4);
-  for(uint32_t d=6;d;d--){manager_dummy_pad(UP);assert(view()->focus==d-1);}
-  manager_dummy_pad(UP);assert(view()->focus==0 && view()->first==0);
-  go(1,0);assert(view()->page==MD_TEAM_INFO && view()->count==5 && view()->rows[0].portrait && view()->rows[0].identity);
+  assert(view()->focus==6);manager_dummy_pad(B);
+  for(uint32_t i=0;i<MD_FIXTURES;i++){
+    time_t stamp=(time_t)(saved.fixtures[i].kickoff_ms/1000+25200);struct tm day;gmtime_r(&stamp,&day);assert(day.tm_wday==3);
+  }
+  go(0,4);manager_dummy_pad(A);assert(view()->page==MD_TEAM_INFO && view()->count==5 && view()->rows[0].portrait && view()->rows[0].identity);
   uint32_t ids[18]={0};for(uint32_t i=0;i<18;i++){MdView v=*view();MdRow *r=&v.rows[v.focus-v.first];assert(r->rating>=60 && r->rating<=69);
     ids[i]=r->identity;for(uint32_t j=0;j<i;j++)assert(ids[j]!=ids[i]);manager_dummy_pad(DOWN);}
-  go(1,1);assert(manager_dummy_take_action()==MD_ACTION_PLAN && manager_dummy_plan_editor());
+  go(1,0);assert(manager_dummy_take_action()==MD_ACTION_PLAN && manager_dummy_plan_editor());
   uint32_t home=0,away=0,players[40],count=0;uint8_t shirts[40];assert(manager_dummy_plan_teams(&home,&away) && home!=away);
   assert(manager_dummy_roster(home,players,shirts,&count) && count==18);assert(manager_dummy_player_allowed(home,players[0])==1);
   ManagerLeaguePlanScope scope;assert(manager_dummy_plan_scope(&scope) && scope.player_count==18 && manager_league_plan_scope_valid(&scope));

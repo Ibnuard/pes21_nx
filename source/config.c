@@ -19,7 +19,8 @@
   CONFIG_VAR_INT(trilinear_filter); \
   CONFIG_VAR_INT(show_fps); \
   CONFIG_VAR_INT(fuzzy_seek); \
-  CONFIG_VAR_INT(force_gles);
+  CONFIG_VAR_INT(force_gles); \
+  CONFIG_VAR_INT(custom_playlist);
 
 Config config;
 

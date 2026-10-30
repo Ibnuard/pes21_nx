@@ -6,6 +6,8 @@
 #include "corner_tactics.h"
 typedef uint64_t u64;
 enum {PES_CONTROLLER_PROFILE_FULL=0};
+static int nameplates_ready;
+static int pes_controller_nameplate_ready(void){return nameplates_ready;}
 enum {HidNpadButton_A=1,HidNpadButton_B=2,HidNpadButton_X=4,
   HidNpadButton_Up=8,HidNpadButton_Right=16,HidNpadButton_Down=32,
   HidNpadButton_Left=64,HidNpadButton_StickL=128,HidNpadButton_StickR=256,
@@ -81,6 +83,25 @@ int main(int argc,char **argv) {
     hid(0,0,0,0,0,0);hid(0,0,HidNpadButton_Left,0,0,0);hid(0,0,0,0,0,0);
     assert(hid(0,0,HidNpadButton_B,HidNpadButton_B,0,0)&FNX_CORNER_CAPTURE);
     assert(!fnx_corner_take(0,42,1000,&command,&option));
+  } else if(!strcmp(argv[1],"nameplate-start")) {
+    for(unsigned profile=0;profile<3;profile++) {
+      nameplates_ready=0;fnx_corner_reset();
+      fnx_corner_publish(0,42,FNX_CORNER_ATTACK,1,8,4,0,1000);
+      hid(0,profile,0,0,0,0);
+      u64 opener=profile ? HidNpadButton_AnySL : HidNpadButton_Left;
+      assert(hid(0,profile,opener,0,0,0)&FNX_CORNER_CAPTURE);
+      nameplates_ready=1;
+      /* No release latch swallowing movement while COM already kicks. */
+      assert(!hid(0,profile,opener|HidNpadButton_B,0,1,1));
+      FnxCornerView v;fnx_corner_view(0,1000,&v);assert(!v.available && !v.open);
+      assert(!fnx_corner_take(0,42,1000,&command,&option));
+      nameplates_ready=0;
+      assert(!hid(0,profile,opener,0,0,0));
+      fnx_corner_view(0,1000,&v);assert(!v.available);
+      fnx_corner_publish(0,43,FNX_CORNER_ATTACK,1,8,4,0,1000);
+      hid(0,profile,0,0,0,0);
+      assert(hid(0,profile,opener,0,0,0)&FNX_CORNER_CAPTURE);
+    }
   } else if(!strcmp(argv[1],"short-page")) {
     hid(0,0,0,0,0,0);hid(0,0,HidNpadButton_Left,0,0,0);hid(0,0,0,0,0,0);
     assert(hid(0,0,HidNpadButton_X,HidNpadButton_X,0,0)&FNX_CORNER_CAPTURE);

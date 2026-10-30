@@ -389,6 +389,15 @@ static void test_condition_toggle_is_per_side(void) {
   exhibition_gameplan_process_pending();
   assert(exhibition_gameplan_sides[1].condition_mode == 1u);
 }
+static void test_user_id_underscore(void) {
+  const char *id="fnx_dev";GLfloat plain[7*24],with_bar[7*24];
+  const float a=measure_efootball_line("fnxdev",6,24,EFOOTBALL_FONT_BOLD);
+  const float b=measure_efootball_line(id,7,24,EFOOTBALL_FONT_BOLD);
+  assert(b>a&&emit_efootball_line(id,7,0,0,24,EFOOTBALL_FONT_BOLD,with_bar)==7);
+  assert(emit_efootball_line("fnx-dev",7,0,0,24,EFOOTBALL_FONT_BOLD,plain)==7);
+  assert(with_bar[3*24+1]<plain[3*24+1]); /* Bar at baseline, same text advance. */
+  assert(fabsf(with_bar[4*24]-plain[4*24])<.0001f&&!strcmp(id,"fnx_dev"));
+}
 int main(int argc, char **argv) {
   assert(argc == 2); setup();
   if (!strcmp(argv[1], "tap")) test_tap();
@@ -404,6 +413,7 @@ int main(int argc, char **argv) {
   else if (!strcmp(argv[1], "popup")) test_popup();
   else if (!strcmp(argv[1], "loading")) test_loading();
   else if (!strcmp(argv[1], "condition")) test_condition_toggle_is_per_side();
+  else if (!strcmp(argv[1], "user-id")) test_user_id_underscore();
   else return 1;
   return 0;
 }

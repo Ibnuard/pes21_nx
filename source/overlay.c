@@ -1,3 +1,4 @@
+#include "gameplan_layout.h"
 #include "match_preferences.h"
 #include "loading_popup.h"
 /* overlay.c -- small FPS counter drawn over the game's output
@@ -459,7 +460,7 @@ static float measure_efootball_line_mode(const char *text, int len, float gh,
       width += gh * 0.34f;
       continue;
     }
-    const int glyph = efootball_font_glyph_index(text[index]);
+    const int glyph = efootball_font_glyph_index(text[index]=='_' ? '-' : text[index]);
     if (glyph < 0)
       continue;
     width += (float)advances[glyph] * gh / source_height;
@@ -493,7 +494,9 @@ static int emit_efootball_line_mode(const char *text, int len,
       pen_x += gh * 0.34f;
       continue;
     }
-    const int glyph = efootball_font_glyph_index(c);
+    /* The atlas has a dash but no underscore. Reuse its raster at baseline;
+     * measuring uses the same advance, preserving the exact displayed User ID. */
+    const int glyph = efootball_font_glyph_index(c=='_' ? '-' : c);
     if (glyph < 0)
       continue;
     const float u0 =
@@ -512,8 +515,9 @@ static int emit_efootball_line_mode(const char *text, int len,
                              ? floorf(pen_x + 0.5f) : pen_x;
     const float px0 = draw_x * 2.0f / (float)screen_width - 1.0f;
     const float px1 = (draw_x + gw) * 2.0f / (float)screen_width - 1.0f;
-    const float py0 = 1.0f - draw_y * 2.0f / (float)screen_height;
-    const float py1 = 1.0f - (draw_y + gh) * 2.0f / (float)screen_height;
+    const float glyph_y=draw_y+(c=='_' ? gh*.35f : 0.f);
+    const float py0 = 1.0f - glyph_y * 2.0f / (float)screen_height;
+    const float py1 = 1.0f - (glyph_y + gh) * 2.0f / (float)screen_height;
     const GLfloat quad[24] = {
         px0, py0, u0, v0, px1, py0, u1, v0, px0, py1, u0, v1,
         px1, py0, u1, v0, px1, py1, u1, v1, px0, py1, u0, v1,
@@ -1860,6 +1864,7 @@ static int emit_gameplan_condition_arrow(float cx, float cy, float size,
 #include "frontdoor_overlay.inc"
 #include "manager_league_dummy_overlay.inc"
 #include "loading_popup_overlay.inc"
+#include "manager_gameplan_render_adapter.inc"
 #include "gameplan_panels.inc"
 #include "corner_tactics_overlay.inc"
 
@@ -2389,11 +2394,12 @@ static void overlay_render(void) {
   const int custom_cpu_popup = pes_controller_custom_cpu_popup_active();
   const int custom_video_settings_popup =
       pes_controller_custom_video_settings_active();
-  const int custom_gameplan =
+  manager_render_plan_snapshot(competition_display_state==COMPETITION_FRONTEND_MANAGER_DUMMY);
+  const int custom_gameplan = manager_render_plan_active ||
       pes_controller_custom_prematch_gameplan_active();
-  const uint32_t custom_gameplan_sides = manager_dummy_plan_editor() ? 1u : 2u;
+  const uint32_t custom_gameplan_sides = (manager_render_plan_active||manager_dummy_plan_editor()) ? 1u : 2u;
   const int custom_gameplan_exhibition =
-      custom_gameplan && pes_controller_exhibition_single_controller_mode();
+      custom_gameplan && !manager_render_plan_active && pes_controller_exhibition_single_controller_mode();
   const int pause_skin = pes_controller_pause_skin_active();
   const uint32_t pause_transition = pes_controller_pause_transition();
   // The result surfaces reuse the pause layout. Pause wins if both claim the
@@ -2499,8 +2505,8 @@ static void overlay_render(void) {
   else if(pause_camera_active)frontdoor_page=FD_PAUSE_SETTINGS;
   else if(pause_skin)frontdoor_page=FD_PAUSE;
   else if(result_skin || pes_controller_result_top_menu_confirm_active())frontdoor_page=FD_RESULT;
-  else if(custom_video_settings_popup)frontdoor_page=FD_VIDEO;
   else if(custom_info_popup)frontdoor_page=FD_INFO;
+  else if(custom_video_settings_popup)frontdoor_page=FD_VIDEO;
   else if (!custom_gameplan && !result_skin && !tutorial_play_active) {
     if (start_prompt) frontdoor_page=FD_TITLE;
     else if (custom_main_menu) frontdoor_page=FD_MENU;
@@ -2675,6 +2681,7 @@ static void overlay_render(void) {
        (competition_display_state == COMPETITION_FRONTEND_LEAGUE_HUB ||
         competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE ||
         competition_display_state == COMPETITION_FRONTEND_MANAGER_DUMMY)));
+  manager_render_plan_queue_portraits();
   for (uint32_t i = 0; i < stamina_bar_count; ++i)
     if (stamina_bars[i].portrait_id &&
         !gameplan_portrait_texture(stamina_bars[i].portrait_id))
@@ -2877,6 +2884,7 @@ static void overlay_render(void) {
   int competition_background_quad = 0;
   /* Cup and career are mutually exclusive and share one draw buffer. */
   MasterLeagueRender master_league_ui = {0};
+  MasterLeagueRender manager_plan_ui = {0};
   int competition_brand_quad = 0;
   int competition_portrait_quad = 0;
   int competition_departing_card_quads[4] = {0};
@@ -3291,8 +3299,8 @@ static void overlay_render(void) {
     const float action_h = 0.078f * (float)screen_height;
     const float action_gap = 0.006f * (float)screen_width;
     const float action_w = (half_w - action_gap * 3.0f) * 0.25f;
-    const float pitch_x_offset = 0.009f * (float)screen_width;
-    const float pitch_w = 0.278f * (float)screen_width;
+    const float pitch_x_offset = GP_PITCH_DX * (float)screen_width;
+    const float pitch_w = GP_PITCH_W * (float)screen_width;
     const float pitch_y = content_y + 0.010f * (float)screen_height;
     const float pitch_h = content_h - 0.020f * (float)screen_height;
     const float bench_gap = 0.007f * (float)screen_width;
@@ -3301,8 +3309,8 @@ static void overlay_render(void) {
                           0.009f * (float)screen_width;
     // Player entries float directly on the pitch. This bounding box reserves
     // a square portrait, a compact black role/rating plate and one name line.
-    const float player_w = 0.052f * (float)screen_width;
-    const float player_h = 0.094f * (float)screen_height;
+    const float player_w = GP_PLAYER_W * (float)screen_width;
+    const float player_h = GP_PLAYER_H * (float)screen_height;
     const float line_thickness = 0.0015f * (float)screen_width;
     static const char *const action_labels[
         PES_PREMATCH_GAMEPLAN_ACTION_COUNT] = {
@@ -3597,7 +3605,7 @@ static void overlay_render(void) {
         }
       }
 
-      if (!waiting && (!custom_gameplan_exhibition || side == 0)) {
+      if (!waiting && (!custom_gameplan_exhibition || side == 0) && (!manager_render_plan_active||manager_render_plan.plan_editable)) {
         const float frame = fmaxf(2.0f, (float)screen_height / 320.0f);
         prematch_gameplan_action_style = (RoundedRectStyle){
             action_w, action_h, 0.012f * (float)screen_height};
@@ -3993,7 +4001,7 @@ static void overlay_render(void) {
                                0.020f * (float)screen_height;
       prematch_gameplan_badge_first_quad[side] = quads;
       prematch_gameplan_badge_quads[side] = emit_badge(
-          pes_controller_2p_prematch_hub_badge(side),
+          (manager_render_plan_active?manager_render_plan.badge:pes_controller_2p_prematch_hub_badge(side)),
           half_x[side] + 0.008f * (float)screen_width,
           header_y + 0.010f * (float)screen_height, badge_size, badge_size,
           verts + quads * 24);
@@ -4023,7 +4031,7 @@ static void overlay_render(void) {
       char team_name[28];
       compact_player_name(
           team_name, sizeof(team_name),
-          pes_controller_2p_prematch_hub_team_name(side));
+          (manager_render_plan_active?(manager_render_plan.plan_editable?manager_render_plan.name:manager_render_plan.headline):pes_controller_2p_prematch_hub_team_name(side)));
       line_quads = emit_efootball_line(
           team_name, (int)strlen(team_name),
           half_x[side] + 0.013f * (float)screen_width + badge_size,
@@ -4031,7 +4039,7 @@ static void overlay_render(void) {
           EFOOTBALL_FONT_STENCIL, verts + quads * 24);
       prematch_gameplan_white_text_quads += line_quads;
       quads += line_quads;
-      if(manager_dummy_plan_editor()) {
+      if(manager_dummy_plan_editor()&&!manager_render_plan_active) {
         char cash[40];snprintf(cash,sizeof(cash),"NX CASH  %u",manager_dummy_cash());
         const float cash_width=measure_efootball_line(cash,(int)strlen(cash),header_meta_gh,EFOOTBALL_FONT_BOLD);
         line_quads=emit_efootball_line(cash,(int)strlen(cash),
@@ -4043,6 +4051,10 @@ static void overlay_render(void) {
       snprintf(stats, sizeof(stats), "SPIRIT %u  POWER %u",
                pes_controller_custom_prematch_gameplan_team_spirit(side),
                pes_controller_custom_prematch_gameplan_team_power(side));
+      if(manager_render_plan_active){
+        stats[0]=0;
+        if(manager_render_plan.plan_editable)snprintf(stats,sizeof(stats),"%u PLAYERS",manager_render_plan_count());
+      }
       const float stats_w = measure_efootball_line(
           stats, (int)strlen(stats), header_meta_gh, EFOOTBALL_FONT_BOLD);
       line_quads = emit_efootball_line(
@@ -4515,10 +4527,10 @@ static void overlay_render(void) {
 
       prematch_gameplan_body_text_quads[side] =
           quads - prematch_gameplan_body_text_first_quad[side];
-      if (!waiting && (!custom_gameplan_exhibition || side == 0))
+      if (!waiting && (!custom_gameplan_exhibition || side == 0) && (!manager_render_plan_active||manager_render_plan.plan_editable))
         for (uint32_t action = 0;
              action < PES_PREMATCH_GAMEPLAN_ACTION_COUNT; action++) {
-          const char *action_label = action == 2 && pes_controller_live_gameplan_active()
+          const char *action_label = manager_render_plan_active && action==2 ? "TACTIC" : action == 2 && pes_controller_live_gameplan_active()
                                          ? "PRESET LOCKED" : action_labels[action];
           const float width = measure_efootball_line(
               action_label, (int)strlen(action_label),
@@ -4538,8 +4550,8 @@ static void overlay_render(void) {
       // pass below paints every label in white-on-blue / navy-on-white.
       prematch_gameplan_focus_text_first_quad[side] = quads;
       line_quads = 0;
-      if (!waiting && (!custom_gameplan_exhibition || side == 0)) {
-        const char *focused_action = root_focus == 2 && pes_controller_live_gameplan_active()
+      if (!waiting && (!custom_gameplan_exhibition || side == 0) && (!manager_render_plan_active||manager_render_plan.plan_editable)) {
+        const char *focused_action = manager_render_plan_active && root_focus==2 ? "TACTIC" : root_focus == 2 && pes_controller_live_gameplan_active()
                                         ? "PRESET LOCKED" : action_labels[root_focus];
         const float focused_action_w = measure_efootball_line(
             focused_action, (int)strlen(focused_action), action_gh,
@@ -4749,6 +4761,7 @@ static void overlay_render(void) {
                 ? "POSITIONS" : "CONDITION";
       }
 
+      if(manager_render_plan_active)footer_count[side]=0;
       float x = half_x[side] + 0.012f * (float)screen_width;
       for (uint32_t helper = 0; helper < footer_count[side]; helper++) {
         footer_icon_x[side][helper] = x + footer_icon_size * 0.5f;
@@ -4804,7 +4817,7 @@ static void overlay_render(void) {
 
     for (uint32_t side = 0; side < custom_gameplan_sides; side++) {
       prematch_gameplan_accent_text_first_quad[side] = quads;
-      const char *owner = custom_gameplan_sides == 1u ? "MY SQUAD" : side ? "P2  AWAY" : "P1  HOME";
+      const char *owner = manager_render_plan_active ? (manager_render_plan.plan_editable?"YOUR GAME PLAN":"SAVED GAME PLAN") : custom_gameplan_sides == 1u ? "MY SQUAD" : side ? "P2  AWAY" : "P1  HOME";
       if (custom_gameplan_exhibition && side == 1)
         owner = "COM  AWAY";
       line_quads = emit_efootball_line(
@@ -4828,7 +4841,7 @@ static void overlay_render(void) {
             .9625f*screen_height,.0444f*screen_height);
     } else if(competition_display_state==COMPETITION_FRONTEND_MANAGER_DUMMY) {
       manager_dummy_emit(&master_league_ui,verts,&quads);
-      MdView portraits;manager_dummy_view(&portraits);uint32_t requested=0;
+      MdView portraits;manager_client_view(&portraits);uint32_t requested=0;
       if(portraits.portrait && !gameplan_portrait_texture(portraits.portrait))
         pes_controller_league_request_scorer_portrait(requested++,portraits.portrait);
       const int pack_portraits=portraits.page==MD_PACK || portraits.page==MD_PACK_RESULT || portraits.page==MD_PACK_SELECT || portraits.page==MD_PACK_OPENING;
@@ -4836,6 +4849,16 @@ static void overlay_render(void) {
       uint32_t count=pack_portraits ? portraits.pack_count : portraits.count;
       for(uint32_t i=0;i<count && requested<5;i++)if(rows[i].portrait && !gameplan_portrait_texture(rows[i].portrait))
         pes_controller_league_request_scorer_portrait(requested++,rows[i].portrait);
+      if(portraits.page==MD_CLUB_PLAN){
+        /* Rotate missing portraits so an unavailable PNG cannot starve the bench.
+         * Hold each batch long enough for the game-thread loader to receive it. */
+        const uint32_t first=(uint32_t)(portraits.now_ms/250u)*5u%18u;
+        for(uint32_t i=0;i<18 && requested<5;i++) {
+          const uint32_t id=portraits.plan_players[(first+i)%18u].portrait;
+          if(id && !gameplan_portrait_texture(id))
+            pes_controller_league_request_scorer_portrait(requested++,id);
+        }
+      }
     } else if (competition_display_state == COMPETITION_FRONTEND_MASTER_LEAGUE) {
       master_league_emit(&master_league_ui, verts, &quads);
       const MlView *view=&master_league_ui.view;
@@ -8509,7 +8532,7 @@ static void overlay_render(void) {
     quads += line_quads;
   } else if (custom_settings_popup || custom_video_settings_popup) {
     const uint32_t item_count = custom_video_settings_popup
-                                    ? 2u
+                                    ? pes_controller_custom_video_settings_count()
                                     : pes_controller_custom_match_settings_count();
     const float panel_x = 0.17f *
                           (float)screen_width;
@@ -8695,7 +8718,7 @@ static void overlay_render(void) {
         text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
     const float helper_gw =
         helper_text_gh * (float)FONT_CELL_W / (float)FONT_CELL_H;
-    const char *title = custom_video_settings_popup ? "VIDEO SETTINGS"
+    const char *title = custom_video_settings_popup ? "SETTINGS"
                                                      : "MATCH SETTINGS";
     int line_quads = emit_line(
         title, (int)strlen(title),
@@ -9159,6 +9182,7 @@ static void overlay_render(void) {
       quads += label_quads;
     }
   }
+  fnx_corner_set_nameplate_ready(stamina_bar_count != 0 || pes_controller_nameplate_ready());
   FnxCornerView corner_views[2]={{0}};
   unsigned corner_open_count=0,corner_available_count=0;
   static uint64_t corner_open_tick[2];
@@ -9854,7 +9878,7 @@ static void overlay_render(void) {
       quads += n; result_cover_spinner_count += n;
     }
   }
-  if (custom_gameplan) {
+  if (custom_gameplan && !manager_render_plan_active) {
     gameplan_locked_rows = quads;
     for (uint32_t side = 0; side < 2; ++side) {
       for (uint32_t slot = 0; slot < prematch_gameplan_bench_visible[side]; ++slot) {
@@ -9995,6 +10019,29 @@ static void overlay_render(void) {
         0.930f * screen_height, helper_h,
         EFOOTBALL_FONT_BOLD, verts + quads * 24);
     quads += main_menu_helper_quads;
+  }
+  if(manager_render_plan_active) {
+    const float gx=(1.f-GP_GROUP_W)*.5f;
+    if(manager_render_plan.page==MD_CLUB_PLAN&&manager_render_plan_count()>18){
+      const float count=(float)manager_render_bench_count(0),visible=(float)prematch_gameplan_bench_visible[0];
+      const float x=gx+GP_BENCH_DX+GP_BENCH_W+.003f;
+      fd_rect(&manager_plan_ui,x,GP_PITCH_Y,.003f,GP_PITCH_H,.76f,.84f,.89f,verts,&quads);
+      fd_rect(&manager_plan_ui,x,GP_PITCH_Y+GP_PITCH_H*prematch_gameplan_bench_start[0]/count,.003f,GP_PITCH_H*visible/count,.02f,.34f,.76f,verts,&quads);
+    }
+    for(unsigned i=0;manager_render_plan.page==MD_CLUB_PLAN&&i<11;i++)if(!gameplan_portrait_texture(manager_render_plan.plan_players[i].portrait)) {
+      const float *r=prematch_gameplan_field_rect[0][i];
+      const float cx=(r[0]+r[2]*.5f)/screen_width,y=r[1]/screen_height;
+      md_ui_circle(&manager_plan_ui,cx,y+.013f,.020f,.60f,.66f,.70f,verts,&quads);
+      fd_rect(&manager_plan_ui,cx-.011f,y+.024f,.022f,.025f,.53f,.60f,.66f,verts,&quads);
+    }
+    if(!manager_render_plan.plan_editable){
+      fd_card(&manager_plan_ui,gx,GP_ACTION_Y,GP_GROUP_W,GP_ACTION_H,0,0,verts,&quads);
+      fd_center_text(&manager_plan_ui,"LATEST SAVED TEAM DATA",gx,GP_ACTION_Y+GP_ACTION_H*.5f,GP_GROUP_W,.028f,-2,verts,&quads);
+    }
+    fd_rect(&manager_plan_ui,0,.925f,1,.075f,.025f,.10f,.28f,verts,&quads);
+    float hx=.035f;for(unsigned i=0;i<manager_render_plan.helper_count;i++)fd_helper_at(&manager_plan_ui,manager_render_plan.helper_key[i],manager_render_plan.helper_label[i],.9625f,&hx,verts,&quads);
+    if(manager_render_plan.modal.open){manager_plan_ui.view.modal=manager_render_plan.modal;ml_ui_confirmation(&manager_plan_ui,verts,&quads);}
+
   }
   if(custom_gameplan) {
     for(uint32_t side=0;side<custom_gameplan_sides;side++) {
@@ -11747,6 +11794,7 @@ overlay_geometry_ready:
     glBindTexture(GL_TEXTURE_2D, gl.tex);
   }
   if(custom_gameplan && editor_ui.draw_count) master_league_draw(&editor_ui);
+  if(manager_plan_ui.draw_count){master_league_draw(&manager_plan_ui);master_league_draw_layer(&manager_plan_ui,1);}
   // Draw all helper glyphs after custom full-page backgrounds and text, but
   // before transition covers/confirmation modals that intentionally hide
   // their underlying controls.

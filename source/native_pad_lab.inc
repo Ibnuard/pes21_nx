@@ -1161,19 +1161,48 @@ static uint32_t native_lab_bind_away_cursor(void *cursor_info_ptr,
   return owner_mask;
 }
 
+static uint32_t native_lab_bind_single_player_cursors(
+    void *cursor_info_ptr, uint32_t *encoded_slots) {
+  if (!cursor_info_ptr || !encoded_slots)
+    return 0;
+  unsigned char *cursor_info = cursor_info_ptr;
+  for (uint32_t i = 0; i < NATIVE_LAB_CURSOR_COUNT; ++i) {
+    unsigned char *cursor = cursor_info + i * NATIVE_LAB_CURSOR_SIZE;
+    if (cursor[0] != 2)
+      continue;
+    // Pad -1 alone is insufficient: IsUserPlayTeam also accepts cursor[3],
+    // and IsUserControlTeam does not inspect the pad at all. Both reject the
+    // native CPU flag at +0x0d. Finalize the opponent's complete ownership
+    // after tmpdb loading, including records retained from a two-pad match.
+    // Keep player slots, native support settings, and every HOME record.
+    const int32_t no_pad = -1;
+    memcpy(cursor + 0x10, &no_pad, sizeof(no_pad));
+    cursor[0x0d] = 1;
+  }
+  uint32_t home_slot, away_slot;
+  const uint32_t owners = native_lab_scan_cursor_owners(
+      cursor_info, &home_slot, &away_slot);
+  *encoded_slots = home_slot < NATIVE_LAB_CURSOR_COUNT ? home_slot + 1u : 0;
+  return owners;
+}
+
 // Called by the post-return assembly trampoline, after every stock tmpdb
 // cursor field and support setting has been finalized but before CheckControl
-// decides which side is CPU-controlled.
+// decides which side is CPU-controlled. The mobile loader may rebuild these
+// records at kickoff, halftime, or another match setup.
 void pes_match_cursor_info_ready(void *cursor_info) {
-  if (!pes_controller_native_pad_lab_two_player())
+  if (!pes_controller_native_pad_lab_active())
     return;
+  const int two_player = pes_controller_native_pad_lab_two_player();
   uint32_t slots = 0;
-  const uint32_t owners = native_lab_bind_away_cursor(cursor_info, &slots);
+  const uint32_t owners = two_player
+      ? native_lab_bind_away_cursor(cursor_info, &slots)
+      : native_lab_bind_single_player_cursors(cursor_info, &slots);
   __atomic_store_n(&native_lab_debug_cursor_slots, slots,
                    __ATOMIC_RELEASE);
   __atomic_store_n(&native_lab_debug_owner_mask, owners,
                    __ATOMIC_RELEASE);
-  if ((owners & 3u) != 3u)
+  if (two_player && (owners & 3u) != 3u)
     __atomic_fetch_or(&native_lab_status, 128u, __ATOMIC_RELAXED);
 }
 

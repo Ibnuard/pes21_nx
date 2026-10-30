@@ -11,7 +11,10 @@
 /* Fixed UTC instants, independently checked against the agreed WIB calendar. */
 #define MONDAY UINT64_C(1792947600000)
 #define TUESDAY UINT64_C(1793034000000)
+#define WEDNESDAY UINT64_C(1793120400000)
 #define THURSDAY UINT64_C(1793206800000)
+#define FRIDAY UINT64_C(1793293200000)
+#define SATURDAY UINT64_C(1793379600000)
 static MdView view(void){MdView v;manager_dummy_view(&v);return v;}
 static void setup_unjoined(void) {
   epoch_now=MONDAY+9*UINT64_C(3600000);loaded=authenticated=1;
@@ -25,7 +28,7 @@ static void setup(void) {
   page=MD_DASHBOARD;focus=0;notice[0]=0;
 }
 static void calendar_checks(void) {
-  assert(md.fixtures[0].kickoff_ms==TUESDAY+12*UINT64_C(3600000));
+  assert(md.fixtures[0].kickoff_ms==WEDNESDAY+12*UINT64_C(3600000));
   assert(md.day_ms==MD_CALENDAR_DAY_MS && manager_dummy_valid(&md));
   uint32_t days[8]={0};
   for(uint32_t n=0;n<MD_FIXTURES;n++) {
@@ -37,19 +40,19 @@ static void calendar_checks(void) {
         assert(f->kickoff_ms>=g->kickoff_ms+g->duration_ms || g->kickoff_ms>=f->kickoff_ms+f->duration_ms);
     }
   }
-  assert(days[2]==12 && days[3]==9 && !days[1] && !days[4] && !days[5] && !days[6] && !days[7]);
-  assert(manager_dummy_week(&md,TUESDAY-1).state==MD_PRE_LEAGUE);
-  assert(manager_dummy_week(&md,TUESDAY).state==MD_MATCH_DAY);
-  assert(manager_dummy_week(&md,TUESDAY+UINT64_C(86400000)+18*UINT64_C(3600000)+599999).state==MD_MATCH_DAY);
-  epoch_now=TUESDAY+UINT64_C(86400000)+18*UINT64_C(3600000)+600000;
+  assert(days[3]==21 && !days[1] && !days[2] && !days[4] && !days[5] && !days[6] && !days[7]);
+  assert(manager_dummy_week(&md,WEDNESDAY-1).state==MD_PRE_LEAGUE);
+  assert(manager_dummy_week(&md,WEDNESDAY).state==MD_MATCH_DAY);
+  assert(manager_dummy_week(&md,WEDNESDAY+18*UINT64_C(3600000)+599999).state==MD_MATCH_DAY);
+  epoch_now=WEDNESDAY+18*UINT64_C(3600000)+600000;
   assert(manager_dummy_week(&md,epoch_now).state==MD_RESULT);
   uint32_t prize=league_prize(&md,0,NULL);
   assert(manager_dummy_next_week());assert(md.week_id==2 && md.balance==8000+prize && profile.balance==8000+prize);
-  assert(md.fixtures[0].kickoff_ms==THURSDAY+MD_CALENDAR_DAY_MS+12*UINT64_C(3600000));
+  assert(md.fixtures[0].kickoff_ms==SATURDAY+12*UINT64_C(3600000));
   assert(!manager_dummy_next_week() && profile.balance==8000+prize);
-  for(uint32_t n=0;n<MD_FIXTURES;n++)assert(calendar_weekday(md.fixtures[n].kickoff_ms)==(md.fixtures[n].round<4 ? 5u : 6u));
+  for(uint32_t n=0;n<MD_FIXTURES;n++)assert(calendar_weekday(md.fixtures[n].kickoff_ms)==6u);
   epoch_now=manager_dummy_week(&md,UINT64_MAX).result_ms;prize+=league_prize(&md,0,NULL);assert(manager_dummy_next_week());
-  assert(md.fixtures[0].kickoff_ms==TUESDAY+7*UINT64_C(86400000)+12*UINT64_C(3600000));
+  assert(md.fixtures[0].kickoff_ms==WEDNESDAY+7*UINT64_C(86400000)+12*UINT64_C(3600000));
   assert(profile.balance==9500+prize);
 }
 static void club_checks(void) {
@@ -77,11 +80,15 @@ static void dev_checks(void) {
   const MdSave before=md;
   manager_dummy_pad(Y);
 #if MANAGER_LEAGUE_DEV_CLOCK
-  assert(now()==md.fixtures[0].kickoff_ms && md.clock_offset_ms>0);
+  assert(now()==TUESDAY && md.clock_offset_ms>0);
+  manager_dummy_pad(Y);assert(now()==WEDNESDAY);
+  manager_dummy_pad(Y);assert(now()==md.fixtures[0].kickoff_ms);
   manager_dummy_pad(Y);assert(now()==md.fixtures[0].kickoff_ms+600000);
   epoch_now=manager_dummy_week(&md,UINT64_MAX).result_ms-md.clock_offset_ms;
   assert(manager_dummy_next_week());page=MD_DASHBOARD;focus=0;manager_dummy_pad(Y);
-  assert(now()==md.fixtures[0].kickoff_ms && md.week_id==2);
+  assert(now()==FRIDAY && md.week_id==2);
+  manager_dummy_pad(Y);assert(now()==SATURDAY);
+  manager_dummy_pad(Y);assert(now()==md.fixtures[0].kickoff_ms);
 #else
   assert(!memcmp(&before,&md,sizeof(md)));
   MdView v=view();for(uint32_t i=0;i<v.helper_count;i++)assert(strcmp(v.helper_label[i],"DEMO TIME"));

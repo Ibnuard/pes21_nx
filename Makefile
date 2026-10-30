@@ -62,8 +62,8 @@ DIAGNOSTICS ?= 0
 PERF_TRACE ?= 0
 NEAR_CAMERA_TRACE ?= 0
 STARTUP_RENDER_AUDIT ?= 0
-# The current Manager front-end is a local fixture preview. Set to 0 for a
-# connected deployment so its users cannot advance an authoritative clock.
+# This flag controls only the hidden offline DEV provider. ONLINEDEV uses
+# server-authorized TEST account capabilities; PRODUCTION has no demo clock.
 MANAGER_LEAGUE_DEV_CLOCK ?= 1
 # Inter Miami original-ID/MLS integration is part of the stable runtime.
 # Keep the variable as an opt-out build switch for rollback and bisecting.
@@ -130,7 +130,7 @@ LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,-Map
 			$(LINK_BUILD_ID_FLAG)
 
 LIBS	:= -lopenal -lSDL2 -lmpg123 \
-			-lEGL -lGLESv2 -lglapi -ldrm_nouveau -lpng -lz -lnx -lm
+			-lEGL -lGLESv2 -lglapi -ldrm_nouveau -lpng -lcurl -lz -lnx -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing

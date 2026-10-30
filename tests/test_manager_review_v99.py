@@ -37,7 +37,7 @@ class ManagerReviewV99Tests(unittest.TestCase):
             with self.subTest(stage=action):
                 work=self.run_mode(action+'-interrupt');(work/'SaveData/manager-league-profile-v2.dat.tmp').rmdir()
                 self.run_mode('recover-'+action,work)
-    def test_ranking_resets_on_fortnight_boundary_and_champions_survive(self):self.run_mode('ranking')
+    def test_monthly_ranking_resets_and_weekly_champions_survive(self):self.run_mode('ranking')
     def test_live_scheduled_and_ended_are_separate_ordered_sections(self):self.run_mode('schedule')
     def test_touchline_uses_elapsed_tape_and_keeps_live_playing(self):self.run_mode('touchline')
     def test_new_passes_link_actual_carriers_and_receivers(self):self.run_mode('passes')

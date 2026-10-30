@@ -18,6 +18,7 @@ static uint64_t scene_runtime_ms(void){return 1000;}
 static void scene_runtime_note(const char *a,const char *b){assert(a&&b);notes++;}
 static int pes_controller_native_pad_lab_active(void){return 0;}
 static int pes_controller_native_pad_lab_two_player(void){return 0;}
+static int pes_controller_nameplate_ready(void){return 0;}
 static uint32_t match_hud_session_serial;
 static void *(*match_global_registry_get_instance)(void);
 static const void *(*match_global_registry_get_team_ai_info)(const void *,uint32_t);

@@ -282,6 +282,9 @@ static unsigned appended,nonzero,failed_render,errors;
 static uint64_t clock_ms=1000;
 static uint64_t armGetSystemTick(void){return clock_ms*1000000u;}
 static uint64_t armTicksToNs(uint64_t tick){return tick;}
+static void custom_playlist_mix_pcm(int16_t *out,uint32_t frames,uint64_t now){
+ assert(out && frames==1024 && now==clock_ms); /* Playlist is OFF in this watch fixture. */
+}
 static int aaudio_render_output(AAudioStream *s,int16_t *out,uint64_t *source){
  (void)s;if(failed_render)return 0;memset(out,0,4096);*source=1024;return 1;}
 static void aaudio_report_error(AAudioStream *s,int error){(void)s;(void)error;++errors;}

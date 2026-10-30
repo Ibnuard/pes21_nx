@@ -95,6 +95,7 @@ typedef struct {
   char name[48];
 } PesStaminaBarSnapshot;
 int pes_controller_match_hud_inplay(void);
+int pes_controller_nameplate_ready(void);
 void pes_controller_referee_performance_note(void);
 uint32_t pes_controller_match_hud_session(void);
 #ifdef DEBUG_LOG
@@ -471,6 +472,8 @@ uintptr_t pes_match_result_half_entry(void *result, const char *name,
 int pes_main_menu_controller_active(void);
 uint32_t pes_main_menu_focus_index(void);
 void pes_main_menu_pad_event(uint32_t buttons, uint32_t previous_buttons);
+/* Same normalized screen-space axes as Exhibition: negative Y points up. */
+void pes_main_menu_pad_axes(float x, float y);
 #define PES_2P_TEAM_SELECTOR_PHASE_CLOSED 0u
 #define PES_2P_TEAM_SELECTOR_PHASE_LEAGUE 1u
 #define PES_2P_TEAM_SELECTOR_PHASE_TEAM 2u
@@ -592,6 +595,7 @@ uint32_t pes_controller_custom_match_settings_count(void);
 const char *pes_controller_custom_match_settings_label(uint32_t index);
 const char *pes_controller_custom_match_settings_value(uint32_t index);
 int pes_controller_custom_video_settings_active(void);
+uint32_t pes_controller_custom_video_settings_count(void);
 uint32_t pes_controller_custom_video_settings_focus(void);
 const char *pes_controller_custom_video_settings_label(uint32_t index);
 const char *pes_controller_custom_video_settings_value(uint32_t index);

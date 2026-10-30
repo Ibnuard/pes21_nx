@@ -34,6 +34,7 @@ typedef struct {
   int show_fps;
   int fuzzy_seek;
   int force_gles;
+  int custom_playlist;
 } Config;
 
 extern Config config;

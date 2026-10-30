@@ -17,7 +17,8 @@ static uint64_t calendar_preparation(uint64_t stamp,uint64_t previous_first) {
   if(weekday==2 || weekday==3)day+=4u-weekday;
   else if(weekday>=5)day+=8u-weekday;
   if(previous_first) {
-    const uint64_t previous=calendar_local_day(previous_first)-1u;
+    const uint32_t previous_day=calendar_weekday(previous_first);
+    const uint64_t previous=calendar_local_day(previous_first)-(previous_day==3||previous_day==6?2u:1u);
     while(day<=previous)day+=(day+3u)%7u==0u ? 3u : 4u;
   }
   return calendar_midnight(day);

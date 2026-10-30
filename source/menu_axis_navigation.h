@@ -2,7 +2,7 @@
 #define PESNX_MENU_AXIS_NAVIGATION_H
 #include <stdint.h>
 typedef struct {uint32_t direction;uint64_t next_ms;} NxMenuAxisRepeat;
-/* Cobra axes are signed, with negative Y pointing up. Face buttons never
+/* Screen axes are signed, with negative Y pointing up. Face buttons never
  * repeat. A new direction fires immediately, then after 350 ms / each 110 ms. */
 static inline uint32_t nx_menu_axis_buttons(uint32_t buttons,int32_t x,int32_t y) {
   const int32_t ax=x<0 ? -x : x,ay=y<0 ? -y : y;

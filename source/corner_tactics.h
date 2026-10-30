@@ -19,6 +19,10 @@ void fnx_corner_publish(uint32_t pad, uint64_t epoch, uint32_t mode,
     int short_allowed, uint32_t normal, uint32_t short_choice,
     uint32_t defence, uint64_t now);
 void fnx_corner_reset(void);
+/* Shared HUD lifecycle, before the user's Show Nameplate preference. A live
+ * nameplate closes both selectors, cancels pending commands, and releases
+ * gameplay input. Returning to set-play waiting requires a new publication. */
+void fnx_corner_set_nameplate_ready(int ready);
 uint32_t fnx_corner_input(uint32_t pad, uint64_t now, int allowed,
     int connected, uint32_t buttons, int axes_neutral);
 uint32_t fnx_corner_hold_input(uint32_t pad, uint64_t now, int allowed,

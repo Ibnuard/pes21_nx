@@ -7,7 +7,7 @@ typedef struct {
 } EditorRow;
 typedef struct {
   uint32_t page, focus, count, total, first, step, modal_focus, target;
-  int active, picker, loading, setplay, centered;
+  int active, picker, loading, setplay, centered, online;
   char title[64], subtitle[96], status[96], select_key[8], back_key[8];
   EditorRow rows[9];
 } EditorPanel;
@@ -24,6 +24,20 @@ static uint32_t editor_first(uint32_t total,uint32_t focus,uint32_t visible) {
 }
 static void editor_snapshot(EditorPanel *v,uint32_t side,int setplay) {
   memset(v,0,sizeof(*v));v->setplay=setplay;
+#ifdef PESNX_MANAGER_RENDER_ADAPTER
+  if(!setplay&&manager_render_plan_active&&manager_render_plan.page==MD_PLAN_SETTINGS){
+    const MdView *m=&manager_render_plan;v->active=v->online=1;v->centered=1;v->picker=m->plan_picker;
+    v->page=m->plan_menu==3?PES_PREMATCH_GAMEPLAN_PAGE_POSITIONS:PES_PREMATCH_GAMEPLAN_PAGE_FORMATION;
+    v->focus=m->focus;v->first=m->first;v->count=m->count;v->total=m->total;
+    fd_copy(v->title,sizeof(v->title),m->plan_menu==1?(m->plan_picker?"CHOOSE SHAPE":"FORMATION"):m->plan_menu==2?"TACTIC":m->plan_picker?"ASSIGN PLAYER":"PLAYER ROLES");
+    for(unsigned i=0;i<v->count&&i<9;i++){const MdRow *r=&m->plan_rows[i];EditorRow *out=&v->rows[i];
+      fd_copy(out->label,sizeof(out->label),r->label);fd_copy(out->value,sizeof(out->value),r->value);
+      fd_copy(out->role,sizeof(out->role),manager_render_plan_role(r->role));out->portrait=r->portrait;out->player=r->identity!=0;
+      out->power=r->rating;out->assigned=r->selected;
+      out->icon=m->plan_menu==1?(m->plan_picker?11u:(uint32_t[]){5,11,7,8}[i]):m->plan_menu==3&&!m->plan_picker?(uint32_t[]){0,1,2,3,3,4,5,5,5}[i]:0;
+    }return;
+  }
+#endif
   if(setplay) {
     v->active=v->picker=1;
     const uint32_t profile=android_controller_profile(pes_controller_set_piece_selector_owner_pad());
@@ -236,8 +250,8 @@ static void editor_panel_emit(MasterLeagueRender *ui,const EditorPanel *v,
   const float row_h=step-.007f;
   if(players) {
     fd_text(ui,"PLAYER",left+.096f,y+.139f,.25f,.019f,-3,verts,quads);
-    fd_text(ui,"FOOT",right-.099f,y+.139f,.046f,.018f,-3,verts,quads);
-    fd_text(ui,"PWR",right-.033f,y+.139f,.033f,.018f,-3,verts,quads);
+    if(!v->online)fd_text(ui,"FOOT",right-.099f,y+.139f,.046f,.018f,-3,verts,quads);
+    fd_text(ui,v->online?"OVR":"PWR",right-.033f,y+.139f,.033f,.018f,-3,verts,quads);
   }else if(roles) {
     fd_text(ui,"ASSIGNMENT",left+.012f,y+.139f,.18f,.019f,-3,verts,quads);
     fd_text(ui,"PLAYER",left+.233f,y+.139f,.18f,.019f,-3,verts,quads);
@@ -256,7 +270,7 @@ static void editor_panel_emit(MasterLeagueRender *ui,const EditorPanel *v,
       if(r->player)editor_role_plate(ui,r->role,left+.039f,cy,.042f,verts,quads);
       fd_text(ui,r->label,left+.091f,fd_cap_top(cy,.023f),right-left-.217f,.023f,ink,verts,quads);
       if(r->player) {
-        editor_foot_pair(ui,r->left,right-.112f,cy,verts,quads);
+        if(!v->online)editor_foot_pair(ui,r->left,right-.112f,cy,verts,quads);
         char value[8];snprintf(value,sizeof(value),"%u",r->power);
         fd_center_text(ui,value,right-.036f,cy,.031f,.024f,ink,verts,quads);
       }

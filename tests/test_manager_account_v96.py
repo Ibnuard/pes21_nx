@@ -69,8 +69,8 @@ int main(int argc,char **argv){
   assert(view().modal.open);manager_dummy_pad(A);
   manager_dummy_pad(B);assert(page==MD_REGISTER);login("0472");
   assert(authenticated && page==MD_DASHBOARD);for(int i=0;i<3;i++)manager_dummy_pad(A);
-  manager_dummy_pad(X);assert(page==MD_LOGOUT);manager_dummy_pad(B);assert(page==MD_DASHBOARD);
-  manager_dummy_pad(X);manager_dummy_pad(LEFT);manager_dummy_pad(A);assert(page==MD_REGISTER && !authenticated);
+  hub_section=2;focus=2;manager_dummy_pad(A);assert(page==MD_LOGOUT);manager_dummy_pad(B);assert(page==MD_DASHBOARD);
+  focus=2;manager_dummy_pad(A);manager_dummy_pad(LEFT);manager_dummy_pad(A);assert(page==MD_REGISTER && !authenticated);
   assert(!pin_value[0]&&!pin_first[0]&&!pin_buffer[0]&&!legacy_password[0]&&!editor&&!restore_pending&&!replay&&!paused);
   assert(!memcmp(&before,&md,sizeof(md)));players.tutorials=profile.tutorials;players.checksum=profile.checksum;
   assert(!memcmp(&players,&profile,sizeof(profile)));assert(!manager_dummy_next_week());
@@ -136,8 +136,8 @@ int main(int argc,char **argv){
   manager_dummy_pad(A);assert(page==MD_REGISTER && !authenticated);
  }else if(!strcmp(argv[1],"navigation")){
   auth_enter_hub();tutorial=0;hub_section=2;
-  const MdPage expected[5]={MD_TABLE,MD_CHAMPIONS,MD_SCHEDULE,MD_OVERALL,MD_RULES};
-  for(unsigned i=0;i<5;i++){page=MD_DASHBOARD;focus=i;MdView v=view();assert(v.count==5);
+  const MdPage expected[4]={MD_CHAMPIONS,MD_OVERALL,MD_LOGOUT,MD_RULES};
+  for(unsigned i=0;i<4;i++){page=MD_DASHBOARD;focus=i;MdView v=view();assert(v.count==4);
    manager_dummy_pad(A);assert(page==expected[i]);manager_dummy_pad(B);assert(page==MD_DASHBOARD&&focus==i);}
   packs_build();page=MD_SHOP;focus=0;manager_dummy_pad(A);manager_dummy_pad(A);manager_dummy_pad(LEFT);manager_dummy_pad(A);epoch_now+=MD_PACK_OPEN_MS+1;manager_dummy_tick_at(epoch_now);
   assert(page==MD_PACK_SELECT);focus=4;manager_dummy_pad(DOWN);assert(focus==4);

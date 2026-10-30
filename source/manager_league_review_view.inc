@@ -1,13 +1,14 @@
 static void ranking_view(MdView *v) {
-  uint64_t end=ranking_start(now())+14u*(uint64_t)MD_CALENDAR_DAY_MS;
+  uint64_t end=md_season_end(now());
   struct tm local;time_t seconds=(time_t)((end+MD_LEAGUE_TIMEZONE_MS)/1000u);gmtime_r(&seconds,&local);
   char date[32];strftime(date,sizeof(date),"%d %b %Y",&local);
-  snprintf(v->caption,sizeof(v->caption),"RESETS %s 00:00 WIB - EVERY TWO REAL WEEKS",date);
-  copy(v->summary,sizeof(v->summary),"Rank resets every 14 days. League Champions remain in the honours list.");
+  snprintf(v->caption,sizeof(v->caption),"RESETS %s 00:00 WIB - MONTHLY SEASON",date);
+  copy(v->summary,sizeof(v->summary),ranking_section?"ONE CHAMPION PER COMPLETED MONTH":"PARTICIPATION AND PODIUM POINTS ACCUMULATE THIS MONTH");
+  md_season_text(now(),v->season_label,sizeof(v->season_label),0);
   v->rank_reset_ms=end;
 }
 static void champions_view(MdView *v) {
-  copy(v->headline,sizeof(v->headline),"LEAGUE CHAMPIONS");
+  copy(v->headline,sizeof(v->headline),"LEAGUE RANKING HISTORY");
   copy(v->caption,sizeof(v->caption),"EVERY CHAMPION IS REMEMBERED AFTER RANKING RESETS");
   v->total=champion_total();if(focus>=v->total)focus=v->total ? v->total-1u : 0;
   v->focus=focus;v->first=focus/5u*5u;v->count=v->total-v->first;if(v->count>5)v->count=5;
@@ -23,7 +24,7 @@ static void champions_view(MdView *v) {
         uint64_t result=manager_dummy_week(&a->save,UINT64_MAX).result_ms;
         struct tm date;time_t seconds=(time_t)((result+MD_LEAGUE_TIMEZONE_MS)/1000u);gmtime_r(&seconds,&date);
         char stamp[32];strftime(stamp,sizeof(stamp),"%d %b %Y",&date);
-        snprintf(r->detail,sizeof(r->detail),"CHAMPION - %s",stamp);
+        snprintf(r->detail,sizeof(r->detail),"W%u CHAMPION - %s",md_hub_weekday(a->save.fixtures[0].kickoff_ms)<3?1:2,stamp);
       } else copy(r->label,sizeof(r->label),"Archive unavailable");
     }
     free(a);first=v->first;total=v->total;seed=md.seed;hash=md.checksum;

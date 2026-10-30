@@ -43,7 +43,7 @@ class FrontdoorVisualTests(unittest.TestCase):
 
     def test_full_flow_fits_native_budgets_and_screen(self):
         # The C driver also checks a vertex-buffer canary and immutable input.
-        self.assertEqual(len(self.frames), 63)
+        self.assertEqual(len(self.frames), 64)
         for name, draws in self.frames.items():
             with self.subTest(frame=name):
                 self.assertLess(len(draws), 384)
@@ -118,7 +118,7 @@ class FrontdoorVisualTests(unittest.TestCase):
                 continue
             with self.subTest(frame=name):
                 helpers = [d for d in draws if d['kind'] == 2 and 20 <= d['texture'] <= 37]
-                single = name in ('31-credits', '37-half-time-overview', '39-full-time-overview',
+                single = name in ('31-credits', '31a-playlist-info', '37-half-time-overview', '39-full-time-overview',
                                   '44-results-missing-stats', '45-results-1080p')
                 self.assertGreaterEqual(len(helpers), 1 if single else 2)
                 self.assertLessEqual(len(helpers), 5)
@@ -168,7 +168,7 @@ class FrontdoorVisualTests(unittest.TestCase):
     def test_adjustable_values_have_paired_arrows_without_numeric_pagination(self):
         for name, count in [('20-stadium', 6), ('21-stadium-last-row', 6),
                             ('22-general-settings', 6), ('23-general-settings-scroll', 6),
-                            ('30-video-settings', 2), ('29-pause-camera-settings', 4)]:
+                            ('30-video-settings', 3), ('29-pause-camera-settings', 4)]:
             arrows = [d for d in self.frames[name] if d['texture'] == 51 and d['kind'] == 2]
             with self.subTest(frame=name):
                 self.assertEqual(len(arrows), count * 2)

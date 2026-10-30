@@ -14,7 +14,9 @@ static void md_watch_line(MasterLeagueRender *ui,float x0,float y0,float x1,floa
 }
 static void md_watch_header(MasterLeagueRender *ui,const MdView *v,GLfloat *verts,int *quads) {
   ml_ui_image(ui,gl.master_league_pearl_tex,0,0,0,1,1,verts,quads);
-  char round[64];snprintf(round,sizeof(round),"MANAGER LEAGUE  -  ROUND %02u",v->round);
+  char round[64];if(v->online_test)snprintf(round,sizeof(round),"ONLINEDEV - TEST");
+  else if(v->online&&!v->round)snprintf(round,sizeof(round),"ONLINE LEAGUE");
+  else snprintf(round,sizeof(round),"MANAGER LEAGUE  -  ROUND %02u",v->round);
   fd_text(ui,round,.035f,.024f,.55f,.024f,-2,verts,quads);
   const char *status=v->watching_replay ? (v->paused ? "PAUSED" : "REPLAY") :
       v->phase==1 ? "LIVE" : v->phase==0 ? "PRE-MATCH" : "FULL TIME";
@@ -75,6 +77,11 @@ static void md_watch_pitch(MasterLeagueRender *ui,const MdView *v,GLfloat *verts
     for(uint32_t n=0;n<5;n++)md_watch_rule(ui,gx,y+h*(.442f+n*.029f),.009f,.0010f,.75f,.87f,.85f,.55f,verts,quads);
     md_ui_circle(ui,side ? x+w*.89f : x+w*.11f,y+h*.5f,.005f,.82f,.93f,.87f,verts,quads);
   }
+  if(v->online&&!v->watch_ready){
+    fd_center_text(ui,v->empty_detail[0]?v->empty_detail:"LOADING MATCH RECORDING",x+.025f,y+h*.5f,w-.050f,.024f,-1,verts,quads);
+    return;
+  }
+  if(v->online&&v->empty_detail[0]&&strcmp(v->empty_detail,"LOADING MATCH RECORDING"))fd_center_text(ui,v->empty_detail,x+.025f,y+.035f,w-.050f,.019f,-1,verts,quads);
   if(v->phase || v->watching_replay)for(uint32_t n=0;n<5;n++) {
     const MdDot *a=n ? &v->ball_trail[n-1] : &v->dots[22],*b=&v->ball_trail[n];
     /* A new episode can relocate the ball; never draw across that discontinuity. */
@@ -83,7 +90,8 @@ static void md_watch_pitch(MasterLeagueRender *ui,const MdView *v,GLfloat *verts
         x+.018f+b->x*(w-.036f),y+.025f+b->y*(h-.05f),.0026f,.89f,.94f,.73f,(5-n)*.12f,verts,quads);
   }
   for(uint32_t i=0;i<23;i++) {
-    const MdDot *d=&v->dots[i];const float cx=x+.018f+d->x*(w-.036f),cy=y+.025f+d->y*(h-.05f);
+    const MdDot *d=&v->dots[i];if(d->x<0||d->y<0)continue;
+    const float cx=x+.018f+d->x*(w-.036f),cy=y+.025f+d->y*(h-.05f);
     const float size=i==22 ? .019f : .027f;
     md_ui_circle(ui,cx+.001f,cy+.004f,size+.006f,.015f,.095f,.09f,verts,quads);
     if(i==22) {
@@ -94,8 +102,8 @@ static void md_watch_pitch(MasterLeagueRender *ui,const MdView *v,GLfloat *verts
     } else {
       md_ui_circle(ui,cx,cy,size+.004f,.88f,.95f,.98f,verts,quads);
       md_ui_circle(ui,cx,cy,size,d->side ? .96f : .04f,d->side ? .13f : .36f,d->side ? .25f : .96f,verts,quads);
-      char number[8];snprintf(number,sizeof(number),"%u",d->number);
-      fd_center_text(ui,number,cx-.015f,cy,.030f,.020f,-1,verts,quads);
+      if(d->number){char number[8];snprintf(number,sizeof(number),"%u",d->number);
+        fd_center_text(ui,number,cx-.015f,cy,.030f,.020f,-1,verts,quads);}
     }
   }
 }
@@ -158,16 +166,17 @@ static void md_watch_event(MasterLeagueRender *ui,const MdView *v,GLfloat *verts
   fd_card(ui,x,y,w,h,0,0,verts,quads);
   ml_ui_art(ui,v->event_side ? 1 : 0,x,y,.145f,h,verts,quads);
   if(v->event_kind==MD_YELLOW)fd_rect(ui,x+.112f,y+.018f,.017f,.039f,1,.85f,.16f,verts,quads);
-  fd_center_text(ui,labels[v->event_kind],x+.012f,y+.075f,.122f,v->event_kind==MD_HALF ? .028f : .041f,-1,verts,quads);
+  fd_center_text(ui,v->online&&v->event_kind==MD_SHOT?"SHOT":labels[v->event_kind],x+.012f,y+.075f,.122f,v->event_kind==MD_HALF ? .028f : .041f,-1,verts,quads);
   const uint32_t duration=v->duration_ms ? v->duration_ms : MD_DURATION;
-  char minute[16];snprintf(minute,sizeof(minute),"%u'",(uint32_t)((uint64_t)(v->elapsed_ms-v->event_age_ms)*90u/duration));
+  char minute[16];snprintf(minute,sizeof(minute),"%u'",v->online ? v->event_game_second/60u : (uint32_t)((uint64_t)(v->elapsed_ms-v->event_age_ms)*90u/duration));
   fd_text(ui,minute,x+.017f,y+.014f,.08f,.020f,-1,verts,quads);
   const uint32_t badge=v->event_kind==MD_HALF ? 0 : v->event_side ? v->away_badge : v->home_badge;
   if(badge)ml_ui_image(ui,gl.badge_tex,badge,x+.159f,y+.035f,.035f,.062f,verts,quads);
   fd_text(ui,v->event_kind==MD_HALF ? "FIRST HALF COMPLETE" : v->event_side ? v->away : v->home,
       x+.208f,y+.031f,.242f,.028f,-2,verts,quads);
   char detail[64];
-  if(v->event_kind==MD_SUB)snprintf(detail,sizeof(detail),"#%u OFF    >    #%u ON",v->event_player,v->event_other);
+  if(v->event_kind==MD_SUB&&v->online)snprintf(detail,sizeof(detail),"%.25s  >  %.25s",v->event_name,v->event_other_name);
+  else if(v->event_kind==MD_SUB)snprintf(detail,sizeof(detail),"#%u OFF    >    #%u ON",v->event_player,v->event_other);
   else if(v->event_kind==MD_HALF)snprintf(detail,sizeof(detail),"%s AT THE BREAK",v->score);
   else snprintf(detail,sizeof(detail),"%.47s",v->event_name);
   fd_text(ui,detail,x+.208f,y+.082f,.242f,.023f,-3,verts,quads);

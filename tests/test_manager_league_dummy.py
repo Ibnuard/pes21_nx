@@ -21,6 +21,11 @@ class ManagerLeagueDummyTests(unittest.TestCase):
             '-I',str(ROOT/'source'),'-I',str(ROOT/'tests'),str(ROOT/'tests/test_manager_league_dummy.c'),
             str(ROOT/'source/manager_league_dummy.c'),str(ROOT/'source/manager_league_motion.c'),str(ROOT/'source/manager_league_plan.c'),str(ROOT/'source/gameplan_preset.c'),'-lm','-pthread','-o',str(cls.exe)],check=True,capture_output=True)
 
+    def test_monthly_participation_podium_reset_and_single_past_champion(self):
+        work=self.work/'monthly';work.mkdir()
+        ran=subprocess.run([str(self.exe),'monthly'],cwd=work,capture_output=True,timeout=20)
+        self.assertEqual(ran.returncode,0,(ran.stdout+ran.stderr).decode(errors='replace'))
+
     def test_full_flow_and_new_process_reloads_identical_archive(self):
         work=self.work/'flow';work.mkdir()
         ran=subprocess.run([str(self.exe),'flow'],cwd=work,capture_output=True,timeout=20)

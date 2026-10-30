@@ -2226,6 +2226,8 @@ void android_input_poll(void) {
                                &have_left_stick_p2, &right_stick_p2,
                                &have_right_stick_p2);
   normalize_stick(&left_stick, have_left_stick, &axis_x, &axis_y);
+  /* Online drag and Exhibition use this one HID -> screen Y conversion. */
+  pes_main_menu_pad_axes(axis_x,axis_y);
   normalize_stick(&right_stick, have_right_stick, &right_axis_x,
                   &right_axis_y);
   normalize_stick(&left_stick_p2, have_left_stick_p2, &axis_x_p2,

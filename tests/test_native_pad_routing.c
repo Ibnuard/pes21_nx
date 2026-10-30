@@ -188,6 +188,63 @@ static void setup_cursor_info(void) {
   memset(home + 0x6c, 0x5a, 0x34); // Stock support settings must be cloned.
 }
 
+static void test_single_player_cursor_ownership(void) {
+  // Reproduce both routes missed by the old pad-number-only correction:
+  // mobile ownership with no physical pad, and a retained physical P2 cursor.
+  for (unsigned scenario = 0; scenario < 3; ++scenario) {
+    setup();
+    setup_cursor_info();
+    unsigned char *away = cursor_info + 5 * NATIVE_LAB_CURSOR_SIZE;
+    const int32_t away_pad = scenario == 0 ? -1 : (int32_t)(scenario - 1);
+    const uint32_t away_player = 15;
+    away[0] = 2;
+    away[3] = scenario == 0 ? 1 : 0;
+    memcpy(away + 0x10, &away_pad, sizeof(away_pad));
+    memcpy(away + 0x20, &away_player, sizeof(away_player));
+    memset(away + 0x6c, 0x6b, 0x34);
+    assert(native_lab_cursor_is_user(away));
+    unsigned char expected[sizeof(cursor_info)];
+    memcpy(expected, cursor_info, sizeof(expected));
+    const int32_t no_pad = -1;
+    memcpy(expected + 5 * NATIVE_LAB_CURSOR_SIZE + 0x10,
+           &no_pad, sizeof(no_pad));
+    expected[5 * NATIVE_LAB_CURSOR_SIZE + 0x0d] = 1;
+    two_player = 0;
+    pes_match_cursor_info_ready(cursor_info);
+    assert(!memcmp(expected, cursor_info, sizeof(expected)));
+    assert(!native_lab_cursor_is_user(away));
+    assert(native_lab_cursor_player(away) == away_player);
+    assert(native_lab_debug_owner_mask == 1u);
+    assert(native_lab_debug_cursor_slots == 4u);
+    pes_match_cursor_info_ready(cursor_info); // Repeated tmpdb finalization.
+    assert(!memcmp(expected, cursor_info, sizeof(expected)));
+  }
+
+  setup();
+  setup_cursor_info();
+  pes_match_cursor_info_ready(cursor_info); // Accepted two-pad path.
+  assert(native_lab_debug_owner_mask == 3u);
+  two_player = 0;
+  pes_match_cursor_info_ready(cursor_info); // Next match is versus COM.
+  assert(native_lab_debug_owner_mask == 1u);
+  assert(native_lab_cursor_pad(cursor_info) == -1);
+  assert(cursor_info[0x0d] == 1);
+  two_player = 1;
+  pes_match_cursor_info_ready(cursor_info); // Two-pad ownership can return.
+  assert(native_lab_debug_owner_mask == 3u);
+  assert(native_lab_cursor_pad(cursor_info + NATIVE_LAB_CURSOR_SIZE) == 1);
+  assert(cursor_info[NATIVE_LAB_CURSOR_SIZE + 0x0d] == 0);
+
+  setup();
+  setup_cursor_info();
+  unsigned char unchanged[sizeof(cursor_info)];
+  memcpy(unchanged, cursor_info, sizeof(unchanged));
+  active = 0;
+  pes_match_cursor_info_ready(cursor_info);
+  assert(!memcmp(unchanged, cursor_info, sizeof(unchanged)));
+  pes_match_cursor_info_ready(NULL);
+}
+
 static void test_single_stick_camera_routing(void) {
   const uint32_t contexts[] = {PES_SETPLAY_CORNER, PES_SETPLAY_GOAL_KICK, PES_SETPLAY_FREE_KICK};
   for (uint32_t pad=0; pad<2; ++pad) for (unsigned c=0; c<3; ++c) {
@@ -240,6 +297,7 @@ static void test_single_stick_camera_routing(void) {
 int main(void) {
   test_live_controls();
   test_single_stick_camera_routing();
+  test_single_player_cursor_ownership();
   setup();
   setup_cursor_info();
   pes_match_cursor_info_ready(cursor_info);

@@ -8,8 +8,9 @@
 #undef assert
 #define assert(c) do {if(!(c)){fprintf(stderr,"%s:%d: %s (notice=%s)\n",__FILE__,__LINE__,#c,notice);exit(97);}}while(0)
 static MdView view(void){MdView v;manager_dummy_view(&v);return v;}
+#define REVIEW_MONDAY UINT64_C(1792947600000) /* 26 Oct 2026 00:00 WIB. */
 static void setup(void) {
-  epoch_now=MD_RANK_EPOCH+9u*UINT64_C(3600000);loaded=authenticated=1;
+  epoch_now=REVIEW_MONDAY+9u*UINT64_C(3600000);loaded=authenticated=1;
   memset(&md,0,sizeof(md));md.balance=5000;md.seed=1729;md.club=100;md.week_id=1;
   strcpy(md.name,"Review United");assert(profile_create());strcpy(profile.user_id,"review_manager");
   profile.tutorials=7;assert(profile_save());md.created=md.joined=1;make_fixtures();assert(persist());
@@ -39,12 +40,12 @@ static void read_raw_profile(MdProfile *p) {
 int main(int argc,char **argv) {
   assert(argc==2);
   if(!strcmp(argv[1],"recover-corrupt")) {
-    epoch_now=MD_RANK_EPOCH+9u*UINT64_C(3600000);load_once();
+    epoch_now=REVIEW_MONDAY+9u*UINT64_C(3600000);load_once();
     assert(blocked && profile_ready && profile.balance==5500 && profile.collection_count==18);
     assert(strstr(notice,"preserved"));return 0;
   }
   if(!strcmp(argv[1],"recover-paid") || !strcmp(argv[1],"recover-debit") || !strcmp(argv[1],"recover-grant")) {
-    epoch_now=MD_RANK_EPOCH+9u*UINT64_C(3600000);load_once();assert(!blocked && profile_ready);
+    epoch_now=REVIEW_MONDAY+9u*UINT64_C(3600000);load_once();assert(!blocked && profile_ready);
     authenticated=1;tutorial=0;
     if(!strcmp(argv[1],"recover-grant")) {
       assert(profile.balance==5500 && profile.collection_count==20 && !pack_pending && !file_exists(MD_PACK_FILE));return 0;
@@ -76,15 +77,17 @@ int main(int argc,char **argv) {
     assert(!manager_dummy_next_week() && md.week_id==1);notice[0]=0;page=MD_PACK_SELECT;focus=0;
     choose();finish();assert(profile.balance==5500+prize);
   } else if(!strcmp(argv[1],"ranking")) {
-    uint32_t points[7];ranking_points(points);for(uint32_t i=0;i<7;i++)assert(!points[i]);
-    for(uint32_t league=0;league<4;league++) {
+    uint32_t points[7];ranking_points(points);for(uint32_t i=0;i<7;i++)assert(points[i]==500);
+    for(uint32_t league=0;league<2;league++) {
       epoch_now=manager_dummy_week(&md,UINT64_MAX).result_ms;assert(manager_dummy_next_week());
     }
-    epoch_now=MD_RANK_EPOCH+14u*(uint64_t)MD_CALENDAR_DAY_MS;
+    assert(champion_total()==2); /* Wednesday and Saturday honours survive a month boundary. */
+    epoch_now=UINT64_C(1793466000000); /* 1 Nov 2026 00:00 WIB. */
     ranking_points(points);for(uint32_t i=0;i<7;i++)assert(!points[i]);
-    page=MD_OVERALL;focus=0;MdView v=view();assert(v.rank_reset_ms==MD_RANK_EPOCH+28u*(uint64_t)MD_CALENDAR_DAY_MS && strstr(v.caption,"TWO REAL WEEKS"));
-    page=MD_CHAMPIONS;v=view();assert(v.total==4 && v.count==4 && v.rows[0].badge);
-    manager_dummy_pad(A);assert(page==MD_CHAMPION && champion_choice==4);v=view();assert(v.count==4 && v.badge);
+    page=MD_OVERALL;focus=0;MdView v=view();assert(v.rank_reset_ms==UINT64_C(1796058000000) && strstr(v.caption,"MONTHLY SEASON"));
+    manager_dummy_pad(R);v=view();assert(v.ranking_section==1 && v.total==1 && strstr(v.rows[0].detail,"October 2026"));
+    page=MD_CHAMPIONS;v=view();assert(v.total==2 && v.count==2 && v.rows[0].badge);
+    manager_dummy_pad(A);assert(page==MD_CHAMPION && champion_choice==2);v=view();assert(v.count==4 && v.badge);
   } else if(!strcmp(argv[1],"schedule")) {
     epoch_now=md.fixtures[0].kickoff_ms+1000;page=MD_SCHEDULE;schedule_group_auto=1;focus=0;
     MdView v=view();assert(v.match_group==0 && v.count==3 && v.match_groups[0]==3 && v.match_groups[1]==18);

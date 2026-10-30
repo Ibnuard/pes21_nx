@@ -13,8 +13,8 @@ static void club_summary(MdView *v) {
   v->club_rating=(v->club_power+5u)/11u;
 }
 static void club_profile_view(MdView *v) {
-  static const char *const labels[]={"REGISTERED SQUAD","LEAGUE STANDINGS","MATCH HISTORY","OVERALL RANKING","GAME PLAN","LEAGUE REWARDS"};
-  static const char *const details[]={"Players, positions and attributes","Position and points in this league","Your club's scheduled games and replays","RP earned in the current 14-day period","Formation and starting eleven","Entry bonus and finishing rewards"};
+  static const char *const labels[]={"REGISTERED SQUAD","LEAGUE STANDINGS","MATCH HISTORY","LEAGUE RANKING","GAME PLAN","LEAGUE REWARDS"};
+  static const char *const details[]={"Players, positions and attributes","Position and points in this league","Your club's scheduled games and replays","Current month and past season champions","Formation and starting eleven","Entry bonus and finishing rewards"};
   copy(v->headline,sizeof(v->headline),team_name(team_choice));
   copy(v->caption,sizeof(v->caption),team_choice ? "LEAGUE CLUB PROFILE" : "YOUR CLUB PROFILE");
   copy(v->club,sizeof(v->club),exhibition_team_catalog_name(profile.clubs[team_choice]));

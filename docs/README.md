@@ -5,6 +5,18 @@ Subsystem notes and historical implementation audits live here.
 
 ## Manager League review
 
+- [Custom Playlist mislabeled AAC/MP4 input and failed-track recovery v122](CUSTOM_PLAYLIST_V122.md)
+- [Custom Playlist gain, bounded decoding and recovery v121](CUSTOM_PLAYLIST_V121.md)
+- [Registration picker, COM ownership, corner helper and menu playlist v120](MANAGER_REVIEW_V120.md)
+- [Hub Back returns to the main menu, session resume and roster API check v119](MANAGER_REVIEW_V119.md)
+- [Monthly League Ranking, W1/W2 history, four LEAGUE tiles and LIVE badge v112](MANAGER_HUB_V112.md)
+- [Hub HOME/MY TEAM/LEAGUE, countdown, registration confirmation and feed contract v111](MANAGER_HUB_V111.md)
+
+- [Backend fixes from authenticated QA and client integration](BACKEND-REVIEW.md)
+- [Online HTTPS client, offline DEV shortcut and current integration limits v101](MANAGER_ONLINE_CLIENT_V101.md)
+- [Account-based ONLINEDEV TEST clock and 5,000 NX Cash CDK contract v106](MANAGER_ONLINEDEV_CDK_V106.md)
+- [Deployed online API review: verified version gate and integration contract gaps](MANAGER_ONLINE_API_DEPLOYMENT_REVIEW_V1.md)
+- [Backend handoff: Go/MySQL/Docker, canonical catalog, online contracts and offline DEV mode](MANAGER_BACKEND_HANDOFF_V1.md)
 - [Random preferences, analog scrolling, loading UI and production assets v100](REVIEW_V100.md)
 - [Watch details, paid packs, ranking resets and honours v99](MANAGER_REVIEW_V99.md)
 - [Manager PCM output routing v99](MANAGER_LEAGUE_AUDIO_V99.md)
@@ -44,6 +56,9 @@ Subsystem notes and historical implementation audits live here.
 
 ## Runtime, controls, and UI
 
+- [Cup, League, Master League and Online League audit with confirmed client bugs](COMPETITION_AUDIT_V113.md)
+- [v113 competition audit fixes and deployed API retest](COMPETITION_FIXES_V113.md)
+- [Backend v113 deployment retest: ranking, phase flow, publication and recovery](MANAGER_BACKEND_RETEST_V113.md)
 - [Accepted v48 performance checkpoint and startup audit](RENDER_AUDIT_V48.md) — user-reported stable 60 FPS, removed release pixel probes, and first-launch-after-update blinking still under investigation.
 - [Render stability and mixed model quality v47](RENDER_STABILITY_V47.md) — private overlay vertex state and native Standard players only when High graphics is selected.
 - [Stadium pacing and balanced faces v46](STADIUM_FACE_SWEETSPOT_V46.md) — v45 device evidence, repeated blending-state suppression and a controlled 5k head target with explicit retained originals.

@@ -52,7 +52,8 @@ def native_binary(tmp_path_factory):
 
 @pytest.mark.parametrize('case',['commands','role-switch','not-ready','match-generation',
     'single-player','abi-fallback','out-of-play','restart-kinds',
-    'conflicting-restart','other-restart-list'])
+    'conflicting-restart','other-restart-list','nameplate-start',
+    'nameplate-start-during-native','nameplate-return'])
 def test_actual_native_adapter(native_binary,case):
     subprocess.run([str(native_binary),case],check=True,capture_output=True,text=True)
 
@@ -72,7 +73,7 @@ def hid_binary(tmp_path_factory):
         (ROOT/'source/corner_tactics.c').as_posix(),'-lm','-o',out.as_posix()],check=True,capture_output=True,text=True)
     return out
 
-@pytest.mark.parametrize('case',['full-right','single-hold','single-short-two-pads','single-mapping','cancel','short-page'])
+@pytest.mark.parametrize('case',['full-right','single-hold','single-short-two-pads','single-mapping','cancel','short-page','nameplate-start'])
 def test_actual_hid_adapter(hid_binary,case):
     subprocess.run([str(hid_binary),case],check=True,capture_output=True,text=True)
 

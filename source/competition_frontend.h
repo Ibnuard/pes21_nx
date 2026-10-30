@@ -40,6 +40,7 @@ void competition_frontend_open_match_mode(void);
 void competition_frontend_match_action_result(int opened);
 void competition_frontend_open_modes(void);
 void competition_frontend_open_online_league(void);
+void competition_frontend_open_manager_dev(void);
 void competition_frontend_close(void);
 void competition_frontend_finish_close(void);
 void competition_frontend_manager_name_result(const char *text);
